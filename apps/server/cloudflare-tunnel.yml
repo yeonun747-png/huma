@@ -1,0 +1,13 @@
+# Cloudflare Tunnel config for HUMA Studio (기획서 7-14)
+# Install: cloudflared tunnel create huma-studio
+# Run: cloudflared tunnel --config cloudflare-tunnel.yml run
+
+tunnel: huma-studio
+credentials-file: /etc/cloudflared/huma-studio.json
+
+ingress:
+  - hostname: huma.yourdomain.com
+    service: http://localhost:3000
+  - hostname: api.huma.yourdomain.com
+    service: http://localhost:3100
+  - service: http_status:404

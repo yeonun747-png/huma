@@ -1,0 +1,23 @@
+{
+  "name": "huma-studio",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "dev:web": "turbo dev --filter=@huma/web",
+    "dev:server": "turbo dev --filter=@huma/server"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.3",
+    "typescript": "^5.4.5"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "npm@10.8.2"
+}

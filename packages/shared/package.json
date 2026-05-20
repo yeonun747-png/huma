@@ -1,0 +1,15 @@
+{
+  "name": "@huma/shared",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./types/index.ts",
+  "types": "./types/index.ts",
+  "exports": {
+    ".": "./types/index.ts",
+    "./account": "./types/account.ts",
+    "./job": "./types/job.ts",
+    "./modem": "./types/modem.ts",
+    "./video": "./types/video.ts",
+    "./bgm": "./types/bgm.ts"
+  }
+}
