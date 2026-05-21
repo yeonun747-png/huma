@@ -2,6 +2,7 @@ import axios from 'axios';
 import { supabase } from '../../middleware/auth.js';
 import { getSetting } from '../../lib/settings.js';
 import { generateSunoMusic } from './suno.js';
+import { createAnthropicClient } from '../../lib/anthropic-client.js';
 
 export async function selectBgm(params: {
   workspace: string;
@@ -56,8 +57,8 @@ async function queryBgm(
 export async function analyzeContentMood(text: string, workspace: string): Promise<string> {
   if (!process.env.ANTHROPIC_API_KEY) return 'calm';
   try {
-    const Anthropic = (await import('@anthropic-ai/sdk')).default;
-    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const client = createAnthropicClient();
+    if (!client) return 'calm';
     const res = await client.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 100,

@@ -9,6 +9,7 @@ import { generateLipsync } from './lipsync.js';
 import { selectBgm } from '../bgm/selector.js';
 import { uploadToPlatform } from '../social-api/index.js';
 import { join } from 'path';
+import { createAnthropicClient } from '../../lib/anthropic-client.js';
 
 async function getVideoJob(id: string) {
   const { data } = await supabase.from('huma_video_queue').select('*').eq('id', id).single();
@@ -33,8 +34,8 @@ async function analyzeContentMood(text: string): Promise<string> {
     return moods[Math.floor(Math.random() * moods.length)];
   }
   try {
-    const Anthropic = (await import('@anthropic-ai/sdk')).default;
-    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const client = createAnthropicClient();
+    if (!client) return moods[Math.floor(Math.random() * moods.length)];
     const res = await client.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 100,
