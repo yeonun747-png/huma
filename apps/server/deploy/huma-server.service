@@ -1,0 +1,28 @@
+[Unit]
+Description=HUMA Studio Worker (API + BullMQ + Playwright)
+Documentation=https://github.com/yeonun747-png/huma
+After=network-online.target redis-server.service huma-xvfb.service
+Wants=network-online.target
+Requires=redis-server.service huma-xvfb.service
+
+[Service]
+Type=simple
+User=huma
+Group=huma
+WorkingDirectory=/home/huma/huma/apps/server
+Environment=NODE_ENV=production
+Environment=DISPLAY=:99
+Environment=XVFB_AVAILABLE=true
+EnvironmentFile=/home/huma/huma/apps/server/.env
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=huma-server
+
+# Playwright/Chromium OOM 방지
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

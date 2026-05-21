@@ -29,6 +29,9 @@
     "socket.io": "^4.7.5",
     "twitter-api-v2": "^1.17.2"
   },
+  "optionalDependencies": {
+    "rebrowser-patches": "^1.0.19"
+  },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
     "@types/jsonwebtoken": "^9.0.6",

@@ -21,6 +21,22 @@ export function clearSettingsCache() {
   cache.clear();
 }
 
+export interface FingerprintRuntimeConfig {
+  canvas_spoof: boolean;
+  webgl_spoof: boolean;
+  audio_noise: boolean;
+}
+
+export async function getFingerprintConfig(): Promise<FingerprintRuntimeConfig> {
+  const engine = await getSetting<{ fingerprint?: Partial<FingerprintRuntimeConfig> }>('human_engine', {});
+  const fp = engine.fingerprint ?? {};
+  return {
+    canvas_spoof: fp.canvas_spoof !== false,
+    webgl_spoof: fp.webgl_spoof !== false,
+    audio_noise: fp.audio_noise !== false,
+  };
+}
+
 export interface HumanEngineConfig {
   wpm_mean: number;
   wpm_sigma: number;

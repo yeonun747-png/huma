@@ -1,15 +1,17 @@
 import type { Page } from 'playwright';
 import { supabase } from '../../../middleware/auth.js';
 import { getSetting, getHumanEngineConfig } from '../../../lib/settings.js';
-import { createBrowserForAccount, closeBrowser } from '../browser.js';
-import { loadAccountForBrowser } from '../account-loader.js';
+import { createBrowserForAccount, closeBrowserContext } from '../browser.js';
+import { loadAccountForBrowser, maybeIncrementWarmupDay } from '../account-loader.js';
 import { naverLogin } from './login.js';
-import { humanSleep } from '../../human-engine/typing.js';
-import { humanType } from '../../human-engine/typing.js';
+import { humanSleep, humanType } from '../../human-engine/typing.js';
 import { scrollRead, measureRTT, rttScale, scaledHumanSleep } from '../../human-engine/timing.js';
+import { humanClick } from '../../human-engine/mouse.js';
 import { randomBetween, shuffleArray } from '../../../lib/utils.js';
 import { getTodayPlan, maxCrankVisitsForWarmup } from '../warmup.js';
 import type { AccountPersona } from '../persona.js';
+import { acquireModem, releaseModem, type ModemSession } from '../../proxy/manager.js';
+import { handleLayer4Detection, isCaptchaError, isBlockError } from '../../watcher/detector.js';
 
 const COMMENT_TEMPLATES = [
   '정말 유익한 글이네요! 많은 도움이 됐습니다',
@@ -17,6 +19,14 @@ const COMMENT_TEMPLATES = [
   '공감되는 내용이에요. 자주 놀러올게요',
   '글을 읽고 많이 배웠습니다. 감사합니다!',
 ];
+
+interface SocialCrankConfig {
+  visits_per_session: number;
+  our_blog_ratio: number;
+  other_blog_ratio: number;
+  min_visit_interval_days: number;
+  keywords: string[];
+}
 
 function generateCrankComment(): string {
   return COMMENT_TEMPLATES[Math.floor(Math.random() * COMMENT_TEMPLATES.length)];
@@ -38,82 +48,107 @@ export async function naturalVisitViaSearch(page: Page, keyword: string, scale =
 
 export async function runSocialCrank(
   accountId: string,
-  payload: { ourBlogUrls: string[]; targetDate?: string }
+  payload: { ourBlogUrls: string[]; targetDate?: string },
 ) {
-  const accountCtx = await loadAccountForBrowser(accountId);
-  const warmupDay = accountCtx.warmup_day ?? 0;
-  const plan = await getTodayPlan(accountCtx);
-  const persona = accountCtx.persona;
+  await maybeIncrementWarmupDay(accountId);
 
-  const config = await getSetting('social_crank', {
-    visits_per_session: 15,
-    keywords: persona.interests.length ? persona.interests : ['사주풀이', '꿈해몽', '신년운세'],
-  });
-
-  const maxVisits = Math.min(
-    config.visits_per_session,
-    plan.blogVisits,
-    maxCrankVisitsForWarmup(warmupDay)
-  );
-
-  let scale = 1;
-  if (accountCtx.proxy_port) {
-    const rtt = await measureRTT(accountCtx.proxy_port);
-    scale = rttScale(rtt);
-  }
-
-  const { browser, context } = await createBrowserForAccount(accountCtx);
-
+  let modemSession: ModemSession | undefined;
   try {
-    await naverLogin(context, accountId, { profilePath: accountCtx.profile_path });
-    const page = await context.newPage();
+    modemSession = await acquireModem(accountId);
+    if (!modemSession) throw new Error('NO_MODEM');
+    const accountCtx = await loadAccountForBrowser(accountId, modemSession.proxyPort);
+    const warmupDay = accountCtx.warmup_day ?? 0;
+    const plan = await getTodayPlan(accountCtx);
+    const persona = accountCtx.persona;
 
-    const ourBlogs = await selectOurBlogsToVisit(accountId, payload.ourBlogUrls, persona);
-    const otherCount = Math.max(0, maxVisits - ourBlogs.length);
-    const otherBlogs = await searchRelatedBlogs(page, config.keywords, otherCount, scale);
-    const allTargets = shuffleArray([...ourBlogs, ...otherBlogs]).slice(0, maxVisits);
+    const config = await getSetting<SocialCrankConfig>('social_crank', {
+      visits_per_session: 15,
+      our_blog_ratio: 0.25,
+      other_blog_ratio: 0.75,
+      min_visit_interval_days: 3,
+      keywords: persona.interests.length ? persona.interests : ['사주풀이', '꿈해몽', '신년운세'],
+    });
 
-    let likesDone = 0;
-    let commentsDone = 0;
+    const maxVisits = Math.min(
+      config.visits_per_session,
+      plan.blogVisits,
+      maxCrankVisitsForWarmup(warmupDay),
+    );
 
-    for (const target of allTargets) {
-      if (target.useSearch && target.keyword) {
-        const url = await naturalVisitViaSearch(page, target.keyword, scale);
-        if (!url) continue;
-      } else {
-        await page.goto(target.url);
-        await page.waitForLoadState('networkidle');
-      }
+    const ourTarget = Math.max(0, Math.round(maxVisits * config.our_blog_ratio));
+    const otherTarget = Math.max(0, maxVisits - ourTarget);
 
-      await scrollRead(page, randomBetween(60000, 180000 * (persona.visitDurationMin / 4)));
-
-      const doLike = target.doLike && likesDone < plan.likes;
-      const doComment = target.doComment && commentsDone < plan.comments;
-
-      await visitBlogActions(page, { ...target, doLike, doComment }, scale);
-      if (doLike) likesDone++;
-      if (doComment && target.commentText) commentsDone++;
-
-      await humanSleep(30000, 120000);
+    let scale = 1;
+    if (accountCtx.proxy_port) {
+      const rtt = await measureRTT(accountCtx.proxy_port);
+      scale = rttScale(rtt);
     }
 
-    await updateVisitHistory(accountId, ourBlogs.map((b) => b.url));
-    await updateCrankCount(accountId, allTargets.length);
+    const { context } = await createBrowserForAccount(accountCtx);
+
+    try {
+      await naverLogin(context, accountId, { profilePath: accountCtx.profile_path });
+      const page = await context.newPage();
+
+      const ourBlogs = await selectOurBlogsToVisit(
+        accountId,
+        payload.ourBlogUrls,
+        persona,
+        ourTarget,
+        config.min_visit_interval_days,
+      );
+      const otherBlogs = await searchRelatedBlogs(page, config.keywords, otherTarget, scale);
+      const allTargets = shuffleArray([...ourBlogs, ...otherBlogs]).slice(0, maxVisits);
+
+      let likesDone = 0;
+      let commentsDone = 0;
+
+      for (const target of allTargets) {
+        if (target.useSearch && target.keyword) {
+          const url = await naturalVisitViaSearch(page, target.keyword, scale);
+          if (!url) continue;
+        } else {
+          await page.goto(target.url);
+          await page.waitForLoadState('networkidle');
+        }
+
+        await scrollRead(page, randomBetween(60000, 180000 * (persona.visitDurationMin / 4)));
+
+        const doLike = target.doLike && likesDone < plan.likes;
+        const doComment = target.doComment && commentsDone < plan.comments;
+
+        await visitBlogActions(page, { ...target, doLike, doComment }, scale);
+        if (doLike) likesDone++;
+        if (doComment && target.commentText) commentsDone++;
+
+        await humanSleep(30000, 120000);
+      }
+
+      await updateVisitHistory(accountId, ourBlogs.map((b) => b.url));
+      await updateCrankCount(accountId, allTargets.length);
+    } finally {
+      await closeBrowserContext(context);
+    }
+  } catch (err) {
+    if (isCaptchaError(err) || isBlockError(err)) {
+      await handleLayer4Detection(accountId, err, modemSession);
+    }
+    throw err;
   } finally {
-    await closeBrowser(browser, context, accountCtx);
+    if (modemSession) await releaseModem(modemSession);
   }
 }
 
 async function visitBlogActions(
   page: Page,
   target: { doLike: boolean; doComment: boolean; commentText?: string },
-  scale: number
+  scale: number,
 ) {
   if (target.doLike) {
     const likeBtn = page.locator('.u_likeit_list_btn');
     if (await likeBtn.isVisible()) {
       await scaledHumanSleep(2000, 5000, scale);
-      await likeBtn.click();
+      await humanClick(page, '.u_likeit_list_btn');
     }
   }
 
@@ -125,7 +160,7 @@ async function visitBlogActions(
       const humanConfig = await getHumanEngineConfig();
       await humanType(page, commentArea, target.commentText, humanConfig);
       await scaledHumanSleep(2000, 5000, scale);
-      await page.locator('.u_cbox_btn_upload').click();
+      await humanClick(page, '.u_cbox_btn_upload');
     }
   }
 }
@@ -133,8 +168,12 @@ async function visitBlogActions(
 async function selectOurBlogsToVisit(
   accountId: string,
   ourBlogUrls: string[],
-  persona: AccountPersona
+  persona: AccountPersona,
+  maxCount: number,
+  minIntervalDays: number,
 ) {
+  if (maxCount <= 0) return [];
+
   const { data: account } = await supabase
     .from('huma_accounts')
     .select('last_visited_our_blog')
@@ -142,13 +181,14 @@ async function selectOurBlogsToVisit(
     .single();
 
   const visitHistory = (account?.last_visited_our_blog as Record<string, string>) || {};
-  const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+  const cutoff = new Date(Date.now() - minIntervalDays * 24 * 60 * 60 * 1000);
 
   return ourBlogUrls
     .filter((url) => {
       const lastVisit = visitHistory[url];
-      return !lastVisit || new Date(lastVisit) < threeDaysAgo;
+      return !lastVisit || new Date(lastVisit) < cutoff;
     })
+    .slice(0, maxCount)
     .map((url) => ({
       url,
       isOurBlog: true,
@@ -200,10 +240,10 @@ async function updateVisitHistory(accountId: string, urls: string[]) {
     .eq('id', accountId)
     .single();
 
-  const history = {
-    ...(account?.last_visited_our_blog as Record<string, string>),
-    ...Object.fromEntries(urls.map((u) => [u, new Date().toISOString()])),
-  };
+  const history = { ...((account?.last_visited_our_blog as Record<string, string>) || {}) };
+  const now = new Date().toISOString();
+  for (const url of urls) history[url] = now;
+
   await supabase.from('huma_accounts').update({ last_visited_our_blog: history }).eq('id', accountId);
 }
 

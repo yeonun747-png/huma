@@ -1,0 +1,25 @@
+# Cloudflare Tunnel — HUMA Worker API (i7 Ubuntu)
+#
+# 1) cloudflared tunnel create huma-studio
+# 2) credentials JSON 경로 확인 후 아래 credentials-file 수정
+# 3) DNS: cloudflared tunnel route dns huma-studio api.huma.yourdomain.com
+# 4) 실행: sudo cloudflared tunnel --config cloudflare-tunnel.yml run
+#
+# Vercel 웹 env: NEXT_PUBLIC_HUMA_API_URL=https://api.huma.yourdomain.com
+
+tunnel: huma-studio
+credentials-file: /etc/cloudflared/huma-studio.json
+
+ingress:
+  # Worker API (Fastify :3100) — 필수
+  - hostname: api.huma.yourdomain.com
+    service: http://127.0.0.1:3100
+    originRequest:
+      connectTimeout: 30s
+      noTLSVerify: false
+
+  # (선택) 같은 i7에서 Next.js도 돌릴 때만
+  # - hostname: huma.yourdomain.com
+  #   service: http://127.0.0.1:3000
+
+  - service: http_status:404

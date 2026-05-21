@@ -1,18 +1,19 @@
-import { mkdirSync, existsSync } from 'fs';
+import { mkdirSync } from 'fs';
 import { join } from 'path';
 import { supabase } from '../../middleware/auth.js';
 import { generateFingerprint, type AccountFingerprint } from './fingerprint.js';
 import { parsePersona, type AccountPersona } from './persona.js';
 import type { BrowserAccountContext } from './browser.js';
 
-const PROFILES_ROOT = process.env.HUMA_PROFILES_DIR ?? join(process.cwd(), 'profiles');
+const PROFILES_ROOT = process.env.HUMA_PROFILES_DIR ?? '/data/browser-profiles';
 
 export function getProfilePath(accountId: string, stored?: string | null): string {
-  return stored ?? join(PROFILES_ROOT, accountId);
+  if (stored) return stored;
+  return join(PROFILES_ROOT, accountId);
 }
 
 export function hasStoredSession(profilePath: string): boolean {
-  return existsSync(join(profilePath, 'state.json'));
+  return Boolean(profilePath);
 }
 
 export async function ensureAccountAntiDetect(accountId: string, workspace: string): Promise<void> {
@@ -45,15 +46,22 @@ export async function ensureAccountAntiDetect(accountId: string, workspace: stri
 
 export async function loadAccountForBrowser(
   accountId: string,
-  proxyPort?: number
+  proxyPort?: number,
 ): Promise<BrowserAccountContext> {
   const { data: account } = await supabase
     .from('huma_accounts')
-    .select('id, proxy_port, fingerprint, persona, profile_path, account_type, warmup_day, health_score, workspace')
+    .select('id, proxy_port, fingerprint, persona, profile_path, account_type, warmup_day, health_score, workspace, layer4_rest_until, is_active')
     .eq('id', accountId)
     .single();
 
   if (!account) throw new Error('계정 없음');
+
+  if (account.layer4_rest_until && new Date(account.layer4_rest_until) > new Date()) {
+    throw new Error('LAYER4_REST');
+  }
+  if (account.is_active === false) {
+    throw new Error('ACCOUNT_INACTIVE');
+  }
 
   let fingerprint = account.fingerprint as AccountFingerprint | null;
   if (!fingerprint) {
@@ -84,4 +92,25 @@ export async function loadAccountForBrowser(
     warmup_day: account.warmup_day ?? 0,
     health_score: account.health_score ?? 100,
   };
+}
+
+export async function maybeIncrementWarmupDay(accountId: string): Promise<void> {
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+  const { data: account } = await supabase
+    .from('huma_accounts')
+    .select('warmup_day, warmup_last_increment_date')
+    .eq('id', accountId)
+    .single();
+
+  if (!account) return;
+  if (account.warmup_last_increment_date === today) return;
+  if ((account.warmup_day ?? 0) >= 30) return;
+
+  await supabase
+    .from('huma_accounts')
+    .update({
+      warmup_day: (account.warmup_day ?? 0) + 1,
+      warmup_last_increment_date: today,
+    })
+    .eq('id', accountId);
 }

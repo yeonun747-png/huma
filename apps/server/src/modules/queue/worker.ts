@@ -1,13 +1,13 @@
 import { Worker } from 'bullmq';
 import { redisConnection } from './producer.js';
 import { supabase } from '../../middleware/auth.js';
-import { createBrowserForAccount, closeBrowser, createBrowser } from '../playwright/browser.js';
+import { createBrowserForAccount, closeBrowserContext, createBrowser } from '../playwright/browser.js';
 import { loadAccountForBrowser } from '../playwright/account-loader.js';
 import { naverLogin } from '../playwright/naver/login.js';
 import { measureRTT, rttScale } from '../human-engine/timing.js';
 import { getHumanEngineConfig, isNightBan } from '../../lib/settings.js';
 import { handleLayer4Detection, isCaptchaError, isBlockError } from '../watcher/detector.js';
-import { acquireModem, releaseModem } from '../proxy/manager.js';
+import { acquireModem, releaseModem, type ModemSession } from '../proxy/manager.js';
 import { acquireAccount, releaseAccount } from '../../lib/account-lock.js';
 import { getDailyLimit } from '../../lib/limits.js';
 import { getCrankDailyLimit } from '../playwright/warmup.js';
@@ -99,11 +99,11 @@ export function startWorker() {
         if (workspace) await checkSharedWorkspaceLimit(workspace, type);
 
         if (PLAYWRIGHT_JOBS.includes(type)) {
-          let proxyPort: number | undefined;
-          if (accountId) proxyPort = await acquireModem(accountId);
+          let modemSession: ModemSession | undefined;
+          if (accountId) modemSession = await acquireModem(accountId);
 
           const accountCtx = accountId
-            ? await loadAccountForBrowser(accountId, proxyPort)
+            ? await loadAccountForBrowser(accountId, modemSession?.proxyPort)
             : null;
 
           let rttScaleFactor = 1;
@@ -112,9 +112,12 @@ export function startWorker() {
             rttScaleFactor = rttScale(rtt);
           }
 
-          const { browser, context } = accountCtx
-            ? await createBrowserForAccount(accountCtx)
-            : await createBrowser(proxyPort);
+          let context;
+          if (accountCtx) {
+            ({ context } = await createBrowserForAccount(accountCtx));
+          } else {
+            ({ context } = await createBrowser(modemSession?.proxyPort));
+          }
 
           try {
             if (accountId) await naverLogin(context, accountId, { profilePath: accountCtx?.profile_path });
@@ -140,20 +143,15 @@ export function startWorker() {
             if (accountId) await incrementAccountCount(accountId, 'post_count_today');
           } catch (err) {
             if (accountId && (isCaptchaError(err) || isBlockError(err))) {
-              await handleLayer4Detection(accountId);
+              await handleLayer4Detection(accountId, err, modemSession);
             }
             throw err;
           } finally {
-            if (accountCtx) {
-              await closeBrowser(browser, context, accountCtx);
-            } else {
-              await browser.close();
-            }
-            if (proxyPort) releaseModem(proxyPort);
+            await closeBrowserContext(context);
+            if (modemSession) await releaseModem(modemSession);
           }
         } else if (type === 'social_crank') {
           await executeSocialCrank(accountId!, payload as { ourBlogUrls: string[] });
-          if (accountId) await incrementAccountCount(accountId, 'crank_count_today');
         } else if (['tiktok_upload', 'instagram_reel', 'instagram_post', 'threads_post', 'twitter_post'].includes(type)) {
           await executeSocialPost(type, payload);
           if (humaJobId) await completeJob(humaJobId);
