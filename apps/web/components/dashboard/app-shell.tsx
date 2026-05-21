@@ -2,7 +2,6 @@
 
 import { Sidebar } from '@/components/dashboard/sidebar';
 import { Topbar } from '@/components/dashboard/topbar';
-import { WorkspaceProvider } from '@/components/dashboard/workspace-context';
 import { PageActionProvider } from '@/components/dashboard/page-action-context';
 import { HumanEngineSaveProvider } from '@/components/dashboard/human-engine-save-context';
 import { getPageMeta } from '@/lib/page-config';
@@ -27,12 +26,10 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
-    <WorkspaceProvider>
-      <PageActionProvider>
-        <HumanEngineSaveProvider>
-          <AppShellInner>{children}</AppShellInner>
-        </HumanEngineSaveProvider>
-      </PageActionProvider>
-    </WorkspaceProvider>
+    <PageActionProvider>
+      <HumanEngineSaveProvider>
+        <AppShellInner>{children}</AppShellInner>
+      </HumanEngineSaveProvider>
+    </PageActionProvider>
   );
 }

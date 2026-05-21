@@ -110,7 +110,7 @@ export function CalendarView() {
                       </div>
                     ))}
                     {(jobsByDay[d]?.length ?? 0) > 3 && (
-                      <div className="text-[8px] text-huma-t3">+{(jobsByDay[d]?.length ?? 0) - 3}건</div>
+                      <div className="text-[9px] text-huma-t3">+{(jobsByDay[d]?.length ?? 0) - 3}건</div>
                     )}
                   </>
                 )}
@@ -135,7 +135,7 @@ export function CalendarView() {
                 <li key={j.id} className="flex items-center justify-between rounded border border-huma-bdr2 bg-huma-bg3 px-3 py-2 text-xs">
                   <div>
                     <div className="font-medium text-huma-t">{j.title}</div>
-                    <div className="font-mono text-[9px] text-huma-t3">{j.job_type} · {formatScheduledAt(j.scheduled_at)}</div>
+                    <div className="font-mono text-[10.5px] text-huma-t3">{j.job_type} · {formatScheduledAt(j.scheduled_at)}</div>
                   </div>
                   <span className={cn('text-[10px]', j.status === 'scheduled' ? 'text-huma-acc' : 'text-huma-t3')}>{j.status}</span>
                 </li>

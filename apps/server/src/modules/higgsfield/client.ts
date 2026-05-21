@@ -32,3 +32,26 @@ export async function higgsfieldRequest(
     }
   }
 }
+
+/** Higgsfield 잔여 크레딧 (API 실패 시 설정값 또는 999) */
+export async function getHiggsfieldCredits(): Promise<number> {
+  if (!process.env.HIGGSFIELD_API_KEY) return 999;
+
+  try {
+    const { data } = await axios.get(`${API_BASE}/credits`, { headers: headers(), timeout: 5000 });
+    const remaining = (data as { remaining?: number; credits?: number }).remaining ?? (data as { credits?: number }).credits;
+    if (typeof remaining === 'number') return remaining;
+  } catch {
+    // fallback below
+  }
+
+  try {
+    const { getSetting } = await import('../../lib/settings.js');
+    const hg = await getSetting<{ remaining_credits?: number }>('higgsfield', {});
+    if (typeof hg.remaining_credits === 'number') return hg.remaining_credits;
+  } catch {
+    // ignore
+  }
+
+  return 999;
+}

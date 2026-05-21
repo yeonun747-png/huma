@@ -29,6 +29,11 @@ export interface HumaVideoQueue {
   upload_platforms?: string[];
   caption?: string;
   hashtags?: string[];
+  blog_job_id?: string;
+  threads_job_id?: string;
+  twitter_job_id?: string;
+  tiktok_result_url?: string;
+  instagram_result_url?: string;
   status: VideoPipelineStatus;
   current_step?: string;
   error_message?: string;

@@ -80,7 +80,7 @@ export async function uploadTikTokVideo(params: {
   videoPath: string;
   caption: string;
   hashtags: string[];
-}) {
+}): Promise<string | undefined> {
   const account = await getPlatformAccount(params.workspace, 'tiktok');
   const token = await refreshTokenIfNeeded(account);
   const videoStat = fs.statSync(params.videoPath);
@@ -106,9 +106,14 @@ export async function uploadTikTokVideo(params: {
       { publish_id: init.data.publish_id },
       { headers: { Authorization: `Bearer ${token}` } }
     );
-    if (s.data.status === 'PUBLISH_COMPLETE') return;
+    if (s.data.status === 'PUBLISH_COMPLETE') {
+      return s.data.publicaly_available_post_id
+        ? `https://www.tiktok.com/@${account.username}/video/${s.data.publicaly_available_post_id}`
+        : undefined;
+    }
     if (s.data.status === 'FAILED') throw new Error('TikTok 발행 실패');
   }
+  return undefined;
 }
 
 export async function uploadInstagramReel(params: {
@@ -116,7 +121,7 @@ export async function uploadInstagramReel(params: {
   videoPath: string;
   caption: string;
   hashtags: string[];
-}) {
+}): Promise<string | undefined> {
   const account = await getPlatformAccount(params.workspace, 'instagram');
   const fullCaption = `${params.caption}\n.\n.\n${params.hashtags.map((h) => `#${h}`).join(' ')}`;
   const videoUrl = await uploadToSupabaseStorage(params.videoPath);
@@ -136,11 +141,20 @@ export async function uploadInstagramReel(params: {
     if (s.status_code === 'ERROR') throw new Error('Instagram 컨테이너 오류');
   }
 
-  await axios.post(
+  const { data: published } = await axios.post(
     `https://graph.facebook.com/v19.0/${account.platform_user_id}/media_publish`,
     { creation_id: c.id },
-    { params: { access_token: account.access_token } }
+    { params: { access_token: account.access_token } },
   );
+
+  try {
+    const { data: media } = await axios.get(`https://graph.facebook.com/v19.0/${published.id}`, {
+      params: { fields: 'permalink', access_token: account.access_token },
+    });
+    return media.permalink as string | undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function uploadInstagramImage(params: {

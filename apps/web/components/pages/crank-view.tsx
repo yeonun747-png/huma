@@ -69,7 +69,7 @@ export function CrankView() {
           <MToggle label="AI 자동 댓글" sub="Claude API · 자연어 변형" value={Boolean(config.auto_comment ?? true)} onChange={(v) => saveCfg({ auto_comment: v })} />
           <MToggle label="이웃 자동 신청" sub="사주·운세 블로그 타겟" value={Boolean(config.auto_neighbor ?? true)} onChange={(v) => saveCfg({ auto_neighbor: v })} />
           <MToggle label="카페 소통" sub="점사모 카페 댓글·공감" value={Boolean(config.cafe_enabled ?? false)} onChange={(v) => saveCfg({ cafe_enabled: v })} />
-          <div className="mt-2 font-mono text-[9px] text-huma-t3">일일 한도: {daily}건/계정</div>
+          <div className="mt-2 font-mono text-[10.5px] text-huma-t3">일일 한도: {daily}건/계정</div>
         </MPanel>
       </MGrid>
     </div>

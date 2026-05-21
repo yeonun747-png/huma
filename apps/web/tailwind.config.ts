@@ -12,6 +12,9 @@ const config: Config = {
         mono: ['var(--font-jetbrains)', 'monospace'],
         display: ['var(--font-bebas)', 'sans-serif'],
       },
+      fontSize: {
+        xs: ['13.5px', { lineHeight: '1.25' }],
+      },
       colors: {
         huma: {
           bg: 'var(--bg)',

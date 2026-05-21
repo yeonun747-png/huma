@@ -49,10 +49,10 @@ export function MonitorView() {
                   <span className={live ? 'text-[10.5px] font-bold text-huma-err' : 'text-[10.5px] text-huma-t3'}>
                     {live ? 'LIVE' : '대기 중'}
                   </span>
-                  <span className="ml-1.5 font-mono text-[9.5px] text-huma-t3">
+                  <span className="ml-1.5 font-mono text-[11px] text-huma-t3">
                     {job.workspace} · {job.platform ?? 'naver'}
                   </span>
-                  {live && <span className="ml-auto font-mono text-[9.5px] text-huma-t3">WPM —</span>}
+                  {live && <span className="ml-auto font-mono text-[11px] text-huma-t3">WPM —</span>}
                 </div>
                 {live ? (
                   <>

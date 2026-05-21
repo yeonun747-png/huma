@@ -1,0 +1,234 @@
+'use client';
+
+import { useRef, useState } from 'react';
+import { REPEAT_OPTIONS, buildScheduledAt } from '@/lib/queue-repeat';
+
+export interface AutoContentFormValues {
+  title: string;
+  source_url: string;
+  synopsis: string;
+  content_type: 'A' | 'B' | 'auto';
+  auto_schedule: boolean;
+  screenshot_base64?: string;
+  schedule_time: string;
+  repeat_rule: string;
+}
+
+interface QueueAutoContentModalProps {
+  open: boolean;
+  onClose: () => void;
+  onSubmit: (values: AutoContentFormValues) => Promise<void>;
+}
+
+export function QueueAutoContentModal({ open, onClose, onSubmit }: QueueAutoContentModalProps) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [form, setForm] = useState<AutoContentFormValues>({
+    title: '',
+    source_url: '',
+    synopsis: '',
+    content_type: 'auto',
+    auto_schedule: true,
+    schedule_time: '10:00',
+    repeat_rule: '',
+  });
+  const [screenshotName, setScreenshotName] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  if (!open) return null;
+
+  const handleFile = (file?: File | null) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const data = String(reader.result ?? '');
+      setForm((f) => ({ ...f, screenshot_base64: data }));
+      setScreenshotName(file.name);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSubmit = async () => {
+    if (!form.title.trim() || !form.source_url.trim()) {
+      setError('① 제목과 ② URL은 필수 입력 항목입니다.');
+      return;
+    }
+    setError('');
+    setLoading(true);
+    try {
+      await onSubmit(form);
+      setForm({
+        title: '',
+        source_url: '',
+        synopsis: '',
+        content_type: 'auto',
+        auto_schedule: true,
+        schedule_time: '10:00',
+        repeat_rule: '',
+        screenshot_base64: undefined,
+      });
+      setScreenshotName('');
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '등록 실패');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="m-modal-bg open" onClick={onClose} role="presentation">
+      <div className="m-modal m-modal-queue" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+        <div className="m-modal-t">✨ AI 자동 콘텐츠 생성 + 발행</div>
+
+        <div className="m-ai-engine-row">
+          <div className="m-ai-engine main">
+            <div className="m-ai-engine-tag">MAIN</div>
+            <div className="m-ai-engine-name">Claude Sonnet 4.6</div>
+            <div className="m-ai-engine-sub">블로그·소셜·영상 프롬프트·TTS</div>
+          </div>
+          <div className="m-ai-engine sub">
+            <div className="m-ai-engine-tag">SUB</div>
+            <div className="m-ai-engine-name">Claude Haiku 4.5</div>
+            <div className="m-ai-engine-sub">타입·모델·스케줄 자동판단</div>
+          </div>
+        </div>
+
+        <div className="m-modal-field">
+          <div className="m-modal-label">콘텐츠 타입</div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className={`flex-1 rounded-md border px-3 py-2 text-left text-xs ${form.content_type === 'auto' ? 'border-huma-acc bg-huma-glow text-huma-acc' : 'border-huma-bdr text-huma-t3'}`}
+              onClick={() => setForm((f) => ({ ...f, content_type: 'auto' }))}
+            >
+              <div className="font-semibold text-huma-t">자동 판단</div>
+              <div>Haiku가 A/B · 영상모델 결정</div>
+            </button>
+            <button
+              type="button"
+              className={`flex-1 rounded-md border px-3 py-2 text-left text-xs ${form.content_type === 'A' ? 'border-huma-acc bg-huma-glow text-huma-acc' : 'border-huma-bdr text-huma-t3'}`}
+              onClick={() => setForm((f) => ({ ...f, content_type: 'A' }))}
+            >
+              <div className="font-semibold text-huma-t">타입 A</div>
+              <div>텍스트 + 이미지</div>
+            </button>
+            <button
+              type="button"
+              className={`flex-1 rounded-md border px-3 py-2 text-left text-xs ${form.content_type === 'B' ? 'border-huma-acc bg-huma-glow text-huma-acc' : 'border-huma-bdr text-huma-t3'}`}
+              onClick={() => setForm((f) => ({ ...f, content_type: 'B' }))}
+            >
+              <div className="font-semibold text-huma-t">타입 B</div>
+              <div>텍스트 + 이미지 + 영상</div>
+            </button>
+          </div>
+        </div>
+
+        <div className="m-modal-field">
+          <div className="m-modal-label">① 포스팅 제목 <span className="text-huma-err">필수</span></div>
+          <input
+            className="m-modal-input"
+            placeholder="예: 2026년 병오년 사주 총운 분석"
+            value={form.title}
+            onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+          />
+        </div>
+
+        <div className="m-modal-field">
+          <div className="m-modal-label">② 관련 URL <span className="text-huma-err">필수 — Claude가 직접 읽고 이해</span></div>
+          <input
+            className="m-modal-input"
+            placeholder="https://yeonun.ai/fortune/2026"
+            value={form.source_url}
+            onChange={(e) => setForm((f) => ({ ...f, source_url: e.target.value }))}
+          />
+        </div>
+
+        <div className="m-modal-field">
+          <div className="m-modal-label">③ 서비스 화면 캡처 <span className="text-huma-t3">선택 — Claude 비전으로 분석</span></div>
+          <button
+            type="button"
+            className="m-modal-drop"
+            onClick={() => fileRef.current?.click()}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => { e.preventDefault(); handleFile(e.dataTransfer.files[0]); }}
+          >
+            <div className="text-lg">📸</div>
+            <div className="text-xs text-huma-t3">
+              {screenshotName || 'PNG·JPG 드래그 또는 클릭'}
+            </div>
+          </button>
+          <input ref={fileRef} type="file" accept="image/png,image/jpeg" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
+        </div>
+
+        <div className="m-modal-field">
+          <div className="m-modal-label">④ 포스팅 시놉 <span className="text-huma-t3">선택 — 없으면 Claude가 자율 작성</span></div>
+          <textarea
+            className="m-modal-input m-modal-textarea"
+            placeholder={'예: 올해는 변화의 해. 두렵지 않아도 돼.\n(방향성·톤·핵심 메시지를 자유롭게 입력)'}
+            value={form.synopsis}
+            onChange={(e) => setForm((f) => ({ ...f, synopsis: e.target.value }))}
+          />
+        </div>
+
+        <div className="m-modal-field">
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-huma-t2">
+            <input
+              type="checkbox"
+              checked={form.auto_schedule}
+              onChange={(e) => setForm((f) => ({ ...f, auto_schedule: e.target.checked }))}
+            />
+            플랫폼별 최적 시간 자동 배분 (Haiku + optimal_schedule)
+          </label>
+        </div>
+
+        <div className="flex gap-2">
+          {!form.auto_schedule && (
+            <div className="m-modal-field flex-1">
+              <div className="m-modal-label">예약 시간</div>
+              <input
+                type="time"
+                className="m-modal-input"
+                value={form.schedule_time}
+                onChange={(e) => setForm((f) => ({ ...f, schedule_time: e.target.value }))}
+              />
+            </div>
+          )}
+          <div className={`m-modal-field ${form.auto_schedule ? 'flex-1' : 'flex-1'}`}>
+            <div className="m-modal-label">반복</div>
+            <select
+              className="m-modal-input font-mono"
+              value={form.repeat_rule}
+              onChange={(e) => setForm((f) => ({ ...f, repeat_rule: e.target.value }))}
+            >
+              {REPEAT_OPTIONS.map((o) => (
+                <option key={o.label} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="m-modal-cost">
+          <div className="text-[11.5px] font-mono text-huma-t3">예상 AI 비용 (건당)</div>
+          <div className="text-[13.5px] font-semibold text-huma-t">
+            약 104원 <span className="text-[10.5px] font-normal text-huma-t3">(Sonnet $0.069 + Haiku $0.0025)</span>
+          </div>
+        </div>
+
+        {error && <p className="mb-2 text-xs text-huma-err">{error}</p>}
+
+        <div className="m-modal-foot">
+          <button type="button" className="btn-primary flex-[2] py-2" onClick={handleSubmit} disabled={loading}>
+            {loading ? 'AI 생성 중…' : '🚀 AI 생성 + 발행 큐 등록'}
+          </button>
+          <button type="button" className="btn-ghost flex-1 py-2" onClick={onClose} disabled={loading}>취소</button>
+        </div>
+        <p className="mt-2 text-center font-mono text-[10.5px] text-huma-t3">
+          {form.auto_schedule
+            ? '플랫폼별 최적 시간은 실행 시 Haiku가 자동 결정합니다'
+            : `예약: ${buildScheduledAt(form.schedule_time).slice(0, 16).replace('T', ' ')}`}
+        </p>
+      </div>
+    </div>
+  );
+}

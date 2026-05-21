@@ -65,7 +65,7 @@ export function BgmLibraryView() {
               <button type="button" className="text-sm">▶</button>
               <div className="min-w-0 flex-1">
                 <div className="text-xs font-medium text-huma-t">{t.title}</div>
-                <div className="font-mono text-[9px] text-huma-t3">{t.mood.join(', ')} · {t.use_count}회 사용</div>
+                <div className="font-mono text-[10.5px] text-huma-t3">{t.mood.join(', ')} · {t.use_count}회 사용</div>
               </div>
               <MTag tone="idle">{t.workspace_fit.join(', ')}</MTag>
             </div>

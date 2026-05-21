@@ -7,7 +7,12 @@ export async function executeSocialPost(type: string, payload: Record<string, un
     case 'instagram_reel':
       return uploadToPlatform('instagram', payload as { workspace: string; videoPath: string; caption: string; hashtags: string[] });
     case 'instagram_post':
-      return uploadInstagramImage(payload as { workspace: string; imageUrl: string; caption: string; hashtags: string[] });
+      return uploadInstagramImage({
+        workspace: payload.workspace as string,
+        imageUrl: (payload.imageUrl as string) || (payload.imageUrls as string[])?.[0],
+        caption: (payload.caption as string) || (payload.content as string) || '',
+        hashtags: (payload.hashtags as string[]) || [],
+      });
     case 'threads_post':
       return postToThreads(payload as { workspace: string; text: string; imageUrl?: string; linkUrl?: string });
     case 'twitter_post':

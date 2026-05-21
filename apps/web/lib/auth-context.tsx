@@ -49,6 +49,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = () => {
     localStorage.removeItem('huma_token');
+    localStorage.removeItem('huma_workspace');
     setToken(null);
     setAdmin(null);
   };

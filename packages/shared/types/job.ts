@@ -5,12 +5,15 @@ export type JobType =
   | 'cafe_new_post'
   | 'cafe_reply'
   | 'social_crank'
+  | 'content_full'
   | 'video_pipeline'
   | 'tiktok_upload'
   | 'instagram_reel'
   | 'instagram_post'
   | 'threads_post'
   | 'twitter_post';
+
+export type ContentType = 'A' | 'B';
 
 export type JobStatus = 'pending' | 'scheduled' | 'running' | 'paused' | 'completed' | 'failed';
 
@@ -27,6 +30,11 @@ export interface HumaJob {
   link_url?: string;
   hashtags?: string[];
   platform?: string;
+  content_type?: ContentType;
+  content_type_auto?: boolean;
+  video_model?: string;
+  auto_scheduled?: boolean;
+  platform_schedule?: Record<string, string>;
   scheduled_at?: string;
   repeat_rule?: string;
   status: JobStatus;

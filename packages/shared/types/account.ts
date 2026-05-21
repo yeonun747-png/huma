@@ -17,6 +17,10 @@ export interface HumaAccount {
   modem_id?: string;
   proxy_port?: number;
   wpm: number;
+  fingerprint?: Record<string, unknown>;
+  persona?: Record<string, unknown>;
+  profile_path?: string;
+  warmup_day?: number;
   last_visited_our_blog?: Record<string, string>;
   is_active: boolean;
   last_posted_at?: string;

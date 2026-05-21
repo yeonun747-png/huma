@@ -75,7 +75,7 @@ export function DashboardHome() {
       </MGrid>
 
       <MGrid cols={2}>
-        <MPanel title={<><span>7일 발행수 추이</span><span className="ml-auto text-[9px] normal-case tracking-normal text-huma-acc">오늘 기준</span></>}>
+        <MPanel title={<><span>7일 발행수 추이</span><span className="ml-auto text-[10.5px] normal-case tracking-normal text-huma-acc">오늘 기준</span></>}>
           <div className="m-bar-chart">
             {(chart.length ? chart : [{ day: '-', value: 0 }]).map((c) => (
               <div key={c.day} className="m-bar-col">

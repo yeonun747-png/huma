@@ -12,8 +12,11 @@ export interface JobRecord {
   image_urls?: string[];
   link_url?: string;
   hashtags?: string[];
+  platform?: string;
+  content_type?: string;
   result_url?: string;
   scheduled_at?: string;
+  repeat_rule?: string | null;
   bull_job_id?: string;
 }
 
@@ -36,11 +39,13 @@ export function buildEnqueuePayload(job: JobRecord) {
     payload: {
       title: job.title,
       content: job.content,
+      text: job.content,
+      imageUrl: job.image_urls?.[0],
       imageUrls: job.image_urls,
       linkUrl: job.link_url,
       workspace: job.workspace,
       videoPath: job.result_url,
-      caption: job.title,
+      caption: job.content ?? job.title,
       hashtags: job.hashtags,
     },
   };

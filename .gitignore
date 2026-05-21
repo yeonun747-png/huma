@@ -7,5 +7,7 @@ dist/
 .env.local
 .env*.local
 apps/server/tmp/
+apps/server/profiles/
 .DS_Store
 Thumbs.db
+*.tsbuildinfo

@@ -16,9 +16,9 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         variant === 'ghost' && 'border border-huma-bdr bg-transparent text-huma-t2 hover:bg-[var(--glow)] hover:text-huma-t',
         variant === 'destructive' && 'border border-huma-err bg-[var(--err-bg)] text-huma-err hover:bg-huma-err hover:text-white',
         variant === 'outline' && 'border border-huma-bdr bg-huma-bg3 text-huma-t2 hover:border-huma-acc',
-        size === 'sm' && 'px-2 py-1 text-[10px]',
-        size === 'md' && 'px-3 py-1.5 text-xs',
-        size === 'lg' && 'px-4 py-2 text-sm',
+        size === 'sm' && 'px-2 py-1 text-[11.5px]',
+        size === 'md' && 'px-3 py-1.5 text-[12.5px]',
+        size === 'lg' && 'px-4 py-2 text-[13.5px]',
         className
       )}
       {...props}

@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
+import { WorkspaceProvider } from '@/components/dashboard/workspace-context';
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { token, loading } = useAuth();
@@ -30,7 +31,9 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <AuthProvider>
-      <AuthGuard>{children}</AuthGuard>
+      <AuthGuard>
+        <WorkspaceProvider>{children}</WorkspaceProvider>
+      </AuthGuard>
     </AuthProvider>
   );
 }

@@ -53,6 +53,19 @@ export const api = {
     request<HumaJob[]>(`/api/jobs${qs(params ?? {})}`),
   createJob: (body: Partial<HumaJob>) =>
     request<HumaJob>('/api/jobs', { method: 'POST', body: JSON.stringify(body) }),
+  createAutoContentJob: (body: {
+    workspace: string;
+    title: string;
+    source_url: string;
+    synopsis?: string;
+    screenshot_base64?: string;
+    content_type?: 'A' | 'B';
+    content_type_auto?: boolean;
+    auto_schedule?: boolean;
+    schedule_time?: string;
+    repeat_rule?: string;
+  }) =>
+    request<HumaJob>('/api/jobs/auto-content', { method: 'POST', body: JSON.stringify(body) }),
   pauseJob: (id: string) => request(`/api/jobs/${id}/pause`, { method: 'PATCH' }),
   resumeJob: (id: string) => request(`/api/jobs/${id}/resume`, { method: 'PATCH' }),
   deleteJob: (id: string) => request(`/api/jobs/${id}`, { method: 'DELETE' }),

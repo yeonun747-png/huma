@@ -72,9 +72,9 @@ export function AccountList() {
               <div className="flex-1">
                 <div className="text-xs font-semibold text-huma-t">
                   {ac.name}
-                  <span className="ml-2 rounded bg-huma-bg2 px-1.5 py-px font-mono text-[8px] uppercase text-huma-acc">{ac.account_type}</span>
+                  <span className="ml-2 rounded bg-huma-bg2 px-1.5 py-px font-mono text-[9px] uppercase text-huma-acc">{ac.account_type}</span>
                 </div>
-                <div className="font-mono text-[9.5px] text-huma-t3">{ac.blog_url ?? ac.naver_id}</div>
+                <div className="font-mono text-[11px] text-huma-t3">{ac.blog_url ?? ac.naver_id}</div>
               </div>
               <span className={cn(ac.is_active ? 'tag-ok' : 'tag-err')}>{ac.is_active ? 'ACTIVE' : 'PAUSED'}</span>
               <Button size="sm" variant="ghost" onClick={() => toggleActive(ac.id, ac.is_active)}>

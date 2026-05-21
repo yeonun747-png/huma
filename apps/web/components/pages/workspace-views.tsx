@@ -49,7 +49,7 @@ export function AdsenseView() {
     <div className="animate-fadeIn">
       <MGrid cols={2}>
         <MPanel title="이번달 수익">
-          <div className="font-mono text-[34px] font-bold text-huma-t">$218.40</div>
+          <div className="font-mono text-[39px] font-bold text-huma-t">$218.40</div>
           <div className="mt-2 font-mono text-[11px] text-huma-t3">목표 $400 · 54% 달성</div>
           <div className="mt-3"><div className="m-pb"><div className="m-pf" style={{ width: '54%' }} /></div></div>
           <div className="mt-4 space-y-2 text-xs text-huma-t2">
@@ -114,7 +114,7 @@ export function ScenarioView() {
             <div className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded border border-huma-acc bg-[var(--glow)] font-mono text-[10px] font-semibold text-huma-acc">{num}</div>
             <div className="flex-1">
               <div className="text-xs font-semibold text-huma-t">{title}</div>
-              <div className="font-mono text-[9.5px] text-huma-t3">{meta}</div>
+              <div className="font-mono text-[11px] text-huma-t3">{meta}</div>
               <div className="mt-1 flex gap-1">{(tags as string[]).map((t) => <MTag key={t} tone="idle">{t}</MTag>)}</div>
             </div>
           </div>

@@ -2,9 +2,20 @@ interface ClaudeMessageResponse {
   content?: Array<{ type: string; text?: string }>;
 }
 
-export async function askClaude(prompt: string, maxTokens = 100): Promise<string | null> {
+type ClaudeContent = string | Array<Record<string, unknown>>;
+
+export async function askClaudeWithModel(params: {
+  model?: string;
+  max_tokens?: number;
+  prompt?: string;
+  system?: string;
+  content?: ClaudeContent;
+}): Promise<string | null> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return null;
+
+  const userContent = params.content ?? params.prompt ?? '';
+  if (!userContent) return null;
 
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -15,9 +26,10 @@ export async function askClaude(prompt: string, maxTokens = 100): Promise<string
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: maxTokens,
-        messages: [{ role: 'user', content: prompt }],
+        model: params.model ?? 'claude-sonnet-4-20250514',
+        max_tokens: params.max_tokens ?? 1024,
+        ...(params.system ? { system: params.system } : {}),
+        messages: [{ role: 'user', content: userContent }],
       }),
     });
     if (!res.ok) return null;
@@ -28,4 +40,8 @@ export async function askClaude(prompt: string, maxTokens = 100): Promise<string
   } catch {
     return null;
   }
+}
+
+export async function askClaude(prompt: string, maxTokens = 100): Promise<string | null> {
+  return askClaudeWithModel({ prompt, max_tokens: maxTokens });
 }
