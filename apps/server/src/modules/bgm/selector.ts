@@ -2,7 +2,7 @@ import axios from 'axios';
 import { supabase } from '../../middleware/auth.js';
 import { getSetting } from '../../lib/settings.js';
 import { generateSunoMusic } from './suno.js';
-import { createAnthropicClient } from '../../lib/anthropic-client.js';
+import { askClaude } from '../../lib/anthropic-client.js';
 
 export async function selectBgm(params: {
   workspace: string;
@@ -57,18 +57,10 @@ async function queryBgm(
 export async function analyzeContentMood(text: string, workspace: string): Promise<string> {
   if (!process.env.ANTHROPIC_API_KEY) return 'calm';
   try {
-    const client = createAnthropicClient();
-    if (!client) return 'calm';
-    const res = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 100,
-      messages: [{
-        role: 'user',
-        content: `스크립트의 무드를 분석해서 1개만 JSON으로 답해. mood는 calm/romantic/mysterious/energetic/inspiring/dark/playful/emotional/dramatic 중 하나. workspace: ${workspace}\n스크립트: ${text.slice(0, 300)}\n{"mood":""}`,
-      }],
-    });
-    const block = res.content[0];
-    if (block.type === 'text') return JSON.parse(block.text).mood ?? 'calm';
+    const reply = await askClaude(
+      `스크립트의 무드를 분석해서 1개만 JSON으로 답해. mood는 calm/romantic/mysterious/energetic/inspiring/dark/playful/emotional/dramatic 중 하나. workspace: ${workspace}\n스크립트: ${text.slice(0, 300)}\n{"mood":""}`
+    );
+    if (reply) return JSON.parse(reply).mood ?? 'calm';
   } catch {
     // ignore
   }

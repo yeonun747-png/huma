@@ -9,7 +9,7 @@ import { generateLipsync } from './lipsync.js';
 import { selectBgm } from '../bgm/selector.js';
 import { uploadToPlatform } from '../social-api/index.js';
 import { join } from 'path';
-import { createAnthropicClient } from '../../lib/anthropic-client.js';
+import { askClaude } from '../../lib/anthropic-client.js';
 
 async function getVideoJob(id: string) {
   const { data } = await supabase.from('huma_video_queue').select('*').eq('id', id).single();
@@ -34,20 +34,10 @@ async function analyzeContentMood(text: string): Promise<string> {
     return moods[Math.floor(Math.random() * moods.length)];
   }
   try {
-    const client = createAnthropicClient();
-    if (!client) return moods[Math.floor(Math.random() * moods.length)];
-    const res = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 100,
-      messages: [{
-        role: 'user',
-        content: `스크립트의 무드를 분석해서 1개만 JSON으로 답해. mood는 calm/romantic/mysterious/energetic/inspiring/dark/playful/emotional/dramatic 중 하나.\n스크립트: ${text.slice(0, 300)}\n{"mood":""}`,
-      }],
-    });
-    const block = res.content[0];
-    if (block.type === 'text') {
-      return JSON.parse(block.text).mood ?? 'calm';
-    }
+    const reply = await askClaude(
+      `스크립트의 무드를 분석해서 1개만 JSON으로 답해. mood는 calm/romantic/mysterious/energetic/inspiring/dark/playful/emotional/dramatic 중 하나.\n스크립트: ${text.slice(0, 300)}\n{"mood":""}`
+    );
+    if (reply) return JSON.parse(reply).mood ?? 'calm';
   } catch {
     // fallback
   }
