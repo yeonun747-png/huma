@@ -41,15 +41,18 @@ export async function acquireModem(accountId: string): Promise<ModemSession | un
     return { proxyPort: port, modemId: modemId ?? '', leased: false };
   }
 
-  // C-Rank: proxy_port null → idle 슬롯 순환 (세션 임대)
-  const { data: idleList } = await supabase
+  // C-Rank / 카페 답글: proxy_port null → crank·cafe 역할 idle 슬롯 순환
+  let query = supabase
     .from('huma_modems')
     .select('*')
     .eq('status', 'idle')
     .order('slot_number');
 
-  for (const idle of idleList ?? []) {
-    const portKey = String(idle.proxy_port);
+  const { data: idleList } = await query;
+  const crankPool = (idleList ?? []).filter(
+    (m) => !m.modem_role || m.modem_role === 'crank' || m.modem_role === 'cafe',
+  );
+  for (const idle of crankPool) {    const portKey = String(idle.proxy_port);
     if (busyModems.has(portKey)) continue;
 
     busyModems.add(portKey);

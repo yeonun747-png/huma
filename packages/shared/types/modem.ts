@@ -1,5 +1,7 @@
 export type ModemStatus = 'idle' | 'busy' | 'reconnecting' | 'error';
 
+export type ModemRole = 'posting' | 'crank' | 'cafe';
+
 export interface HumaModem {
   id: string;
   slot_number: number;
@@ -10,6 +12,7 @@ export interface HumaModem {
   carrier?: string;
   sim_number?: string;
   status: ModemStatus;
+  modem_role?: ModemRole;
   response_ms?: number;
   last_reconnect_at?: string;
   created_at: string;

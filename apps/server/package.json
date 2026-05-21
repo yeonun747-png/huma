@@ -5,11 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "dev:worker": "tsx watch src/worker-only.ts",
     "build": "node scripts/build.mjs",
     "start": "node dist/index.js",
+    "start:worker": "node dist/worker-only.js",
     "lint": "tsc --noEmit"
-  },
-  "dependencies": {
+  },  "dependencies": {
     "@anthropic-ai/sdk": "^0.27.3",
     "@huma/shared": "*",
     "@supabase/supabase-js": "^2.45.4",

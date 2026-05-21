@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { authMiddleware, supabase } from '../middleware/auth.js';
 import { enqueueJob } from '../modules/queue/producer.js';
 import { crawlCafeTargets } from '../modules/playwright/naver/cafe-crawl.js';
-
+import { pickCafeReplyCrankAccount } from '../lib/cafe-accounts.js';
 export async function registerCafeRoutes(app: FastifyInstance) {
   app.get('/api/cafe/targets', { preHandler: authMiddleware }, async (request) => {
     const { replied } = request.query as { replied?: string };
@@ -22,20 +22,16 @@ export async function registerCafeRoutes(app: FastifyInstance) {
     const { data: target } = await supabase.from('huma_cafe_targets').select('*').eq('id', id).single();
     if (!target) return { error: '대상 없음' };
 
-    const { data: crankAccount } = await supabase
-      .from('huma_accounts')
-      .select('id')
-      .eq('account_type', 'cafe')
-      .eq('is_active', true)
-      .limit(1)
-      .single();
+    const crankAccountId = await pickCafeReplyCrankAccount();
+    if (!crankAccountId) {
+      return { error: '사용 가능한 C-Rank 계정 없음' };
+    }
 
     await enqueueJob({
       type: 'cafe_reply',
-      accountId: crankAccount?.id,
+      accountId: crankAccountId,
       payload: { postUrl: target.post_url, replyContent: target.reply_content || '좋은 글 감사합니다!' },
     });
-
     return { success: true, targetId: id };
   });
 }

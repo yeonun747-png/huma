@@ -33,5 +33,20 @@ module.exports = {
         XVFB_AVAILABLE: 'true',
       },
     },
+    {
+      name: 'huma-worker-b',
+      cwd: serverRoot,
+      script: 'dist/worker-only.js',
+      interpreter: 'node',
+      autorestart: true,
+      max_memory_restart: '2G',
+      env: {
+        NODE_ENV: 'production',
+        DISPLAY: ':99',
+        XVFB_AVAILABLE: 'true',
+        HUMA_WORKER_CONCURRENCY: '3',
+        // REDIS_HOST: '192.168.x.x',  // 노트북 A IP — .env 또는 pm2 env_file
+      },
+    },
   ],
 };

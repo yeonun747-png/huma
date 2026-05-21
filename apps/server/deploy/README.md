@@ -70,11 +70,38 @@ NEXT_PUBLIC_HUMA_API_URL=https://api.huma.yourdomain.com
 # 3proxy (root)
 sudo bash ~/huma/apps/server/scripts/setup-proxy.sh
 
-# Supabase SQL Editor
-# seed_modems_10slots.sql 실행
+# Supabase SQL Editor (v3.9 순서)
+# v3_9_fds_watcher.sql → v3_9_1_modem_roles.sql
+# 1단계 7슬롯: seed_modems_7slots.sql
+# 2단계 20슬롯: seed_modems_20slots.sql
+# (레거시 10슬롯: seed_modems_10slots.sql)
 
 # 장치 확인
 ip -br link | grep wwan
+```
+
+## E. 노트북 B 워커 (v3.9 분산)
+
+노트북 A: API + Redis + Tunnel + Worker A  
+노트북 B: **워커만** (동일 repo, 원격 Redis)
+
+```bash
+# 노트북 B .env
+REDIS_HOST=192.168.x.x    # 노트북 A LAN IP
+SUPABASE_URL=...
+SUPABASE_SERVICE_KEY=...
+HUMA_WORKER_CONCURRENCY=3
+
+cd ~/huma/apps/server
+npm run build
+npm run start:worker
+# 또는 PM2: pm2 start deploy/ecosystem.config.cjs --only huma-worker-b
+```
+
+노트북 A Redis는 LAN 바인딩 필요:
+```bash
+# /etc/redis/redis.conf → bind 0.0.0.0 (또는 A의 LAN IP)
+sudo systemctl restart redis-server
 ```
 
 ## 헬스체크

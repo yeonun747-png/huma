@@ -12,6 +12,7 @@ import {
   buildScheduledAtFromTime,
   registerAutoContentJobs,
 } from '../modules/claude/auto-content-orchestrator.js';
+import { assertCafeNewPostAccount, assertCafeReplyAccount } from '../lib/cafe-accounts.js';
 
 export async function registerJobRoutes(app: FastifyInstance) {
   app.get('/api/jobs', { preHandler: authMiddleware }, async (request) => {
@@ -113,9 +114,17 @@ export async function registerJobRoutes(app: FastifyInstance) {
 
     const scheduledAt = body.scheduled_at as string | undefined;
     const status = resolveJobStatus(scheduledAt);
+    const jobType = body.job_type as string | undefined;
+    const accountId = body.account_id as string | undefined;
 
-    const { data, error } = await supabase
-      .from('huma_jobs')
+    try {
+      if (jobType === 'cafe_new_post' && accountId) await assertCafeNewPostAccount(accountId);
+      if (jobType === 'cafe_reply' && accountId) await assertCafeReplyAccount(accountId);
+    } catch (err) {
+      return reply.code(400).send({ error: (err as Error).message });
+    }
+
+    const { data, error } = await supabase      .from('huma_jobs')
       .insert({ ...body, status, retry_count: body.retry_count ?? 0 })
       .select()
       .single();

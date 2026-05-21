@@ -21,7 +21,8 @@ import { executeVideoPipeline } from './jobs/video-pipeline.js';
 import { executeContentFull } from '../claude/auto-content-orchestrator.js';
 import { executeSocialPost } from './jobs/social-post.js';
 import { scheduleRepeatIfNeeded } from '../../lib/repeat-scheduler.js';
-
+import { isSlimDataCapError, scheduleSlimCapRetry } from '../../lib/slim-retry.js';
+import { assertCafeNewPostAccount, assertCafeReplyAccount } from '../../lib/cafe-accounts.js';
 let systemPaused = false;
 
 export function setSystemPaused(paused: boolean) {
@@ -58,8 +59,12 @@ async function completeJob(jobId: string, resultUrl?: string) {
 
 const PLAYWRIGHT_JOBS = ['post_blog', 'cafe_new_post', 'cafe_reply'];
 
-export function startWorker() {
-  const worker = new Worker(
+function dailyCountField(jobType: string): 'post_count_today' | 'crank_count_today' {
+  if (jobType === 'social_crank' || jobType === 'cafe_reply') return 'crank_count_today';
+  return 'post_count_today';
+}
+
+export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURRENCY) || 5) {  const worker = new Worker(
     'huma-jobs',
     async (job) => {
       if (systemPaused) throw new Error('SYSTEM_PAUSED');
@@ -86,15 +91,20 @@ export function startWorker() {
 
       try {
         if (accountId) {
-          const countField = type === 'social_crank' ? 'crank_count_today' : 'post_count_today';
+          if (type === 'cafe_new_post') await assertCafeNewPostAccount(accountId);
+          if (type === 'cafe_reply') await assertCafeReplyAccount(accountId);
+
+          const countField = dailyCountField(type);
           let limit = getDailyLimit(type);
-          if (type === 'social_crank') {
+          if (type === 'social_crank' || type === 'cafe_reply') {
             const ctx = await loadAccountForBrowser(accountId);
-            limit = getCrankDailyLimit(ctx.warmup_day ?? 0);
+            const crankCap = getCrankDailyLimit(ctx.warmup_day ?? 0);
+            limit = type === 'cafe_reply'
+              ? Math.min(getDailyLimit('cafe_reply'), crankCap)
+              : crankCap;
           }
           if ((await getTodayCount(accountId, countField)) >= limit) throw new Error('DAILY_LIMIT');
         }
-
         const workspace = payload.workspace as string | undefined;
         if (workspace) await checkSharedWorkspaceLimit(workspace, type);
 
@@ -140,8 +150,7 @@ export function startWorker() {
             }
 
             if (humaJobId && resultUrl) await completeJob(humaJobId, resultUrl);
-            if (accountId) await incrementAccountCount(accountId, 'post_count_today');
-          } catch (err) {
+            if (accountId) await incrementAccountCount(accountId, dailyCountField(type));          } catch (err) {
             if (accountId && (isCaptchaError(err) || isBlockError(err))) {
               await handleLayer4Detection(accountId, err, modemSession);
             }
@@ -166,8 +175,17 @@ export function startWorker() {
 
         await logOperation({ level: 'info', message: `작업 완료: ${type}`, job_id: humaJobId, account_id: accountId });
       } catch (err) {
-        if (humaJobId) {
-          await supabase
+        if (humaJobId && isSlimDataCapError(err)) {
+          await scheduleSlimCapRetry(humaJobId, job.data as Record<string, unknown>);
+          await logOperation({
+            level: 'warn',
+            message: `슬림 데이터 소진 — 자정 재시도: ${type}`,
+            job_id: humaJobId,
+            account_id: accountId,
+          });
+          return;
+        }
+        if (humaJobId) {          await supabase
             .from('huma_jobs')
             .update({ status: 'failed', error_message: (err as Error).message })
             .eq('id', humaJobId);
@@ -178,9 +196,8 @@ export function startWorker() {
         if (accountId) releaseAccount(accountId);
       }
     },
-    { connection: redisConnection, concurrency: 5 }
+    { connection: redisConnection, concurrency }
   );
-
   worker.on('failed', (job, err) => {
     console.error(`Job ${job?.id} failed:`, err.message);
   });
