@@ -7,7 +7,7 @@
   ],
   "scripts": {
     "dev": "turbo dev",
-    "build": "turbo build",
+    "build": "turbo build --filter=@huma/web --filter=@huma/server",
     "build:web": "turbo build --filter=@huma/web",
     "lint": "turbo lint",
     "dev:web": "turbo dev --filter=@huma/web",
