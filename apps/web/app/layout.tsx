@@ -27,6 +27,11 @@ export const metadata: Metadata = {
   title: 'HUMA Studio — Human Automation Platform',
   description: '네이버·소셜 멀티플랫폼 자동 발행 관리 플랫폼',
   metadataBase: new URL(siteUrl),
+  icons: {
+    icon: [{ url: '/f.png', type: 'image/png' }],
+    shortcut: '/f.png',
+    apple: '/f.png',
+  },
   openGraph: {
     title: 'HUMA Studio — Human Automation Platform',
     description: '네이버·소셜 멀티플랫폼 자동 발행 관리 플랫폼',
