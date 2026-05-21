@@ -27,6 +27,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   app.get('/api/auth/me', { preHandler: authMiddleware }, async (request) => {
     return {
       adminId: request.admin!.adminId,
+      email: request.admin!.email ?? '',
       workspaces: request.admin!.workspaces,
       isSuper: request.admin!.isSuper,
     };

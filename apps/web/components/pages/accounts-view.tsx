@@ -1,13 +1,54 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { HumaAccount } from '@huma/shared';
+import type { AccountType, HumaAccount, Workspace } from '@huma/shared';
 import { api } from '@/lib/api';
 import { WORKSPACES } from '@/lib/constants';
 import { MAccountCard, MGrid, MStat, MTypeBadge } from '@/components/mockup/primitives';
 import { useRegisterPageAction } from '@/components/dashboard/page-action-context';
+import { useWorkspace } from '@/components/dashboard/workspace-context';
+import { useAuth } from '@/lib/auth-context';
+import { alertAccountError } from '@/lib/account-errors';
+import {
+  defaultAccountGroup,
+  getAccountGroups,
+  isSuperAdmin,
+  type AccountGroup,
+} from '@/lib/admin-scope';
 
-const WS_ORDER = ['yeonun', 'quizoasis', 'panana'] as const;
+const ACCOUNT_GROUPS: { id: AccountGroup; title: string }[] = [
+  { id: 'yeonun', title: '연운' },
+  { id: 'quizoasis_panana', title: '퀴즈+파나나' },
+];
+
+const QP_WORKSPACES: Workspace[] = ['quizoasis', 'panana'];
+
+type AccountCategory = AccountType | 'social';
+
+const CATEGORY_OPTIONS: { value: AccountCategory; label: string; sub: string }[] = [
+  { value: 'posting', label: '포스팅', sub: '네이버 블로그 발행 (지수5)' },
+  { value: 'crank', label: 'C-Rank', sub: '타·내 블로그 방문·공감·댓글' },
+  { value: 'cafe', label: '카페', sub: '점사모 새글·답글' },
+  { value: 'social', label: '소셜미디어', sub: 'TikTok·IG·Threads·X API' },
+];
+
+const SOCIAL_PLATFORMS = [
+  { value: 'tiktok', label: 'TikTok' },
+  { value: 'instagram', label: 'Instagram' },
+  { value: 'threads', label: 'Threads' },
+  { value: 'twitter', label: 'X (Twitter)' },
+];
+
+const TYPE_LABEL: Record<AccountType, string> = {
+  posting: 'POSTING',
+  crank: 'C-RANK',
+  cafe: 'CAFE',
+};
+
+function belongsToGroup(ws: string, group: AccountGroup): boolean {
+  if (group === 'yeonun') return ws === 'yeonun';
+  return ws === 'quizoasis' || ws === 'panana';
+}
 
 function statusTone(ac: HumaAccount): 'ok' | 'warn' | 'err' | 'live' | 'idle' {
   if (!ac.is_active) return 'warn';
@@ -20,124 +61,421 @@ function statusLabel(ac: HumaAccount) {
   return 'IDLE';
 }
 
+async function confirmDelete(label: string) {
+  return window.confirm(`「${label}」 계정을 삭제할까요?\n삭제 후에는 복구할 수 없습니다.`);
+}
+
+function emptyForm(opts: {
+  registerGroup: AccountGroup;
+  socialWorkspace: Workspace;
+}) {
+  return {
+    registerGroup: opts.registerGroup,
+    socialWorkspace: opts.socialWorkspace,
+    category: 'posting' as AccountCategory,
+    name: '',
+    naver_id: '',
+    naver_pw: '',
+    blog_url: '',
+    platform: 'tiktok',
+    username: '',
+    access_token: '',
+  };
+}
+
+function resolveNaverWorkspace(group: AccountGroup): Workspace {
+  if (group === 'yeonun') return 'yeonun';
+  return 'quizoasis';
+}
+
+function resolveSocialWorkspace(group: AccountGroup, form: ReturnType<typeof emptyForm>): Workspace {
+  if (group === 'yeonun') return 'yeonun';
+  return form.socialWorkspace;
+}
+
 export function AccountsView() {
+  const { admin, loading: authLoading } = useAuth();
+  const { workspace: sidebarWorkspace } = useWorkspace();
+  const superAdmin = isSuperAdmin(admin);
+  const adminWorkspaces = admin?.workspaces ?? [];
+
+  const visibleGroups = useMemo(() => getAccountGroups(admin), [admin]);
+
+  const defaultGroup = defaultAccountGroup(admin);
+  const defaultSocialWs: Workspace = adminWorkspaces.includes('quizoasis')
+    ? 'quizoasis'
+    : adminWorkspaces.includes('panana')
+      ? 'panana'
+      : sidebarWorkspace;
+
   const [accounts, setAccounts] = useState<HumaAccount[]>([]);
   const [platforms, setPlatforms] = useState<Array<Record<string, unknown>>>([]);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ workspace: 'yeonun', name: '', naver_id: '', naver_pw: '', account_type: 'posting' });
+  const [form, setForm] = useState(() =>
+    emptyForm({ registerGroup: defaultGroup, socialWorkspace: defaultSocialWs }),
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const listGridCols = (visibleGroups.length >= 2 ? 2 : 1) as 1 | 2;
 
   const load = useCallback(() => {
-    Promise.all([api.accounts(), api.platformAccounts()]).then(([a, p]) => {
-      setAccounts(a);
-      setPlatforms(p);
-    }).catch(() => {});
+    Promise.all([api.accounts(), api.platformAccounts()])
+      .then(([a, p]) => {
+        setAccounts(a);
+        setPlatforms(p);
+      })
+      .catch(() => {});
   }, []);
 
-  useEffect(() => { load(); }, [load]);
-  useRegisterPageAction('openAccountForm', () => setShowForm((v) => !v));
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  const grouped = useMemo(() => {
-    const map: Record<string, HumaAccount[]> = { yeonun: [], quizoasis: [], panana: [] };
-    accounts.forEach((a) => { if (map[a.workspace]) map[a.workspace].push(a); });
-    return map;
-  }, [accounts]);
+  useRegisterPageAction('openAccountForm', () => {
+    setShowForm((v) => !v);
+    setError('');
+    setForm(
+      emptyForm({
+        registerGroup: defaultGroup,
+        socialWorkspace: QP_WORKSPACES.includes(sidebarWorkspace) ? sidebarWorkspace : defaultSocialWs,
+      }),
+    );
+  });
 
-  const posting = accounts.filter((a) => a.account_type === 'posting').length;
-  const crank = accounts.filter((a) => a.account_type === 'crank').length;
+  const visibleAccounts = useMemo(
+    () => accounts.filter((a) => visibleGroups.some((g) => belongsToGroup(a.workspace, g))),
+    [accounts, visibleGroups],
+  );
+
+  const visiblePlatforms = useMemo(
+    () => platforms.filter((p) => visibleGroups.some((g) => belongsToGroup(String(p.workspace), g))),
+    [platforms, visibleGroups],
+  );
+
+  const posting = visibleAccounts.filter((a) => a.account_type === 'posting').length;
+  const crank = visibleAccounts.filter((a) => a.account_type === 'crank').length;
+  const cafe = visibleAccounts.filter((a) => a.account_type === 'cafe').length;
+  const isSocial = form.category === 'social';
+
+  const registerGroupLabel =
+    ACCOUNT_GROUPS.find((g) => g.id === form.registerGroup)?.title ?? form.registerGroup;
 
   const handleCreate = async () => {
-    if (!form.name || !form.naver_id) return;
-    await api.createAccount({ ...form, is_active: true, health_score: 100, blog_index: 5, wpm: 55 });
-    setShowForm(false);
-    load();
+    setError('');
+    setSaving(true);
+    try {
+      if (isSocial) {
+        if (!form.username.trim() || !form.access_token.trim()) {
+          setError('소셜 계정은 사용자명과 API 토큰이 필요합니다.');
+          return;
+        }
+        const targetWs = resolveSocialWorkspace(form.registerGroup, form);
+        await api.createPlatformAccount({
+          workspace: targetWs,
+          platform: form.platform,
+          username: form.username.trim(),
+          access_token: form.access_token.trim(),
+          is_active: true,
+        });
+      } else {
+        if (!form.name.trim() || !form.naver_id.trim()) {
+          setError('표시 이름과 네이버 ID는 필수입니다.');
+          return;
+        }
+        const targetWs = resolveNaverWorkspace(form.registerGroup);
+        await api.createAccount({
+          workspace: targetWs,
+          name: form.name.trim(),
+          naver_id: form.naver_id.trim(),
+          naver_pw: form.naver_pw,
+          account_type: form.category,
+          blog_url: form.blog_url.trim() || undefined,
+          ...(form.registerGroup === 'quizoasis_panana' && form.category === 'posting'
+            ? { shared_workspace: 'panana' }
+            : {}),
+          is_active: true,
+          health_score: 100,
+          blog_index: form.category === 'posting' ? 5 : 0,
+          wpm: 55,
+        });
+      }
+      setShowForm(false);
+      load();
+    } catch (e) {
+      alertAccountError(e, { naverId: form.naver_id, platform: form.platform });
+    } finally {
+      setSaving(false);
+    }
   };
+
+  const handleDeleteNaver = async (ac: HumaAccount) => {
+    if (!(await confirmDelete(ac.name))) return;
+    try {
+      await api.deleteAccount(ac.id);
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '삭제 실패');
+    }
+  };
+
+  const handleDeletePlatform = async (p: Record<string, unknown>) => {
+    const label = String(p.username ?? p.platform ?? '소셜');
+    if (!(await confirmDelete(label))) return;
+    try {
+      await api.deletePlatformAccount(String(p.id));
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '삭제 실패');
+    }
+  };
+
+  const platformIcon = (platform: string) => {
+    if (platform === 'tiktok') return 'T';
+    if (platform === 'instagram') return 'I';
+    if (platform === 'threads') return '@';
+    if (platform === 'twitter') return 'X';
+    return 'S';
+  };
+
+  const accountsInGroup = (group: AccountGroup) =>
+    accounts.filter((a) => belongsToGroup(a.workspace, group));
+
+  const platformsInGroup = (group: AccountGroup) =>
+    platforms.filter((p) => belongsToGroup(String(p.workspace), group));
+
+  if (authLoading) {
+    return <div className="animate-fadeIn py-8 text-center text-[12px] text-huma-t3">계정 목록 불러오는 중…</div>;
+  }
 
   return (
     <div className="animate-fadeIn">
-      <MGrid cols={3}>
-        <MStat label="포스팅 전용 (지수5)" value={<>{posting}<span className="text-[11px] text-huma-t3">개</span></>} sub="블로그 발행 계정" />
-        <MStat label="C-Rank 소통 (일반)" value={<>{crank}<span className="text-[11px] text-huma-t3">개</span></>} sub="방문·공감·댓글 전용" />
-        <MStat label="소셜미디어 (API)" value={<>{platforms.length}<span className="text-[11px] text-huma-t3">개</span></>} sub="TikTok·IG·Threads·X" />
+      <MGrid cols={2}>
+        <MStat label="포스팅 (지수5)" value={<>{posting}<span className="text-[11px] text-huma-t3">개</span></>} sub="블로그 발행" />
+        <MStat label="C-Rank 소통" value={<>{crank}<span className="text-[11px] text-huma-t3">개</span></>} sub="방문·공감·댓글" />
+        <MStat label="카페" value={<>{cafe}<span className="text-[11px] text-huma-t3">개</span></>} sub="점사모 활동" />
+        <MStat label="소셜미디어 (API)" value={<>{visiblePlatforms.length}<span className="text-[11px] text-huma-t3">개</span></>} sub="TikTok·IG·Threads·X" />
       </MGrid>
 
       {showForm && (
-        <div className="m-panel mb-3 flex flex-wrap items-end gap-2">
-          <select value={form.workspace} onChange={(e) => setForm((f) => ({ ...f, workspace: e.target.value }))} className="m-model-select max-w-[140px]">
-            {WORKSPACES.map((w) => <option key={w.id} value={w.id}>{w.label}</option>)}
-          </select>
-          <input placeholder="표시 이름" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} className="m-model-select max-w-[140px]" />
-          <input placeholder="네이버 ID" value={form.naver_id} onChange={(e) => setForm((f) => ({ ...f, naver_id: e.target.value }))} className="m-model-select max-w-[140px]" />
-          <input type="password" placeholder="비밀번호" value={form.naver_pw} onChange={(e) => setForm((f) => ({ ...f, naver_pw: e.target.value }))} className="m-model-select max-w-[140px]" />
-          <button type="button" className="btn-primary" onClick={handleCreate}>추가</button>
+        <div className="m-panel mb-3 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-[12px] font-semibold text-huma-t">계정 유형 선택</div>
+            {superAdmin ? (
+              <select
+                value={form.registerGroup}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, registerGroup: e.target.value as AccountGroup }))
+                }
+                className="m-model-select max-w-[180px]"
+              >
+                <option value="yeonun">연운</option>
+                <option value="quizoasis_panana">퀴즈+파나나</option>
+              </select>
+            ) : (
+              <div className="font-mono text-[11px] text-huma-acc">등록 그룹: {registerGroupLabel}</div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+            {CATEGORY_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, category: opt.value }))}
+                className={`rounded-md border px-3 py-2 text-left text-xs transition ${
+                  form.category === opt.value
+                    ? 'border-huma-acc bg-huma-glow text-huma-acc'
+                    : 'border-huma-bdr text-huma-t3 hover:border-huma-acc/50'
+                }`}
+              >
+                <div className="font-semibold text-huma-t">{opt.label}</div>
+                <div className="mt-0.5 text-[10px] leading-snug">{opt.sub}</div>
+              </button>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-end gap-2">
+            {isSocial && form.registerGroup === 'quizoasis_panana' && (
+              <select
+                value={form.socialWorkspace}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, socialWorkspace: e.target.value as Workspace }))
+                }
+                className="m-model-select max-w-[140px]"
+                title="소셜 API는 서비스별로 등록"
+              >
+                <option value="quizoasis">퀴즈오아시스</option>
+                <option value="panana">파나나</option>
+              </select>
+            )}
+
+            {isSocial ? (
+              <>
+                <select
+                  value={form.platform}
+                  onChange={(e) => setForm((f) => ({ ...f, platform: e.target.value }))}
+                  className="m-model-select max-w-[140px]"
+                >
+                  {SOCIAL_PLATFORMS.map((p) => (
+                    <option key={p.value} value={p.value}>{p.label}</option>
+                  ))}
+                </select>
+                <input
+                  placeholder="계정명 / @handle"
+                  value={form.username}
+                  onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
+                  className="m-model-select max-w-[160px]"
+                />
+                <input
+                  type="password"
+                  placeholder="API Access Token"
+                  value={form.access_token}
+                  onChange={(e) => setForm((f) => ({ ...f, access_token: e.target.value }))}
+                  className="m-model-select min-w-[180px] flex-1"
+                />
+              </>
+            ) : (
+              <>
+                <input
+                  placeholder="표시 이름"
+                  value={form.name}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  className="m-model-select max-w-[140px]"
+                />
+                <input
+                  placeholder="네이버 ID"
+                  value={form.naver_id}
+                  onChange={(e) => setForm((f) => ({ ...f, naver_id: e.target.value }))}
+                  className="m-model-select max-w-[140px]"
+                />
+                <input
+                  type="password"
+                  placeholder="비밀번호"
+                  value={form.naver_pw}
+                  onChange={(e) => setForm((f) => ({ ...f, naver_pw: e.target.value }))}
+                  className="m-model-select max-w-[140px]"
+                />
+                {(form.category === 'posting' || form.category === 'crank') && (
+                  <input
+                    placeholder="블로그 URL (선택)"
+                    value={form.blog_url}
+                    onChange={(e) => setForm((f) => ({ ...f, blog_url: e.target.value }))}
+                    className="m-model-select min-w-[200px] flex-1"
+                  />
+                )}
+              </>
+            )}
+
+            <button type="button" className="btn-primary" onClick={handleCreate} disabled={saving}>
+              {saving ? '등록 중…' : '추가'}
+            </button>
+            <button type="button" className="btn-ghost" onClick={() => { setShowForm(false); setError(''); }}>
+              취소
+            </button>
+          </div>
+
+          {!superAdmin && form.registerGroup === 'quizoasis_panana' && isSocial && (
+            <p className="font-mono text-[10.5px] text-huma-t3">
+              퀴즈·파나나는 네이버·C-Rank 계정을 공유합니다. 소셜 API만 서비스별로 등록하세요.
+            </p>
+          )}
+
+          {error && <p className="text-xs text-huma-err">{error}</p>}
         </div>
       )}
 
-      <MGrid cols={3}>
-        {WS_ORDER.map((ws) => (
-          <div key={ws}>
-            <div className="m-ws-col-title">{WORKSPACES.find((w) => w.id === ws)?.short ?? ws}</div>
-            {grouped[ws]?.length ? grouped[ws].map((ac) => (
-              <MAccountCard
-                key={ac.id}
-                icon="📝"
-                iconBg="var(--ok-bg)"
-                name={<>{ac.name} {ac.account_type === 'posting' && <MTypeBadge type={ws === 'quizoasis' ? 'shared' : 'posting'} />}</>}
-                url={`${ac.naver_id ?? ac.name} · 지수${ac.blog_index ?? 5}`}
-                status={statusLabel(ac)}
-                statusTone={statusTone(ac)}
-                stats={[
-                  { label: 'Health', value: ac.health_score ?? '—', tone: (ac.health_score ?? 100) >= 80 ? 'text-huma-ok' : 'text-huma-warn' },
-                  { label: 'Index', value: ac.blog_index ?? '—' },
-                  { label: 'WPM', value: ac.wpm ?? '—' },
-                ]}
-                actions={[
-                  { label: '편집', primary: true, onClick: () => api.updateAccount(ac.id, { is_active: ac.is_active }) },
-                  { label: '로그', onClick: () => api.accountLogs(ac.id).then((logs) => console.log(logs)) },
-                  { label: ac.is_active ? '정지' : '재개', onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(load) },
-                ]}
-              />
-            )) : (
-              <div className="m-ac text-center text-[11px] text-huma-t3">등록된 계정 없음</div>
-            )}
-            {ws === 'quizoasis' && platforms.filter((p) => p.workspace === ws).map((p) => (
-              <MAccountCard
-                key={String(p.id)}
-                icon="I"
-                iconBg="var(--blue-bg)"
-                name={String(p.account_name ?? p.platform)}
-                url={`${String(p.platform)} · API`}
-                status="활성"
-                statusTone="ok"
-                stats={[
-                  { label: '팔로워', value: '—' },
-                  { label: '도달', value: '—' },
-                  { label: 'API', value: '✓', tone: 'text-huma-ok' },
-                ]}
-                actions={[{ label: 'API설정', primary: true }, { label: '로그' }]}
-              />
-            ))}
-            {ws === 'panana' && platforms.filter((p) => p.workspace === ws).map((p) => (
-              <MAccountCard
-                key={String(p.id)}
-                icon="T"
-                iconBg="#1a0020"
-                name={String(p.account_name ?? '@account')}
-                url={`${String(p.platform)} · API`}
-                status={p.is_active === false ? '세션오류' : '활성'}
-                statusTone={p.is_active === false ? 'err' : 'ok'}
-                stats={[
-                  { label: '팔로워', value: '—' },
-                  { label: '도달', value: p.is_active === false ? '—' : '—', tone: p.is_active === false ? 'err' : undefined },
-                  { label: '조치', value: p.is_active === false ? '재로그인↑' : '—', tone: p.is_active === false ? 'text-huma-err' : undefined },
-                ]}
-                actions={[
-                  ...(p.is_active === false ? [{ label: '재연결', danger: true }] : [{ label: '편집', primary: true }]),
-                  { label: '로그' },
-                ]}
-              />
-            ))}
-          </div>
-        ))}
+      <MGrid cols={listGridCols}>
+        {visibleGroups.map((group) => {
+          const groupAccounts = accountsInGroup(group);
+          const groupPlatforms = platformsInGroup(group);
+          const title = ACCOUNT_GROUPS.find((g) => g.id === group)?.title ?? group;
+
+          return (
+            <div key={group}>
+              <div className="m-ws-col-title">{title}</div>
+
+              {groupAccounts.length ? (
+                groupAccounts.map((ac) => (
+                  <MAccountCard
+                    key={ac.id}
+                    icon={ac.account_type === 'crank' ? '🔗' : ac.account_type === 'cafe' ? '🏛' : '📝'}
+                    iconBg={ac.account_type === 'crank' ? 'var(--warn-bg)' : 'var(--ok-bg)'}
+                    name={
+                      <>
+                        {ac.name}{' '}
+                        <span className="ml-1 rounded bg-huma-bg2 px-1.5 py-px font-mono text-[9px] uppercase text-huma-acc">
+                          {TYPE_LABEL[ac.account_type]}
+                        </span>
+                        {ac.account_type === 'posting' && group === 'quizoasis_panana' && (
+                          <MTypeBadge type="shared" />
+                        )}
+                        {ac.account_type === 'posting' && group === 'yeonun' && (
+                          <MTypeBadge type="posting" />
+                        )}
+                        {ac.workspace === 'quizoasis' && group === 'quizoasis_panana' && (
+                          <span className="ml-1 font-mono text-[9px] text-huma-t3">퀴즈</span>
+                        )}
+                        {ac.workspace === 'panana' && group === 'quizoasis_panana' && (
+                          <span className="ml-1 font-mono text-[9px] text-huma-t3">파나나</span>
+                        )}
+                      </>
+                    }
+                    url={ac.blog_url ?? `${ac.naver_id} · 지수${ac.blog_index ?? 5}`}
+                    status={statusLabel(ac)}
+                    statusTone={statusTone(ac)}
+                    stats={[
+                      { label: 'Health', value: ac.health_score ?? '—', tone: (ac.health_score ?? 100) >= 80 ? 'text-huma-ok' : 'text-huma-warn' },
+                      { label: 'Index', value: ac.blog_index ?? '—' },
+                      { label: ac.account_type === 'crank' ? '오늘 소통' : 'WPM', value: ac.account_type === 'crank' ? ac.crank_count_today : ac.wpm ?? '—' },
+                    ]}
+                    actions={[
+                      { label: ac.is_active ? '정지' : '재개', primary: true, onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(load) },
+                      { label: '로그', onClick: () => api.accountLogs(ac.id).then((logs) => console.log(logs)) },
+                      { label: '삭제', danger: true, onClick: () => handleDeleteNaver(ac) },
+                    ]}
+                  />
+                ))
+              ) : (
+                <div className="m-ac text-center text-[11px] text-huma-t3">네이버 계정 없음</div>
+              )}
+
+              {groupPlatforms.map((p) => {
+                const platform = String(p.platform ?? '');
+                const active = p.is_active !== false;
+                const wsShort = WORKSPACES.find((w) => w.id === p.workspace)?.short ?? String(p.workspace);
+                return (
+                  <MAccountCard
+                    key={String(p.id)}
+                    icon={platformIcon(platform)}
+                    iconBg={platform === 'tiktok' ? '#1a0020' : 'var(--blue-bg)'}
+                    name={
+                      <>
+                        {String(p.username ?? platform)}
+                        <span className="ml-1 rounded bg-huma-bg2 px-1.5 py-px font-mono text-[9px] uppercase text-huma-acc">SOCIAL</span>
+                        {group === 'quizoasis_panana' && (
+                          <span className="ml-1 font-mono text-[9px] text-huma-t3">{wsShort}</span>
+                        )}
+                      </>
+                    }
+                    url={`${SOCIAL_PLATFORMS.find((sp) => sp.value === platform)?.label ?? platform} · API`}
+                    status={active ? '활성' : '세션오류'}
+                    statusTone={active ? 'ok' : 'err'}
+                    stats={[
+                      { label: '플랫폼', value: platform },
+                      { label: '오늘 발행', value: String(p.post_count_today ?? 0) },
+                      { label: 'API', value: active ? '✓' : '✗', tone: active ? 'text-huma-ok' : 'text-huma-err' },
+                    ]}
+                    actions={[
+                      { label: active ? '정지' : '재개', primary: true, onClick: () => api.updatePlatformAccount(String(p.id), { is_active: !active }).then(load) },
+                      { label: '삭제', danger: true, onClick: () => handleDeletePlatform(p) },
+                    ]}
+                  />
+                );
+              })}
+            </div>
+          );
+        })}
       </MGrid>
     </div>
   );

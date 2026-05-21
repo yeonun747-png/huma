@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { authMiddleware, getWorkspaceFilter, supabase } from '../middleware/auth.js';
 import { encrypt } from '../lib/crypto.js';
+import { mapAccountDbError } from '../lib/account-errors.js';
 import { ensureAccountAntiDetect } from '../modules/playwright/account-loader.js';
 
 export async function registerAccountRoutes(app: FastifyInstance) {
@@ -25,7 +26,7 @@ export async function registerAccountRoutes(app: FastifyInstance) {
       delete body.naver_pw;
     }
     const { data, error } = await supabase.from('huma_accounts').insert(body).select().single();
-    if (error) return reply.code(400).send({ error: error.message });
+    if (error) return reply.code(400).send({ error: mapAccountDbError(error.message) });
     if (data?.id) {
       await ensureAccountAntiDetect(data.id, (data.workspace as string) ?? 'yeonun');
       const { data: refreshed } = await supabase.from('huma_accounts').select('*').eq('id', data.id).single();

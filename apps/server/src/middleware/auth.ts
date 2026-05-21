@@ -5,6 +5,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 export interface AdminPayload {
   adminId: string;
+  email?: string;
   workspaces: string[];
   isSuper: boolean;
 }
@@ -65,6 +66,7 @@ export async function loginAdmin(loginId: string, password: string) {
   const token = jwt.sign(
     {
       adminId: admin.id,
+      email: admin.email,
       workspaces: admin.workspaces,
       isSuper: admin.is_super,
     },
@@ -74,7 +76,12 @@ export async function loginAdmin(loginId: string, password: string) {
 
   return {
     token,
-    admin: { name: admin.name, workspaces: admin.workspaces, isSuper: admin.is_super },
+    admin: {
+      name: admin.name,
+      email: admin.email,
+      workspaces: admin.workspaces,
+      isSuper: admin.is_super,
+    },
   };
 }
 
@@ -88,6 +95,7 @@ export async function authMiddleware(request: FastifyRequest, reply: FastifyRepl
   if (apiSecret && token === apiSecret) {
     request.admin = {
       adminId: 'system',
+      email: 'superadmin',
       workspaces: ['yeonun', 'quizoasis', 'panana'],
       isSuper: true,
     };

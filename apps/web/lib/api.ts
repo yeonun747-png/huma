@@ -44,11 +44,11 @@ export const api = {
     paused: boolean;
   }>('/api/status'),
   login: (username: string, password: string) =>
-    request<{ token: string; admin: { name: string; workspaces: string[]; isSuper?: boolean } }>(
-      '/api/auth/login',
-      { method: 'POST', body: JSON.stringify({ username, password }) }
-    ),
-  me: () => request<{ adminId: string; workspaces: string[]; isSuper: boolean }>('/api/auth/me'),
+    request<{
+      token: string;
+      admin: { name: string; email: string; workspaces: string[]; isSuper?: boolean };
+    }>('/api/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
+  me: () => request<{ adminId: string; email: string; workspaces: string[]; isSuper: boolean }>('/api/auth/me'),
   jobs: (params?: { status?: string; workspace?: string; platform?: string }) =>
     request<HumaJob[]>(`/api/jobs${qs(params ?? {})}`),
   createJob: (body: Partial<HumaJob>) =>
@@ -78,6 +78,7 @@ export const api = {
     request('/api/accounts', { method: 'POST', body: JSON.stringify(body) }),
   updateAccount: (id: string, body: Record<string, unknown>) =>
     request(`/api/accounts/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteAccount: (id: string) => request(`/api/accounts/${id}`, { method: 'DELETE' }),
   accountLogs: (id: string) => request(`/api/accounts/${id}/logs`),
   modems: () => request<HumaModem[]>('/api/modems'),
   reconnectModem: (id: string) => request(`/api/modems/${id}/reconnect`, { method: 'POST' }),

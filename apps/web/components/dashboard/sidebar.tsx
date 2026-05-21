@@ -11,7 +11,14 @@ import { api } from '@/lib/api';
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { workspace, setWorkspace, accessibleWorkspaces } = useWorkspace();
+  const {
+    workspace,
+    businessUnit,
+    setBusinessUnit,
+    setSubWorkspace,
+    accessibleBusinessUnits,
+    accessibleSubWorkspaces,
+  } = useWorkspace();
   const { admin, logout } = useAuth();
   const [badges, setBadges] = useState({ queue: 0, video: 0, watcher: 0, seo: 4, langs: 3, scenario: 3 });
   const [pendingJobs, setPendingJobs] = useState(0);
@@ -48,31 +55,63 @@ export function Sidebar() {
         </div>
       </div>
 
-      {accessibleWorkspaces.length > 0 && (
-      <div className="mx-2.5 my-2 flex flex-col gap-0.5 rounded-lg border border-huma-bdr bg-huma-bg3 p-1">
-        {accessibleWorkspaces.map((ws) => (
-          <button
-            key={ws.id}
-            type="button"
-            onClick={() => setWorkspace(ws.id)}
-            className={cn(
-              'group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13.5px] font-medium transition',
-              workspace === ws.id
-                ? 'bg-[var(--glow)] font-bold text-huma-acc'
-                : 'text-huma-t2 hover:bg-[var(--glow)] hover:text-huma-t'
-            )}
-          >
-            <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', ws.dotClass)} />
-            {ws.label}
-            <span
-              className="ml-auto flex h-4 w-4 items-center justify-center rounded border border-huma-err bg-[var(--err-bg)] text-[9px] text-huma-err opacity-0 transition group-hover:opacity-100"
-              title={`${ws.short} 긴급정지`}
-              onClick={(e) => { e.stopPropagation(); api.stopAll(); }}
-            >
-              ■
-            </span>
-          </button>
-        ))}
+      {accessibleBusinessUnits.length > 0 && (
+      <div className="mx-2.5 my-2 flex flex-col gap-1 rounded-lg border border-huma-bdr bg-huma-bg3 p-1">
+        {accessibleBusinessUnits.length > 1 && (
+          <div className="flex flex-col gap-0.5">
+            {accessibleBusinessUnits.map((unit) => (
+              <button
+                key={unit.id}
+                type="button"
+                onClick={() => setBusinessUnit(unit.id)}
+                className={cn(
+                  'group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13.5px] font-medium transition',
+                  businessUnit === unit.id
+                    ? 'bg-[var(--glow)] font-bold text-huma-acc'
+                    : 'text-huma-t2 hover:bg-[var(--glow)] hover:text-huma-t',
+                )}
+              >
+                <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', unit.dotClass)} />
+                {unit.label}
+                <span
+                  className="ml-auto flex h-4 w-4 items-center justify-center rounded border border-huma-err bg-[var(--err-bg)] text-[9px] text-huma-err opacity-0 transition group-hover:opacity-100"
+                  title={`${unit.short} 긴급정지`}
+                  onClick={(e) => { e.stopPropagation(); api.stopAll(); }}
+                >
+                  ■
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {accessibleBusinessUnits.length === 1 && (
+          <div className="flex items-center gap-2 px-2 py-1.5 text-[13.5px] font-bold text-huma-acc">
+            <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', accessibleBusinessUnits[0].dotClass)} />
+            {accessibleBusinessUnits[0].label}
+          </div>
+        )}
+
+        {businessUnit === 'quizoasis_panana' && accessibleSubWorkspaces.length > 1 && (
+          <div className="flex gap-0.5 border-t border-huma-bdr pt-1">
+            {accessibleSubWorkspaces.map((ws) => (
+              <button
+                key={ws.id}
+                type="button"
+                onClick={() => setSubWorkspace(ws.id)}
+                className={cn(
+                  'flex flex-1 items-center justify-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium transition',
+                  workspace === ws.id
+                    ? 'bg-huma-bg2 font-bold text-huma-acc'
+                    : 'text-huma-t3 hover:bg-huma-bg2 hover:text-huma-t2',
+                )}
+              >
+                <span className={cn('h-1 w-1 shrink-0 rounded-full', ws.dotClass)} />
+                {ws.short}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       )}
 
@@ -151,7 +190,7 @@ export function Sidebar() {
           <div className="min-w-0 flex-1">
             <div className="truncate text-[12.5px] font-semibold text-huma-t">{admin?.name ?? '관리자'}</div>
             <div className="font-mono text-[10.5px] text-huma-t3">
-              {accessibleWorkspaces.map((ws) => ws.short).join(', ') || '—'}
+              {admin?.email ?? (accessibleBusinessUnits.map((u) => u.short).join(', ') || '—')}
             </div>
           </div>
         </div>

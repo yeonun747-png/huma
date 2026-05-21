@@ -18,8 +18,12 @@ const NOTIFICATIONS = [
 export function Topbar({ title }: { title: string }) {
   const pathname = usePathname();
   const meta = getPageMeta(pathname);
-  const { workspace } = useWorkspace();
-  const wsLabel = WORKSPACES.find((w) => w.id === workspace)?.short ?? '연운';
+  const { workspace, businessUnit } = useWorkspace();
+  const wsMeta = WORKSPACES.find((w) => w.id === workspace);
+  const breadcrumb =
+    businessUnit === 'yeonun'
+      ? `HUMA › 연운 › ${title}`
+      : `HUMA › 퀴즈+파나나 › ${wsMeta?.short ?? workspace} › ${title}`;
   const [period, setPeriod] = useState<'today' | 'week' | 'month'>('today');
   const [notifOpen, setNotifOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -49,9 +53,7 @@ export function Topbar({ title }: { title: string }) {
     <header className="flex h-12 shrink-0 items-center gap-3 border-b border-huma-bdr bg-huma-bg2 px-[18px] transition-all duration-300">
       <div>
         <h1 className="font-display text-[19.5px] tracking-[0.15em] text-huma-acc">{title}</h1>
-        <p className="font-mono text-[11px] text-huma-t3">
-          HUMA › {wsLabel} › {title}
-        </p>
+        <p className="font-mono text-[11px] text-huma-t3">{breadcrumb}</p>
       </div>
 
       <div className="ml-auto flex items-center gap-2">

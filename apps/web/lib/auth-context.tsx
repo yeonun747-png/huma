@@ -5,7 +5,7 @@ import { api } from './api';
 
 interface AuthState {
   token: string | null;
-  admin: { name: string; workspaces: string[]; isSuper?: boolean } | null;
+  admin: { name: string; email?: string; workspaces: string[]; isSuper?: boolean } | null;
   loading: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
@@ -29,7 +29,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (t) {
       setToken(t);
       api.me()
-        .then((me) => setAdmin({ name: '관리자', workspaces: me.workspaces, isSuper: me.isSuper }))
+        .then((me) =>
+          setAdmin({
+            name: '관리자',
+            email: me.email,
+            workspaces: me.workspaces,
+            isSuper: me.isSuper,
+          }),
+        )
         .catch(() => {
           localStorage.removeItem('huma_token');
           setToken(null);
@@ -44,7 +51,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const res = await api.login(username, password);
     localStorage.setItem('huma_token', res.token);
     setToken(res.token);
-    setAdmin({ name: res.admin.name, workspaces: res.admin.workspaces, isSuper: res.admin.isSuper });
+    setAdmin({
+      name: res.admin.name,
+      email: res.admin.email,
+      workspaces: res.admin.workspaces,
+      isSuper: res.admin.isSuper,
+    });
   };
 
   const logout = () => {

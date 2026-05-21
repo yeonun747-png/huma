@@ -391,6 +391,7 @@
   }
 
   /* ── Mockup v7 shared UI ── */
+  .m-g1 { display: grid; grid-template-columns: 1fr; gap: 10px; margin-bottom: 12px; max-width: 420px; }
   .m-g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 12px; }
   .m-g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px; }
   .m-g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }

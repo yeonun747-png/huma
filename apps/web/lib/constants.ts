@@ -1,6 +1,10 @@
 import type { Workspace } from '@huma/shared';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import {
+  getAccessibleWorkspaces as resolveAccessibleWorkspaces,
+  type AdminScope,
+} from '@/lib/admin-scope';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -17,19 +21,12 @@ export const WORKSPACES: {
   { id: 'panana', label: '파나나', short: '파나나', dotClass: 'bg-[#00d4ff]' },
 ];
 
-export function getAccessibleWorkspaces(admin: {
-  workspaces: string[];
-  isSuper?: boolean;
-} | null) {
-  if (!admin) return WORKSPACES;
-  if (admin.isSuper) return WORKSPACES;
-  return WORKSPACES.filter((ws) => admin.workspaces.includes(ws.id));
+export function getAccessibleWorkspaces(admin: AdminScope & { name?: string } | null) {
+  const ids = resolveAccessibleWorkspaces(admin);
+  return WORKSPACES.filter((ws) => ids.includes(ws.id));
 }
 
-export function getDefaultWorkspace(admin: {
-  workspaces: string[];
-  isSuper?: boolean;
-} | null): Workspace {
+export function getDefaultWorkspace(admin: AdminScope & { name?: string } | null): Workspace {
   const allowed = getAccessibleWorkspaces(admin);
   return allowed[0]?.id ?? 'yeonun';
 }

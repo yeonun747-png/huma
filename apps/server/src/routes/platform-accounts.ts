@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { authMiddleware, getWorkspaceFilter, supabase } from '../middleware/auth.js';
+import { mapAccountDbError } from '../lib/account-errors.js';
 
 export async function registerPlatformAccountRoutes(app: FastifyInstance) {
   app.get('/api/platform-accounts', { preHandler: authMiddleware }, async (request) => {
@@ -19,7 +20,7 @@ export async function registerPlatformAccountRoutes(app: FastifyInstance) {
       return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
     }
     const { data, error } = await supabase.from('huma_platform_accounts').insert(body).select().single();
-    if (error) return reply.code(400).send({ error: error.message });
+    if (error) return reply.code(400).send({ error: mapAccountDbError(error.message) });
     return data;
   });
 

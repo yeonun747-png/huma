@@ -3,8 +3,8 @@
 import { cn } from '@/lib/constants';
 import type { ReactNode } from 'react';
 
-export function MGrid({ cols = 2, className, children }: { cols?: 2 | 3 | 4; className?: string; children: ReactNode }) {
-  const cls = cols === 4 ? 'm-g4' : cols === 3 ? 'm-g3' : 'm-g2';
+export function MGrid({ cols = 2, className, children }: { cols?: 1 | 2 | 3 | 4; className?: string; children: ReactNode }) {
+  const cls = cols === 4 ? 'm-g4' : cols === 3 ? 'm-g3' : cols === 1 ? 'm-g1' : 'm-g2';
   return <div className={cn(cls, className)}>{children}</div>;
 }
 
