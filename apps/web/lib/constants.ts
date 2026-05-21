@@ -41,7 +41,6 @@ export const NAV_ITEMS = [
   { href: '/monitor', label: '발행 모니터', icon: '▣', live: true, group: 'common' },
   { href: '/oplog', label: 'Operation Log', icon: '📋', group: 'common' },
   { href: '/accounts', label: '계정 관리', icon: '◉', group: 'common' },
-  { href: '/platform-accounts', label: '플랫폼 계정', icon: '◎', group: 'common' },
   { href: '/video-pipeline', label: '영상 파이프라인', icon: '▷', badgeKey: 'video', group: 'common' },
   { href: '/watcher', label: 'Layer4 Watcher', icon: '⚠', badgeKey: 'watcher', badgeErr: true, group: 'common' },
   { href: '/human-engine', label: '휴먼 엔진 설정', icon: '⚙', group: 'common' },
@@ -50,6 +49,24 @@ export const NAV_ITEMS = [
   { href: '/modems', label: '프록시 관리', icon: '⊕', group: 'system' },
   { href: '/settings', label: '환경 설정', icon: '◈', group: 'system' },
 ];
+
+export const SPEC_NAV_ITEMS: Record<string, { href: string; label: string; icon: string; badgeKey?: string }[]> = {
+  yeonun: [{ href: '/seo-keywords', label: 'SEO 키워드', icon: '🔍', badgeKey: 'seo' }],
+  quizoasis: [
+    { href: '/adsense', label: '애드센스 수익', icon: '💰' },
+    { href: '/languages', label: '다국어 번역 관리', icon: '🌐', badgeKey: 'langs' },
+  ],
+  panana: [
+    { href: '/scenario', label: '영상 시나리오', icon: '🎬', badgeKey: 'scenario' },
+    { href: '/social', label: '소셜 분석·DM 자동화', icon: '📱' },
+  ],
+};
+
+export const WS_LABEL: Record<string, string> = {
+  yeonun: '연운',
+  quizoasis: '퀴즈오아시스',
+  panana: '파나나',
+};
 
 export const MOCK_SERVICE_STATUS = [
   {

@@ -128,7 +128,7 @@ function PlatformAccountsContent() {
 
 export default function PlatformAccountsPage() {
   return (
-    <AppShell title="플랫폼 계정">
+    <AppShell>
       <PlatformAccountsContent />
     </AppShell>
   );

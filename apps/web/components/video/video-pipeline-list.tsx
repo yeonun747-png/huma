@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { HumaVideoQueue } from '@huma/shared';
+import { DEFAULT_TTS_MODEL } from '@/lib/tts-models';
 import { api } from '@/lib/api';
 import { useWorkspace } from '@/components/dashboard/workspace-context';
 import { cn } from '@/lib/constants';
@@ -20,14 +21,18 @@ export function VideoPipelineList() {
     <div className="animate-fadeIn space-y-3">
       <div className="flex justify-between">
         <div className="panel-title mb-0">영상 파이프라인</div>
-        <button type="button" className="btn-primary" onClick={() => {
-          api.createVideo({
+        <button type="button" className="btn-primary" onClick={async () => {
+          const hg = await api.getSetting('higgsfield').catch(() => ({})) as Record<string, unknown>;
+          const ttsModel = String(hg.default_tts_model ?? DEFAULT_TTS_MODEL);
+          await api.createVideo({
             workspace,
             image_prompt: 'mystical fortune teller, cinematic',
             video_prompt: 'slow camera zoom, ethereal glow',
             tts_script: '오늘의 운세를 알려드립니다.',
+            tts_model: ttsModel,
             upload_platforms: ['tiktok', 'instagram'],
-          }).then(() => api.videoQueue().then(setItems));
+          });
+          api.videoQueue().then(setItems);
         }}>+ 파이프라인 시작</button>
       </div>
       {items.map((v) => (

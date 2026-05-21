@@ -8,7 +8,7 @@ export function PlaceholderPage({
   description: string;
 }) {
   return (
-    <AppShell title={title}>
+    <AppShell>
       <div className="panel animate-fadeIn">
         <div className="panel-title">{title}</div>
         <p className="text-sm text-huma-t2">{description}</p>

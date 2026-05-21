@@ -1,10 +1,10 @@
 import { AppShell } from '@/components/dashboard/app-shell';
-import { BgmLibraryPanel } from '@/components/bgm/bgm-library-panel';
+import { BgmLibraryView } from '@/components/pages/bgm-view';
 
 export default function BgmLibraryPage() {
   return (
-    <AppShell title="BGM 라이브러리">
-      <BgmLibraryPanel />
+    <AppShell>
+      <BgmLibraryView />
     </AppShell>
   );
 }

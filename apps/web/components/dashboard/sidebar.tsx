@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { NAV_ITEMS, cn } from '@/lib/constants';
+import { NAV_ITEMS, SPEC_NAV_ITEMS, WS_LABEL, cn } from '@/lib/constants';
 import { useWorkspace } from './workspace-context';
 import { useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
@@ -13,14 +13,17 @@ export function Sidebar() {
   const router = useRouter();
   const { workspace, setWorkspace, accessibleWorkspaces } = useWorkspace();
   const { admin, logout } = useAuth();
-  const [badges, setBadges] = useState({ queue: 0, video: 0, watcher: 0 });
+  const [badges, setBadges] = useState({ queue: 0, video: 0, watcher: 0, seo: 4, langs: 3, scenario: 3 });
   const [pendingJobs, setPendingJobs] = useState(0);
 
+  const mergeBadges = (apiBadges: { queue: number; video: number; watcher: number }) =>
+    setBadges((prev) => ({ ...prev, ...apiBadges }));
+
   useEffect(() => {
-    api.navBadges().then(setBadges).catch(() => {});
+    api.navBadges().then(mergeBadges).catch(() => {});
     api.status().then((s) => setPendingJobs(s.pendingJobs)).catch(() => {});
     const t = setInterval(() => {
-      api.navBadges().then(setBadges).catch(() => {});
+      api.navBadges().then(mergeBadges).catch(() => {});
       api.status().then((s) => setPendingJobs(s.pendingJobs)).catch(() => {});
     }, 30000);
     return () => clearInterval(t);
@@ -28,6 +31,7 @@ export function Sidebar() {
 
   const commonNav = NAV_ITEMS.filter((n) => n.group === 'common');
   const systemNav = NAV_ITEMS.filter((n) => n.group === 'system');
+  const specNav = SPEC_NAV_ITEMS[workspace] ?? [];
 
   const getBadge = (key?: string) => {
     if (!key) return undefined;
@@ -103,6 +107,29 @@ export function Sidebar() {
             </Link>
           );
         })}
+
+        {specNav.length > 0 && (
+          <>
+            <div className="mt-1 px-2 py-2 font-mono text-[8px] uppercase tracking-[0.2em] text-huma-t3">
+              {WS_LABEL[workspace] ?? workspace} 특화
+            </div>
+            {specNav.map((item) => {
+              const active = pathname === item.href;
+              const badge = getBadge(item.badgeKey);
+              return (
+                <Link key={item.href} href={item.href} className={active ? 'nav-item-active' : 'nav-item'}>
+                  <span className="w-4 shrink-0 text-center text-xs">{item.icon}</span>
+                  {item.label}
+                  {badge !== undefined && (
+                    <span className="ml-auto rounded-full bg-huma-acc px-1.5 py-px font-mono text-[8.5px] font-semibold text-white">
+                      {badge}
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
+          </>
+        )}
 
         <div className="mt-1 px-2 py-2 font-mono text-[8px] uppercase tracking-[0.2em] text-huma-t3">시스템</div>
         {systemNav.map((item) => {

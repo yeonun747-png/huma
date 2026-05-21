@@ -26,6 +26,7 @@ const config: Config = {
           t3: 'var(--t3)',
           t4: 'var(--t4)',
           bdr: 'var(--bdr)',
+          bdr2: 'var(--bdr2)',
           ok: 'var(--ok)',
           warn: 'var(--warn)',
           err: 'var(--err)',
