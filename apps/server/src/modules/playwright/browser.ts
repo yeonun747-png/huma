@@ -8,18 +8,6 @@ import { getFingerprintConfig } from '../../lib/settings.js';
 
 chromium.use(StealthPlugin());
 
-void (async () => {
-  try {
-    const mod = 'rebrowser-patches';
-    const rebrowser = await import(mod);
-    if (typeof (rebrowser as { applyRebrowserPatches?: () => void }).applyRebrowserPatches === 'function') {
-      (rebrowser as { applyRebrowserPatches: () => void }).applyRebrowserPatches();
-    }
-  } catch {
-    // rebrowser-patches optional (Linux production)
-  }
-})();
-
 export interface BrowserAccountContext {
   id: string;
   proxy_port?: number;

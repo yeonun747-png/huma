@@ -21,9 +21,27 @@ const bebas = Bebas_Neue({
   variable: '--font-bebas',
 });
 
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://romang-ai.com';
+
 export const metadata: Metadata = {
   title: 'HUMA Studio — Human Automation Platform',
   description: '네이버·소셜 멀티플랫폼 자동 발행 관리 플랫폼',
+  metadataBase: new URL(siteUrl),
+  openGraph: {
+    title: 'HUMA Studio — Human Automation Platform',
+    description: '네이버·소셜 멀티플랫폼 자동 발행 관리 플랫폼',
+    url: siteUrl,
+    siteName: 'HUMA Studio',
+    locale: 'ko_KR',
+    type: 'website',
+    images: [{ url: '/og.png', width: 1200, height: 630, alt: 'HUMA Studio' }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'HUMA Studio — Human Automation Platform',
+    description: '네이버·소셜 멀티플랫폼 자동 발행 관리 플랫폼',
+    images: ['/og.png'],
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
