@@ -2,6 +2,7 @@ import axios from 'axios';
 import fs from 'fs';
 import { supabase } from '../../middleware/auth.js';
 import { sleep } from '../../lib/utils.js';
+import { uploadYouTubeShorts } from './youtube.js';
 
 async function getPlatformAccount(workspace: string, platform: string) {
   const { data } = await supabase
@@ -234,7 +235,7 @@ async function uploadToSupabaseStorage(filePath: string): Promise<string> {
 
 export async function uploadToPlatform(
   platform: string,
-  params: { workspace: string; videoPath: string; caption: string; hashtags: string[] }
+  params: { workspace: string; videoPath: string; caption: string; hashtags: string[]; title?: string; description?: string }
 ) {
   switch (platform) {
     case 'tiktok':
@@ -242,6 +243,14 @@ export async function uploadToPlatform(
     case 'instagram':
     case 'instagram_reel':
       return uploadInstagramReel(params);
+    case 'youtube':
+      return uploadYouTubeShorts({
+        workspace: params.workspace,
+        videoPath: params.videoPath,
+        title: params.title ?? params.caption.slice(0, 90),
+        description: (params.description ?? params.caption).slice(0, 500),
+        hashtags: params.hashtags,
+      });
     case 'threads':
       return postToThreads({ workspace: params.workspace, text: params.caption, linkUrl: undefined });
     case 'twitter':
@@ -251,5 +260,7 @@ export async function uploadToPlatform(
       throw new Error(`지원하지 않는 플랫폼: ${platform}`);
   }
 }
+
+export { uploadYouTubeShorts } from './youtube.js';
 
 export { getPlatformAccount, refreshTokenIfNeeded };

@@ -19,8 +19,9 @@ import { generateLipsync } from './lipsync.js';
 import { selectBgm } from '../bgm/selector.js';
 
 import { uploadTikTokVideo, uploadInstagramReel } from '../social-api/index.js';
+import { uploadYouTubeShorts } from '../social-api/youtube.js';
 
-import { buildVideoLinks } from '../queue/jobs/content-orchestrator.js';
+import { buildBlogVideoAppend } from '../queue/jobs/content-orchestrator.js';
 
 import { join } from 'path';
 
@@ -130,9 +131,29 @@ async function finalizeTypeBJobs(
 
   instagramUrl?: string,
 
+  youtubeUrl?: string,
+
 ) {
 
-  const links = buildVideoLinks(tiktokUrl, instagramUrl);
+  let blogTitle = String(videoJob.caption ?? 'HUMA Short');
+
+  if (videoJob.blog_job_id) {
+
+    const { data: blogJob } = await supabase
+
+      .from('huma_jobs')
+
+      .select('title')
+
+      .eq('id', videoJob.blog_job_id)
+
+      .maybeSingle();
+
+    if (blogJob?.title) blogTitle = blogJob.title;
+
+  }
+
+  const links = buildBlogVideoAppend(blogTitle, tiktokUrl, instagramUrl, youtubeUrl);
 
   if (videoJob.blog_job_id) {
 
@@ -272,45 +293,81 @@ export async function runVideoPipeline(videoJobId: string) {
 
     const platforms = (job.upload_platforms ?? []) as string[];
 
-    let tiktokUrl: string | undefined;
+    let blogTitle = job.caption ?? 'HUMA Short';
 
-    let instagramUrl: string | undefined;
+    let blogDescription = String(job.caption ?? '').slice(0, 500);
 
+    if (job.blog_job_id) {
 
+      const { data: blogJob } = await supabase
+
+        .from('huma_jobs')
+
+        .select('title, content')
+
+        .eq('id', job.blog_job_id)
+
+        .maybeSingle();
+
+      if (blogJob?.title) blogTitle = blogJob.title;
+
+      if (blogJob?.content) blogDescription = String(blogJob.content).slice(0, 500);
+
+    }
+
+    const uploadTasks: Array<{
+      key: 'tiktok' | 'instagram' | 'youtube';
+      run: () => Promise<string | undefined>;
+    }> = [];
 
     if (platforms.includes('tiktok')) {
-
-      tiktokUrl = await uploadTikTokVideo({
-
-        workspace: job.workspace,
-
-        videoPath: outputPath,
-
-        caption: job.caption ?? '',
-
-        hashtags: job.hashtags ?? [],
-
+      uploadTasks.push({
+        key: 'tiktok',
+        run: () =>
+          uploadTikTokVideo({
+            workspace: job.workspace,
+            videoPath: outputPath,
+            caption: job.caption ?? '',
+            hashtags: job.hashtags ?? [],
+          }),
       });
-
     }
-
     if (platforms.includes('instagram')) {
-
-      instagramUrl = await uploadInstagramReel({
-
-        workspace: job.workspace,
-
-        videoPath: outputPath,
-
-        caption: job.caption ?? '',
-
-        hashtags: job.hashtags ?? [],
-
+      uploadTasks.push({
+        key: 'instagram',
+        run: () =>
+          uploadInstagramReel({
+            workspace: job.workspace,
+            videoPath: outputPath,
+            caption: job.caption ?? '',
+            hashtags: job.hashtags ?? [],
+          }),
       });
-
+    }
+    if (platforms.includes('youtube')) {
+      uploadTasks.push({
+        key: 'youtube',
+        run: () =>
+          uploadYouTubeShorts({
+            workspace: job.workspace,
+            videoPath: outputPath,
+            title: String(blogTitle),
+            description: blogDescription,
+            hashtags: [...(job.hashtags ?? []), 'Shorts'],
+          }),
+      });
     }
 
+    const uploadResults = await Promise.allSettled(uploadTasks.map((t) => t.run()));
+    const urls: Partial<Record<'tiktok' | 'instagram' | 'youtube', string | undefined>> = {};
+    uploadTasks.forEach((task, i) => {
+      const result = uploadResults[i];
+      urls[task.key] = result.status === 'fulfilled' ? result.value : undefined;
+    });
 
+    const tiktokUrl = urls.tiktok;
+    const instagramUrl = urls.instagram;
+    const youtubeUrl = urls.youtube;
 
     await updateVideoJob(videoJobId, {
 
@@ -318,13 +375,13 @@ export async function runVideoPipeline(videoJobId: string) {
 
       instagram_result_url: instagramUrl ?? null,
 
+      youtube_result_url: youtubeUrl ?? null,
+
     });
-
-
 
     if (job.blog_job_id) {
 
-      await finalizeTypeBJobs(job, tiktokUrl, instagramUrl);
+      await finalizeTypeBJobs(job, tiktokUrl, instagramUrl, youtubeUrl);
 
     }
 

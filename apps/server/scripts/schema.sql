@@ -113,6 +113,7 @@ CREATE TABLE IF NOT EXISTS huma_video_queue (
   twitter_job_id UUID REFERENCES huma_jobs(id),
   tiktok_result_url TEXT,
   instagram_result_url TEXT,
+  youtube_result_url TEXT,
   status VARCHAR(30) DEFAULT 'pending',
   current_step VARCHAR(30),
   error_message TEXT,

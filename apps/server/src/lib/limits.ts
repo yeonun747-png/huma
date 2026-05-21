@@ -5,6 +5,7 @@ export const PLATFORM_DAILY_LIMITS: Record<string, number> = {
   social_crank: 30,
   tiktok_upload: 5,
   instagram_reel: 25,
+  youtube_upload: 2,
   instagram_post: 25,
   threads_post: 250,
   twitter_post: 50,

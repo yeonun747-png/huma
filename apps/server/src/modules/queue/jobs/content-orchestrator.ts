@@ -67,9 +67,42 @@ function resolveStatus(scheduledAt: string) {
 
 function buildVideoLinks(tiktokUrl?: string | null, instagramUrl?: string | null): string {
   const parts: string[] = [];
-  if (tiktokUrl) parts.push(`\n\n▶ TikTok으로 보기: ${tiktokUrl}`);
-  if (instagramUrl) parts.push(`\n\n▶ Instagram으로 보기: ${instagramUrl}`);
+  if (tiktokUrl) parts.push(`\n\n▶ TikTok: ${tiktokUrl}`);
+  if (instagramUrl) parts.push(`\n▶ Instagram: ${instagramUrl}`);
   return parts.join('');
+}
+
+export function extractYouTubeVideoId(url: string): string | null {
+  try {
+    const u = new URL(url);
+    if (u.hostname.includes('youtu.be')) return u.pathname.slice(1).split('/')[0] || null;
+    const v = u.searchParams.get('v');
+    if (v) return v;
+    const shorts = u.pathname.match(/\/shorts\/([^/?]+)/);
+    if (shorts) return shorts[1];
+    const embed = u.pathname.match(/\/embed\/([^/?]+)/);
+    if (embed) return embed[1];
+    return u.pathname.split('/').filter(Boolean).pop() ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function buildYouTubeEmbed(title: string, youtubeUrl?: string | null): string {
+  if (!youtubeUrl) return '';
+  const id = extractYouTubeVideoId(youtubeUrl);
+  if (!id) return '';
+  const safeTitle = title.replace(/"/g, '&quot;');
+  return `\n\n<iframe width="315" height="560" src="https://www.youtube.com/embed/${id}" title="${safeTitle}" frameborder="0" allowfullscreen></iframe>`;
+}
+
+export function buildBlogVideoAppend(
+  title: string,
+  tiktokUrl?: string | null,
+  instagramUrl?: string | null,
+  youtubeUrl?: string | null,
+): string {
+  return buildYouTubeEmbed(title, youtubeUrl) + buildVideoLinks(tiktokUrl, instagramUrl);
 }
 
 export { buildVideoLinks };
@@ -267,7 +300,7 @@ async function runTypeB(
       tts_script: generated.tts_script,
       caption: generated.tiktok_caption,
       hashtags: generated.hashtags,
-      upload_platforms: ['tiktok', 'instagram'],
+      upload_platforms: ['tiktok', 'instagram', 'youtube'],
       status: 'pending',
     })
     .select()

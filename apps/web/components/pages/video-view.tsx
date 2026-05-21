@@ -120,7 +120,7 @@ export function VideoPipelineView() {
 
       auto_bgm: autoBgm,
 
-      upload_platforms: ['tiktok', 'instagram'],
+      upload_platforms: ['tiktok', 'instagram', 'youtube'],
 
     });
 
@@ -150,7 +150,7 @@ export function VideoPipelineView() {
 
         <MStat label="진행중" value={running ? 1 : 0} tone="warn" sub="파이프라인 중" />
 
-        <MStat label="업로드 완료" value={doneToday} tone="ok" sub="TikTok·IG" />
+        <MStat label="업로드 완료" value={doneToday} tone="ok" sub="TikTok·IG·YouTube" />
 
         <MStat label="크레딧 잔여" value={842} sub="Plus 1,000중 사용 158" />
 
@@ -298,7 +298,11 @@ export function VideoPipelineView() {
 
             <span key="c" className="font-mono ok">28크</span>,
 
-            <MTag key="u" tone={v.status === 'done' ? 'ok' : 'idle'}>{v.status === 'done' ? 'TikTok ✓' : '대기'}</MTag>,
+            <MTag key="u" tone={v.status === 'done' ? 'ok' : 'idle'}>
+              {v.status === 'done'
+                ? [v.tiktok_result_url && 'TT', v.instagram_result_url && 'IG', v.youtube_result_url && 'YT'].filter(Boolean).join('·') || '완료'
+                : '대기'}
+            </MTag>,
 
           ])}
 

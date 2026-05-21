@@ -20,7 +20,7 @@ i7 노트북(Ubuntu)에서 **API + BullMQ Worker + Playwright** 를 상시 운�
 ```bash
 # Redis, FFmpeg, Xvfb, Node 20+, repo clone, npm install
 # apps/server/.env 작성
-# Supabase: schema.sql → v3_5 → v3_7 → v3_8 → v3_9 → v3_10
+# Supabase: schema.sql → v3_5 → v3_7 → v3_8 → v3_9 → v3_10 → v3_11
 ```
 
 ## A. PM2로 운영 (간단)
@@ -73,7 +73,7 @@ i7 노트북 1대 · USB 허브 10포트 · 동글 10개 (포스팅 4 + C-Rank·
 sudo bash ~/huma/apps/server/scripts/setup-proxy.sh
 
 # Supabase SQL Editor
-# v3_9_fds_watcher.sql → v3_9_1_modem_roles.sql → v3_10_social_crank.sql
+# v3_9_fds_watcher.sql → v3_9_1_modem_roles.sql → v3_10_social_crank.sql → v3_11_youtube.sql
 # seed_modems_10slots.sql
 
 # 장치 확인
