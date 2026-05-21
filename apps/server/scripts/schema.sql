@@ -190,7 +190,7 @@ INSERT INTO huma_settings (key, value) VALUES
 ('higgsfield', '{"default_image_model":"nano-banana-pro","default_video_model":"kling-3.0","default_tts_model":"eleven-v3","video_duration_sec":5,"aspect_ratio":"9:16"}'),
 ('bgm', '{"fallback_to_suno":true,"max_use_count_before_rotate":10}'),
 ('optimal_schedule', '{"naver_blog":{"windows":[{"start":"08:00","end":"10:00"},{"start":"19:00","end":"21:00"}]},"tiktok":{"windows":[{"start":"19:00","end":"21:00"},{"start":"10:00","end":"12:00"}]},"instagram":{"windows":[{"start":"09:00","end":"11:00"},{"start":"19:00","end":"21:00"}]},"threads":{"windows":[{"start":"08:00","end":"10:00"},{"start":"12:00","end":"13:00"}]},"x":{"windows":[{"start":"09:00","end":"10:00"},{"start":"12:00","end":"13:00"}]},"spread_minutes":30}'),
-('social_crank', '{"daily_limit_per_account":30,"min_visit_interval_days":3,"our_blog_ratio":0.25,"other_blog_ratio":0.75,"visits_per_session":15,"stay_duration_ms":[180000,300000],"keywords":["사주풀이","꿈해몽","신년운세","궁합","자미두수","운세","사주"]}')
+('social_crank', '{"daily_limit_per_account":30,"min_visit_interval_days":5,"our_blog_ratio":0.25,"other_blog_ratio":0.75,"visits_per_session":15,"stay_duration_ms":[180000,300000],"keywords":["사주풀이","꿈해몽","신년운세","궁합","자미두수","운세","사주"]}')
 ON CONFLICT (key) DO NOTHING;
 
 CREATE INDEX IF NOT EXISTS idx_huma_jobs_status ON huma_jobs(status);

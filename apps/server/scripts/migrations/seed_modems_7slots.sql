@@ -1,6 +1,5 @@
--- v3.9 1단계: LTE USB 모뎀 7슬롯 (포스팅 4 + C-Rank 3)
--- 2단계 확장: seed_modems_20slots.sql 참고
-
+-- DEPRECATED (v3.9 1단계) — v3.10은 seed_modems_10slots.sql 사용
+-- LTE USB 모뎀 7슬롯 (포스팅 4 + C-Rank 3)
 INSERT INTO huma_modems (slot_number, interface_name, proxy_port, status, modem_role) VALUES
   (1, 'wwan0', 10001, 'idle', 'posting'),
   (2, 'wwan1', 10002, 'idle', 'posting'),

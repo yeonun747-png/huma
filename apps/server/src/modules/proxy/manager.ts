@@ -50,7 +50,7 @@ export async function acquireModem(accountId: string): Promise<ModemSession | un
 
   const { data: idleList } = await query;
   const crankPool = (idleList ?? []).filter(
-    (m) => !m.modem_role || m.modem_role === 'crank' || m.modem_role === 'cafe',
+    (m) => !m.modem_role || m.modem_role === 'crank',
   );
   for (const idle of crankPool) {    const portKey = String(idle.proxy_port);
     if (busyModems.has(portKey)) continue;

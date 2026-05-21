@@ -1,7 +1,5 @@
--- v3.9 2단계: LTE USB 모뎀 20슬롯
--- 노트북 A: posting 4 + crank 6 (슬롯 1-10)
--- 노트북 B: crank 9 + cafe 1 (슬롯 11-20) — worker-only
-
+-- DEPRECATED (v3.9 2단계·노트북 B) — v3.10은 seed_modems_10slots.sql (10슬롯·1대)
+-- LTE USB 모뎀 20슬롯
 INSERT INTO huma_modems (slot_number, interface_name, proxy_port, status, modem_role) VALUES
   ( 1, 'wwan0',  10001, 'idle', 'posting'),
   ( 2, 'wwan1',  10002, 'idle', 'posting'),

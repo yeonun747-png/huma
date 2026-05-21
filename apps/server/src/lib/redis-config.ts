@@ -1,4 +1,4 @@
-/** Redis 연결 URL — REDIS_URL 또는 REDIS_HOST+REDIS_PORT (v3.9 노트북 B) */
+/** Redis 연결 URL — REDIS_URL 또는 REDIS_HOST+REDIS_PORT (v3.9 레거시 분산 워커용) */
 export function resolveRedisUrl(): string {
   const direct = process.env.REDIS_URL?.trim();
   if (direct) return direct;

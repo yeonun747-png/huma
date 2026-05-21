@@ -1,6 +1,6 @@
 /**
- * v3.9 노트북 B — API 없이 BullMQ 워커만 실행
- * REDIS_HOST=노트북A_IP · HUMA_WORKER_ONLY=true
+ * v3.9 레거시 — v3.10은 단일 i7에서 index.js(API+Worker)만 사용.
+ * 2대 분산 시: REDIS_HOST=마스터 IP · npm run start:worker
  */
 import './lib/load-env.js';
 import { startWorker } from './modules/queue/worker.js';

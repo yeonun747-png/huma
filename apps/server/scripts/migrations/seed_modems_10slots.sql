@@ -1,7 +1,6 @@
--- LTE USB 모뎀 10슬롯 초기 등록 (3proxy 포트 10001~10010)
+-- LTE USB 모뎀 10슬롯 (v3.10 확정)
+-- 포스팅 4 (슬롯 1-4, proxy_port 고정) + C-Rank·카페 6 (슬롯 5-10, idle 순환)
 -- setup-proxy.sh 실행 후 Supabase SQL Editor에서 1회 실행
--- interface_name(wwan0~wwan9)은 실제 장치 연결 시 ifconfig/ip link로 확인 후 UPDATE
-
 INSERT INTO huma_modems (slot_number, interface_name, proxy_port, status, modem_role) VALUES
   ( 1, 'wwan0', 10001, 'idle', 'posting'),
   ( 2, 'wwan1', 10002, 'idle', 'posting'),

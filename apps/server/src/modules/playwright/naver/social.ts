@@ -65,7 +65,7 @@ export async function runSocialCrank(
       visits_per_session: 15,
       our_blog_ratio: 0.25,
       other_blog_ratio: 0.75,
-      min_visit_interval_days: 3,
+      min_visit_interval_days: 5,
       keywords: persona.interests.length ? persona.interests : ['사주풀이', '꿈해몽', '신년운세'],
     });
 

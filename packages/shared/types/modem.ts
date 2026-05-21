@@ -1,6 +1,6 @@
 export type ModemStatus = 'idle' | 'busy' | 'reconnecting' | 'error';
 
-export type ModemRole = 'posting' | 'crank' | 'cafe';
+export type ModemRole = 'posting' | 'crank';
 
 export interface HumaModem {
   id: string;
