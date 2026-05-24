@@ -74,18 +74,39 @@ export function AdsenseView() {
 
   return (
     <div className="animate-fadeIn">
+      <MPanel title="미지급 + 이번달 합계">
+        <div className="font-mono text-[39px] font-bold text-huma-acc">{fmtUsd(stats.combinedTotal)}</div>
+        <div className="mt-3 space-y-1 text-xs text-huma-t2">
+          <div className="flex justify-between">
+            <span>미지급 잔고</span>
+            <span className="font-mono">{stats.unpaidBalanceFormatted || fmtUsd(stats.unpaidBalance)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span>이번달 수익</span>
+            <span className="font-mono">{fmtUsd(stats.monthEarnings)}</span>
+          </div>
+          <div className="flex justify-between border-t border-huma-bdr pt-1 font-medium text-huma-t">
+            <span>합계</span>
+            <span className="font-mono">{fmtUsd(stats.combinedTotal)}</span>
+          </div>
+        </div>
+      </MPanel>
       <MGrid cols={3}>
         <MStat label="오늘 수익" value={fmtUsd(stats.todayEarnings)} sub="TODAY" />
         <MStat label="어제 수익" value={fmtUsd(stats.yesterdayEarnings)} sub="YESTERDAY" />
+        <MStat
+          label="미지급 + 이번달"
+          value={fmtUsd(stats.combinedTotal)}
+          sub="잔고 + 월 누계"
+        />
+      </MGrid>
+      <MGrid cols={3}>
         <MStat
           label="미지급 잔고"
           value={stats.unpaidBalanceFormatted || fmtUsd(stats.unpaidBalance)}
           sub="지급 대기 중"
         />
-      </MGrid>
-      <MGrid cols={3}>
         <MStat label="월 누계" value={fmtUsd(stats.monthEarnings)} sub="MONTH_TO_DATE" />
-        <MStat label="월 PV" value={fmtNum(stats.monthPageViews)} sub="PAGE_VIEWS" />
         <MStat label="RPM" value={fmtUsd(stats.rpm)} sub="수익/PV×1000" />
       </MGrid>
       <MGrid cols={2}>
@@ -95,8 +116,11 @@ export function AdsenseView() {
             <div className="flex justify-between"><span>오늘</span><span className="font-mono">{fmtUsd(stats.todayEarnings)}</span></div>
             <div className="flex justify-between"><span>어제</span><span className="font-mono">{fmtUsd(stats.yesterdayEarnings)}</span></div>
             <div className="flex justify-between"><span>미지급 잔고</span><span className="font-mono">{stats.unpaidBalanceFormatted || fmtUsd(stats.unpaidBalance)}</span></div>
+            <div className="flex justify-between border-t border-huma-bdr pt-1 font-medium text-huma-t">
+              <span>미지급 + 이번달</span>
+              <span className="font-mono">{fmtUsd(stats.combinedTotal)}</span>
+            </div>
             <div className="flex justify-between"><span>PV</span><span className="font-mono">{fmtNum(stats.monthPageViews)}</span></div>
-            <div className="flex justify-between"><span>RPM</span><span className="font-mono">{fmtUsd(stats.rpm)}</span></div>
           </div>
         </MPanel>
         <MPanel title="월별 추이">

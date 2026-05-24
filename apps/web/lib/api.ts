@@ -131,6 +131,7 @@ export const api = {
       rpm: number;
       unpaidBalance: number;
       unpaidBalanceFormatted: string;
+      combinedTotal: number;
       monthlyTrend: Array<{ month: string; earnings: number; pageViews: number; rpm: number }>;
     }>(`/api/adsense/stats?workspace=${encodeURIComponent(workspace)}`),
   stopAll: () => request('/api/stop-all', { method: 'POST' }),

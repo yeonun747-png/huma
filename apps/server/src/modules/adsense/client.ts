@@ -13,6 +13,7 @@ export interface AdSenseStats {
   rpm: number;
   unpaidBalance: number;
   unpaidBalanceFormatted: string;
+  combinedTotal: number;
   monthlyTrend: Array<{ month: string; earnings: number; pageViews: number; rpm: number }>;
 }
 
@@ -97,6 +98,7 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
     rpm: 0,
     unpaidBalance: 0,
     unpaidBalanceFormatted: '',
+    combinedTotal: 0,
     monthlyTrend: [],
   };
 
@@ -139,6 +141,7 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
   const unpaidPayment = paymentsRes.data.payments?.find((payment) => payment.name?.endsWith('/unpaid'));
   const unpaidBalanceFormatted = unpaidPayment?.amount ?? '';
   const unpaidBalance = parseAmount(unpaidBalanceFormatted);
+  const combinedTotal = unpaidBalance + monthEarnings;
 
   const monthlyTrend: AdSenseStats['monthlyTrend'] = [];
   for (const row of trendRes.data.rows ?? []) {
@@ -164,6 +167,7 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
     rpm,
     unpaidBalance,
     unpaidBalanceFormatted,
+    combinedTotal,
     monthlyTrend,
   };
 }
