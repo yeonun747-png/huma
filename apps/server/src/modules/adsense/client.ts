@@ -10,6 +10,8 @@ export interface AdSenseStats {
   yesterdayEarnings: number;
   monthEarnings: number;
   monthPageViews: number;
+  monthClicks: number;
+  cpc: number;
   rpm: number;
   unpaidBalance: number;
   unpaidBalanceFormatted: string;
@@ -95,6 +97,8 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
     yesterdayEarnings: 0,
     monthEarnings: 0,
     monthPageViews: 0,
+    monthClicks: 0,
+    cpc: 0,
     rpm: 0,
     unpaidBalance: 0,
     unpaidBalanceFormatted: '',
@@ -121,7 +125,7 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
     }),
     fetchReport(adsense, account, {
       dateRange: 'MONTH_TO_DATE',
-      metrics: ['ESTIMATED_EARNINGS', 'PAGE_VIEWS', 'IMPRESSIONS'],
+      metrics: ['ESTIMATED_EARNINGS', 'PAGE_VIEWS', 'CLICKS', 'COST_PER_CLICK'],
     }),
     fetchReport(adsense, account, {
       startDate: { year: trendStart.getFullYear(), month: trendStart.getMonth() + 1, day: 1 },
@@ -136,6 +140,9 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
   const yesterdayEarnings = parseMetric(yesterdayRes.data.rows, 0);
   const monthEarnings = parseMetric(monthRes.data.rows, 0);
   const monthPageViews = parseMetric(monthRes.data.rows, 1);
+  const monthClicks = parseMetric(monthRes.data.rows, 2);
+  const cpcFromApi = parseMetric(monthRes.data.rows, 3);
+  const cpc = cpcFromApi > 0 ? cpcFromApi : (monthClicks > 0 ? monthEarnings / monthClicks : 0);
   const rpm = monthPageViews > 0 ? (monthEarnings / monthPageViews) * 1000 : 0;
 
   const unpaidPayment = paymentsRes.data.payments?.find((payment) => payment.name?.endsWith('/unpaid'));
@@ -164,6 +171,8 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
     yesterdayEarnings,
     monthEarnings,
     monthPageViews,
+    monthClicks,
+    cpc,
     rpm,
     unpaidBalance,
     unpaidBalanceFormatted,

@@ -128,6 +128,8 @@ export const api = {
       yesterdayEarnings: number;
       monthEarnings: number;
       monthPageViews: number;
+      monthClicks: number;
+      cpc: number;
       rpm: number;
       unpaidBalance: number;
       unpaidBalanceFormatted: string;

@@ -94,11 +94,7 @@ export function AdsenseView() {
       <MGrid cols={3}>
         <MStat label="오늘 수익" value={fmtUsd(stats.todayEarnings)} sub="TODAY" />
         <MStat label="어제 수익" value={fmtUsd(stats.yesterdayEarnings)} sub="YESTERDAY" />
-        <MStat
-          label="미지급 + 이번달"
-          value={fmtUsd(stats.combinedTotal)}
-          sub="잔고 + 월 누계"
-        />
+        <MStat label="CPC" value={fmtUsd(stats.cpc)} sub="클릭당 수익" />
       </MGrid>
       <MGrid cols={3}>
         <MStat
