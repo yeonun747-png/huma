@@ -38,6 +38,7 @@ import {
 import { DEFAULT_TTS_MODEL, TTS_MODELS, normalizeTtsModel, ttsModelLabel, ttsModelOptionLabel } from '@/lib/tts-models';
 
 import { MGrid, MPanel, MStat, MTable, MTag } from '@/components/mockup/primitives';
+import { EmptyPanel } from '@/components/ui/empty-panel';
 
 import { useRegisterPageAction } from '@/components/dashboard/page-action-context';
 
@@ -60,6 +61,7 @@ export function VideoPipelineView() {
   const [ttsModel, setTtsModel] = useState(DEFAULT_TTS_MODEL);
 
   const [autoBgm, setAutoBgm] = useState(true);
+  const [creditsRemaining, setCreditsRemaining] = useState<number | null>(null);
 
   const formRef = useRef<HTMLDivElement>(null);
 
@@ -82,6 +84,8 @@ export function VideoPipelineView() {
       setVidModel(normalizeVideoModel(String(settings.default_video_model ?? DEFAULT_VIDEO_MODEL)));
 
       setTtsModel(normalizeTtsModel(String(settings.default_tts_model ?? DEFAULT_TTS_MODEL)));
+      const remaining = settings.credits_remaining;
+      setCreditsRemaining(typeof remaining === 'number' ? remaining : null);
 
     }).catch(() => setItems([]));
 
@@ -152,7 +156,7 @@ export function VideoPipelineView() {
 
         <MStat label="업로드 완료" value={doneToday} tone="ok" sub="TikTok·IG·YouTube" />
 
-        <MStat label="크레딧 잔여" value={842} sub="Plus 1,000중 사용 158" />
+        <MStat label="크레딧 잔여" value={creditsRemaining ?? '—'} sub={creditsRemaining != null ? 'Higgsfield' : 'API 연동 후 표시'} />
 
       </MGrid>
 
@@ -278,13 +282,15 @@ export function VideoPipelineView() {
 
       </MGrid>
 
-      <MPanel title="오늘 완료된 영상">
-
+      <MPanel title="완료·진행 영상">
+        {items.length === 0 ? (
+          <EmptyPanel message="영상 파이프라인 작업이 없습니다" />
+        ) : (
         <MTable
 
-          head={['영상', '이미지 모델', '영상 모델', 'TTS', 'BGM', '크레딧', '업로드']}
+          head={['영상', '이미지 모델', '영상 모델', 'TTS', 'BGM', '상태', '업로드']}
 
-          rows={items.slice(0, 5).map((v) => [
+          rows={items.slice(0, 10).map((v) => [
 
             v.image_prompt?.slice(0, 20) ?? v.id.slice(0, 8),
 
@@ -294,9 +300,9 @@ export function VideoPipelineView() {
 
             <span key="t" className="font-mono text-[11px]">{ttsModelLabel(v.tts_model ?? ttsModel)}</span>,
 
-            '자동',
+            v.bgm_url ? '자동' : '—',
 
-            <span key="c" className="font-mono ok">28크</span>,
+            <MTag key="s" tone={v.status === 'done' ? 'ok' : v.status === 'failed' ? 'err' : 'warn'}>{v.status}</MTag>,
 
             <MTag key="u" tone={v.status === 'done' ? 'ok' : 'idle'}>
               {v.status === 'done'
@@ -307,7 +313,7 @@ export function VideoPipelineView() {
           ])}
 
         />
-
+        )}
       </MPanel>
 
     </div>

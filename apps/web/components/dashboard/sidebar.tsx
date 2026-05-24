@@ -20,11 +20,11 @@ export function Sidebar() {
     accessibleSubWorkspaces,
   } = useWorkspace();
   const { admin, logout } = useAuth();
-  const [badges, setBadges] = useState({ queue: 0, video: 0, watcher: 0, seo: 4, langs: 3, scenario: 3 });
+  const [badges, setBadges] = useState({ queue: 0, video: 0, watcher: 0, seo: 0, langs: 0, scenario: 0 });
   const [pendingJobs, setPendingJobs] = useState(0);
 
   const mergeBadges = (apiBadges: { queue: number; video: number; watcher: number }) =>
-    setBadges((prev) => ({ ...prev, ...apiBadges }));
+    setBadges((prev) => ({ ...prev, queue: apiBadges.queue, video: apiBadges.video, watcher: apiBadges.watcher }));
 
   useEffect(() => {
     api.navBadges().then(mergeBadges).catch(() => {});

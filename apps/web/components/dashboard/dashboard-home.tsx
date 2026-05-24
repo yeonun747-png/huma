@@ -2,24 +2,17 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { WORKSPACES, getAccessibleWorkspaces } from '@/lib/constants';
+import { getAccessibleWorkspaces } from '@/lib/constants';
 import { useAuth } from '@/lib/auth-context';
 import { useWorkspace } from '@/components/dashboard/workspace-context';
-import { MGrid, MPanel, MSocRow, MStat, MTable, MTag, MUrlLink } from '@/components/mockup/primitives';
+import { EmptyPanel } from '@/components/ui/empty-panel';
+import { MGrid, MPanel, MStat, MTable, MTag, MUrlLink } from '@/components/mockup/primitives';
 
 const WS_META: Record<string, { icon: string; name: string }> = {
   yeonun: { icon: '🔮', name: '연운 緣運' },
   quizoasis: { icon: '🧠', name: '퀴즈오아시스' },
   panana: { icon: '🎬', name: '파나나' },
 };
-
-const ROAS = [
-  ['꿈해몽 가이드', '네이버', '4,821', 90],
-  ['MBTI 테스트', 'Google', '3,240', 70],
-  ['위로 영상 · 하루', 'TikTok', '12,400', 60],
-  ['신년운세 리뷰', '네이버', '2,890', 55],
-  ['궁합 체크리스트', '네이버', '1,932', 38],
-];
 
 export function DashboardHome() {
   const { admin } = useAuth();
@@ -36,7 +29,7 @@ export function DashboardHome() {
       setChart(d.chart);
       setStats({ pendingJobs: d.pendingJobs, activeAccounts: d.activeAccounts, errors: d.errors, todayCompleted: d.todayCompleted });
     }).catch(() => {});
-    api.dashboardRecent().then(setRecent).catch(() => {});
+    api.dashboardRecent().then(setRecent).catch(() => setRecent([]));
   }, []);
 
   const serviceCards = accessible.map((ws) => {
@@ -47,6 +40,7 @@ export function DashboardHome() {
   });
 
   const maxChart = Math.max(...chart.map((c) => c.value), 1);
+  const workspaceRecent = recent.filter((r) => r.workspace === workspace);
 
   return (
     <div className="animate-fadeIn">
@@ -68,94 +62,42 @@ export function DashboardHome() {
       </div>
 
       <MGrid cols={4}>
-        <MStat label="오늘 총 발행" value={stats.todayCompleted} sub="▲ 실시간 집계" />
+        <MStat label="오늘 총 발행" value={stats.todayCompleted} sub="API 집계" />
         <MStat label="큐 대기" value={stats.pendingJobs} sub="활성" />
-        <MStat label="오류" value={stats.errors} tone="err" sub="Layer4 감지" />
-        <MStat label="활성 계정" value={<>{stats.activeAccounts}<span className="text-xs text-huma-t3">/{stats.activeAccounts + 1}</span></>} sub="1계정 오류" />
+        <MStat label="오류" value={stats.errors} tone={stats.errors > 0 ? 'err' : undefined} sub="Layer4·실패 작업" />
+        <MStat label="활성 계정" value={stats.activeAccounts} sub="등록된 posting 계정" />
       </MGrid>
 
       <MGrid cols={2}>
         <MPanel title={<><span>7일 발행수 추이</span><span className="ml-auto text-[10.5px] normal-case tracking-normal text-huma-acc">오늘 기준</span></>}>
-          <div className="m-bar-chart">
-            {(chart.length ? chart : [{ day: '-', value: 0 }]).map((c) => (
-              <div key={c.day} className="m-bar-col">
-                <div className="m-bar-fill" style={{ height: `${Math.max(4, (c.value / maxChart) * 100)}%` }} title={`${c.value}`} />
-                <div className="m-bar-label">{c.day}</div>
-              </div>
-            ))}
-          </div>
+          {chart.length === 0 ? (
+            <EmptyPanel message="발행 이력이 없습니다" />
+          ) : (
+            <div className="m-bar-chart">
+              {chart.map((c) => (
+                <div key={c.day} className="m-bar-col">
+                  <div className="m-bar-fill" style={{ height: `${Math.max(4, (c.value / maxChart) * 100)}%` }} title={`${c.value}`} />
+                  <div className="m-bar-label">{c.day}</div>
+                </div>
+              ))}
+            </div>
+          )}
         </MPanel>
-        <MPanel title="콘텐츠 효율 (ROAS) · 상위 5">
-          <MTable
-            head={['콘텐츠 유형', '플랫폼', '조회', '효율']}
-            rows={ROAS.map(([a, b, c, w]) => [a, b, <span key="m" className="font-mono">{c}</span>, <span key="r" className="m-roas-bar" style={{ width: `${w}px`, display: 'inline-block' }} />])}
-          />
-        </MPanel>
-      </MGrid>
-
-      {workspace === 'yeonun' && (
-        <MGrid cols={2}>
-          <MPanel title="오늘 발행 현황">
+        <MPanel title="최근 완료 작업">
+          {workspaceRecent.length === 0 ? (
+            <EmptyPanel message="완료된 작업이 없습니다" />
+          ) : (
             <MTable
-              head={['제목', '캐릭터', '상태', 'URL']}
-              rows={recent.filter((r) => r.workspace === 'yeonun').slice(0, 5).map((r) => [
+              head={['제목', '상태', 'URL']}
+              rows={workspaceRecent.slice(0, 5).map((r) => [
                 r.title,
-                '—',
                 <MTag key="s" tone={r.status === 'completed' ? 'ok' : r.status === 'failed' ? 'err' : 'warn'}>{r.status === 'completed' ? '완료' : r.status}</MTag>,
-                r.result_url ? <MUrlLink href={r.result_url}>blog.naver.com/ ↗</MUrlLink> : '—',
+                r.result_url ? <MUrlLink href={r.result_url}>링크 ↗</MUrlLink> : '—',
               ])}
             />
-          </MPanel>
-          <MPanel title="Bot Social Activity · 연운">
-            <MSocRow label="🤝 오늘 타 블로그 방문" value={<>143<span className="text-[10px] text-huma-t3">/200</span></>} />
-            <MSocRow label="❤ 공감 클릭" value={<>89<span className="text-[10px] text-huma-t3">/150</span></>} />
-            <MSocRow label="💬 AI 댓글 게시" value={<>31<span className="text-[10px] text-huma-t3">/50</span></>} />
-            <MSocRow label="👥 이웃 신청" value={<>12<span className="text-[10px] text-huma-t3">/20</span></>} />
-            <MSocRow label="🏛 카페 소통" value="8건" />
-          </MPanel>
-        </MGrid>
-      )}
-
-      {workspace === 'quizoasis' && (
-        <>
-          <MGrid cols={4}>
-            <MStat label="오늘 수익" value="$12.4" sub="▲ $2.1" />
-            <MStat label="월 누계" value="$218" sub="목표 54%" />
-            <MStat label="일 PV" value="8.2K" sub="▲ 12%" />
-            <MStat label="RPM" value="$1.51" sub="↑ $1.34" />
-          </MGrid>
-          <MGrid cols={2}>
-            <MPanel title="TOP 키워드">
-              <div className="m-kw-row"><div className="m-kw-rank">#3</div><div className="m-kw-word">MBTI 테스트</div><div className="m-kw-vol">1,240 클릭</div><div className="m-kw-chg ok">▲2</div></div>
-              <div className="m-kw-row"><div className="m-kw-rank">#5</div><div className="m-kw-word">성격 유형 테스트</div><div className="m-kw-vol">1,103 클릭</div><div className="m-kw-chg ok">▲3</div></div>
-            </MPanel>
-            <MPanel title="오늘 발행">
-              <MTable head={['테스트명', '언어', '상태', 'URL']} rows={recent.filter((r) => r.workspace === 'quizoasis').slice(0, 3).map((r) => [r.title, '7', <MTag key="s" tone="ok">완료</MTag>, r.result_url ? <MUrlLink href={r.result_url}>IG ↗</MUrlLink> : '—'])} />
-            </MPanel>
-          </MGrid>
-        </>
-      )}
-
-      {workspace === 'panana' && (
-        <>
-          <MGrid cols={4}>
-            <MStat label="총 팔로워" value="42K" sub="▲ 1.2K" />
-            <MStat label="오늘 발행" value={stats.todayCompleted} sub="4채널" />
-            <MStat label="영상 조회" value="28K" sub="오늘" />
-            <MStat label="오류 계정" value={stats.errors || 1} tone="err" sub="sora 세션만료" />
-          </MGrid>
-          <MGrid cols={2}>
-            <MPanel title="오늘 발행">
-              <MTable head={['캐릭터', '플랫폼', '상태', 'URL']} rows={recent.filter((r) => r.workspace === 'panana').slice(0, 4).map((r) => ['🌸 —', 'TikTok', <MTag key="s" tone={r.status === 'failed' ? 'err' : 'ok'}>{r.status === 'completed' ? '완료' : r.status}</MTag>, r.result_url ? <MUrlLink href={r.result_url}>tiktok ↗</MUrlLink> : '—'])} />
-            </MPanel>
-            <MPanel title="Bot Social Activity · 파나나">
-              <MSocRow label="💬 자동 댓글 반응" value="47건" />
-              <MSocRow label="📨 DM 자동 발송" value="12건" />
-              <MSocRow label="❤ 좋아요 자동" value="188건" />
-            </MPanel>
-          </MGrid>
-        </>
-      )}
+          )}
+        </MPanel>
+      </MGrid>
     </div>
   );
 }

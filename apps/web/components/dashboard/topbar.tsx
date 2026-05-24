@@ -1,19 +1,16 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { WORKSPACES } from '@/lib/constants';
 import { getPageMeta } from '@/lib/page-config';
 import { useWorkspace } from './workspace-context';
 import { api } from '@/lib/api';
 import { usePageAction } from './page-action-context';
 import { useHumanEngineSave } from './human-engine-save-context';
+import { EmptyPanel } from '@/components/ui/empty-panel';
 
-const NOTIFICATIONS = [
-  { type: 'err', title: 'panana_sora TikTok 세션 만료', sub: '파나나 · 14:14 · 재연결 필요' },
-  { type: 'warn', title: 'yeonun_crank 응답 지연 감지', sub: '연운 · 14:13 · 2.1s 딜레이' },
-  { type: 'err', title: 'Layer4 캡차 감지 → 자동 중지', sub: '연운 · 11:23 · 복구 완료' },
-];
+type NotifItem = { type: 'err' | 'warn'; title: string; sub: string };
 
 export function Topbar({ title }: { title: string }) {
   const pathname = usePathname();
@@ -27,8 +24,25 @@ export function Topbar({ title }: { title: string }) {
   const [period, setPeriod] = useState<'today' | 'week' | 'month'>('today');
   const [notifOpen, setNotifOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [notifications, setNotifications] = useState<NotifItem[]>([]);
   const pageAction = usePageAction();
   const humanSave = useHumanEngineSave();
+
+  const loadNotifications = useCallback(() => {
+    api.logs({ level: 'ERROR', limit: '10' }).then((rows) => {
+      setNotifications(
+        rows.map((log) => ({
+          type: 'err' as const,
+          title: String(log.message ?? '오류'),
+          sub: [log.workspace, log.platform, log.created_at].filter(Boolean).join(' · '),
+        })),
+      );
+    }).catch(() => setNotifications([]));
+  }, []);
+
+  useEffect(() => {
+    loadNotifications();
+  }, [loadNotifications]);
 
   const handlePrimary = async () => {
     setBusy(true);
@@ -77,14 +91,19 @@ export function Topbar({ title }: { title: string }) {
         <div className="relative">
           <button
             type="button"
-            onClick={() => setNotifOpen(!notifOpen)}
+            onClick={() => {
+              setNotifOpen(!notifOpen);
+              if (!notifOpen) loadNotifications();
+            }}
             className="flex h-8 w-8 items-center justify-center rounded-md border border-huma-bdr bg-huma-bg3 text-sm text-huma-t2 transition hover:border-huma-acc hover:text-huma-acc"
           >
             🔔
           </button>
-          <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-huma-err font-mono text-[9.5px] font-bold text-white">
-            3
-          </span>
+          {notifications.length > 0 && (
+            <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-huma-err font-mono text-[9.5px] font-bold text-white">
+              {notifications.length}
+            </span>
+          )}
           {notifOpen && (
             <div className="absolute right-0 top-10 z-50 w-[300px] rounded-xl border border-huma-bdr bg-huma-bg2 shadow-panel">
               <div className="flex items-center justify-between border-b border-huma-bdr px-3.5 py-2.5 text-[12.5px] font-bold">
@@ -93,8 +112,10 @@ export function Topbar({ title }: { title: string }) {
                   닫기
                 </button>
               </div>
-              {NOTIFICATIONS.map((n) => (
-                <div key={n.title} className="flex gap-2.5 border-b border-huma-bdr2 px-3.5 py-2.5 last:border-0">
+              {notifications.length === 0 ? (
+                <EmptyPanel message="새 알림이 없습니다" />
+              ) : notifications.map((n) => (
+                <div key={`${n.title}-${n.sub}`} className="flex gap-2.5 border-b border-huma-bdr2 px-3.5 py-2.5 last:border-0">
                   <div className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${n.type === 'err' ? 'bg-huma-err' : 'bg-huma-warn'}`} />
                   <div>
                     <div className="text-[13px] font-medium text-huma-t">{n.title}</div>
