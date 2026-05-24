@@ -29,6 +29,7 @@ import { registerPlatformAccountRoutes } from './routes/platform-accounts.js';
 import { registerCafeRoutes } from './routes/cafe.js';
 
 import { registerDashboardRoutes } from './routes/dashboard.js';
+import { registerAdSenseRoutes } from './routes/adsense.js';
 
 import { setLogSocket } from './lib/log-emitter.js';
 
@@ -80,6 +81,7 @@ async function main() {
   await registerCafeRoutes(app);
 
   await registerDashboardRoutes(app);
+  await registerAdSenseRoutes(app);
 
   await app.listen({ port: PORT, host: '0.0.0.0' });
 

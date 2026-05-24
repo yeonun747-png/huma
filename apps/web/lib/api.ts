@@ -121,6 +121,15 @@ export const api = {
     ),
   cafeTargets: () => request<Array<Record<string, unknown>>>('/api/cafe/targets'),
   crawlCafe: () => request<{ success: boolean; count: number }>('/api/cafe/crawl', { method: 'POST' }),
+  adsenseStats: (workspace: string) =>
+    request<{
+      configured: boolean;
+      todayEarnings: number;
+      monthEarnings: number;
+      monthPageViews: number;
+      rpm: number;
+      monthlyTrend: Array<{ month: string; earnings: number; pageViews: number; rpm: number }>;
+    }>(`/api/adsense/stats?workspace=${encodeURIComponent(workspace)}`),
   stopAll: () => request('/api/stop-all', { method: 'POST' }),
   resumeAll: () => request('/api/resume-all', { method: 'POST' }),
 };
