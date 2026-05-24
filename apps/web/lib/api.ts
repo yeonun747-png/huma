@@ -140,6 +140,8 @@ export const api = {
         clicks: { current: number; previous: number; change: number; changePct: number };
         pageViews: { current: number; previous: number; change: number; changePct: number };
         impressions: { current: number; previous: number; change: number; changePct: number };
+        cpc: { current: number; previous: number; change: number; changePct: number };
+        rpm: { current: number; previous: number; change: number; changePct: number };
         ctr: { current: number; previous: number; changePp: number; changePct: number };
       };
       monthlyTrend: Array<{ month: string; earnings: number; pageViews: number; rpm: number }>;

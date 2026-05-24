@@ -52,6 +52,11 @@ export function AdsenseView() {
     const arrow = up ? '▲' : '▼';
     return `이전 7일 대비 ${arrow}${Math.abs(changePp).toFixed(2)}pp (${arrow}${Math.abs(changePct).toFixed(1)}%)`;
   };
+  const fmtUsdCompare = (change: number, changePct: number) => {
+    const up = change >= 0;
+    const arrow = up ? '▲' : '▼';
+    return `이전 7일 대비 ${arrow}${fmtUsd(Math.abs(change))} (${arrow}${Math.abs(changePct).toFixed(1)}%)`;
+  };
 
   if (loading) {
     return (
@@ -105,23 +110,30 @@ export function AdsenseView() {
       <MGrid cols={3}>
         <MStat label="오늘 수익" value={fmtUsd(stats.todayEarnings)} sub="TODAY" />
         <MStat label="어제 수익" value={fmtUsd(stats.yesterdayEarnings)} sub="YESTERDAY" />
-        <MStat label="CPC" value={fmtUsd(stats.cpc)} sub="클릭당 수익" />
+        <MStat
+          label="CPC"
+          value={fmtUsd(stats.last7Days.cpc.current)}
+          sub={fmtUsdCompare(stats.last7Days.cpc.change, stats.last7Days.cpc.changePct)}
+        />
       </MGrid>
       <MGrid cols={3}>
-        <MStat label="클릭수" value={fmtNum(stats.monthClicks)} sub="MONTH_TO_DATE" />
+        <MStat
+          label="클릭수"
+          value={fmtNum(stats.last7Days.clicks.current)}
+          sub={fmtCompare(stats.last7Days.clicks.change, stats.last7Days.clicks.changePct)}
+        />
         <MStat
           label="CTR"
           value={fmtPct(stats.last7Days.ctr.current)}
           sub={fmtCtrCompare(stats.last7Days.ctr.changePp, stats.last7Days.ctr.changePct)}
         />
-        <MStat label="RPM" value={fmtUsd(stats.rpm)} sub="수익/PV×1000" />
-      </MGrid>
-      <MGrid cols={3}>
         <MStat
-          label="최근 7일 클릭"
-          value={fmtNum(stats.last7Days.clicks.current)}
-          sub={fmtCompare(stats.last7Days.clicks.change, stats.last7Days.clicks.changePct)}
+          label="RPM"
+          value={fmtUsd(stats.last7Days.rpm.current)}
+          sub={fmtUsdCompare(stats.last7Days.rpm.change, stats.last7Days.rpm.changePct)}
         />
+      </MGrid>
+      <MGrid cols={2}>
         <MStat
           label="최근 7일 PV"
           value={fmtNum(stats.last7Days.pageViews.current)}

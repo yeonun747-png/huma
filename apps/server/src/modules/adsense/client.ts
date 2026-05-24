@@ -36,6 +36,8 @@ export interface AdSenseStats {
     clicks: AdSenseMetricCompare;
     pageViews: AdSenseMetricCompare;
     impressions: AdSenseMetricCompare;
+    cpc: AdSenseMetricCompare;
+    rpm: AdSenseMetricCompare;
     ctr: AdSenseCtrCompare;
   };
   monthlyTrend: Array<{ month: string; earnings: number; pageViews: number; rpm: number }>;
@@ -121,6 +123,11 @@ function emptyCtrCompare(): AdSenseCtrCompare {
   return { current: 0, previous: 0, changePp: 0, changePct: 0 };
 }
 
+function resolveRate(fromApi: number, numerator: number, denominator: number): number {
+  if (fromApi > 0) return fromApi;
+  return denominator > 0 ? numerator / denominator : 0;
+}
+
 async function fetchReport(
   adsense: ReturnType<typeof google.adsense>,
   account: string,
@@ -165,6 +172,8 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
       clicks: emptyCompare(),
       pageViews: emptyCompare(),
       impressions: emptyCompare(),
+      cpc: emptyCompare(),
+      rpm: emptyCompare(),
       ctr: emptyCtrCompare(),
     },
     monthlyTrend: [],
@@ -191,7 +200,7 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
     }),
     fetchReport(adsense, account, {
       dateRange: 'MONTH_TO_DATE',
-      metrics: ['ESTIMATED_EARNINGS', 'PAGE_VIEWS', 'CLICKS', 'COST_PER_CLICK', 'IMPRESSIONS', 'IMPRESSIONS_CTR'],
+      metrics: ['ESTIMATED_EARNINGS', 'PAGE_VIEWS', 'CLICKS', 'COST_PER_CLICK', 'IMPRESSIONS', 'PAGE_VIEWS_CTR', 'PAGE_VIEWS_RPM'],
     }),
     fetchReport(adsense, account, {
       startDate: { year: trendStart.getFullYear(), month: trendStart.getMonth() + 1, day: 1 },
@@ -202,12 +211,12 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
     adsense.accounts.payments.list({ parent: account }),
     fetchReport(adsense, account, {
       dateRange: 'LAST_7_DAYS',
-      metrics: ['CLICKS', 'PAGE_VIEWS', 'IMPRESSIONS', 'IMPRESSIONS_CTR'],
+      metrics: ['ESTIMATED_EARNINGS', 'CLICKS', 'PAGE_VIEWS', 'IMPRESSIONS', 'PAGE_VIEWS_CTR', 'COST_PER_CLICK', 'PAGE_VIEWS_RPM'],
     }),
     fetchReport(adsense, account, {
       startDate: dateParts(prev7Start),
       endDate: dateParts(prev7End),
-      metrics: ['CLICKS', 'PAGE_VIEWS', 'IMPRESSIONS', 'IMPRESSIONS_CTR'],
+      metrics: ['ESTIMATED_EARNINGS', 'CLICKS', 'PAGE_VIEWS', 'IMPRESSIONS', 'PAGE_VIEWS_CTR', 'COST_PER_CLICK', 'PAGE_VIEWS_RPM'],
     }),
   ]);
 
@@ -219,26 +228,32 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
   const cpcFromApi = parseMetric(monthRes.data.rows, 3);
   const monthImpressions = parseMetric(monthRes.data.rows, 4);
   const ctrFromApi = parseMetric(monthRes.data.rows, 5);
+  const rpmFromApi = parseMetric(monthRes.data.rows, 6);
   const cpc = cpcFromApi > 0 ? cpcFromApi : (monthClicks > 0 ? monthEarnings / monthClicks : 0);
-  const ctr = ctrFromApi > 0
-    ? ctrFromApi
-    : (monthImpressions > 0 ? monthClicks / monthImpressions : 0);
-  const rpm = monthPageViews > 0 ? (monthEarnings / monthPageViews) * 1000 : 0;
+  const ctr = resolveRate(ctrFromApi, monthClicks, monthPageViews);
+  const rpm = rpmFromApi > 0 ? rpmFromApi : (monthPageViews > 0 ? (monthEarnings / monthPageViews) * 1000 : 0);
 
-  const last7Clicks = parseMetric(last7Res.data.rows, 0);
-  const last7PageViews = parseMetric(last7Res.data.rows, 1);
-  const last7Impressions = parseMetric(last7Res.data.rows, 2);
-  const last7CtrFromApi = parseMetric(last7Res.data.rows, 3);
-  const prev7Clicks = parseMetric(prev7Res.data.rows, 0);
-  const prev7PageViews = parseMetric(prev7Res.data.rows, 1);
-  const prev7Impressions = parseMetric(prev7Res.data.rows, 2);
-  const prev7CtrFromApi = parseMetric(prev7Res.data.rows, 3);
-  const last7Ctr = last7CtrFromApi > 0
-    ? last7CtrFromApi
-    : (last7Impressions > 0 ? last7Clicks / last7Impressions : 0);
-  const prev7Ctr = prev7CtrFromApi > 0
-    ? prev7CtrFromApi
-    : (prev7Impressions > 0 ? prev7Clicks / prev7Impressions : 0);
+  const last7Earnings = parseMetric(last7Res.data.rows, 0);
+  const last7Clicks = parseMetric(last7Res.data.rows, 1);
+  const last7PageViews = parseMetric(last7Res.data.rows, 2);
+  const last7Impressions = parseMetric(last7Res.data.rows, 3);
+  const last7CtrFromApi = parseMetric(last7Res.data.rows, 4);
+  const last7CpcFromApi = parseMetric(last7Res.data.rows, 5);
+  const last7RpmFromApi = parseMetric(last7Res.data.rows, 6);
+  const prev7Earnings = parseMetric(prev7Res.data.rows, 0);
+  const prev7Clicks = parseMetric(prev7Res.data.rows, 1);
+  const prev7PageViews = parseMetric(prev7Res.data.rows, 2);
+  const prev7Impressions = parseMetric(prev7Res.data.rows, 3);
+  const prev7CtrFromApi = parseMetric(prev7Res.data.rows, 4);
+  const prev7CpcFromApi = parseMetric(prev7Res.data.rows, 5);
+  const prev7RpmFromApi = parseMetric(prev7Res.data.rows, 6);
+
+  const last7Ctr = resolveRate(last7CtrFromApi, last7Clicks, last7PageViews);
+  const prev7Ctr = resolveRate(prev7CtrFromApi, prev7Clicks, prev7PageViews);
+  const last7Cpc = last7CpcFromApi > 0 ? last7CpcFromApi : (last7Clicks > 0 ? last7Earnings / last7Clicks : 0);
+  const prev7Cpc = prev7CpcFromApi > 0 ? prev7CpcFromApi : (prev7Clicks > 0 ? prev7Earnings / prev7Clicks : 0);
+  const last7Rpm = last7RpmFromApi > 0 ? last7RpmFromApi : (last7PageViews > 0 ? (last7Earnings / last7PageViews) * 1000 : 0);
+  const prev7Rpm = prev7RpmFromApi > 0 ? prev7RpmFromApi : (prev7PageViews > 0 ? (prev7Earnings / prev7PageViews) * 1000 : 0);
 
   const unpaidPayment = paymentsRes.data.payments?.find((payment) => payment.name?.endsWith('/unpaid'));
   const unpaidBalanceFormatted = unpaidPayment?.amount ?? '';
@@ -278,6 +293,8 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
       clicks: compareMetric(last7Clicks, prev7Clicks),
       pageViews: compareMetric(last7PageViews, prev7PageViews),
       impressions: compareMetric(last7Impressions, prev7Impressions),
+      cpc: compareMetric(last7Cpc, prev7Cpc),
+      rpm: compareMetric(last7Rpm, prev7Rpm),
       ctr: compareCtr(last7Ctr, prev7Ctr),
     },
     monthlyTrend,
