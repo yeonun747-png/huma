@@ -125,9 +125,12 @@ export const api = {
     request<{
       configured: boolean;
       todayEarnings: number;
+      yesterdayEarnings: number;
       monthEarnings: number;
       monthPageViews: number;
       rpm: number;
+      unpaidBalance: number;
+      unpaidBalanceFormatted: string;
       monthlyTrend: Array<{ month: string; earnings: number; pageViews: number; rpm: number }>;
     }>(`/api/adsense/stats?workspace=${encodeURIComponent(workspace)}`),
   stopAll: () => request('/api/stop-all', { method: 'POST' }),

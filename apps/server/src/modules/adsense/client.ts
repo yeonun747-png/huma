@@ -7,9 +7,12 @@ const WORKSPACE_ENV_KEYS: Record<string, string> = {
 export interface AdSenseStats {
   configured: boolean;
   todayEarnings: number;
+  yesterdayEarnings: number;
   monthEarnings: number;
   monthPageViews: number;
   rpm: number;
+  unpaidBalance: number;
+  unpaidBalanceFormatted: string;
   monthlyTrend: Array<{ month: string; earnings: number; pageViews: number; rpm: number }>;
 }
 
@@ -34,9 +37,16 @@ function getAdSenseClient(workspace: string) {
 }
 
 function accountPath(workspace: string): string | null {
-  const raw = envKey(workspace, 'ACCOUNT_ID');
+  const raw = envKey(workspace, 'ACCOUNT_ID') ?? envKey(workspace, 'PUBLISHER_ID');
   if (!raw) return null;
   return raw.startsWith('accounts/') ? raw : `accounts/${raw}`;
+}
+
+function parseAmount(value: string | null | undefined): number {
+  if (!value) return 0;
+  const normalized = value.replace(/[^\d.,-]/g, '').replace(/,/g, '');
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function parseMetric(rows: Array<{ cells?: Array<{ value?: string | null }> | null }> | null | undefined, index: number): number {
@@ -81,9 +91,12 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
   const empty: AdSenseStats = {
     configured: false,
     todayEarnings: 0,
+    yesterdayEarnings: 0,
     monthEarnings: 0,
     monthPageViews: 0,
     rpm: 0,
+    unpaidBalance: 0,
+    unpaidBalanceFormatted: '',
     monthlyTrend: [],
   };
 
@@ -95,9 +108,13 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
 
   const trendStart = new Date(now.getFullYear(), now.getMonth() - 2, 1);
 
-  const [todayRes, monthRes, trendRes] = await Promise.all([
+  const [todayRes, yesterdayRes, monthRes, trendRes, paymentsRes] = await Promise.all([
     fetchReport(adsense, account, {
       dateRange: 'TODAY',
+      metrics: ['ESTIMATED_EARNINGS', 'PAGE_VIEWS'],
+    }),
+    fetchReport(adsense, account, {
+      dateRange: 'YESTERDAY',
       metrics: ['ESTIMATED_EARNINGS', 'PAGE_VIEWS'],
     }),
     fetchReport(adsense, account, {
@@ -110,12 +127,18 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
       metrics: ['ESTIMATED_EARNINGS', 'PAGE_VIEWS'],
       dimensions: ['MONTH'],
     }),
+    adsense.accounts.payments.list({ parent: account }),
   ]);
 
   const todayEarnings = parseMetric(todayRes.data.rows, 0);
+  const yesterdayEarnings = parseMetric(yesterdayRes.data.rows, 0);
   const monthEarnings = parseMetric(monthRes.data.rows, 0);
   const monthPageViews = parseMetric(monthRes.data.rows, 1);
   const rpm = monthPageViews > 0 ? (monthEarnings / monthPageViews) * 1000 : 0;
+
+  const unpaidPayment = paymentsRes.data.payments?.find((payment) => payment.name?.endsWith('/unpaid'));
+  const unpaidBalanceFormatted = unpaidPayment?.amount ?? '';
+  const unpaidBalance = parseAmount(unpaidBalanceFormatted);
 
   const monthlyTrend: AdSenseStats['monthlyTrend'] = [];
   for (const row of trendRes.data.rows ?? []) {
@@ -135,9 +158,12 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
   return {
     configured: true,
     todayEarnings,
+    yesterdayEarnings,
     monthEarnings,
     monthPageViews,
     rpm,
+    unpaidBalance,
+    unpaidBalanceFormatted,
     monthlyTrend,
   };
 }
