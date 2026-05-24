@@ -129,11 +129,19 @@ export const api = {
       monthEarnings: number;
       monthPageViews: number;
       monthClicks: number;
+      monthImpressions: number;
       cpc: number;
+      ctr: number;
       rpm: number;
       unpaidBalance: number;
       unpaidBalanceFormatted: string;
       combinedTotal: number;
+      last7Days: {
+        clicks: { current: number; previous: number; change: number; changePct: number };
+        pageViews: { current: number; previous: number; change: number; changePct: number };
+        impressions: { current: number; previous: number; change: number; changePct: number };
+        ctr: { current: number; previous: number; changePp: number; changePct: number };
+      };
       monthlyTrend: Array<{ month: string; earnings: number; pageViews: number; rpm: number }>;
     }>(`/api/adsense/stats?workspace=${encodeURIComponent(workspace)}`),
   stopAll: () => request('/api/stop-all', { method: 'POST' }),

@@ -4,6 +4,20 @@ const WORKSPACE_ENV_KEYS: Record<string, string> = {
   quizoasis: 'QUIZOASIS',
 };
 
+export interface AdSenseMetricCompare {
+  current: number;
+  previous: number;
+  change: number;
+  changePct: number;
+}
+
+export interface AdSenseCtrCompare {
+  current: number;
+  previous: number;
+  changePp: number;
+  changePct: number;
+}
+
 export interface AdSenseStats {
   configured: boolean;
   todayEarnings: number;
@@ -11,11 +25,19 @@ export interface AdSenseStats {
   monthEarnings: number;
   monthPageViews: number;
   monthClicks: number;
+  monthImpressions: number;
   cpc: number;
+  ctr: number;
   rpm: number;
   unpaidBalance: number;
   unpaidBalanceFormatted: string;
   combinedTotal: number;
+  last7Days: {
+    clicks: AdSenseMetricCompare;
+    pageViews: AdSenseMetricCompare;
+    impressions: AdSenseMetricCompare;
+    ctr: AdSenseCtrCompare;
+  };
   monthlyTrend: Array<{ month: string; earnings: number; pageViews: number; rpm: number }>;
 }
 
@@ -65,6 +87,40 @@ function monthLabel(year: number, month: number): string {
   return `${year}-${String(month).padStart(2, '0')}`;
 }
 
+function dateParts(d: Date) {
+  return { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate() };
+}
+
+function daysAgo(days: number): Date {
+  const d = new Date();
+  d.setHours(12, 0, 0, 0);
+  d.setDate(d.getDate() - days);
+  return d;
+}
+
+function compareMetric(current: number, previous: number): AdSenseMetricCompare {
+  const change = current - previous;
+  const changePct = previous > 0 ? (change / previous) * 100 : (current > 0 ? 100 : 0);
+  return { current, previous, change, changePct };
+}
+
+function emptyCompare(): AdSenseMetricCompare {
+  return { current: 0, previous: 0, change: 0, changePct: 0 };
+}
+
+function compareCtr(current: number, previous: number): AdSenseCtrCompare {
+  return {
+    current,
+    previous,
+    changePp: (current - previous) * 100,
+    changePct: previous > 0 ? ((current - previous) / previous) * 100 : (current > 0 ? 100 : 0),
+  };
+}
+
+function emptyCtrCompare(): AdSenseCtrCompare {
+  return { current: 0, previous: 0, changePp: 0, changePct: 0 };
+}
+
 async function fetchReport(
   adsense: ReturnType<typeof google.adsense>,
   account: string,
@@ -98,11 +154,19 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
     monthEarnings: 0,
     monthPageViews: 0,
     monthClicks: 0,
+    monthImpressions: 0,
     cpc: 0,
+    ctr: 0,
     rpm: 0,
     unpaidBalance: 0,
     unpaidBalanceFormatted: '',
     combinedTotal: 0,
+    last7Days: {
+      clicks: emptyCompare(),
+      pageViews: emptyCompare(),
+      impressions: emptyCompare(),
+      ctr: emptyCtrCompare(),
+    },
     monthlyTrend: [],
   };
 
@@ -113,8 +177,10 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
   const now = new Date();
 
   const trendStart = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+  const prev7Start = daysAgo(13);
+  const prev7End = daysAgo(7);
 
-  const [todayRes, yesterdayRes, monthRes, trendRes, paymentsRes] = await Promise.all([
+  const [todayRes, yesterdayRes, monthRes, trendRes, paymentsRes, last7Res, prev7Res] = await Promise.all([
     fetchReport(adsense, account, {
       dateRange: 'TODAY',
       metrics: ['ESTIMATED_EARNINGS', 'PAGE_VIEWS'],
@@ -125,7 +191,7 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
     }),
     fetchReport(adsense, account, {
       dateRange: 'MONTH_TO_DATE',
-      metrics: ['ESTIMATED_EARNINGS', 'PAGE_VIEWS', 'CLICKS', 'COST_PER_CLICK'],
+      metrics: ['ESTIMATED_EARNINGS', 'PAGE_VIEWS', 'CLICKS', 'COST_PER_CLICK', 'IMPRESSIONS', 'IMPRESSIONS_CTR'],
     }),
     fetchReport(adsense, account, {
       startDate: { year: trendStart.getFullYear(), month: trendStart.getMonth() + 1, day: 1 },
@@ -134,6 +200,15 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
       dimensions: ['MONTH'],
     }),
     adsense.accounts.payments.list({ parent: account }),
+    fetchReport(adsense, account, {
+      dateRange: 'LAST_7_DAYS',
+      metrics: ['CLICKS', 'PAGE_VIEWS', 'IMPRESSIONS', 'IMPRESSIONS_CTR'],
+    }),
+    fetchReport(adsense, account, {
+      startDate: dateParts(prev7Start),
+      endDate: dateParts(prev7End),
+      metrics: ['CLICKS', 'PAGE_VIEWS', 'IMPRESSIONS', 'IMPRESSIONS_CTR'],
+    }),
   ]);
 
   const todayEarnings = parseMetric(todayRes.data.rows, 0);
@@ -142,8 +217,28 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
   const monthPageViews = parseMetric(monthRes.data.rows, 1);
   const monthClicks = parseMetric(monthRes.data.rows, 2);
   const cpcFromApi = parseMetric(monthRes.data.rows, 3);
+  const monthImpressions = parseMetric(monthRes.data.rows, 4);
+  const ctrFromApi = parseMetric(monthRes.data.rows, 5);
   const cpc = cpcFromApi > 0 ? cpcFromApi : (monthClicks > 0 ? monthEarnings / monthClicks : 0);
+  const ctr = ctrFromApi > 0
+    ? ctrFromApi
+    : (monthImpressions > 0 ? monthClicks / monthImpressions : 0);
   const rpm = monthPageViews > 0 ? (monthEarnings / monthPageViews) * 1000 : 0;
+
+  const last7Clicks = parseMetric(last7Res.data.rows, 0);
+  const last7PageViews = parseMetric(last7Res.data.rows, 1);
+  const last7Impressions = parseMetric(last7Res.data.rows, 2);
+  const last7CtrFromApi = parseMetric(last7Res.data.rows, 3);
+  const prev7Clicks = parseMetric(prev7Res.data.rows, 0);
+  const prev7PageViews = parseMetric(prev7Res.data.rows, 1);
+  const prev7Impressions = parseMetric(prev7Res.data.rows, 2);
+  const prev7CtrFromApi = parseMetric(prev7Res.data.rows, 3);
+  const last7Ctr = last7CtrFromApi > 0
+    ? last7CtrFromApi
+    : (last7Impressions > 0 ? last7Clicks / last7Impressions : 0);
+  const prev7Ctr = prev7CtrFromApi > 0
+    ? prev7CtrFromApi
+    : (prev7Impressions > 0 ? prev7Clicks / prev7Impressions : 0);
 
   const unpaidPayment = paymentsRes.data.payments?.find((payment) => payment.name?.endsWith('/unpaid'));
   const unpaidBalanceFormatted = unpaidPayment?.amount ?? '';
@@ -172,11 +267,19 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
     monthEarnings,
     monthPageViews,
     monthClicks,
+    monthImpressions,
     cpc,
+    ctr,
     rpm,
     unpaidBalance,
     unpaidBalanceFormatted,
     combinedTotal,
+    last7Days: {
+      clicks: compareMetric(last7Clicks, prev7Clicks),
+      pageViews: compareMetric(last7PageViews, prev7PageViews),
+      impressions: compareMetric(last7Impressions, prev7Impressions),
+      ctr: compareCtr(last7Ctr, prev7Ctr),
+    },
     monthlyTrend,
   };
 }

@@ -41,6 +41,17 @@ export function AdsenseView() {
 
   const fmtUsd = (n: number) => `$${n.toFixed(2)}`;
   const fmtNum = (n: number) => n.toLocaleString('en-US');
+  const fmtPct = (n: number) => `${(n * 100).toFixed(2)}%`;
+  const fmtCompare = (change: number, changePct: number) => {
+    const up = change >= 0;
+    const arrow = up ? '▲' : '▼';
+    return `이전 7일 대비 ${arrow}${fmtNum(Math.abs(change))} (${arrow}${Math.abs(changePct).toFixed(1)}%)`;
+  };
+  const fmtCtrCompare = (changePp: number, changePct: number) => {
+    const up = changePp >= 0;
+    const arrow = up ? '▲' : '▼';
+    return `이전 7일 대비 ${arrow}${Math.abs(changePp).toFixed(2)}pp (${arrow}${Math.abs(changePct).toFixed(1)}%)`;
+  };
 
   if (loading) {
     return (
@@ -97,13 +108,30 @@ export function AdsenseView() {
         <MStat label="CPC" value={fmtUsd(stats.cpc)} sub="클릭당 수익" />
       </MGrid>
       <MGrid cols={3}>
+        <MStat label="클릭수" value={fmtNum(stats.monthClicks)} sub="MONTH_TO_DATE" />
         <MStat
-          label="미지급 잔고"
-          value={stats.unpaidBalanceFormatted || fmtUsd(stats.unpaidBalance)}
-          sub="지급 대기 중"
+          label="CTR"
+          value={fmtPct(stats.last7Days.ctr.current)}
+          sub={fmtCtrCompare(stats.last7Days.ctr.changePp, stats.last7Days.ctr.changePct)}
         />
-        <MStat label="월 누계" value={fmtUsd(stats.monthEarnings)} sub="MONTH_TO_DATE" />
         <MStat label="RPM" value={fmtUsd(stats.rpm)} sub="수익/PV×1000" />
+      </MGrid>
+      <MGrid cols={3}>
+        <MStat
+          label="최근 7일 클릭"
+          value={fmtNum(stats.last7Days.clicks.current)}
+          sub={fmtCompare(stats.last7Days.clicks.change, stats.last7Days.clicks.changePct)}
+        />
+        <MStat
+          label="최근 7일 PV"
+          value={fmtNum(stats.last7Days.pageViews.current)}
+          sub={fmtCompare(stats.last7Days.pageViews.change, stats.last7Days.pageViews.changePct)}
+        />
+        <MStat
+          label="최근 7일 노출"
+          value={fmtNum(stats.last7Days.impressions.current)}
+          sub={fmtCompare(stats.last7Days.impressions.change, stats.last7Days.impressions.changePct)}
+        />
       </MGrid>
       <MGrid cols={2}>
         <MPanel title="이번달 수익">
