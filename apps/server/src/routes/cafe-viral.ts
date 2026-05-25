@@ -9,6 +9,7 @@ import {
 } from '../lib/cafe-viral-config.js';
 import { scanCafeById } from '../modules/cafe/viral.js';
 import { autoDetectGradeRequirements, executeViralReplyPost, runCafeWarmup } from '../modules/cafe/warmup.js';
+import { runDailyActivity, getTodayActivityCounts, assertActivityRatioSlot } from '../modules/cafe/activity.js';
 import { generateViralReply } from '../modules/cafe/viral.js';
 import { loadAccountForBrowser } from '../modules/playwright/account-loader.js';
 import { naverLogin } from '../modules/playwright/naver/login.js';
@@ -42,6 +43,7 @@ export async function registerCafeViralRoutes(app: FastifyInstance) {
         category: body.category ? String(body.category) : null,
         keywords: (body.keywords as string[]) ?? [],
         grade_requirements: body.grade_requirements ?? null,
+        activity_ratio: body.activity_ratio ?? { daily_reply: 8, self_qa: 2 },
         note: body.note ? String(body.note) : null,
         is_active: body.is_active !== false,
       })
@@ -62,6 +64,7 @@ export async function registerCafeViralRoutes(app: FastifyInstance) {
         ...(body.category !== undefined ? { category: String(body.category) } : {}),
         ...(body.keywords !== undefined ? { keywords: body.keywords as string[] } : {}),
         ...(body.grade_requirements !== undefined ? { grade_requirements: body.grade_requirements } : {}),
+        ...(body.activity_ratio !== undefined ? { activity_ratio: body.activity_ratio } : {}),
         ...(body.is_active !== undefined ? { is_active: Boolean(body.is_active) } : {}),
         ...(body.note !== undefined ? { note: String(body.note) } : {}),
       })
@@ -146,6 +149,7 @@ export async function registerCafeViralRoutes(app: FastifyInstance) {
     if (!post) return reply.code(404).send({ error: '게시글 없음' });
 
     await assertCafeViralReplyLimits(post.cafe_id);
+    await assertActivityRatioSlot(post.cafe_id, post.is_self_post ? 'self_qa' : 'daily_reply');
     const accountId = body?.account_id ?? (await pickCafeReplyCrankAccount());
     if (!accountId) return reply.code(400).send({ error: '사용 가능한 C-Rank 계정 없음' });
 
@@ -179,6 +183,39 @@ export async function registerCafeViralRoutes(app: FastifyInstance) {
     } finally {
       await browser.close();
     }
+  });
+
+  app.post('/api/cafe-viral/activity/daily', { preHandler: authMiddleware }, async (request, reply) => {
+    const body = request.body as { account_id: string; cafe_id: string; workspace: string };
+    if (!body.account_id || !body.cafe_id || !body.workspace) {
+      return reply.code(400).send({ error: 'account_id, cafe_id, workspace 필요' });
+    }
+
+    await assertCafeWarmupComplete(body.account_id, body.cafe_id);
+
+    const accountCtx = await loadAccountForBrowser(body.account_id);
+    const { browser, context } = await createBrowser(accountCtx?.proxy_port);
+    try {
+      await naverLogin(context, body.account_id);
+      const page = await context.newPage();
+      const result = await runDailyActivity({
+        accountId: body.account_id,
+        cafeId: body.cafe_id,
+        workspace: body.workspace,
+        page,
+      });
+      return { success: true, ...result };
+    } finally {
+      await browser.close();
+    }
+  });
+
+  app.get('/api/cafe-viral/activity/stats', { preHandler: authMiddleware }, async (request) => {
+    const { cafe_id } = request.query as { cafe_id?: string };
+    if (!cafe_id) return { error: 'cafe_id 필요' };
+    const counts = await getTodayActivityCounts(cafe_id);
+    const { data: cafe } = await supabase.from('huma_cafe_viral_cafes').select('activity_ratio, cafe_name').eq('id', cafe_id).single();
+    return { cafe_name: cafe?.cafe_name, activity_ratio: cafe?.activity_ratio ?? { daily_reply: 8, self_qa: 2 }, today: counts };
   });
 
   app.get('/api/cafe-viral/warmup', { preHandler: authMiddleware }, async (request) => {

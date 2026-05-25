@@ -1,6 +1,11 @@
 import { getSetting } from './settings.js';
 import { supabase } from '../middleware/auth.js';
 
+export interface ActivityRatio {
+  daily_reply: number;
+  self_qa: number;
+}
+
 export interface CafeViralConfig {
   enabled: boolean;
   keywords_yeonun: string[];
@@ -13,9 +18,12 @@ export interface CafeViralConfig {
   mention_rate: number;
   daily_limit_per_cafe: number;
   daily_limit_total: number;
+  activity_ratio: ActivityRatio;
   min_post_age_hours: number;
   max_post_age_days: number;
 }
+
+const DEFAULT_ACTIVITY_RATIO: ActivityRatio = { daily_reply: 8, self_qa: 2 };
 
 const DEFAULT: CafeViralConfig = {
   enabled: true,
@@ -29,9 +37,22 @@ const DEFAULT: CafeViralConfig = {
   mention_rate: 0,
   daily_limit_per_cafe: 3,
   daily_limit_total: 10,
+  activity_ratio: DEFAULT_ACTIVITY_RATIO,
   min_post_age_hours: 1,
   max_post_age_days: 7,
 };
+
+export function resolveActivityRatio(
+  cafeRatio?: ActivityRatio | null,
+  globalRatio?: ActivityRatio,
+): ActivityRatio {
+  const base = globalRatio ?? DEFAULT_ACTIVITY_RATIO;
+  if (!cafeRatio) return base;
+  return {
+    daily_reply: cafeRatio.daily_reply ?? base.daily_reply,
+    self_qa: cafeRatio.self_qa ?? base.self_qa,
+  };
+}
 
 export async function getCafeViralConfig(): Promise<CafeViralConfig> {
   return getSetting('cafe_viral', DEFAULT);

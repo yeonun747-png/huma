@@ -20,7 +20,7 @@ i7 노트북(Ubuntu)에서 **API + BullMQ Worker + Playwright** 를 상시 운�
 ```bash
 # Redis, FFmpeg, Xvfb, Node 20+, repo clone, npm install
 # apps/server/.env 작성
-# Supabase: schema.sql → v3_5 → v3_7 → v3_8 → v3_9 → v3_10 → v3_11 → v3_12 → v3_16
+# Supabase: schema.sql → v3_5 → v3_7 → v3_8 → v3_9 → v3_10 → v3_11 → v3_12 → v3_16 → v3_17
 ```
 
 ## A. PM2로 운영 (간단)

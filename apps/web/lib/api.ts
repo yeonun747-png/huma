@@ -133,6 +133,12 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(accountId ? { account_id: accountId } : {}),
     }),
+  runCafeDailyActivity: (body: { account_id: string; cafe_id: string; workspace: string }) =>
+    request('/api/cafe-viral/activity/daily', { method: 'POST', body: JSON.stringify(body) }),
+  cafeViralActivityStats: (cafeId: string) =>
+    request<{ cafe_name?: string; activity_ratio: { daily_reply: number; self_qa: number }; today: { daily_reply: number; self_qa: number } }>(
+      `/api/cafe-viral/activity/stats?cafe_id=${encodeURIComponent(cafeId)}`,
+    ),
   detectCafeGrade: (cafeId: string) =>
     request(`/api/cafe-viral/cafes/${cafeId}/detect-grade`, { method: 'POST' }),
   adsenseStats: (workspace: string) =>

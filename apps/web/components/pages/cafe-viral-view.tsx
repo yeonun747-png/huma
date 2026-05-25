@@ -14,21 +14,30 @@ export function CafeViralView() {
   const [posts, setPosts] = useState<Array<Record<string, unknown>>>([]);
   const [form, setForm] = useState({ cafe_url: '', cafe_name: '', keywords: '' });
 
+  const [activityStats, setActivityStats] = useState<{ daily_reply: number; self_qa: number } | null>(null);
+
   const load = useCallback(() => {
     Promise.all([
       api.getSetting('cafe_viral').catch(() => ({})),
       api.cafeViralCafes(),
       api.cafeViralPosts(),
-    ]).then(([cfg, c, p]) => {
+    ]).then(async ([cfg, c, p]) => {
       setConfig(cfg as Record<string, unknown>);
       setCafes(c);
       setPosts(p);
+      const target = (c as Array<Record<string, unknown>>).find((x) => x.workspace === workspace && x.is_active !== false);
+      if (target?.id) {
+        api.cafeViralActivityStats(String(target.id)).then((s) => setActivityStats(s.today)).catch(() => setActivityStats(null));
+      } else {
+        setActivityStats(null);
+      }
     }).catch(() => {
       setConfig({});
       setCafes([]);
       setPosts([]);
+      setActivityStats(null);
     });
-  }, []);
+  }, [workspace]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -90,6 +99,9 @@ export function CafeViralView() {
 
   const perCafe = Number(config.daily_limit_per_cafe ?? 3);
   const total = Number(config.daily_limit_total ?? 10);
+  const ratio = (config.activity_ratio as { daily_reply?: number; self_qa?: number }) ?? { daily_reply: 8, self_qa: 2 };
+  const replyTarget = Number(ratio.daily_reply ?? 8);
+  const selfTarget = Number(ratio.self_qa ?? 2);
 
   return (
     <div className="animate-fadeIn">
@@ -127,7 +139,7 @@ export function CafeViralView() {
           )}
         </MPanel>
 
-        <MPanel title="바이럴 설정 (v3.16)">
+        <MPanel title="바이럴 설정 (v3.17)">
           <MToggle
             label="카페 침투 바이럴"
             sub="검색 유입 게시글 자동 수집·답글"
@@ -140,6 +152,14 @@ export function CafeViralView() {
             value={Boolean(config.self_qa_enabled ?? true)}
             onChange={(v) => saveCfg({ self_qa_enabled: v })}
           />
+          <div className="mt-2 font-mono text-[10.5px] text-huma-t3">
+            등업 후 활동 비율 (㉝): 타인 답글 {replyTarget} · 자문자답 {selfTarget} (80:20)
+          </div>
+          {activityStats && (
+            <div className="mt-1 font-mono text-[10.5px] text-huma-t3">
+              오늘 진행: 답글 {activityStats.daily_reply}/{replyTarget} · 자문자답 {activityStats.self_qa}/{selfTarget}
+            </div>
+          )}
           <div className="mt-2 font-mono text-[10.5px] text-huma-t3">
             일일 한도: 카페당 {perCafe}건 · 전체 {total}건 (㉛)
           </div>
