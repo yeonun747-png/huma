@@ -26,7 +26,7 @@ export async function askClaudeWithModel(params: {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: params.model ?? 'claude-sonnet-4-20250514',
+        model: params.model ?? 'claude-sonnet-4-6',
         max_tokens: params.max_tokens ?? 1024,
         ...(params.system ? { system: params.system } : {}),
         messages: [{ role: 'user', content: userContent }],

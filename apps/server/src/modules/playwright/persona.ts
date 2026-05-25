@@ -1,4 +1,5 @@
 import { askClaudeWithModel } from '../../lib/anthropic-client.js';
+import { getSubClaudeModel } from '../../lib/ai-engine.js';
 
 export interface AccountPersona {
   age: number;
@@ -12,7 +13,7 @@ export interface AccountPersona {
   interests: string[];
 }
 
-const HAIKU = 'claude-haiku-4-5-20251001';
+const HAIKU_FALLBACK = 'claude-haiku-4-5-20251001';
 
 const DEFAULT_PERSONA: AccountPersona = {
   age: 32,
@@ -31,7 +32,7 @@ export async function generatePersona(workspace: string): Promise<AccountPersona
 
   try {
     const raw = await askClaudeWithModel({
-      model: HAIKU,
+      model: (await getSubClaudeModel()) || HAIKU_FALLBACK,
       max_tokens: 200,
       prompt: `서비스 ${workspace} 네이버 블로그 사용자 페르소나 JSON:
 {"age":25~55,"job":"직업","activeHours":"morning/afternoon/evening/night",

@@ -1,4 +1,4 @@
--- HUMA Studio Full Schema (기획서 v3.2 섹션 5)
+-- HUMA Studio Full Schema (기획서 v3.16 섹션 5)
 
 CREATE TABLE IF NOT EXISTS huma_modems (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -93,12 +93,12 @@ CREATE TABLE IF NOT EXISTS huma_video_queue (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace VARCHAR(20) NOT NULL,
   job_id UUID REFERENCES huma_jobs(id),
-  image_model VARCHAR(50) DEFAULT 'nano-banana-pro',
+  image_model VARCHAR(50) DEFAULT 'gpt-image-2',
   image_prompt TEXT,
   generated_image_url TEXT,
   video_model VARCHAR(50) DEFAULT 'kling-3.0',
   video_prompt TEXT,
-  duration_sec INTEGER DEFAULT 5,
+  duration_sec INTEGER DEFAULT 15,
   source_video_url TEXT,
   tts_model VARCHAR(50) DEFAULT 'eleven-v3',
   tts_script TEXT,
@@ -129,6 +129,57 @@ CREATE TABLE IF NOT EXISTS huma_cafe_targets (
   is_replied BOOLEAN DEFAULT false,
   replied_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS huma_cafe_viral_cafes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace VARCHAR(20) NOT NULL,
+  cafe_url VARCHAR(100) NOT NULL UNIQUE,
+  cafe_name VARCHAR(100) NOT NULL,
+  category VARCHAR(50),
+  member_count INTEGER,
+  join_required BOOLEAN DEFAULT true,
+  min_grade VARCHAR(20),
+  keywords TEXT[] NOT NULL DEFAULT '{}',
+  grade_requirements JSONB,
+  grade_auto_detected BOOLEAN DEFAULT false,
+  grade_detected_at TIMESTAMPTZ,
+  is_active BOOLEAN DEFAULT true,
+  note TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS huma_cafe_warmup_accounts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  account_id UUID REFERENCES huma_accounts(id) ON DELETE CASCADE,
+  cafe_id UUID REFERENCES huma_cafe_viral_cafes(id) ON DELETE CASCADE,
+  greeting_posted BOOLEAN DEFAULT false,
+  comment_count INTEGER DEFAULT 0,
+  like_count INTEGER DEFAULT 0,
+  is_graded_up BOOLEAN DEFAULT false,
+  graded_up_at TIMESTAMPTZ,
+  status VARCHAR(20) DEFAULT 'warming',
+  last_activity_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(account_id, cafe_id)
+);
+
+CREATE TABLE IF NOT EXISTS huma_cafe_viral_posts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  cafe_id UUID REFERENCES huma_cafe_viral_cafes(id) ON DELETE CASCADE,
+  workspace VARCHAR(20) NOT NULL,
+  post_url TEXT NOT NULL UNIQUE,
+  post_title TEXT,
+  post_content TEXT,
+  keyword_matched TEXT[],
+  reply_drafted TEXT,
+  reply_posted TEXT,
+  account_id UUID REFERENCES huma_accounts(id),
+  is_self_post BOOLEAN DEFAULT false,
+  parent_post_id UUID REFERENCES huma_cafe_viral_posts(id),
+  status VARCHAR(20) DEFAULT 'pending',
+  posted_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS huma_logs (
@@ -169,7 +220,10 @@ INSERT INTO huma_settings (key, value) VALUES
 ('watcher', '{"slack_webhook":"","cooldown_429_min":15,"recovery_steps_min":[12,30,120],"auto_pause":true}'),
 ('higgsfield', '{"default_image_model":"gpt-image-2","default_video_model":"kling-3.0","default_video_resolution":"720p","default_tts_model":"eleven-v3","video_duration_sec":15,"aspect_ratio":"9:16","higgsfield_plan":"Plus","monthly_credits":1000}'),
 ('optimal_schedule', '{"naver_blog":{"windows":[{"start":"08:00","end":"10:00"},{"start":"19:00","end":"21:00"}]},"tiktok":{"windows":[{"start":"19:00","end":"21:00"},{"start":"10:00","end":"12:00"}]},"instagram":{"windows":[{"start":"09:00","end":"11:00"},{"start":"19:00","end":"21:00"}]},"threads":{"windows":[{"start":"08:00","end":"10:00"},{"start":"12:00","end":"13:00"}]},"x":{"windows":[{"start":"09:00","end":"10:00"},{"start":"12:00","end":"13:00"}]},"spread_minutes":30}'),
-('social_crank', '{"daily_limit_per_account":30,"min_visit_interval_days":5,"our_blog_ratio":0.25,"other_blog_ratio":0.75,"visits_per_session":15,"stay_duration_ms":[180000,300000],"keywords":["사주풀이","꿈해몽","신년운세","궁합","자미두수","운세","사주"]}')
+('social_crank', '{"daily_limit_per_account":30,"min_visit_interval_days":5,"our_blog_ratio":0.25,"other_blog_ratio":0.75,"visits_per_session":15,"stay_duration_ms":[180000,300000],"keywords":["사주풀이","꿈해몽","신년운세","궁합","자미두수","운세","사주"]}'),
+('ai_engine', '{"main_model":"claude-sonnet-4-6","sub_model":"claude-haiku-4-5-20251001","main_tasks":["blog_post","social_caption","tts_script","video_prompt"],"sub_tasks":["hashtags","summary","autoDecide"],"max_input_tokens":8000,"max_output_tokens":4000}'),
+('cafe_viral', '{"enabled":true,"keywords_yeonun":["신점추천","사주봐줘","운세추천","사주어플","신점어플","궁합봐주세요","오늘운세"],"keywords_quizoasis":["심리테스트추천","MBTI테스트","성격테스트","심리검사"],"keywords_panana":["AI캐릭터","캐릭터챗","AI채팅","가상연애"],"post_style":"고민·경험담 질문형 (서비스명 직접 언급 금지)","reply_style":"경험담 공감형","self_qa_enabled":true,"self_qa_delay_min":60,"mention_rate":0.0,"daily_limit_per_cafe":3,"daily_limit_total":10,"min_post_age_hours":1,"max_post_age_days":7}'),
+('posting_schedule', '{"weekday":{"yeonun_blog":6,"quizoasis_panana_blog":2,"total_blog":8,"type_b_ratio":0.5,"videos_per_day":4},"weekend":{"yeonun_blog":3,"quizoasis_panana_blog":2,"total_blog":5,"type_b_ratio":0.5,"videos_per_day":3},"cafe":{"daily":2,"type":"text_image_only","credit_cost":0},"monthly_estimate":{"weekday_days":22,"weekend_days":8,"total_videos":112,"total_credits":1008,"plan":"Higgsfield Plus 1000 credits"}}')
 ON CONFLICT (key) DO NOTHING;
 
 CREATE INDEX IF NOT EXISTS idx_huma_jobs_status ON huma_jobs(status);
@@ -180,11 +234,16 @@ CREATE INDEX IF NOT EXISTS idx_huma_logs_workspace ON huma_logs(workspace, platf
 CREATE INDEX IF NOT EXISTS idx_huma_platform_accounts_ws ON huma_platform_accounts(workspace, platform);
 CREATE INDEX IF NOT EXISTS idx_huma_video_queue_status ON huma_video_queue(status);
 
+CREATE INDEX IF NOT EXISTS idx_huma_cafe_viral_posts_status ON huma_cafe_viral_posts(status);
+CREATE INDEX IF NOT EXISTS idx_huma_cafe_viral_posts_workspace ON huma_cafe_viral_posts(workspace);
+CREATE INDEX IF NOT EXISTS idx_huma_cafe_viral_cafes_ws ON huma_cafe_viral_cafes(workspace);
+
 DO $$ DECLARE t TEXT;
 BEGIN FOR t IN SELECT unnest(ARRAY[
   'huma_accounts','huma_modems','huma_platform_accounts',
   'huma_jobs','huma_video_queue',
-  'huma_cafe_targets','huma_logs','huma_settings','huma_admins'])
+  'huma_cafe_targets','huma_cafe_viral_cafes','huma_cafe_warmup_accounts','huma_cafe_viral_posts',
+  'huma_logs','huma_settings','huma_admins'])
 LOOP
   EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
   EXECUTE format('DROP POLICY IF EXISTS "service only" ON %I', t);

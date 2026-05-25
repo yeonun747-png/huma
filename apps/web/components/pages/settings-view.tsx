@@ -15,10 +15,12 @@ export function SettingsView() {
       api.getSetting('watcher').catch(() => ({})),
     ]).then(([a, w]) => {
       const appSettings = a as Record<string, unknown>;
-      if (appSettings.elevenlabs_tts === undefined && appSettings.clova_tts !== undefined) {
-        appSettings.elevenlabs_tts = appSettings.clova_tts;
-        delete appSettings.clova_tts;
+      if (appSettings.higgsfield_api === undefined) {
+        appSettings.higgsfield_api = appSettings.elevenlabs_tts ?? appSettings.clova_tts ?? true;
       }
+      delete appSettings.gemini_api;
+      delete appSettings.elevenlabs_tts;
+      delete appSettings.clova_tts;
       setApp(appSettings);
       setWatcher(w as Record<string, unknown>);
     });
@@ -40,9 +42,20 @@ export function SettingsView() {
     <div className="animate-fadeIn">
       <MGrid cols={2}>
         <MPanel title="API 연결">
-          <MToggle label="Claude API (Sonnet 4.5)" sub="콘텐츠·댓글·시나리오 생성" value={Boolean(app.claude_api ?? true)} onChange={(v) => patchApp('claude_api', v)} />
-          <MToggle label="Gemini Pro (Google)" sub="병렬 백그라운드 생성" value={Boolean(app.gemini_api ?? true)} onChange={(v) => patchApp('gemini_api', v)} />
-          <MToggle label="ElevenLabs TTS" sub="Higgsfield · 영상 음성 합성 (v3)" value={Boolean(app.elevenlabs_tts ?? true)} onChange={(v) => patchApp('elevenlabs_tts', v)} />
+          <MToggle
+            label="Claude API (Sonnet 4.6)"
+            sub="콘텐츠·댓글·시나리오 생성 (메인)"
+            sub2="Claude Haiku 4.5 (서브: 해시태그·autoDecide) 동일 키 사용"
+            value={Boolean(app.claude_api ?? true)}
+            onChange={(v) => patchApp('claude_api', v)}
+          />
+          <MToggle
+            label="Higgsfield API (Plus)"
+            sub="이미지(GPT Image 2) · 영상(Kling 3.0) · TTS(Eleven Labs v3) 통합"
+            sub2="Plus $39/월 · 1,000크레딧/월"
+            value={Boolean(app.higgsfield_api ?? true)}
+            onChange={(v) => patchApp('higgsfield_api', v)}
+          />
           <MToggle label="Slack Webhook" sub="#huma-alerts · Fail-Safe 알림" value={Boolean(app.slack_webhook ?? true)} onChange={(v) => patchApp('slack_webhook', v)} />
         </MPanel>
         <MPanel title="발행 제한">

@@ -25,6 +25,7 @@ import { registerSettingsRoutes } from './routes/settings.js';
 import { registerPlatformAccountRoutes } from './routes/platform-accounts.js';
 
 import { registerCafeRoutes } from './routes/cafe.js';
+import { registerCafeViralRoutes } from './routes/cafe-viral.js';
 
 import { registerDashboardRoutes } from './routes/dashboard.js';
 import { registerAdSenseRoutes } from './routes/adsense.js';
@@ -73,6 +74,8 @@ async function main() {
   await registerPlatformAccountRoutes(app);
 
   await registerCafeRoutes(app);
+
+  await registerCafeViralRoutes(app);
 
   await registerDashboardRoutes(app);
   await registerAdSenseRoutes(app);

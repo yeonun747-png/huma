@@ -59,12 +59,13 @@ export function MTable({ head, rows }: { head: string[]; rows: ReactNode[][] }) 
   );
 }
 
-export function MToggle({ label, sub, value, onChange }: { label: string; sub?: string; value: boolean; onChange: (v: boolean) => void }) {
+export function MToggle({ label, sub, sub2, value, onChange }: { label: string; sub?: string; sub2?: string; value: boolean; onChange: (v: boolean) => void }) {
   return (
     <div className="m-tw">
       <div>
         <div className="m-tw-label">{label}</div>
         {sub && <div className="m-tw-sub">{sub}</div>}
+        {sub2 && <div className="m-tw-sub">{sub2}</div>}
       </div>
       <button type="button" className={cn('m-tgl', value && 'on')} onClick={() => onChange(!value)} aria-pressed={value} />
     </div>

@@ -42,6 +42,7 @@ export const NAV_ITEMS = [
   { href: '/watcher', label: 'Layer4 Watcher', icon: '⚠', badgeKey: 'watcher', badgeErr: true, group: 'common' },
   { href: '/human-engine', label: '휴먼 엔진 설정', icon: '⚙', group: 'common' },
   { href: '/crank', label: 'C-Rank 소통 관리', icon: '🔗', group: 'common' },
+  { href: '/cafe-viral', label: '카페 바이럴', icon: '🎯', group: 'common' },
   { href: '/modems', label: '프록시 관리', icon: '⊕', group: 'system' },
   { href: '/settings', label: '환경 설정', icon: '◈', group: 'system' },
 ];

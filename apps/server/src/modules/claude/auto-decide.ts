@@ -1,5 +1,6 @@
 import { askClaudeWithModel } from '../../lib/anthropic-client.js';
 import { getSetting } from '../../lib/settings.js';
+import { getSubClaudeModel } from '../../lib/ai-engine.js';
 import { getHiggsfieldCredits } from '../higgsfield/client.js';
 import type { ContentType } from '@huma/shared';
 
@@ -13,7 +14,7 @@ export interface AutoDecideResult {
   schedule: PlatformSchedule;
 }
 
-const HAIKU = 'claude-haiku-4-5-20251001';
+const HAIKU_FALLBACK = 'claude-haiku-4-5-20251001';
 
 const DEFAULT_SCHEDULE: PlatformSchedule = {
   naver_blog: '09:00',
@@ -140,7 +141,7 @@ export async function autoDecide(params: {
   try {
     const optimal = await getSetting<OptimalScheduleConfig>('optimal_schedule', {});
     const raw = await askClaudeWithModel({
-      model: HAIKU,
+      model: (await getSubClaudeModel()) || HAIKU_FALLBACK,
       max_tokens: 300,
       prompt: `콘텐츠 제목: ${params.title}
 내용 요약: ${params.urlSummary.slice(0, 300)}

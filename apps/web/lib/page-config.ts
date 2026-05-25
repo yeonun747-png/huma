@@ -10,6 +10,7 @@ export type PageActionType =
   | 'startVideoPipeline'
   | 'refreshWatcher'
   | 'startCrank'
+  | 'scanCafeViral'
   | 'openModemForm'
   | 'refreshSeo'
   | 'refreshAdsense'
@@ -38,6 +39,7 @@ export const PAGE_META: Record<string, PageMeta> = {
   '/human-engine': { title: '휴먼 엔진 설정', action: '저장', actionType: 'saveHuman', contentClass: 'px-[18px] py-4' },
   '/bgm-library': { title: '오디오 정책', action: '—', actionType: 'none' },
   '/crank': { title: 'C-Rank 소통 관리', action: '▶ 소통 실행', actionType: 'startCrank' },
+  '/cafe-viral': { title: '카페 바이럴', action: '↻ 키워드 스캔', actionType: 'scanCafeViral' },
   '/modems': { title: '프록시 관리', action: '+ 프록시 추가', actionType: 'openModemForm' },
   '/settings': { title: '환경 설정', action: '저장', actionType: 'saveSettings' },
   '/seo-keywords': { title: 'SEO 키워드', action: '↺ 분석', actionType: 'refreshSeo' },

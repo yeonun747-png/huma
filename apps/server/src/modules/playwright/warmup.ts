@@ -1,4 +1,5 @@
 import { askClaudeWithModel } from '../../lib/anthropic-client.js';
+import { getSubClaudeModel } from '../../lib/ai-engine.js';
 
 export interface WarmupPlan {
   blogVisits: number;
@@ -6,7 +7,7 @@ export interface WarmupPlan {
   comments: number;
 }
 
-const HAIKU = 'claude-haiku-4-5-20251001';
+const HAIKU_FALLBACK = 'claude-haiku-4-5-20251001';
 
 export async function getTodayPlan(account: {
   warmup_day?: number;
@@ -23,7 +24,7 @@ export async function getTodayPlan(account: {
 
   try {
     const raw = await askClaudeWithModel({
-      model: HAIKU,
+      model: (await getSubClaudeModel()) || HAIKU_FALLBACK,
       max_tokens: 150,
       prompt: `건강점수:${account.health_score ?? 100}
 활동계획JSON:{"blogVisits":1~15,"likes":숫자,"comments":숫자}

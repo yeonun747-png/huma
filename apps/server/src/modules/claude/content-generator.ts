@@ -1,4 +1,5 @@
 import { askClaudeWithModel } from '../../lib/anthropic-client.js';
+import { getMainClaudeModel, getSubClaudeModel } from '../../lib/ai-engine.js';
 
 export interface ContentGenerationInput {
   title: string;
@@ -21,8 +22,8 @@ export interface ContentGenerationOutput {
   hashtags: string[];
 }
 
-const SONNET_MODEL = 'claude-sonnet-4-20250514';
-const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
+const SONNET_MODEL_FALLBACK = 'claude-sonnet-4-6';
+const HAIKU_MODEL_FALLBACK = 'claude-haiku-4-5-20251001';
 
 const SYSTEM_PROMPTS: Record<string, string> = {
   yeonun: `당신은 연운(緣運) AI 사주·운세 플랫폼의 전문 콘텐츠 마케터입니다.
@@ -59,7 +60,7 @@ export async function fetchAndSummarizeUrl(url: string): Promise<string> {
   if (!rawText) return `URL: ${url}`;
 
   const summary = await askClaudeWithModel({
-    model: HAIKU_MODEL,
+    model: (await getSubClaudeModel()) || HAIKU_MODEL_FALLBACK,
     max_tokens: 500,
     prompt: `다음 웹페이지 내용의 핵심을 500자 이내로 요약. 서비스 특징·기능 중심:\n\n${rawText}`,
   });
@@ -136,7 +137,7 @@ async function generateMainContent(
   }
 
   const raw = await askClaudeWithModel({
-    model: SONNET_MODEL,
+    model: (await getMainClaudeModel()) || SONNET_MODEL_FALLBACK,
     max_tokens: 4096,
     system: SYSTEM_PROMPTS[input.workspace] ?? SYSTEM_PROMPTS.yeonun,
     content: userParts,
@@ -156,7 +157,7 @@ async function generateSubContent(
   workspace: string,
 ): Promise<{ hashtags: string[] }> {
   const raw = await askClaudeWithModel({
-    model: HAIKU_MODEL,
+    model: (await getSubClaudeModel()) || HAIKU_MODEL_FALLBACK,
     max_tokens: 300,
     prompt: `서비스: ${workspace}, 제목: ${title}
 내용 요약: ${urlSummary.slice(0, 500)}

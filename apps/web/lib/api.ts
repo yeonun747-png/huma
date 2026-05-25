@@ -121,6 +121,20 @@ export const api = {
     ),
   cafeTargets: () => request<Array<Record<string, unknown>>>('/api/cafe/targets'),
   crawlCafe: () => request<{ success: boolean; count: number }>('/api/cafe/crawl', { method: 'POST' }),
+  cafeViralCafes: () => request<Array<Record<string, unknown>>>('/api/cafe-viral/cafes'),
+  createCafeViral: (body: Record<string, unknown>) =>
+    request('/api/cafe-viral/cafes', { method: 'POST', body: JSON.stringify(body) }),
+  scanCafeViral: (cafeId: string) =>
+    request<{ success: boolean; count: number }>(`/api/cafe-viral/cafes/${cafeId}/scan`, { method: 'POST' }),
+  cafeViralPosts: (status?: string) =>
+    request<Array<Record<string, unknown>>>(`/api/cafe-viral/posts${status ? `?status=${status}` : ''}`),
+  replyCafeViralPost: (postId: string, accountId?: string) =>
+    request(`/api/cafe-viral/posts/${postId}/reply`, {
+      method: 'POST',
+      body: JSON.stringify(accountId ? { account_id: accountId } : {}),
+    }),
+  detectCafeGrade: (cafeId: string) =>
+    request(`/api/cafe-viral/cafes/${cafeId}/detect-grade`, { method: 'POST' }),
   adsenseStats: (workspace: string) =>
     request<{
       configured: boolean;
