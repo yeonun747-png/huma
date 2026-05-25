@@ -19,9 +19,22 @@ export interface BrowserAccountContext {
   health_score?: number;
 }
 
-function canUseHeadfulBrowser(): boolean {
-  if (process.platform !== 'linux') return false;
-  return process.env.DISPLAY === ':99' || process.env.XVFB_AVAILABLE === 'true';
+/** 기획서 규칙 ㉳: Xvfb(DISPLAY=:99) 없이 headless:false 실행 금지 */
+export function assertXvfbForHeadfulBrowser(): void {
+  if (process.env.PLAYWRIGHT_HEADLESS === 'true') return;
+  if (process.platform !== 'linux') return;
+  if (process.env.DISPLAY !== ':99') {
+    throw new Error(
+      'Xvfb 미실행: DISPLAY=:99 환경에서만 headless:false 브라우저를 실행할 수 있습니다 (규칙 ㉳)',
+    );
+  }
+}
+
+function resolveHeadless(): boolean {
+  if (process.env.PLAYWRIGHT_HEADLESS === 'true') return true;
+  assertXvfbForHeadfulBrowser();
+  if (process.platform !== 'linux') return true;
+  return false;
 }
 
 function baseLaunchArgs(fp: AccountFingerprint) {
@@ -39,7 +52,7 @@ function baseLaunchArgs(fp: AccountFingerprint) {
 
 function persistentLaunchOptions(account: BrowserAccountContext, fpConfig: Awaited<ReturnType<typeof getFingerprintConfig>>) {
   const fp = account.fingerprint;
-  const headless = process.env.PLAYWRIGHT_HEADLESS === 'true' || !canUseHeadfulBrowser();
+  const headless = resolveHeadless();
 
   const proxy = account.proxy_port
     ? { server: `socks5://127.0.0.1:${account.proxy_port}` }
@@ -87,8 +100,9 @@ export async function closeBrowser(
 
 /** 레거시: 계정 없는 크롤 등 */
 export async function createBrowser(proxyPort?: number) {
+  const headless = process.env.PLAYWRIGHT_HEADLESS === 'true' ? true : resolveHeadless();
   const browser = await chromium.launch({
-    headless: process.env.PLAYWRIGHT_HEADLESS !== 'false',
+    headless,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',

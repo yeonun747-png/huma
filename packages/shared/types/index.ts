@@ -2,7 +2,6 @@ export * from './account';
 export * from './job';
 export * from './modem';
 export * from './video';
-export * from './bgm';
 
 export type Workspace = import('./account').Workspace;
 

@@ -20,8 +20,6 @@ import { registerLogRoutes } from './routes/logs.js';
 
 import { registerVideoRoutes } from './routes/video.js';
 
-import { registerBgmRoutes } from './routes/bgm.js';
-
 import { registerSettingsRoutes } from './routes/settings.js';
 
 import { registerPlatformAccountRoutes } from './routes/platform-accounts.js';
@@ -69,8 +67,6 @@ async function main() {
   await registerLogRoutes(app);
 
   await registerVideoRoutes(app);
-
-  await registerBgmRoutes(app);
 
   await registerSettingsRoutes(app);
 

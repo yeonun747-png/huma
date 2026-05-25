@@ -19,7 +19,6 @@ export interface ContentGenerationOutput {
   video_prompt: string;
   tts_script: string;
   hashtags: string[];
-  bgm_mood: string;
 }
 
 const SONNET_MODEL = 'claude-sonnet-4-20250514';
@@ -94,14 +93,13 @@ function fallbackContent(input: ContentGenerationInput, urlSummary: string): Con
     video_prompt: `Cinematic 9:16 vertical video about ${input.title}, smooth camera motion`,
     tts_script: short,
     hashtags: ['#운세', '#AI', '#콘텐츠'],
-    bgm_mood: 'calm',
   };
 }
 
 async function generateMainContent(
   input: ContentGenerationInput,
   urlSummary: string,
-): Promise<Omit<ContentGenerationOutput, 'hashtags' | 'bgm_mood'>> {
+): Promise<Omit<ContentGenerationOutput, 'hashtags'>> {
   const synopsisGuide = input.synopsis
     ? `\n[운영자 시놉시스 - 반드시 참고]\n"${input.synopsis}"`
     : '\n[시놉시스 없음 - URL과 제목을 바탕으로 자율 작성]';
@@ -147,7 +145,7 @@ async function generateMainContent(
   if (!raw) throw new Error('Claude Sonnet 응답 없음');
 
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
-  const parsed = JSON.parse(jsonMatch?.[0] ?? raw) as Omit<ContentGenerationOutput, 'hashtags' | 'bgm_mood'>;
+  const parsed = JSON.parse(jsonMatch?.[0] ?? raw) as Omit<ContentGenerationOutput, 'hashtags'>;
   if (!parsed.blog_post) throw new Error('블로그 본문 생성 실패');
   return parsed;
 }
@@ -156,7 +154,7 @@ async function generateSubContent(
   title: string,
   urlSummary: string,
   workspace: string,
-): Promise<{ hashtags: string[]; bgm_mood: string }> {
+): Promise<{ hashtags: string[] }> {
   const raw = await askClaudeWithModel({
     model: HAIKU_MODEL,
     max_tokens: 300,
@@ -164,20 +162,19 @@ async function generateSubContent(
 내용 요약: ${urlSummary.slice(0, 500)}
 
 JSON만 (코드블록 없이):
-{"hashtags":["태그1", "...최대 20개"],"bgm_mood":"calm/romantic/mysterious/energetic/dramatic/emotional/playful/inspiring 중 1개"}`,
+{"hashtags":["태그1", "...최대 20개"]}`,
   });
 
-  if (!raw) return { hashtags: ['#AI', '#콘텐츠'], bgm_mood: 'calm' };
+  if (!raw) return { hashtags: ['#AI', '#콘텐츠'] };
 
   try {
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    const parsed = JSON.parse(jsonMatch?.[0] ?? raw) as { hashtags?: string[]; bgm_mood?: string };
+    const parsed = JSON.parse(jsonMatch?.[0] ?? raw) as { hashtags?: string[] };
     return {
       hashtags: parsed.hashtags?.length ? parsed.hashtags : ['#AI', '#콘텐츠'],
-      bgm_mood: parsed.bgm_mood ?? 'calm',
     };
   } catch {
-    return { hashtags: ['#AI', '#콘텐츠'], bgm_mood: 'calm' };
+    return { hashtags: ['#AI', '#콘텐츠'] };
   }
 }
 

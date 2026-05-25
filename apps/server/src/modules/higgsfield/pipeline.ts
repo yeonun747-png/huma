@@ -12,20 +12,16 @@ import { generateVideo, type VideoModel } from './video.js';
 
 import { generateTTS, type TTSModel } from './tts.js';
 
-import { mergeWithFFmpeg } from './ffmpeg.js';
-
 import { generateLipsync } from './lipsync.js';
-
-import { selectBgm } from '../bgm/selector.js';
 
 import { uploadTikTokVideo, uploadInstagramReel } from '../social-api/index.js';
 import { uploadYouTubeShorts } from '../social-api/youtube.js';
 
 import { buildBlogVideoAppend } from '../queue/jobs/content-orchestrator.js';
 
-import { join } from 'path';
+import { copyFile, mkdir } from 'fs/promises';
 
-import { askClaude } from '../../lib/anthropic-client.js';
+import { join } from 'path';
 
 
 
@@ -58,41 +54,6 @@ async function updateVideoJob(id: string, fields: Record<string, unknown>) {
     .update({ ...fields, updated_at: new Date().toISOString() })
 
     .eq('id', id);
-
-}
-
-
-
-async function analyzeContentMood(text: string): Promise<string> {
-
-  const moods = ['upbeat', 'calm', 'mysterious', 'emotional', 'energetic', 'cinematic', 'lofi'];
-
-  if (!process.env.ANTHROPIC_API_KEY) {
-
-    return moods[Math.floor(Math.random() * moods.length)];
-
-  }
-
-  try {
-
-    const reply = await askClaude(
-
-      `스크립트의 BGM 분류를 분석해서 1개만 JSON으로 답해. category는 upbeat/calm/mysterious/emotional/energetic/cinematic/lofi 중 하나.\n스크립트: ${text.slice(0, 300)}\n{"category":""}`
-
-    );
-
-    if (reply) {
-      const parsed = JSON.parse(reply) as { category?: string; mood?: string };
-      return parsed.category ?? parsed.mood ?? 'calm';
-    }
-
-  } catch {
-
-    // fallback
-
-  }
-
-  return 'calm';
 
 }
 
@@ -232,7 +193,7 @@ export async function runVideoPipeline(videoJobId: string) {
 
     let audioUrl: string | null = null;
 
-    let lipsyncVideoUrl = videoUrl;
+    let finalVideoUrl = videoUrl;
 
     if (job.tts_script) {
 
@@ -244,59 +205,24 @@ export async function runVideoPipeline(videoJobId: string) {
 
       await updateStep(videoJobId, 'lipsync_generating');
 
-      lipsyncVideoUrl = await generateLipsync({ videoUrl, audioUrl });
+      finalVideoUrl = await generateLipsync({ videoUrl, audioUrl });
 
-      await updateVideoJob(videoJobId, { source_video_url: lipsyncVideoUrl });
-
-    }
-
-
-
-    const mood = await analyzeContentMood(job.tts_script || job.video_prompt || '');
-
-    let bgmPath: string | null = null;
-
-    try {
-
-      bgmPath = await selectBgm({
-
-        workspace: job.workspace,
-
-        contentMood: mood,
-
-        videoDurationSec: job.duration_sec,
-
-        platform: job.upload_platforms?.[0] ?? 'tiktok',
-
-      });
-
-      if (bgmPath) await updateVideoJob(videoJobId, { bgm_url: bgmPath });
-
-    } catch {
-
-      // BGM 없이 영상 생성 계속
+      await updateVideoJob(videoJobId, { source_video_url: finalVideoUrl });
 
     }
 
 
 
-    await updateStep(videoJobId, 'ffmpeg_merging');
+    // v3.12: 별도 BGM 없음 — Kling 3.0 내장 오디오 또는 TTS+립싱크 결과 사용
+    await updateStep(videoJobId, 'finalizing');
+
+    await mkdir(tmpDir, { recursive: true });
 
     const outputPath = join(tmpDir, `${videoJobId}_final.mp4`);
 
-    await mergeWithFFmpeg({
+    const sourceLocal = await downloadFile(finalVideoUrl, join(tmpDir, `${videoJobId}_source.mp4`));
 
-      videoPath: await downloadFile(lipsyncVideoUrl, join(tmpDir, `${videoJobId}_video.mp4`)),
-
-      audioPath: audioUrl ? await downloadFile(audioUrl, join(tmpDir, `${videoJobId}_tts.mp3`)) : null,
-
-      bgmPath,
-
-      outputPath,
-
-      bgmVolume: 0.3,
-
-    });
+    await copyFile(sourceLocal, outputPath);
 
     await updateVideoJob(videoJobId, { output_video_path: outputPath });
 
@@ -371,6 +297,7 @@ export async function runVideoPipeline(videoJobId: string) {
       });
     }
 
+    // Step 4 (규칙 ⑰): TikTok + Instagram + YouTube 병렬 업로드 — 실패해도 계속
     const uploadResults = await Promise.allSettled(uploadTasks.map((t) => t.run()));
     const urls: Partial<Record<'tiktok' | 'instagram' | 'youtube', string | undefined>> = {};
     uploadTasks.forEach((task, i) => {
@@ -392,6 +319,7 @@ export async function runVideoPipeline(videoJobId: string) {
 
     });
 
+    // Step 5 (규칙 ⑰·㉘): 업로드 후 블로그 재개 — YouTube iframe 우선, TT/IG 링크 보조, YT 실패해도 중단 없음
     if (job.blog_job_id) {
 
       await finalizeTypeBJobs(job, tiktokUrl, instagramUrl, youtubeUrl);
@@ -429,4 +357,3 @@ export async function runVideoPipeline(videoJobId: string) {
   }
 
 }
-

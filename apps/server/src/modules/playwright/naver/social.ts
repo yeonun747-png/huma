@@ -57,6 +57,9 @@ export async function runSocialCrank(
     modemSession = await acquireModem(accountId);
     if (!modemSession) throw new Error('NO_MODEM');
     const accountCtx = await loadAccountForBrowser(accountId, modemSession.proxyPort);
+    if (accountCtx.account_type !== 'crank') {
+      throw new Error('ACCOUNT_NOT_CRANK');
+    }
     const warmupDay = accountCtx.warmup_day ?? 0;
     const plan = await getTodayPlan(accountCtx);
     const persona = accountCtx.persona;

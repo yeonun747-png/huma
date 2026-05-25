@@ -5,7 +5,8 @@ export type VideoPipelineStatus =
   | 'image_generating'
   | 'video_generating'
   | 'tts_generating'
-  | 'ffmpeg_merging'
+  | 'lipsync_generating'
+  | 'finalizing'
   | 'uploading'
   | 'done'
   | 'failed';
@@ -24,7 +25,6 @@ export interface HumaVideoQueue {
   tts_model: string;
   tts_script?: string;
   tts_audio_url?: string;
-  bgm_url?: string;
   output_video_path?: string;
   upload_platforms?: string[];
   caption?: string;

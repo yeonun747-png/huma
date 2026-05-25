@@ -9,7 +9,6 @@
     "./account": "./types/account.ts",
     "./job": "./types/job.ts",
     "./modem": "./types/modem.ts",
-    "./video": "./types/video.ts",
-    "./bgm": "./types/bgm.ts"
+    "./video": "./types/video.ts"
   }
 }

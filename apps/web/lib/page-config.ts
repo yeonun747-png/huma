@@ -9,7 +9,6 @@ export type PageActionType =
   | 'openAccountForm'
   | 'startVideoPipeline'
   | 'refreshWatcher'
-  | 'openBgmForm'
   | 'startCrank'
   | 'openModemForm'
   | 'refreshSeo'
@@ -37,7 +36,7 @@ export const PAGE_META: Record<string, PageMeta> = {
   '/video-pipeline': { title: '영상 파이프라인', action: '▶ 파이프라인', actionType: 'startVideoPipeline' },
   '/watcher': { title: 'Layer4 Watcher', action: '↺ 새로고침', actionType: 'refreshWatcher' },
   '/human-engine': { title: '휴먼 엔진 설정', action: '저장', actionType: 'saveHuman', contentClass: 'px-[18px] py-4' },
-  '/bgm-library': { title: 'BGM 라이브러리', action: '+ 음원 추가', actionType: 'openBgmForm' },
+  '/bgm-library': { title: '오디오 정책', action: '—', actionType: 'none' },
   '/crank': { title: 'C-Rank 소통 관리', action: '▶ 소통 실행', actionType: 'startCrank' },
   '/modems': { title: '프록시 관리', action: '+ 프록시 추가', actionType: 'openModemForm' },
   '/settings': { title: '환경 설정', action: '저장', actionType: 'saveSettings' },

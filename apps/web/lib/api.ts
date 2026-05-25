@@ -1,4 +1,4 @@
-import type { HumaJob, HumaAccount, HumaModem, HumaVideoQueue, BgmListResponse, BgmPixabayItem } from '@huma/shared';
+import type { HumaJob, HumaAccount, HumaModem, HumaVideoQueue } from '@huma/shared';
 
 const API_BASE = process.env.NEXT_PUBLIC_HUMA_API_URL ?? 'http://localhost:3100';
 
@@ -91,10 +91,6 @@ export const api = {
   videoQueue: () => request<HumaVideoQueue[]>('/api/video/queue'),
   createVideo: (body: Record<string, unknown>) =>
     request('/api/video/generate', { method: 'POST', body: JSON.stringify(body) }),
-  bgmList: (category?: string) =>
-    request<BgmListResponse>(`/api/bgm/list${qs({ category })}`),
-  bgmDownload: (id: number, url: string) =>
-    request<{ filePath: string }>(`/api/bgm/download${qs({ id: String(id), url })}`),
   settings: () => request<Array<{ key: string; value: unknown }>>('/api/settings'),
   getSetting: (key: string) => request<Record<string, unknown>>(`/api/settings/${key}`),
   updateSetting: (key: string, value: unknown) =>

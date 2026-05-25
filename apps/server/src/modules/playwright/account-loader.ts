@@ -29,6 +29,7 @@ export async function ensureAccountAntiDetect(accountId: string, workspace: stri
   if (!account.fingerprint) {
     updates.fingerprint = generateFingerprint(accountId);
   }
+  // 규칙 ⑲: fingerprint 컬럼이 있으면 절대 덮어쓰지 않음
   if (!account.persona) {
     const { generatePersona } = await import('./persona.js');
     updates.persona = await generatePersona(workspace);
@@ -67,7 +68,10 @@ export async function loadAccountForBrowser(
   if (!fingerprint) {
     fingerprint = generateFingerprint(accountId);
     await supabase.from('huma_accounts').update({ fingerprint }).eq('id', accountId);
+  } else if (typeof fingerprint !== 'object' || !fingerprint.userAgent) {
+    throw new Error('FINGERPRINT_CORRUPT');
   }
+  // 규칙 ⑲: 저장된 fingerprint 재생성·overwrite 금지
 
   let persona = parsePersona(account.persona);
   if (!account.persona) {

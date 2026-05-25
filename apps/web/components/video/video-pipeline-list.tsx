@@ -13,7 +13,7 @@ import { api } from '@/lib/api';
 import { useWorkspace } from '@/components/dashboard/workspace-context';
 import { cn } from '@/lib/constants';
 
-const STEPS = ['pending', 'image_generating', 'video_generating', 'tts_generating', 'ffmpeg_merging', 'uploading', 'done'];
+const STEPS = ['pending', 'image_generating', 'video_generating', 'tts_generating', 'lipsync_generating', 'finalizing', 'uploading', 'done'];
 
 export function VideoPipelineList() {
   const { workspace } = useWorkspace();

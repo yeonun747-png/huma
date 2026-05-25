@@ -103,7 +103,6 @@ CREATE TABLE IF NOT EXISTS huma_video_queue (
   tts_model VARCHAR(50) DEFAULT 'eleven-v3',
   tts_script TEXT,
   tts_audio_url TEXT,
-  bgm_url TEXT,
   output_video_path TEXT,
   upload_platforms TEXT[],
   caption TEXT,
@@ -119,26 +118,6 @@ CREATE TABLE IF NOT EXISTS huma_video_queue (
   error_message TEXT,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS huma_bgm_library (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  title VARCHAR(200) NOT NULL,
-  file_path TEXT NOT NULL,
-  file_url TEXT NOT NULL,
-  duration_sec INTEGER NOT NULL,
-  mood TEXT[] NOT NULL,
-  genre TEXT[] NOT NULL,
-  tempo VARCHAR(10),
-  energy VARCHAR(10),
-  bpm INTEGER,
-  keywords TEXT[],
-  workspace_fit TEXT[],
-  platform_fit TEXT[],
-  source VARCHAR(100),
-  license VARCHAR(20),
-  use_count INTEGER DEFAULT 0,
-  created_at TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS huma_cafe_targets (
@@ -188,8 +167,7 @@ INSERT INTO huma_settings (key, value) VALUES
 ('human_engine', '{"wpm_mean":55,"wpm_sigma":18,"typo_rate":0.04,"backspace_delay_ms":[200,800],"paragraph_pause_ms":[2000,8000],"review_duration_ms":[120000,300000],"night_ban_start":1,"night_ban_end":7,"active_hours":[0.1,0.05,0.05,0.05,0.08,0.15,0.35,0.55,0.7,0.85,0.9,0.88,0.75,0.8,0.85,0.9,0.95,0.92,0.88,0.82,0.7,0.5,0.3,0.15],"weekend_ratio":0.5,"min_publish_interval_hours":4,"crank_publish_ratio":1,"crank_comm_ratio":3,"fingerprint":{"canvas_spoof":true,"webgl_spoof":true,"audio_noise":true,"mouse_bezier":true,"click_jitter_px":3,"auto_pause_on_detect":true,"captcha_slack":true,"cooldown_429_hours":2}}'),
 ('image_engine', '{"noise_pct":0.8,"jpeg_quality_range":[90,96],"exif_randomize":true,"gps_randomize":true,"block_duplicate":true}'),
 ('watcher', '{"slack_webhook":"","cooldown_429_min":15,"recovery_steps_min":[12,30,120],"auto_pause":true}'),
-('higgsfield', '{"default_image_model":"nano-banana-pro","default_video_model":"kling-3.0","default_tts_model":"eleven-v3","video_duration_sec":5,"aspect_ratio":"9:16"}'),
-('bgm', '{"fallback_to_suno":true,"max_use_count_before_rotate":10}'),
+('higgsfield', '{"default_image_model":"gpt-image-2","default_video_model":"kling-3.0","default_video_resolution":"720p","default_tts_model":"eleven-v3","video_duration_sec":15,"aspect_ratio":"9:16","higgsfield_plan":"Plus","monthly_credits":1000}'),
 ('optimal_schedule', '{"naver_blog":{"windows":[{"start":"08:00","end":"10:00"},{"start":"19:00","end":"21:00"}]},"tiktok":{"windows":[{"start":"19:00","end":"21:00"},{"start":"10:00","end":"12:00"}]},"instagram":{"windows":[{"start":"09:00","end":"11:00"},{"start":"19:00","end":"21:00"}]},"threads":{"windows":[{"start":"08:00","end":"10:00"},{"start":"12:00","end":"13:00"}]},"x":{"windows":[{"start":"09:00","end":"10:00"},{"start":"12:00","end":"13:00"}]},"spread_minutes":30}'),
 ('social_crank', '{"daily_limit_per_account":30,"min_visit_interval_days":5,"our_blog_ratio":0.25,"other_blog_ratio":0.75,"visits_per_session":15,"stay_duration_ms":[180000,300000],"keywords":["사주풀이","꿈해몽","신년운세","궁합","자미두수","운세","사주"]}')
 ON CONFLICT (key) DO NOTHING;
@@ -201,14 +179,11 @@ CREATE INDEX IF NOT EXISTS idx_huma_logs_created ON huma_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_huma_logs_workspace ON huma_logs(workspace, platform);
 CREATE INDEX IF NOT EXISTS idx_huma_platform_accounts_ws ON huma_platform_accounts(workspace, platform);
 CREATE INDEX IF NOT EXISTS idx_huma_video_queue_status ON huma_video_queue(status);
-CREATE INDEX IF NOT EXISTS idx_huma_bgm_mood ON huma_bgm_library USING GIN(mood);
-CREATE INDEX IF NOT EXISTS idx_huma_bgm_workspace ON huma_bgm_library USING GIN(workspace_fit);
-CREATE INDEX IF NOT EXISTS idx_huma_bgm_keywords ON huma_bgm_library USING GIN(keywords);
 
 DO $$ DECLARE t TEXT;
 BEGIN FOR t IN SELECT unnest(ARRAY[
   'huma_accounts','huma_modems','huma_platform_accounts',
-  'huma_jobs','huma_video_queue','huma_bgm_library',
+  'huma_jobs','huma_video_queue',
   'huma_cafe_targets','huma_logs','huma_settings','huma_admins'])
 LOOP
   EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);

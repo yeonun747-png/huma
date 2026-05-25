@@ -44,7 +44,7 @@ import { useRegisterPageAction } from '@/components/dashboard/page-action-contex
 
 
 
-const PIPE_STEPS = ['image_generating', 'video_generating', 'tts_generating', 'ffmpeg_merging', 'uploading'];
+const PIPE_STEPS = ['image_generating', 'video_generating', 'tts_generating', 'lipsync_generating', 'finalizing', 'uploading'];
 
 
 
@@ -59,8 +59,6 @@ export function VideoPipelineView() {
   const [vidModel, setVidModel] = useState<VideoModelId>(DEFAULT_VIDEO_MODEL);
 
   const [ttsModel, setTtsModel] = useState(DEFAULT_TTS_MODEL);
-
-  const [autoBgm, setAutoBgm] = useState(true);
   const [creditsRemaining, setCreditsRemaining] = useState<number | null>(null);
 
   const formRef = useRef<HTMLDivElement>(null);
@@ -121,8 +119,6 @@ export function VideoPipelineView() {
       video_model: vidModel,
 
       tts_model: model,
-
-      auto_bgm: autoBgm,
 
       upload_platforms: ['tiktok', 'instagram', 'youtube'],
 
@@ -228,18 +224,8 @@ export function VideoPipelineView() {
 
             </div>
 
-            <div className="flex items-center justify-between rounded-md border border-huma-bdr bg-huma-bg3 px-2.5 py-2">
-
-              <div>
-
-                <div className="text-[11.5px] text-huma-t">④ BGM — 자동 선택 (태그 매칭)</div>
-
-                <div className="font-mono text-[11px] text-huma-t3">Supabase BGM → Suno AI 폴백</div>
-
-              </div>
-
-              <button type="button" className={`m-tgl ${autoBgm ? 'on' : ''}`} onClick={() => setAutoBgm(!autoBgm)} aria-label="BGM 자동 선택" />
-
+            <div className="rounded-md border border-huma-bdr bg-huma-bg3 px-2.5 py-2 text-[11px] text-huma-t3">
+              ④ 오디오 — Kling 3.0 내장 (TTS 선택 시 립싱크)
             </div>
 
             <button type="button" className="btn-primary w-full py-2" onClick={startPipeline}>▶ 파이프라인 시작</button>
@@ -288,7 +274,7 @@ export function VideoPipelineView() {
         ) : (
         <MTable
 
-          head={['영상', '이미지 모델', '영상 모델', 'TTS', 'BGM', '상태', '업로드']}
+          head={['영상', '이미지 모델', '영상 모델', 'TTS', '상태', '업로드']}
 
           rows={items.slice(0, 10).map((v) => [
 
@@ -299,8 +285,6 @@ export function VideoPipelineView() {
             <span key="v" className="font-mono text-[11px]">{videoModelLabel(v.video_model ?? vidModel)}</span>,
 
             <span key="t" className="font-mono text-[11px]">{ttsModelLabel(v.tts_model ?? ttsModel)}</span>,
-
-            v.bgm_url ? '자동' : '—',
 
             <MTag key="s" tone={v.status === 'done' ? 'ok' : v.status === 'failed' ? 'err' : 'warn'}>{v.status}</MTag>,
 
