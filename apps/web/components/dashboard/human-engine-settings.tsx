@@ -54,9 +54,12 @@ interface MediaConfig {
   default_image_model: string;
   default_video_model: string;
   tts_engine: string;
-  video_resolution: string;
   whisper_subtitle_sync: boolean;
 }
+
+/** v3.12: Shorts 파이프라인 영상 해상도 720p 고정 (9:16) */
+const FIXED_VIDEO_RESOLUTION = '720p';
+const FIXED_VIDEO_DIMENSIONS = '720×1280 · 9:16';
 
 /** 목업 initHuman() intensity 배열 */
 const MOCKUP_ACTIVE_HOURS = [
@@ -99,7 +102,6 @@ const DEFAULT_MEDIA: MediaConfig = {
   default_image_model: DEFAULT_IMAGE_MODEL,
   default_video_model: DEFAULT_VIDEO_MODEL,
   tts_engine: DEFAULT_TTS_MODEL,
-  video_resolution: '1080x1920',
   whisper_subtitle_sync: true,
 };
 
@@ -221,7 +223,6 @@ export function HumanEngineSettings() {
         default_image_model: normalizeImageModel(String(hg.default_image_model ?? DEFAULT_IMAGE_MODEL)),
         default_video_model: normalizeVideoModel(String(hg.default_video_model ?? DEFAULT_VIDEO_MODEL)),
         tts_engine: normalizeTtsModel(String(hg.default_tts_model ?? DEFAULT_TTS_MODEL)),
-        video_resolution: String(hg.video_resolution ?? '1080x1920'),
         whisper_subtitle_sync: Boolean(hg.whisper_subtitle_sync ?? true),
       });
     });
@@ -238,7 +239,7 @@ export function HumanEngineSettings() {
         default_video_model: normalizeVideoModel(media.default_video_model),
         default_tts_model: normalizeTtsModel(media.tts_engine),
         aspect_ratio: '9:16',
-        video_resolution: media.video_resolution,
+        default_video_resolution: FIXED_VIDEO_RESOLUTION,
         whisper_subtitle_sync: media.whisper_subtitle_sync,
       }),
       api.updateSetting('watcher', {
@@ -399,10 +400,7 @@ export function HumanEngineSettings() {
             </select>
           </div>
           <div className="he-chart-caption">{ttsLabel} · Higgsfield Plus</div>
-          <div className="he-slider-row">
-            <span className="he-slider-label">영상 해상도</span>
-            <span className="he-video-val">1080×1920 · 9:16</span>
-          </div>
+          <HeStaticRow label="영상 해상도" value={`${FIXED_VIDEO_DIMENSIONS} · ${FIXED_VIDEO_RESOLUTION} 고정`} />
           <HeToggle
             label="자막 자동 싱크 (Whisper)"
             value={media.whisper_subtitle_sync}

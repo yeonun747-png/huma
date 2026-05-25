@@ -27,8 +27,9 @@ export async function generateVideo(params: {
   const args: Record<string, unknown> = {
     start_image_url: params.imageUrl,
     prompt: params.prompt,
-    duration: params.durationSec || 5,
+    duration: params.durationSec || 15,
     aspect_ratio: '9:16',
+    resolution: '720p',
   };
   if (uiModel === 'kling-3.0-motion-control') args.motion_control = true;
   if (uiModel === 'veo-3.1') args.model = 'veo-3-1-preview';
