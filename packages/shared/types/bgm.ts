@@ -19,3 +19,18 @@ export interface HumaBgmLibrary {
   use_count: number;
   created_at: string;
 }
+
+export interface BgmPixabayItem {
+  id: number;
+  title: string;
+  duration: number;
+  previewUrl: string;
+  downloadUrl: string;
+  tags: string[];
+  likes: number;
+}
+
+export interface BgmListResponse {
+  category: string;
+  items: BgmPixabayItem[];
+}

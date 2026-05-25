@@ -25,6 +25,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const onExpired = () => {
+      localStorage.removeItem('huma_token');
+      localStorage.removeItem('huma_workspace');
+      setToken(null);
+      setAdmin(null);
+    };
+    window.addEventListener('huma:auth-expired', onExpired);
+    return () => window.removeEventListener('huma:auth-expired', onExpired);
+  }, []);
+
+  useEffect(() => {
     const t = localStorage.getItem('huma_token');
     if (t) {
       setToken(t);

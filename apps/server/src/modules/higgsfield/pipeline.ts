@@ -65,7 +65,7 @@ async function updateVideoJob(id: string, fields: Record<string, unknown>) {
 
 async function analyzeContentMood(text: string): Promise<string> {
 
-  const moods = ['calm', 'romantic', 'mysterious', 'energetic', 'inspiring', 'dark', 'playful', 'emotional', 'dramatic'];
+  const moods = ['upbeat', 'calm', 'mysterious', 'emotional', 'energetic', 'cinematic', 'lofi'];
 
   if (!process.env.ANTHROPIC_API_KEY) {
 
@@ -77,11 +77,14 @@ async function analyzeContentMood(text: string): Promise<string> {
 
     const reply = await askClaude(
 
-      `스크립트의 무드를 분석해서 1개만 JSON으로 답해. mood는 calm/romantic/mysterious/energetic/inspiring/dark/playful/emotional/dramatic 중 하나.\n스크립트: ${text.slice(0, 300)}\n{"mood":""}`
+      `스크립트의 BGM 분류를 분석해서 1개만 JSON으로 답해. category는 upbeat/calm/mysterious/emotional/energetic/cinematic/lofi 중 하나.\n스크립트: ${text.slice(0, 300)}\n{"category":""}`
 
     );
 
-    if (reply) return JSON.parse(reply).mood ?? 'calm';
+    if (reply) {
+      const parsed = JSON.parse(reply) as { category?: string; mood?: string };
+      return parsed.category ?? parsed.mood ?? 'calm';
+    }
 
   } catch {
 
@@ -251,19 +254,29 @@ export async function runVideoPipeline(videoJobId: string) {
 
     const mood = await analyzeContentMood(job.tts_script || job.video_prompt || '');
 
-    const bgmUrl = await selectBgm({
+    let bgmPath: string | null = null;
 
-      workspace: job.workspace,
+    try {
 
-      contentMood: mood,
+      bgmPath = await selectBgm({
 
-      videoDurationSec: job.duration_sec,
+        workspace: job.workspace,
 
-      platform: job.upload_platforms?.[0] ?? 'tiktok',
+        contentMood: mood,
 
-    });
+        videoDurationSec: job.duration_sec,
 
-    await updateVideoJob(videoJobId, { bgm_url: bgmUrl });
+        platform: job.upload_platforms?.[0] ?? 'tiktok',
+
+      });
+
+      if (bgmPath) await updateVideoJob(videoJobId, { bgm_url: bgmPath });
+
+    } catch {
+
+      // BGM 없이 영상 생성 계속
+
+    }
 
 
 
@@ -277,11 +290,11 @@ export async function runVideoPipeline(videoJobId: string) {
 
       audioPath: audioUrl ? await downloadFile(audioUrl, join(tmpDir, `${videoJobId}_tts.mp3`)) : null,
 
-      bgmPath: await downloadFile(bgmUrl, join(tmpDir, `${videoJobId}_bgm.mp3`)),
+      bgmPath,
 
       outputPath,
 
-      bgmVolume: 0.25,
+      bgmVolume: 0.3,
 
     });
 

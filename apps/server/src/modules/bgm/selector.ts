@@ -1,68 +1,45 @@
-import axios from 'axios';
-import { supabase } from '../../middleware/auth.js';
-import { getSetting } from '../../lib/settings.js';
-import { generateSunoMusic } from './suno.js';
 import { askClaude } from '../../lib/anthropic-client.js';
+import { normalizeBgmCategory, selectRandomBgmFile, type BgmCategory } from './pixabay.js';
+
+const BGM_MOODS: BgmCategory[] = [
+  'upbeat',
+  'calm',
+  'mysterious',
+  'emotional',
+  'energetic',
+  'cinematic',
+  'lofi',
+];
 
 export async function selectBgm(params: {
   workspace: string;
   contentMood: string;
   videoDurationSec: number;
   platform: string;
-}): Promise<string> {
-  let url = await queryBgm(params, ['mood', 'workspace', 'platform']);
-  if (url) return url;
+}): Promise<string | null> {
+  void params.workspace;
+  void params.videoDurationSec;
+  void params.platform;
 
-  url = await queryBgm(params, ['mood', 'workspace']);
-  if (url) return url;
-
-  url = await queryBgm(params, ['workspace']);
-  if (url) return url;
-
-  const bgmConfig = await getSetting('bgm', { fallback_to_suno: true });
-  if (bgmConfig.fallback_to_suno) {
-    return generateSunoMusic(params);
-  }
-
-  throw new Error('BGM 선택 실패');
+  const category = normalizeBgmCategory(params.contentMood);
+  return selectRandomBgmFile(category);
 }
 
-async function queryBgm(
-  params: { workspace: string; contentMood: string; videoDurationSec: number; platform: string },
-  filters: string[]
-): Promise<string | null> {
-  let query = supabase
-    .from('huma_bgm_library')
-    .select('id, file_url, use_count')
-    .gte('duration_sec', params.videoDurationSec)
-    .order('use_count', { ascending: true })
-    .limit(5);
-
-  if (filters.includes('mood')) query = query.contains('mood', [params.contentMood]);
-  if (filters.includes('workspace')) query = query.contains('workspace_fit', [params.workspace]);
-  if (filters.includes('platform')) query = query.contains('platform_fit', [params.platform]);
-
-  const { data } = await query;
-  if (!data?.length) return null;
-
-  const selected = data[Math.floor(Math.random() * data.length)];
-  await supabase
-    .from('huma_bgm_library')
-    .update({ use_count: (selected.use_count ?? 0) + 1 })
-    .eq('id', selected.id);
-
-  return selected.file_url;
-}
-
-export async function analyzeContentMood(text: string, workspace: string): Promise<string> {
+export async function analyzeContentMood(text: string, workspace: string): Promise<BgmCategory> {
+  void workspace;
   if (!process.env.ANTHROPIC_API_KEY) return 'calm';
+
   try {
     const reply = await askClaude(
-      `스크립트의 무드를 분석해서 1개만 JSON으로 답해. mood는 calm/romantic/mysterious/energetic/inspiring/dark/playful/emotional/dramatic 중 하나. workspace: ${workspace}\n스크립트: ${text.slice(0, 300)}\n{"mood":""}`
+      `스크립트의 BGM 분류를 분석해서 1개만 JSON으로 답해. category는 upbeat/calm/mysterious/emotional/energetic/cinematic/lofi 중 하나.\n스크립트: ${text.slice(0, 300)}\n{"category":""}`
     );
-    if (reply) return JSON.parse(reply).mood ?? 'calm';
+    if (reply) {
+      const parsed = JSON.parse(reply) as { category?: string; mood?: string };
+      return normalizeBgmCategory(parsed.category ?? parsed.mood ?? 'calm');
+    }
   } catch {
     // ignore
   }
-  return 'calm';
+
+  return BGM_MOODS[Math.floor(Math.random() * BGM_MOODS.length)] ?? 'calm';
 }

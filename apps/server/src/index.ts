@@ -49,11 +49,9 @@ async function main() {
 
 
   await app.register(cors, {
-
     origin: true,
-
     credentials: true,
-
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-HUMA-KEY'],
   });
 
 

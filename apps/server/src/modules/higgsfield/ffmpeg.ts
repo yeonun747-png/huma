@@ -3,23 +3,31 @@ import { execSync } from 'child_process';
 export async function mergeWithFFmpeg(params: {
   videoPath: string;
   audioPath: string | null;
-  bgmPath: string;
+  bgmPath: string | null;
   outputPath: string;
   bgmVolume?: number;
 }): Promise<string> {
   const { videoPath, audioPath, bgmPath, outputPath, bgmVolume = 0.25 } = params;
 
-  const inputs = [`-i "${videoPath}"`, `-i "${bgmPath}"`];
+  const inputs = [`-i "${videoPath}"`];
   let filterComplex = '';
   let mapFlags = '';
 
-  if (audioPath) {
+  if (bgmPath) {
+    inputs.push(`-i "${bgmPath}"`);
+    if (audioPath) {
+      inputs.push(`-i "${audioPath}"`);
+      filterComplex = `-filter_complex "[1:a]volume=${bgmVolume}[bgm];[2:a][bgm]amix=inputs=2:duration=first[aout]"`;
+      mapFlags = '-map 0:v -map "[aout]"';
+    } else {
+      filterComplex = `-filter_complex "[1:a]volume=${bgmVolume}[aout]"`;
+      mapFlags = '-map 0:v -map "[aout]"';
+    }
+  } else if (audioPath) {
     inputs.push(`-i "${audioPath}"`);
-    filterComplex = `-filter_complex "[1:a]volume=${bgmVolume}[bgm];[2:a][bgm]amix=inputs=2:duration=first[aout]"`;
-    mapFlags = '-map 0:v -map "[aout]"';
+    mapFlags = '-map 0:v -map 1:a';
   } else {
-    filterComplex = `-filter_complex "[1:a]volume=${bgmVolume}[aout]"`;
-    mapFlags = '-map 0:v -map "[aout]"';
+    mapFlags = '-map 0:v -map 0:a?';
   }
 
   const cmd = [

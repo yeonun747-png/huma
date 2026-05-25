@@ -1,36 +1,44 @@
 import type { FastifyInstance } from 'fastify';
-import { authMiddleware, supabase } from '../middleware/auth.js';
+import { authMiddleware } from '../middleware/auth.js';
+import {
+  downloadPixabayBgm,
+  fetchPixabayBgmList,
+  isAllowedPixabayUrl,
+  normalizeBgmCategory,
+} from '../modules/bgm/pixabay.js';
 
 export async function registerBgmRoutes(app: FastifyInstance) {
-  app.get('/api/bgm', { preHandler: authMiddleware }, async (request) => {
-    const { workspace, mood } = request.query as { workspace?: string; mood?: string };
-    let query = supabase.from('huma_bgm_library').select('*').order('use_count', { ascending: true });
-    if (workspace) query = query.contains('workspace_fit', [workspace]);
-    if (mood) query = query.contains('mood', [mood]);
-    const { data } = await query;
-    return data ?? [];
+  app.get('/api/bgm/list', { preHandler: authMiddleware }, async (request, reply) => {
+    const { category = 'upbeat' } = request.query as { category?: string };
+
+    try {
+      return await fetchPixabayBgmList(category);
+    } catch (err) {
+      return reply.code(502).send({
+        error: (err as Error).message,
+        category: normalizeBgmCategory(category),
+        items: [],
+      });
+    }
   });
 
-  app.post('/api/bgm', { preHandler: authMiddleware }, async (request, reply) => {
-    const body = request.body as Record<string, unknown>;
-    const { data, error } = await supabase.from('huma_bgm_library').insert(body).select().single();
-    if (error) return reply.code(400).send({ error: error.message });
-    return data;
-  });
+  app.get('/api/bgm/download', { preHandler: authMiddleware }, async (request, reply) => {
+    const { id, url } = request.query as { id?: string; url?: string };
+    const numericId = Number(id);
 
-  app.get('/api/bgm/select', { preHandler: authMiddleware }, async (request) => {
-    const { workspace, mood, platform } = request.query as {
-      workspace?: string;
-      mood?: string;
-      platform?: string;
-    };
-    let query = supabase.from('huma_bgm_library').select('id, file_url, use_count').limit(5);
-    if (mood) query = query.contains('mood', [mood]);
-    if (workspace) query = query.contains('workspace_fit', [workspace]);
-    if (platform) query = query.contains('platform_fit', [platform]);
-    const { data } = await query;
-    if (!data?.length) return { file_url: null };
-    const selected = data[Math.floor(Math.random() * data.length)];
-    return { file_url: selected.file_url, id: selected.id };
+    if (!numericId || !url) {
+      return reply.code(400).send({ error: 'id와 url이 필요합니다' });
+    }
+
+    if (!isAllowedPixabayUrl(url)) {
+      return reply.code(400).send({ error: 'Pixabay URL만 허용됩니다' });
+    }
+
+    try {
+      const filePath = await downloadPixabayBgm(numericId, url);
+      return { filePath };
+    } catch (err) {
+      return reply.code(502).send({ error: (err as Error).message });
+    }
   });
 }
