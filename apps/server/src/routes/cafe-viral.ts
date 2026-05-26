@@ -64,6 +64,7 @@ export async function registerCafeViralRoutes(app: FastifyInstance) {
         ...(body.category !== undefined ? { category: String(body.category) } : {}),
         ...(body.keywords !== undefined ? { keywords: body.keywords as string[] } : {}),
         ...(body.grade_requirements !== undefined ? { grade_requirements: body.grade_requirements } : {}),
+        ...(body.grade_auto_detected !== undefined ? { grade_auto_detected: Boolean(body.grade_auto_detected) } : {}),
         ...(body.activity_ratio !== undefined ? { activity_ratio: body.activity_ratio } : {}),
         ...(body.is_active !== undefined ? { is_active: Boolean(body.is_active) } : {}),
         ...(body.note !== undefined ? { note: String(body.note) } : {}),
@@ -102,15 +103,19 @@ export async function registerCafeViralRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/cafe-viral/cafes/:id/scan', { preHandler: authMiddleware }, async (request) => {
+  app.post('/api/cafe-viral/cafes/:id/scan', { preHandler: authMiddleware }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const { browser, context } = await createBrowser();
     try {
-      const page = await context.newPage();
-      const count = await scanCafeById(id, page);
-      return { success: true, count };
-    } finally {
-      await browser.close();
+      const { browser, context } = await createBrowser();
+      try {
+        const page = await context.newPage();
+        const count = await scanCafeById(id, page);
+        return { success: true, count };
+      } finally {
+        await browser.close();
+      }
+    } catch (err) {
+      return reply.code(400).send({ error: (err as Error).message });
     }
   });
 

@@ -105,6 +105,78 @@ JSON만: {"title":"...","content":"..."}`,
   };
 }
 
+async function resolveCafeClubId(page: Page, slug: string): Promise<string | null> {
+  await page.goto(`https://cafe.naver.com/${slug}`, { waitUntil: 'domcontentloaded' });
+  await sleep(randomBetween(1500, 3000));
+
+  const clubId = await page
+    .evaluate(() => {
+      const w = window as unknown as { g_sClubId?: string };
+      if (w.g_sClubId && /^\d+$/.test(w.g_sClubId)) return w.g_sClubId;
+
+      const iframe = document.querySelector('#cafe_main') as HTMLIFrameElement | null;
+      if (iframe?.src) {
+        const m = iframe.src.match(/clubid=(\d+)/i);
+        if (m) return m[1];
+      }
+
+      const html = document.documentElement.innerHTML;
+      const patterns = [
+        /g_sClubId\s*=\s*['"](\d+)['"]/,
+        /"clubId"\s*:\s*(\d+)/,
+        /clubid[=:]["']?(\d{5,})/i,
+      ];
+      for (const re of patterns) {
+        const m = html.match(re);
+        if (m) return m[1];
+      }
+      return null;
+    })
+    .catch(() => null);
+
+  return clubId;
+}
+
+async function collectArticleLinks(page: Page): Promise<Array<{ title: string; url: string }>> {
+  const frame = page.frame({ name: 'cafe_main' });
+  const target = frame ?? page;
+
+  return target
+    .$$eval('a.article, .article-board .td_article a, .board-list a', (els) =>
+      els
+        .map((el) => ({
+          title: (el as HTMLElement).textContent?.trim() ?? '',
+          url: (el as HTMLAnchorElement).href ?? '',
+        }))
+        .filter((x) => x.url.includes('articles') && x.title),
+    )
+    .catch(() => [] as Array<{ title: string; url: string }>);
+}
+
+async function searchCafeByKeyword(
+  page: Page,
+  slug: string,
+  clubId: string,
+  keyword: string,
+): Promise<Array<{ title: string; url: string }>> {
+  const searchUrl = `https://cafe.naver.com/ArticleSearchList.nhn?search.query=${encodeURIComponent(keyword)}&search.clubid=${clubId}`;
+  await page.goto(searchUrl, { waitUntil: 'domcontentloaded' });
+  await sleep(randomBetween(2000, 4000));
+  return collectArticleLinks(page);
+}
+
+async function searchCafeBoardByKeyword(
+  page: Page,
+  slug: string,
+  keyword: string,
+): Promise<Array<{ title: string; url: string }>> {
+  await page.goto(`https://cafe.naver.com/${slug}`, { waitUntil: 'domcontentloaded' });
+  await sleep(randomBetween(2000, 4000));
+  const items = await collectArticleLinks(page);
+  const lower = keyword.toLowerCase();
+  return items.filter((item) => item.title.toLowerCase().includes(lower));
+}
+
 /** 키워드 검색으로 타 카페 게시글 수집 */
 export async function scanCafeForTargets(params: {
   cafeSlug: string;
@@ -117,27 +189,19 @@ export async function scanCafeForTargets(params: {
   const hits: CafePostHit[] = [];
   const seen = new Set<string>();
 
+  const clubId = await resolveCafeClubId(params.page, params.cafeSlug);
+
   for (const keyword of params.keywords) {
-    const searchUrl = `https://cafe.naver.com/ArticleSearchList.nhn?search.query=${encodeURIComponent(keyword)}&search.clubid=${params.cafeSlug}`;
-    await params.page.goto(`https://cafe.naver.com/${params.cafeSlug}`);
-    await params.page.waitForLoadState('networkidle').catch(() => {});
-    await sleep(randomBetween(2000, 4000));
-
     try {
-      await params.page.goto(searchUrl);
-      await params.page.waitForLoadState('networkidle').catch(() => {});
-      await sleep(randomBetween(2000, 4000));
+      const items = clubId
+        ? await searchCafeByKeyword(params.page, params.cafeSlug, clubId, keyword)
+        : await searchCafeBoardByKeyword(params.page, params.cafeSlug, keyword);
 
-      const items = await params.page.$$eval('a.article, .article-board .td_article a', (els) =>
-        els
-          .map((el) => ({
-            title: (el as HTMLElement).textContent?.trim() ?? '',
-            url: (el as HTMLAnchorElement).href ?? '',
-          }))
-          .filter((x) => x.url && x.title),
-      );
+      const filtered = items.length
+        ? items
+        : await searchCafeBoardByKeyword(params.page, params.cafeSlug, keyword);
 
-      for (const item of items.slice(0, 15)) {
+      for (const item of filtered.slice(0, 15)) {
         const url = normalizeCafePostUrl(item.url);
         if (seen.has(url)) continue;
         seen.add(url);

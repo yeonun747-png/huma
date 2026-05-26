@@ -9,10 +9,11 @@ function getToken(): string | null {
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
+  const hasBody = options.body !== undefined && options.body !== null && options.body !== '';
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),
   };
+  if (hasBody) headers['Content-Type'] = 'application/json';
   if (token) headers['X-HUMA-KEY'] = token;
 
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers }).catch(() => {
@@ -124,6 +125,8 @@ export const api = {
   cafeViralCafes: () => request<Array<Record<string, unknown>>>('/api/cafe-viral/cafes'),
   createCafeViral: (body: Record<string, unknown>) =>
     request('/api/cafe-viral/cafes', { method: 'POST', body: JSON.stringify(body) }),
+  updateCafeViral: (id: string, body: Record<string, unknown>) =>
+    request(`/api/cafe-viral/cafes/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   scanCafeViral: (cafeId: string) =>
     request<{ success: boolean; count: number }>(`/api/cafe-viral/cafes/${cafeId}/scan`, { method: 'POST' }),
   cafeViralPosts: (status?: string) =>
