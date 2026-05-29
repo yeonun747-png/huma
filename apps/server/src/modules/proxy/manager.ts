@@ -1,6 +1,7 @@
 import { supabase } from '../../middleware/auth.js';
+import { getModemProxyPort, releaseModemLocks } from '../modem/allocation.js';
 
-/** 프로세스 내 동시 점유 — 규칙②: 동일 슬롯 2계정 금지 */
+/** 프로세스 내 동시 점유 — 규칙 ⑬: 동일 슬롯 2계정 금지 */
 const busyModems = new Set<string>();
 
 export interface ModemSession {
@@ -8,6 +9,7 @@ export interface ModemSession {
   modemId: string;
   /** C-Rank idle 슬롯 임대 (세션 종료 시 반납) */
   leased: boolean;
+  lockKind: 'posting' | 'crank';
 }
 
 export async function acquireModem(accountId: string): Promise<ModemSession | undefined> {
@@ -19,57 +21,52 @@ export async function acquireModem(accountId: string): Promise<ModemSession | un
 
   if (!account) return undefined;
 
-  // 포스팅 등: DB 고정 proxy_port
-  if (account.proxy_port) {
-    const port = account.proxy_port;
-    if (busyModems.has(String(port))) {
+  let proxyPort: number;
+  let lockKind: 'posting' | 'crank';
+
+  try {
+    proxyPort = await getModemProxyPort(accountId);
+    lockKind =
+      account.account_type === 'posting' && account.proxy_port === proxyPort ? 'posting' : 'crank';
+  } catch (err) {
+    if ((err as Error).message.includes('유휴 C-Rank')) {
+      throw new Error('NO_IDLE_MODEM');
+    }
+    if ((err as Error).message.includes('C-Rank 사용 중')) {
       throw new Error('MODEM_BUSY');
     }
-    busyModems.add(String(port));
-
-    const { data: modem } = await supabase
-      .from('huma_modems')
-      .select('id')
-      .eq('proxy_port', port)
-      .maybeSingle();
-
-    const modemId = modem?.id ?? account.modem_id;
-    if (modemId) {
-      await supabase.from('huma_modems').update({ status: 'busy' }).eq('id', modemId);
-    }
-
-    return { proxyPort: port, modemId: modemId ?? '', leased: false };
+    throw err;
   }
 
-  // C-Rank / 카페 답글: proxy_port null → crank·cafe 역할 idle 슬롯 순환
-  let query = supabase
+  const portKey = String(proxyPort);
+  if (busyModems.has(portKey)) {
+    await releaseModemLocks(proxyPort, lockKind);
+    throw new Error('MODEM_BUSY');
+  }
+  busyModems.add(portKey);
+
+  const { data: modem } = await supabase
     .from('huma_modems')
-    .select('*')
-    .eq('status', 'idle')
-    .order('slot_number');
+    .select('id')
+    .eq('proxy_port', proxyPort)
+    .maybeSingle();
 
-  const { data: idleList } = await query;
-  const crankPool = (idleList ?? []).filter(
-    (m) => !m.modem_role || m.modem_role === 'crank',
-  );
-  for (const idle of crankPool) {    const portKey = String(idle.proxy_port);
-    if (busyModems.has(portKey)) continue;
-
-    busyModems.add(portKey);
-    await supabase.from('huma_modems').update({ status: 'busy' }).eq('id', idle.id);
-    return { proxyPort: idle.proxy_port, modemId: idle.id, leased: true };
+  const modemId = modem?.id ?? account.modem_id ?? '';
+  if (modemId) {
+    await supabase.from('huma_modems').update({ status: 'busy' }).eq('id', modemId);
   }
 
-  throw new Error('NO_IDLE_MODEM');
+  return { proxyPort, modemId, leased: lockKind === 'crank', lockKind };
 }
 
 export async function releaseModem(session: ModemSession | number): Promise<void> {
-  const normalized =
+  const normalized: ModemSession =
     typeof session === 'number'
-      ? { proxyPort: session, modemId: '', leased: false }
+      ? { proxyPort: session, modemId: '', leased: false, lockKind: 'crank' }
       : session;
 
   busyModems.delete(String(normalized.proxyPort));
+  await releaseModemLocks(normalized.proxyPort, normalized.lockKind);
 
   if (normalized.modemId) {
     await supabase

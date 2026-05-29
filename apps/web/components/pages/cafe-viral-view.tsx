@@ -327,7 +327,7 @@ export function CafeViralView() {
   if (workspace !== 'yeonun') {
     return (
       <div className="animate-fadeIn">
-        <MPanel title="카페 바이럴 (v3.21)">
+        <MPanel title="카페 바이럴 (v3.22)">
           <EmptyPanel message="카페 침투 바이럴은 연운 전용입니다. 퀴즈·파나나에는 적용되지 않습니다 (규칙 ㉛)." />
         </MPanel>
       </div>
@@ -385,7 +385,7 @@ export function CafeViralView() {
           </div>
         </MPanel>
 
-        <MPanel title="바이럴 설정 (v3.21 · 연운 전용)" className="!mb-0">
+        <MPanel title="바이럴 설정 (v3.22 · 연운 전용)" className="!mb-0">
           {config.note ? (
             <div className="mb-2 font-mono text-[10px] text-huma-t3">{String(config.note)}</div>
           ) : null}

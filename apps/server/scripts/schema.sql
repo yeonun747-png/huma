@@ -1,5 +1,6 @@
--- HUMA Studio Full Schema (기획서 v3.21 섹션 5)
+-- HUMA Studio Full Schema (기획서 v3.22 섹션 5)
 -- account_type: posting(지수5) | crank(C-Rank·카페 통합, 초기 10→최대 150) | cafe(레거시)
+-- 모뎀: slot 1-4 posting(10001-10004) · slot 5-10 crank 순환(10005-10010, Redis 락)
 
 CREATE TABLE IF NOT EXISTS huma_modems (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
