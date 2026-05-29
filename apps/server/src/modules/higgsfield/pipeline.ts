@@ -16,6 +16,8 @@ import { generateLipsync } from './lipsync.js';
 
 import { uploadTikTokVideo, uploadInstagramReel } from '../social-api/index.js';
 import { uploadYouTubeShorts } from '../social-api/youtube.js';
+import { uploadPinterestVideoPin } from '../social-api/pinterest.js';
+import { uploadQuizOasisInstagramVariants } from '../social/quizoasis-reels.js';
 
 import { buildBlogVideoAppend } from '../queue/jobs/content-orchestrator.js';
 
@@ -255,7 +257,7 @@ export async function runVideoPipeline(videoJobId: string) {
     }
 
     const uploadTasks: Array<{
-      key: 'tiktok' | 'instagram' | 'youtube';
+      key: 'tiktok' | 'instagram' | 'youtube' | 'pinterest';
       run: () => Promise<string | undefined>;
     }> = [];
 
@@ -274,12 +276,39 @@ export async function runVideoPipeline(videoJobId: string) {
     if (platforms.includes('instagram')) {
       uploadTasks.push({
         key: 'instagram',
-        run: () =>
-          uploadInstagramReel({
+        run: async () => {
+          if (job.workspace === 'quizoasis') {
+            const testSlug = String(job.source_slug ?? job.id).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32);
+            const urls = await uploadQuizOasisInstagramVariants({
+              workspace: job.workspace,
+              videoPath: outputPath,
+              caption: job.caption ?? '',
+              hashtags: job.hashtags ?? [],
+              testSlug: testSlug || 'reel',
+            });
+            return urls.en ?? urls.kr;
+          }
+          return uploadInstagramReel({
             workspace: job.workspace,
             videoPath: outputPath,
             caption: job.caption ?? '',
             hashtags: job.hashtags ?? [],
+          });
+        },
+      });
+    }
+    if (platforms.includes('pinterest') && job.workspace === 'quizoasis') {
+      const testSlug = String(job.source_slug ?? 'test').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+      const linkUrl = `https://www.myquizoasis.com/en/test/${testSlug}`;
+      const pinTitle = `${String(blogTitle).slice(0, 60)} | Find Your True Type | QuizOasis`;
+      uploadTasks.push({
+        key: 'pinterest',
+        run: () =>
+          uploadPinterestVideoPin({
+            videoPath: outputPath,
+            title: pinTitle,
+            description: blogDescription,
+            linkUrl,
           }),
       });
     }
@@ -299,7 +328,7 @@ export async function runVideoPipeline(videoJobId: string) {
 
     // Step 4 (규칙 ⑰): TikTok + Instagram + YouTube 병렬 업로드 — 실패해도 계속
     const uploadResults = await Promise.allSettled(uploadTasks.map((t) => t.run()));
-    const urls: Partial<Record<'tiktok' | 'instagram' | 'youtube', string | undefined>> = {};
+    const urls: Partial<Record<'tiktok' | 'instagram' | 'youtube' | 'pinterest', string | undefined>> = {};
     uploadTasks.forEach((task, i) => {
       const result = uploadResults[i];
       urls[task.key] = result.status === 'fulfilled' ? result.value : undefined;

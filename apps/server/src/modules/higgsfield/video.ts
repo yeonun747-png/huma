@@ -30,6 +30,7 @@ export async function generateVideo(params: {
     duration: params.durationSec || 15,
     aspect_ratio: '9:16',
     resolution: '720p',
+    // v3.20+: Kling 3.0 내장 오디오(효과음·한국어 포함) 자동 생성 — TTS는 나레이션 스크립트 필요 시만
   };
   if (uiModel === 'kling-3.0-motion-control') args.motion_control = true;
   if (uiModel === 'veo-3.1') args.model = 'veo-3-1-preview';

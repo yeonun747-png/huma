@@ -3,6 +3,7 @@ import fs from 'fs';
 import { supabase } from '../../middleware/auth.js';
 import { sleep } from '../../lib/utils.js';
 import { uploadYouTubeShorts } from './youtube.js';
+import { uploadPinterestVideoPin } from './pinterest.js';
 
 async function getPlatformAccount(workspace: string, platform: string) {
   const { data } = await supabase
@@ -85,7 +86,12 @@ export async function uploadTikTokVideo(params: {
   const account = await getPlatformAccount(params.workspace, 'tiktok');
   const token = await refreshTokenIfNeeded(account);
   const videoStat = fs.statSync(params.videoPath);
-  const fullCaption = `${params.caption}\n${params.hashtags.map((h) => `#${h}`).join(' ')}`;
+  let tags = params.hashtags;
+  if (params.workspace === 'quizoasis') {
+    const { buildQuizOasisTikTokHashtags } = await import('../social/quizoasis-reels.js');
+    tags = buildQuizOasisTikTokHashtags(params.hashtags);
+  }
+  const fullCaption = `${params.caption}\n${tags.map((h) => `#${h.replace(/^#/, '')}`).join(' ')}`;
 
   const { data: init } = await axios.post(
     'https://open.tiktokapis.com/v2/post/publish/video/init/',
@@ -122,8 +128,10 @@ export async function uploadInstagramReel(params: {
   videoPath: string;
   caption: string;
   hashtags: string[];
+  platform?: string;
 }): Promise<string | undefined> {
-  const account = await getPlatformAccount(params.workspace, 'instagram');
+  const platformKey = params.platform ?? 'instagram';
+  const account = await getPlatformAccount(params.workspace, platformKey);
   const fullCaption = `${params.caption}\n.\n.\n${params.hashtags.map((h) => `#${h}`).join(' ')}`;
   const videoUrl = await uploadToSupabaseStorage(params.videoPath);
 
@@ -235,7 +243,15 @@ async function uploadToSupabaseStorage(filePath: string): Promise<string> {
 
 export async function uploadToPlatform(
   platform: string,
-  params: { workspace: string; videoPath: string; caption: string; hashtags: string[]; title?: string; description?: string }
+  params: {
+    workspace: string;
+    videoPath: string;
+    caption: string;
+    hashtags: string[];
+    title?: string;
+    description?: string;
+    linkUrl?: string;
+  }
 ) {
   switch (platform) {
     case 'tiktok':
@@ -256,11 +272,19 @@ export async function uploadToPlatform(
     case 'twitter':
     case 'x':
       return postToTwitter({ workspace: params.workspace, text: params.caption });
+    case 'pinterest':
+      return uploadPinterestVideoPin({
+        videoPath: params.videoPath,
+        title: params.title ?? params.caption.slice(0, 100),
+        description: (params.description ?? params.caption).slice(0, 500),
+        linkUrl: params.linkUrl ?? '',
+      });
     default:
       throw new Error(`지원하지 않는 플랫폼: ${platform}`);
   }
 }
 
+export { uploadPinterestVideoPin } from './pinterest.js';
 export { uploadYouTubeShorts } from './youtube.js';
 
 export { getPlatformAccount, refreshTokenIfNeeded };

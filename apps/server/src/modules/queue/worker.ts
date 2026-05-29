@@ -161,7 +161,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
           }
         } else if (type === 'social_crank') {
           await executeSocialCrank(accountId!, payload as { ourBlogUrls: string[] });
-        } else if (['tiktok_upload', 'instagram_reel', 'instagram_post', 'threads_post', 'twitter_post'].includes(type)) {
+        } else if (['tiktok_upload', 'instagram_reel', 'instagram_post', 'threads_post', 'twitter_post', 'pinterest_upload'].includes(type)) {
           await executeSocialPost(type, payload);
           if (humaJobId) await completeJob(humaJobId);
         } else if (type === 'video_pipeline') {

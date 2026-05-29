@@ -186,17 +186,6 @@ export function AdsenseView() {
   );
 }
 
-export function LanguagesView() {
-  useRegisterPageAction('openLangForm', () => {});
-  return (
-    <div className="animate-fadeIn">
-      <MPanel title="다국어 번역 현황">
-        <EmptyPanel message="번역 현황 데이터가 없습니다." />
-      </MPanel>
-    </div>
-  );
-}
-
 export function ScenarioView() {
   useRegisterPageAction('openScenarioForm', () => {});
   return (

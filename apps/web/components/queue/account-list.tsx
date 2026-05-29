@@ -12,8 +12,7 @@ import { alertAccountError } from '@/lib/account-errors';
 
 const TYPE_OPTIONS: { value: AccountType; label: string }[] = [
   { value: 'posting', label: '포스팅' },
-  { value: 'crank', label: 'C-Rank' },
-  { value: 'cafe', label: '카페' },
+  { value: 'crank', label: 'C-Rank+Cafe' },
 ];
 
 export function AccountList() {

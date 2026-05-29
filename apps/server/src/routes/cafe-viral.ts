@@ -1,9 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { authMiddleware, supabase, getWorkspaceFilter } from '../middleware/auth.js';
-import { createBrowser } from '../modules/playwright/browser.js';
-import { pickCafeReplyCrankAccount } from '../lib/cafe-accounts.js';
+import { createBrowser, createBrowserForAccount, closeBrowserContext } from '../modules/playwright/browser.js';
+import { pickCafeReplyCrankAccount, pickCafeScanAccount } from '../lib/cafe-accounts.js';
 import {
   assertCafeViralReplyLimits,
+  assertCafeViralYeonunWorkspace,
   assertCafeWarmupComplete,
   normalizeCafePostUrl,
 } from '../lib/cafe-viral-config.js';
@@ -16,28 +17,34 @@ import { naverLogin } from '../modules/playwright/naver/login.js';
 
 export async function registerCafeViralRoutes(app: FastifyInstance) {
   app.get('/api/cafe-viral/cafes', { preHandler: authMiddleware }, async (request) => {
-    const workspaces = getWorkspaceFilter(request);
+    const workspaces = getWorkspaceFilter(request).filter((ws) => ws === 'yeonun');
+    if (!workspaces.length) return [];
     const { data } = await supabase
       .from('huma_cafe_viral_cafes')
       .select('*')
-      .in('workspace', workspaces)
+      .eq('workspace', 'yeonun')
       .order('created_at', { ascending: false });
     return data ?? [];
   });
 
-  app.post('/api/cafe-viral/cafes', { preHandler: authMiddleware }, async (request) => {
+  app.post('/api/cafe-viral/cafes', { preHandler: authMiddleware }, async (request, reply) => {
     const body = request.body as Record<string, unknown>;
+    const workspace = String(body.workspace ?? 'yeonun');
+    try {
+      assertCafeViralYeonunWorkspace(workspace);
+    } catch (err) {
+      return reply.code(400).send({ error: (err as Error).message });
+    }
     const workspaces = getWorkspaceFilter(request);
-    const workspace = String(body.workspace ?? '');
-    if (!workspaces.includes(workspace)) {
-      return { error: '워크스페이스 접근 권한 없음' };
+    if (!workspaces.includes('yeonun')) {
+      return reply.code(403).send({ error: '연운 워크스페이스 접근 권한 없음' });
     }
 
     const cafeUrl = String(body.cafe_url ?? '').replace(/^https?:\/\/cafe\.naver\.com\//, '').split('/')[0];
     const { data, error } = await supabase
       .from('huma_cafe_viral_cafes')
       .insert({
-        workspace,
+        workspace: 'yeonun',
         cafe_url: cafeUrl,
         cafe_name: String(body.cafe_name ?? cafeUrl),
         category: body.category ? String(body.category) : null,
@@ -105,14 +112,26 @@ export async function registerCafeViralRoutes(app: FastifyInstance) {
 
   app.post('/api/cafe-viral/cafes/:id/scan', { preHandler: authMiddleware }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const body = (request.body ?? {}) as { account_id?: string };
+
     try {
-      const { browser, context } = await createBrowser();
+      const accountId = body.account_id ?? (await pickCafeScanAccount());
+      if (!accountId) {
+        return reply.code(400).send({
+          error:
+            '비공개 카페 스캔에는 네이버 계정이 필요합니다. 계정관리에서 C-Rank·카페·포스팅 계정을 등록하고 럭키포에버(raise1)에 가입하세요.',
+        });
+      }
+
+      const accountCtx = await loadAccountForBrowser(accountId);
+      const { context } = await createBrowserForAccount(accountCtx);
       try {
+        await naverLogin(context, accountId);
         const page = await context.newPage();
         const count = await scanCafeById(id, page);
         return { success: true, count };
       } finally {
-        await browser.close();
+        await closeBrowserContext(context);
       }
     } catch (err) {
       return reply.code(400).send({ error: (err as Error).message });
@@ -121,11 +140,12 @@ export async function registerCafeViralRoutes(app: FastifyInstance) {
 
   app.get('/api/cafe-viral/posts', { preHandler: authMiddleware }, async (request) => {
     const workspaces = getWorkspaceFilter(request);
+    if (!workspaces.includes('yeonun')) return [];
     const { status } = request.query as { status?: string };
     let query = supabase
       .from('huma_cafe_viral_posts')
       .select('*, huma_cafe_viral_cafes(cafe_name, cafe_url)')
-      .in('workspace', workspaces)
+      .eq('workspace', 'yeonun')
       .order('created_at', { ascending: false })
       .limit(100);
     if (status) query = query.eq('status', status);

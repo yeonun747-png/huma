@@ -42,16 +42,17 @@ export const NAV_ITEMS = [
   { href: '/watcher', label: 'Layer4 Watcher', icon: '⚠', badgeKey: 'watcher', badgeErr: true, group: 'common' },
   { href: '/human-engine', label: '휴먼 엔진 설정', icon: '⚙', group: 'common' },
   { href: '/crank', label: 'C-Rank 소통 관리', icon: '🔗', group: 'common' },
-  { href: '/cafe-viral', label: '카페 바이럴', icon: '🎯', group: 'common' },
   { href: '/modems', label: '프록시 관리', icon: '⊕', group: 'system' },
   { href: '/settings', label: '환경 설정', icon: '◈', group: 'system' },
 ];
 
 export const SPEC_NAV_ITEMS: Record<string, { href: string; label: string; icon: string; badgeKey?: string }[]> = {
-  yeonun: [{ href: '/seo-keywords', label: 'SEO 키워드', icon: '🔍', badgeKey: 'seo' }],
+  yeonun: [
+    { href: '/cafe-viral', label: '카페 바이럴', icon: '🎯' },
+    { href: '/seo-keywords', label: 'SEO 키워드', icon: '🔍', badgeKey: 'seo' },
+  ],
   quizoasis: [
     { href: '/adsense', label: '애드센스 수익', icon: '💰' },
-    { href: '/languages', label: '다국어 번역 관리', icon: '🌐', badgeKey: 'langs' },
   ],
   panana: [
     { href: '/scenario', label: '영상 시나리오', icon: '🎬', badgeKey: 'scenario' },

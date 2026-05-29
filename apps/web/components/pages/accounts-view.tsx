@@ -23,27 +23,39 @@ const ACCOUNT_GROUPS: { id: AccountGroup; title: string }[] = [
 
 const QP_WORKSPACES: Workspace[] = ['quizoasis', 'panana'];
 
-type AccountCategory = AccountType | 'social';
+type AccountCategory = 'posting' | 'crank' | 'social';
 
 const CATEGORY_OPTIONS: { value: AccountCategory; label: string; sub: string }[] = [
   { value: 'posting', label: '포스팅', sub: '네이버 블로그 발행 (지수5)' },
-  { value: 'crank', label: 'C-Rank', sub: '타·내 블로그 방문·공감·댓글' },
-  { value: 'cafe', label: '카페', sub: '점사모 새글·답글' },
-  { value: 'social', label: '소셜미디어', sub: 'TikTok·IG·Threads·X API' },
+  { value: 'crank', label: 'C-Rank+Cafe', sub: '초기 10~최대 150 · 소통·카페·바이럴' },
+  { value: 'social', label: '소셜미디어', sub: 'TikTok·IG·Threads·X·Pinterest API' },
 ];
 
-const SOCIAL_PLATFORMS = [
+const SOCIAL_PLATFORMS_BASE = [
   { value: 'tiktok', label: 'TikTok' },
   { value: 'instagram', label: 'Instagram' },
   { value: 'threads', label: 'Threads' },
   { value: 'twitter', label: 'X (Twitter)' },
 ];
 
+const SOCIAL_PLATFORMS_QUIZOASIS = [
+  ...SOCIAL_PLATFORMS_BASE,
+  { value: 'instagram_en', label: 'Instagram (EN)' },
+  { value: 'instagram_kr', label: 'Instagram (KR)' },
+  { value: 'twitter_en', label: 'X (EN)' },
+  { value: 'twitter_ja', label: 'X (JA)' },
+  { value: 'pinterest', label: 'Pinterest' },
+];
+
 const TYPE_LABEL: Record<AccountType, string> = {
   posting: 'POSTING',
-  crank: 'C-RANK',
-  cafe: 'CAFE',
+  crank: 'C-RANK+CAFE',
+  cafe: 'C-RANK+CAFE',
 };
+
+function isCrankPool(ac: HumaAccount) {
+  return ac.account_type === 'crank' || ac.account_type === 'cafe';
+}
 
 function belongsToGroup(ws: string, group: AccountGroup): boolean {
   if (group === 'yeonun') return ws === 'yeonun';
@@ -154,9 +166,10 @@ export function AccountsView() {
   );
 
   const posting = visibleAccounts.filter((a) => a.account_type === 'posting').length;
-  const crank = visibleAccounts.filter((a) => a.account_type === 'crank').length;
-  const cafe = visibleAccounts.filter((a) => a.account_type === 'cafe').length;
+  const crankCafe = visibleAccounts.filter((a) => isCrankPool(a)).length;
   const isSocial = form.category === 'social';
+  const socialPlatforms =
+    form.registerGroup === 'quizoasis_panana' ? SOCIAL_PLATFORMS_QUIZOASIS : SOCIAL_PLATFORMS_BASE;
 
   const registerGroupLabel =
     ACCOUNT_GROUPS.find((g) => g.id === form.registerGroup)?.title ?? form.registerGroup;
@@ -250,11 +263,10 @@ export function AccountsView() {
 
   return (
     <div className="animate-fadeIn">
-      <MGrid cols={2}>
+      <MGrid cols={3}>
         <MStat label="포스팅 (지수5)" value={<>{posting}<span className="text-[11px] text-huma-t3">개</span></>} sub="블로그 발행" />
-        <MStat label="C-Rank 소통" value={<>{crank}<span className="text-[11px] text-huma-t3">개</span></>} sub="방문·공감·댓글" />
-        <MStat label="카페" value={<>{cafe}<span className="text-[11px] text-huma-t3">개</span></>} sub="점사모 활동" />
-        <MStat label="소셜미디어 (API)" value={<>{visiblePlatforms.length}<span className="text-[11px] text-huma-t3">개</span></>} sub="TikTok·IG·Threads·X" />
+        <MStat label="C-Rank+Cafe" value={<>{crankCafe}<span className="text-[11px] text-huma-t3">개</span></>} sub="10~150 · 소통·카페" />
+        <MStat label="소셜미디어 (API)" value={<>{visiblePlatforms.length}<span className="text-[11px] text-huma-t3">개</span></>} sub="TikTok·IG·Pinterest 등" />
       </MGrid>
 
       {showForm && (
@@ -277,7 +289,7 @@ export function AccountsView() {
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             {CATEGORY_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
@@ -317,7 +329,7 @@ export function AccountsView() {
                   onChange={(e) => setForm((f) => ({ ...f, platform: e.target.value }))}
                   className="m-model-select max-w-[140px]"
                 >
-                  {SOCIAL_PLATFORMS.map((p) => (
+                  {socialPlatforms.map((p) => (
                     <option key={p.value} value={p.value}>{p.label}</option>
                   ))}
                 </select>
@@ -399,8 +411,8 @@ export function AccountsView() {
                 groupAccounts.map((ac) => (
                   <MAccountCard
                     key={ac.id}
-                    icon={ac.account_type === 'crank' ? '🔗' : ac.account_type === 'cafe' ? '🏛' : '📝'}
-                    iconBg={ac.account_type === 'crank' ? 'var(--warn-bg)' : 'var(--ok-bg)'}
+                    icon={isCrankPool(ac) ? '🔗' : '📝'}
+                    iconBg={isCrankPool(ac) ? 'var(--warn-bg)' : 'var(--ok-bg)'}
                     name={
                       <>
                         {ac.name}{' '}
@@ -427,7 +439,7 @@ export function AccountsView() {
                     stats={[
                       { label: 'Health', value: ac.health_score ?? '—', tone: (ac.health_score ?? 100) >= 80 ? 'text-huma-ok' : 'text-huma-warn' },
                       { label: 'Index', value: ac.blog_index ?? '—' },
-                      { label: ac.account_type === 'crank' ? '오늘 소통' : 'WPM', value: ac.account_type === 'crank' ? ac.crank_count_today : ac.wpm ?? '—' },
+                      { label: isCrankPool(ac) ? '오늘 소통' : 'WPM', value: isCrankPool(ac) ? ac.crank_count_today : ac.wpm ?? '—' },
                     ]}
                     actions={[
                       { label: ac.is_active ? '정지' : '재개', primary: true, onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(load) },
@@ -458,7 +470,7 @@ export function AccountsView() {
                         )}
                       </>
                     }
-                    url={`${SOCIAL_PLATFORMS.find((sp) => sp.value === platform)?.label ?? platform} · API`}
+                    url={`${socialPlatforms.find((sp) => sp.value === platform)?.label ?? platform} · API`}
                     status={active ? '활성' : '세션오류'}
                     statusTone={active ? 'ok' : 'err'}
                     stats={[

@@ -36,6 +36,22 @@ export async function pickCafeReplyCrankAccount(): Promise<string | null> {
   return (eligible[0] ?? accounts[0])?.id ?? null;
 }
 
+/** 카페 키워드 스캔 — crank → cafe → posting 순 활성 계정 */
+export async function pickCafeScanAccount(): Promise<string | null> {
+  for (const accountType of ['crank', 'cafe', 'posting'] as const) {
+    const { data } = await supabase
+      .from('huma_accounts')
+      .select('id')
+      .eq('account_type', accountType)
+      .eq('is_active', true)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (data?.id) return data.id;
+  }
+  return null;
+}
+
 export async function assertCafeReplyAccount(accountId: string): Promise<void> {
   const { data: account } = await supabase
     .from('huma_accounts')

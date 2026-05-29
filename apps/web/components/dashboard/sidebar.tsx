@@ -20,7 +20,7 @@ export function Sidebar() {
     accessibleSubWorkspaces,
   } = useWorkspace();
   const { admin, logout } = useAuth();
-  const [badges, setBadges] = useState({ queue: 0, video: 0, watcher: 0, seo: 0, langs: 0, scenario: 0 });
+  const [badges, setBadges] = useState({ queue: 0, video: 0, watcher: 0, seo: 0, scenario: 0 });
   const [pendingJobs, setPendingJobs] = useState(0);
 
   const mergeBadges = (apiBadges: { queue: number; video: number; watcher: number }) =>

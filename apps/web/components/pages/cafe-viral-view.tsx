@@ -324,6 +324,16 @@ export function CafeViralView() {
   const replyTarget = Number(ratio.daily_reply ?? 8);
   const selfTarget = Number(ratio.self_qa ?? 2);
 
+  if (workspace !== 'yeonun') {
+    return (
+      <div className="animate-fadeIn">
+        <MPanel title="카페 바이럴 (v3.21)">
+          <EmptyPanel message="카페 침투 바이럴은 연운 전용입니다. 퀴즈·파나나에는 적용되지 않습니다 (규칙 ㉛)." />
+        </MPanel>
+      </div>
+    );
+  }
+
   return (
     <div className="animate-fadeIn">
       <MGrid cols={2}>
@@ -375,7 +385,10 @@ export function CafeViralView() {
           </div>
         </MPanel>
 
-        <MPanel title="바이럴 설정 (v3.17)" className="!mb-0">
+        <MPanel title="바이럴 설정 (v3.21 · 연운 전용)" className="!mb-0">
+          {config.note ? (
+            <div className="mb-2 font-mono text-[10px] text-huma-t3">{String(config.note)}</div>
+          ) : null}
           <MToggle
             label="카페 침투 바이럴"
             sub="검색 유입 게시글 자동 수집·답글"
@@ -401,6 +414,9 @@ export function CafeViralView() {
           </div>
           <div className="mt-1 font-mono text-[10.5px] text-huma-t3">
             답글 스타일: {String(config.reply_style ?? '경험담 공감형')}
+          </div>
+          <div className="mt-1 font-mono text-[10.5px] text-huma-t3">
+            ※ 비공개 카페(럭키포에버 등) 키워드 스캔 — 계정관리 등록·카페 가입 필수
           </div>
           <div className="mt-1 font-mono text-[10.5px] text-huma-t3">
             ※ 가입(CAPTCHA)은 수동 · HUMA는 등업 워밍업부터 담당

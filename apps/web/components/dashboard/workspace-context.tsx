@@ -19,7 +19,6 @@ const STORAGE_KEY = 'huma_workspace';
 const WS_ROUTE_MAP: Partial<Record<string, Workspace>> = {
   '/seo-keywords': 'yeonun',
   '/adsense': 'quizoasis',
-  '/languages': 'quizoasis',
   '/scenario': 'panana',
   '/social': 'panana',
 };

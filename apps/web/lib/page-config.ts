@@ -14,7 +14,6 @@ export type PageActionType =
   | 'openModemForm'
   | 'refreshSeo'
   | 'refreshAdsense'
-  | 'openLangForm'
   | 'openScenarioForm'
   | 'refreshSocial'
   | 'none';
@@ -44,7 +43,6 @@ export const PAGE_META: Record<string, PageMeta> = {
   '/settings': { title: '환경 설정', action: '저장', actionType: 'saveSettings' },
   '/seo-keywords': { title: 'SEO 키워드', action: '↺ 분석', actionType: 'refreshSeo' },
   '/adsense': { title: '애드센스 수익', action: '↺ 새로고침', actionType: 'refreshAdsense' },
-  '/languages': { title: '다국어 번역 관리', action: '+ 번역 추가', actionType: 'openLangForm' },
   '/scenario': { title: '영상 시나리오', action: '+ 시나리오', actionType: 'openScenarioForm' },
   '/social': { title: '소셜 분석·DM 자동화', action: '↺ 새로고침', actionType: 'refreshSocial' },
 };

@@ -1,4 +1,5 @@
--- HUMA Studio Full Schema (기획서 v3.17 섹션 5)
+-- HUMA Studio Full Schema (기획서 v3.21 섹션 5)
+-- account_type: posting(지수5) | crank(C-Rank·카페 통합, 초기 10→최대 150) | cafe(레거시)
 
 CREATE TABLE IF NOT EXISTS huma_modems (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -133,7 +134,7 @@ CREATE TABLE IF NOT EXISTS huma_cafe_targets (
 
 CREATE TABLE IF NOT EXISTS huma_cafe_viral_cafes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  workspace VARCHAR(20) NOT NULL,
+  workspace VARCHAR(20) NOT NULL DEFAULT 'yeonun',
   cafe_url VARCHAR(100) NOT NULL UNIQUE,
   cafe_name VARCHAR(100) NOT NULL,
   category VARCHAR(50),
@@ -221,9 +222,9 @@ INSERT INTO huma_settings (key, value) VALUES
 ('watcher', '{"slack_webhook":"","cooldown_429_min":15,"recovery_steps_min":[12,30,120],"auto_pause":true}'),
 ('higgsfield', '{"default_image_model":"gpt-image-2","default_video_model":"kling-3.0","default_video_resolution":"720p","default_tts_model":"eleven-v3","video_duration_sec":15,"aspect_ratio":"9:16","higgsfield_plan":"Plus","monthly_credits":1000}'),
 ('optimal_schedule', '{"naver_blog":{"windows":[{"start":"08:00","end":"10:00"},{"start":"19:00","end":"21:00"}]},"tiktok":{"windows":[{"start":"19:00","end":"21:00"},{"start":"10:00","end":"12:00"}]},"instagram":{"windows":[{"start":"09:00","end":"11:00"},{"start":"19:00","end":"21:00"}]},"threads":{"windows":[{"start":"08:00","end":"10:00"},{"start":"12:00","end":"13:00"}]},"x":{"windows":[{"start":"09:00","end":"10:00"},{"start":"12:00","end":"13:00"}]},"spread_minutes":30}'),
-('social_crank', '{"daily_limit_per_account":30,"min_visit_interval_days":5,"our_blog_ratio":0.25,"other_blog_ratio":0.75,"visits_per_session":15,"stay_duration_ms":[180000,300000],"keywords":["사주풀이","꿈해몽","신년운세","궁합","자미두수","운세","사주"]}'),
+('social_crank', '{"daily_limit_per_account":30,"min_visit_interval_days":5,"our_blog_ratio":0.25,"other_blog_ratio":0.75,"visits_per_session":15,"stay_duration_ms":[180000,300000],"initial_account_count":10,"max_account_count":150,"keywords":["사주풀이","꿈해몽","신년운세","궁합","자미두수","운세","사주"]}'),
 ('ai_engine', '{"main_model":"claude-sonnet-4-6","sub_model":"claude-haiku-4-5-20251001","main_tasks":["blog_post","social_caption","tts_script","video_prompt"],"sub_tasks":["hashtags","summary","autoDecide"],"max_input_tokens":8000,"max_output_tokens":4000}'),
-('cafe_viral', '{"enabled":true,"keywords_yeonun":["신점추천","사주봐줘","운세추천","사주어플","신점어플","궁합봐주세요","오늘운세"],"keywords_quizoasis":["심리테스트추천","MBTI테스트","성격테스트","심리검사"],"keywords_panana":["AI캐릭터","캐릭터챗","AI채팅","가상연애"],"post_style":"고민·경험담 질문형 (서비스명 직접 언급 금지)","reply_style":"경험담 공감형","self_qa_enabled":true,"self_qa_delay_min":60,"mention_rate":0.0,"daily_limit_per_cafe":3,"daily_limit_total":10,"activity_ratio":{"daily_reply":8,"self_qa":2},"min_post_age_hours":1,"max_post_age_days":7}'),
+('cafe_viral', '{"enabled":true,"target_workspace":"yeonun","note":"카페 침투는 연운 전용. 퀴즈·파나나는 카페 바이럴 미적용.","keywords_yeonun":["신점추천","사주봐줘","운세추천","사주어플","신점어플","궁합봐주세요","오늘운세"],"post_style":"고민·경험담 질문형 (서비스명 직접 언급 금지)","reply_style":"경험담 공감형","self_qa_enabled":true,"self_qa_delay_min":60,"mention_rate":0.0,"daily_limit_per_cafe":3,"daily_limit_total":10,"activity_ratio":{"daily_reply":8,"self_qa":2},"min_post_age_hours":1,"max_post_age_days":7}'),
 ('posting_schedule', '{"weekday":{"yeonun_blog":6,"quizoasis_panana_blog":2,"total_blog":8,"type_b_ratio":0.5,"videos_per_day":4},"weekend":{"yeonun_blog":3,"quizoasis_panana_blog":2,"total_blog":5,"type_b_ratio":0.5,"videos_per_day":3},"cafe":{"daily":2,"type":"text_image_only","credit_cost":0},"monthly_estimate":{"weekday_days":22,"weekend_days":8,"total_videos":112,"total_credits":1008,"plan":"Higgsfield Plus 1000 credits"}}')
 ON CONFLICT (key) DO NOTHING;
 
