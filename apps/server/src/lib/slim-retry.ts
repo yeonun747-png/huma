@@ -1,7 +1,7 @@
 import { supabase } from '../middleware/auth.js';
 import { enqueueJob } from '../modules/queue/producer.js';
 
-/** KT 스카이라이프 슬림 — 데이터 소진·프록시 차단 시 다음날(KST) 자정 재시도 */
+/** KT M mobile 초알뜰 — 데이터 소진·프록시 차단 시 다음날(KST) 자정 재시도 */
 export function isSlimDataCapError(err: unknown): boolean {
   const msg = (err instanceof Error ? err.message : String(err)).toUpperCase();
   return (
@@ -36,7 +36,7 @@ export async function scheduleSlimCapRetry(
     .update({
       status: 'scheduled',
       scheduled_at: scheduledAt,
-      error_message: '슬림 데이터 소진 — KST 자정 자동 재시도 예약',
+      error_message: '초알뜰 데이터 소진 — KST 자정 자동 재시도 예약',
       started_at: null,
     })
     .eq('id', humaJobId);

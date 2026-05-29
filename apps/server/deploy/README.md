@@ -82,7 +82,7 @@ ip -br link | grep wwan
 
 > v3.22: `setup-proxy.sh` → `seed_modems_10slots.sql` → `v3_22_modem_slots.sql` · C-Rank 포트 10005~10010 Redis 동적 할당
 
-> v3.21: LTE 유심 **KT 초알뜰 10개** (포스팅 4×2GB + C-Rank·카페 6×3GB) · 월 약 45,000원
+> v3.22: LTE 유심 **KT M mobile 초알뜰 10개** (포스팅 4×2GB + C-Rank·카페 6×3GB, 각 4,900원) · 월 49,000원 · 구매 [mkmobile.co.kr](https://mkmobile.co.kr)
 
 > v3.9 레거시: `seed_modems_7slots.sql` / `seed_modems_20slots.sql` / 노트북 B 워커(`worker-only.ts`)는 사용하지 않음.
 

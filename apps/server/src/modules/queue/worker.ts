@@ -179,7 +179,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
           await scheduleSlimCapRetry(humaJobId, job.data as Record<string, unknown>);
           await logOperation({
             level: 'warn',
-            message: `슬림 데이터 소진 — 자정 재시도: ${type}`,
+            message: `초알뜰 데이터 소진 — 자정 재시도: ${type}`,
             job_id: humaJobId,
             account_id: accountId,
           });
