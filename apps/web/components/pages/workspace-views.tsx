@@ -69,14 +69,21 @@ export function AdsenseView() {
 
   if (error) {
     const isAuthError = error.includes('토큰') || error.includes('인증');
+    const isGoogleError =
+      error.includes('refresh token') ||
+      error.includes('Google') ||
+      error.includes('AdSense Management') ||
+      error.includes('invalid_grant');
     return (
       <div className="animate-fadeIn">
         <MPanel title="애드센스 수익">
           <EmptyPanel
             message={
               isAuthError
-                ? `${error} — 로그아웃 후 다시 로그인하세요. (i7 서버 재시작·JWT_SECRET 변경 시 토큰이 무효화됩니다)`
-                : error
+                ? `${error} — 로그아웃 후 다시 로그인하세요.`
+                : isGoogleError
+                  ? `${error}\n\n→ i7 apps/server/.env의 ADSENSE_REFRESH_TOKEN 재발급 또는 Google Cloud OAuth scope 확인`
+                  : error
             }
           />
         </MPanel>

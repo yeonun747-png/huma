@@ -19,6 +19,7 @@ async function adsenseStatsHandler(request: FastifyRequest, reply: FastifyReply)
     const stats = await fetchAdSenseStats(workspace);
     return stats;
   } catch (err) {
+    request.log.error({ err }, 'AdSense stats failed');
     return reply.code(502).send({ error: (err as Error).message, configured: true });
   }
 }

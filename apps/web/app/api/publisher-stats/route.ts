@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const maxDuration = 30;
+
 const API_BASE =
   process.env.HUMA_API_URL?.trim() ||
   process.env.NEXT_PUBLIC_HUMA_API_URL?.trim() ||

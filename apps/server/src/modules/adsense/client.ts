@@ -92,6 +92,20 @@ function accountPath(workspace: string): string | null {
   return raw.startsWith('accounts/') ? raw : `accounts/${raw}`;
 }
 
+function formatAdSenseApiError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/invalid_grant|Token has been expired or revoked/i.test(msg)) {
+    return 'Google refresh token 만료/무효 — OAuth 재인증 후 ADSENSE_REFRESH_TOKEN을 i7 .env에 갱신하세요';
+  }
+  if (/403|Insufficient Permission|accessNotConfigured/i.test(msg)) {
+    return 'AdSense Management API 권한 없음 — Google Cloud Console에서 API 활성화·OAuth scope(adsense.readonly) 확인';
+  }
+  if (/404|not found/i.test(msg)) {
+    return `AdSense 계정 ID 오류 — ADSENSE_ACCOUNT_ID(pub-…) 확인: ${msg}`;
+  }
+  return msg;
+}
+
 function parseAmount(value: string | null | undefined): number {
   if (!value) return 0;
   const normalized = value.replace(/[^\d.,-]/g, '').replace(/,/g, '');
@@ -176,7 +190,19 @@ async function fetchReport(
   });
 }
 
+export function formatAdSenseError(err: unknown): string {
+  return formatAdSenseApiError(err);
+}
+
 export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats> {
+  try {
+    return await fetchAdSenseStatsInner(workspace);
+  } catch (err) {
+    throw new Error(formatAdSenseApiError(err));
+  }
+}
+
+async function fetchAdSenseStatsInner(workspace: string): Promise<AdSenseStats> {
   const adsense = getAdSenseClient(workspace);
   const account = accountPath(workspace);
   if (!adsense || !account) return emptyAdSenseStats(workspace);
@@ -187,7 +213,7 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
   const prev7Start = daysAgo(13);
   const prev7End = daysAgo(7);
 
-  const [todayRes, yesterdayRes, monthRes, trendRes, paymentsRes, last7Res, prev7Res] = await Promise.all([
+  const [todayRes, yesterdayRes, monthRes, trendRes, last7Res, prev7Res] = await Promise.all([
     fetchReport(adsense, account, {
       dateRange: 'TODAY',
       metrics: ['ESTIMATED_EARNINGS', 'PAGE_VIEWS'],
@@ -206,7 +232,6 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
       metrics: ['ESTIMATED_EARNINGS', 'PAGE_VIEWS'],
       dimensions: ['MONTH'],
     }),
-    adsense.accounts.payments.list({ parent: account }),
     fetchReport(adsense, account, {
       dateRange: 'LAST_7_DAYS',
       metrics: ['ESTIMATED_EARNINGS', 'CLICKS', 'PAGE_VIEWS', 'IMPRESSIONS', 'PAGE_VIEWS_CTR', 'COST_PER_CLICK', 'PAGE_VIEWS_RPM'],
@@ -217,6 +242,15 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
       metrics: ['ESTIMATED_EARNINGS', 'CLICKS', 'PAGE_VIEWS', 'IMPRESSIONS', 'PAGE_VIEWS_CTR', 'COST_PER_CLICK', 'PAGE_VIEWS_RPM'],
     }),
   ]);
+
+  let unpaidBalanceFormatted = '';
+  try {
+    const paymentsRes = await adsense.accounts.payments.list({ parent: account });
+    const unpaidPayment = paymentsRes.data.payments?.find((payment) => payment.name?.endsWith('/unpaid'));
+    unpaidBalanceFormatted = unpaidPayment?.amount ?? '';
+  } catch {
+    // 미지급 잔액 API 실패해도 리포트 수치는 표시
+  }
 
   const todayEarnings = parseMetric(todayRes.data.rows, 0);
   const yesterdayEarnings = parseMetric(yesterdayRes.data.rows, 0);
@@ -253,8 +287,6 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
   const last7Rpm = last7RpmFromApi > 0 ? last7RpmFromApi : (last7PageViews > 0 ? (last7Earnings / last7PageViews) * 1000 : 0);
   const prev7Rpm = prev7RpmFromApi > 0 ? prev7RpmFromApi : (prev7PageViews > 0 ? (prev7Earnings / prev7PageViews) * 1000 : 0);
 
-  const unpaidPayment = paymentsRes.data.payments?.find((payment) => payment.name?.endsWith('/unpaid'));
-  const unpaidBalanceFormatted = unpaidPayment?.amount ?? '';
   const unpaidBalance = parseAmount(unpaidBalanceFormatted);
   const combinedTotal = unpaidBalance + monthEarnings;
 
