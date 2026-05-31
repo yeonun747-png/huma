@@ -47,6 +47,9 @@ export const metadata: Metadata = {
     description: '네이버·소셜 멀티플랫폼 자동 발행 관리 플랫폼',
     images: ['/og.png'],
   },
+  verification: {
+    google: 'FOkVNz2tplVehJnLNNgEC3c9mxf5LFcMTd-yrCUUELQ',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
