@@ -13,7 +13,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   if (token) {
-    router.replace('/');
+    router.replace('/dashboard');
     return null;
   }
 
@@ -23,7 +23,7 @@ export default function LoginPage() {
     setError('');
     try {
       await login(username.trim(), password);
-      router.push('/');
+      router.push('/dashboard');
     } catch (err) {
       setError((err as Error).message);
     } finally {

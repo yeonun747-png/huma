@@ -32,7 +32,7 @@ export function getDefaultWorkspace(admin: AdminScope & { name?: string } | null
 }
 
 export const NAV_ITEMS = [
-  { href: '/', label: '대시보드', icon: '⬡', group: 'common' },
+  { href: '/dashboard', label: '대시보드', icon: '⬡', group: 'common' },
   { href: '/queue', label: '큐 관리', icon: '⊞', badgeKey: 'queue', group: 'common' },
   { href: '/calendar', label: '스케줄 캘린더', icon: '▦', group: 'common' },
   { href: '/monitor', label: '발행 모니터', icon: '▣', live: true, group: 'common' },

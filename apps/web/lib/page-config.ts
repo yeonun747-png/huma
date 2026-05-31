@@ -27,7 +27,7 @@ export interface PageMeta {
 }
 
 export const PAGE_META: Record<string, PageMeta> = {
-  '/': { title: '대시보드', action: '▶ 발행 실행', actionType: 'resumeAll', showPeriod: true },
+  '/dashboard': { title: '대시보드', action: '▶ 발행 실행', actionType: 'resumeAll', showPeriod: true },
   '/queue': { title: '큐 관리', action: '+ 작업 추가', actionType: 'openQueueForm' },
   '/calendar': { title: '스케줄 캘린더', action: '+ 스케줄 추가', actionType: 'openScheduleForm' },
   '/monitor': { title: '발행 모니터', action: '⟳ 새로고침', actionType: 'refreshMonitor' },

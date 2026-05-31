@@ -7,7 +7,7 @@ export function LegalPageShell({ title, children }: { title: string; children: R
       <header className="border-b border-huma-bdr bg-huma-bg2 px-4 py-4">
         <div className="mx-auto flex max-w-3xl items-center justify-between gap-4">
           <div>
-            <Link href="/login" className="font-display text-xl tracking-[0.15em] text-huma-acc">
+            <Link href="/" className="font-display text-xl tracking-[0.15em] text-huma-acc">
               HUMA
             </Link>
             <p className="mt-0.5 font-mono text-[10px] text-huma-t3">{title}</p>
@@ -29,7 +29,7 @@ export function LegalPageShell({ title, children }: { title: string; children: R
           <Link href="/terms" className="hover:text-huma-acc">
             이용약관
           </Link>
-          <Link href="/login" className="hover:text-huma-acc">
+          <Link href="/" className="hover:text-huma-acc">
             HUMA Studio
           </Link>
         </nav>
