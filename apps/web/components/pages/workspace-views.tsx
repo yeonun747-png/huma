@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { useWorkspace } from '@/components/dashboard/workspace-context';
 import { EmptyPanel } from '@/components/ui/empty-panel';
 import { MGrid, MPanel, MStat, MTable } from '@/components/mockup/primitives';
 import { useRegisterPageAction } from '@/components/dashboard/page-action-context';
@@ -19,7 +18,6 @@ export function SeoKeywordsView() {
 }
 
 export function AdsenseView() {
-  const { workspace } = useWorkspace();
   const [stats, setStats] = useState<Awaited<ReturnType<typeof api.adsenseStats>> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -27,14 +25,15 @@ export function AdsenseView() {
   const load = useCallback(() => {
     setLoading(true);
     setError(null);
-    api.adsenseStats(workspace)
+    // /adsense는 퀴즈오아시스 전용 — workspace 컨텍스트 전환 race 방지
+    api.adsenseStats('quizoasis')
       .then(setStats)
       .catch((e: Error) => {
         setStats(null);
         setError(e.message);
       })
       .finally(() => setLoading(false));
-  }, [workspace]);
+  }, []);
 
   useEffect(() => { load(); }, [load]);
   useRegisterPageAction('refreshAdsense', load);

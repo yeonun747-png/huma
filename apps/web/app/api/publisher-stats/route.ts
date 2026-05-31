@@ -22,7 +22,10 @@ export async function GET(request: NextRequest) {
     const body = await upstream.text();
     return new NextResponse(body, {
       status: upstream.status,
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store',
+      },
     });
   } catch {
     return NextResponse.json(
