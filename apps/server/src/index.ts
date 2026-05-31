@@ -29,6 +29,7 @@ import { registerCafeViralRoutes } from './routes/cafe-viral.js';
 
 import { registerDashboardRoutes } from './routes/dashboard.js';
 import { registerAdSenseRoutes } from './routes/adsense.js';
+import { getMissingAdSenseEnvKeys, isAdSenseConfigured } from './modules/adsense/client.js';
 
 import { setLogSocket } from './lib/log-emitter.js';
 
@@ -128,7 +129,13 @@ async function main() {
 
 
   app.log.info(`HUMA Server running on http://localhost:${PORT}`);
-
+  const adsenseOk = isAdSenseConfigured('quizoasis');
+  const adsenseMissing = getMissingAdSenseEnvKeys('quizoasis');
+  app.log.info(
+    adsenseOk
+      ? 'AdSense API: configured (quizoasis)'
+      : `AdSense API: NOT configured — missing: ${adsenseMissing.join(', ') || '(unknown)'}`,
+  );
 }
 
 

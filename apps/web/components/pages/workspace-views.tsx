@@ -89,10 +89,13 @@ export function AdsenseView() {
     const missing = stats?.missingEnv?.length
       ? `\n누락: ${stats.missingEnv.join(', ')}`
       : '';
+    const rebuildHint = stats?.missingEnv === undefined
+      ? '\n\n→ i7에서 git pull → npm run build --workspace=@huma/server → 서버 재시작 후 tail /tmp/huma-server.log | grep AdSense 로 configured 확인'
+      : '';
     return (
       <div className="animate-fadeIn">
         <MPanel title="애드센스 수익">
-          <EmptyPanel message={`AdSense 환경변수를 i7 apps/server/.env에 설정 후 서버를 재시작하세요.${missing}\n\n※ 웹(Vercel) .env가 아닌 i7 서버 .env입니다.`} />
+          <EmptyPanel message={`AdSense 환경변수를 i7 apps/server/.env에 설정 후 서버를 재시작하세요.${missing}\n\n※ 웹(Vercel) .env가 아닌 i7 서버 .env입니다.${rebuildHint}`} />
         </MPanel>
       </div>
     );
