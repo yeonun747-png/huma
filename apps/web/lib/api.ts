@@ -7,22 +7,26 @@ function getToken(): string | null {
   return localStorage.getItem('huma_token');
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+type RequestOptions = RequestInit & { sameOrigin?: boolean };
+
+async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const { sameOrigin, ...fetchOptions } = options;
   const token = getToken();
-  const hasBody = options.body !== undefined && options.body !== null && options.body !== '';
+  const hasBody = fetchOptions.body !== undefined && fetchOptions.body !== null && fetchOptions.body !== '';
   const headers: Record<string, string> = {
-    ...(options.headers as Record<string, string>),
+    ...(fetchOptions.headers as Record<string, string>),
   };
   if (hasBody) headers['Content-Type'] = 'application/json';
   if (token) headers['X-HUMA-KEY'] = token;
 
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers }).catch(() => {
-    const hint =
-      path.includes('adsense') || path.includes('monetization')
-        ? ' 브라우저 광고 차단 확장 프로그램이 API 요청을 막았을 수 있습니다.'
-        : '';
+  const url = sameOrigin ? path : `${API_BASE}${path}`;
+
+  const res = await fetch(url, { ...fetchOptions, headers }).catch(() => {
+    const hint = !sameOrigin && (path.includes('adsense') || path.includes('monetization'))
+      ? ' 브라우저 광고 차단 확장 프로그램이 API 요청을 막았을 수 있습니다.'
+      : '';
     throw new Error(
-      `API 서버에 연결할 수 없습니다 (${API_BASE}). i7 서버·Cloudflare Tunnel 실행 여부와 NEXT_PUBLIC_HUMA_API_URL을 확인하세요.${hint}`,
+      `API 서버에 연결할 수 없습니다 (${sameOrigin ? '동일 출처 프록시' : API_BASE}). i7 서버·Cloudflare Tunnel 실행 여부와 NEXT_PUBLIC_HUMA_API_URL을 확인하세요.${hint}`,
     );
   });
   if (!res.ok) {
@@ -174,7 +178,7 @@ export const api = {
         ctr: { current: number; previous: number; changePp: number; changePct: number };
       };
       monthlyTrend: Array<{ month: string; earnings: number; pageViews: number; rpm: number }>;
-    }>(`/api/monetization/stats?workspace=${encodeURIComponent(workspace)}`),
+    }>(`/api/publisher-stats?workspace=${encodeURIComponent(workspace)}`, { sameOrigin: true }),
   stopAll: () => request('/api/stop-all', { method: 'POST' }),
   resumeAll: () => request('/api/resume-all', { method: 'POST' }),
 };
