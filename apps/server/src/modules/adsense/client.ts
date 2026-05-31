@@ -20,6 +20,7 @@ export interface AdSenseCtrCompare {
 
 export interface AdSenseStats {
   configured: boolean;
+  missingEnv?: string[];
   todayEarnings: number;
   yesterdayEarnings: number;
   monthEarnings: number;
@@ -53,6 +54,25 @@ function envKey(workspace: string, suffix: string): string | undefined {
     process.env[`ADSENSE_${suffix}`]?.trim() ??
     process.env[`GOOGLE_ADSENSE_${suffix}`]?.trim()
   );
+}
+
+const ADSENSE_ENV_SPECS = [
+  { key: 'CLIENT_ID', label: 'ADSENSE_CLIENT_ID (또는 GOOGLE_ADSENSE_CLIENT_ID)' },
+  { key: 'CLIENT_SECRET', label: 'ADSENSE_CLIENT_SECRET (또는 GOOGLE_ADSENSE_CLIENT_SECRET)' },
+  { key: 'REFRESH_TOKEN', label: 'ADSENSE_REFRESH_TOKEN (또는 GOOGLE_ADSENSE_REFRESH_TOKEN)' },
+  { key: 'ACCOUNT_ID', label: 'ADSENSE_ACCOUNT_ID (또는 ADSENSE_PUBLISHER_ID / GOOGLE_ADSENSE_PUBLISHER_ID)' },
+] as const;
+
+export function getMissingAdSenseEnvKeys(workspace: string): string[] {
+  const missing: string[] = [];
+  for (const spec of ADSENSE_ENV_SPECS) {
+    if (spec.key === 'ACCOUNT_ID') {
+      if (!accountPath(workspace)) missing.push(spec.label);
+      continue;
+    }
+    if (!envKey(workspace, spec.key)) missing.push(spec.label);
+  }
+  return missing;
 }
 
 function getAdSenseClient(workspace: string) {
@@ -157,34 +177,9 @@ async function fetchReport(
 }
 
 export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats> {
-  const empty: AdSenseStats = {
-    configured: false,
-    todayEarnings: 0,
-    yesterdayEarnings: 0,
-    monthEarnings: 0,
-    monthPageViews: 0,
-    monthClicks: 0,
-    monthImpressions: 0,
-    cpc: 0,
-    ctr: 0,
-    rpm: 0,
-    unpaidBalance: 0,
-    unpaidBalanceFormatted: '',
-    combinedTotal: 0,
-    last7Days: {
-      clicks: emptyCompare(),
-      pageViews: emptyCompare(),
-      impressions: emptyCompare(),
-      cpc: emptyCompare(),
-      rpm: emptyCompare(),
-      ctr: emptyCtrCompare(),
-    },
-    monthlyTrend: [],
-  };
-
   const adsense = getAdSenseClient(workspace);
   const account = accountPath(workspace);
-  if (!adsense || !account) return empty;
+  if (!adsense || !account) return emptyAdSenseStats(workspace);
 
   const now = new Date();
 
@@ -305,5 +300,33 @@ export async function fetchAdSenseStats(workspace: string): Promise<AdSenseStats
 }
 
 export function isAdSenseConfigured(workspace: string): boolean {
-  return Boolean(getAdSenseClient(workspace) && accountPath(workspace));
+  return getMissingAdSenseEnvKeys(workspace).length === 0;
+}
+
+export function emptyAdSenseStats(workspace: string): AdSenseStats {
+  return {
+    configured: false,
+    missingEnv: getMissingAdSenseEnvKeys(workspace),
+    todayEarnings: 0,
+    yesterdayEarnings: 0,
+    monthEarnings: 0,
+    monthPageViews: 0,
+    monthClicks: 0,
+    monthImpressions: 0,
+    cpc: 0,
+    ctr: 0,
+    rpm: 0,
+    unpaidBalance: 0,
+    unpaidBalanceFormatted: '',
+    combinedTotal: 0,
+    last7Days: {
+      clicks: emptyCompare(),
+      pageViews: emptyCompare(),
+      impressions: emptyCompare(),
+      cpc: emptyCompare(),
+      rpm: emptyCompare(),
+      ctr: emptyCtrCompare(),
+    },
+    monthlyTrend: [],
+  };
 }

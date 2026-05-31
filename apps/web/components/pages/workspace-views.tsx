@@ -86,10 +86,13 @@ export function AdsenseView() {
   }
 
   if (!stats?.configured) {
+    const missing = stats?.missingEnv?.length
+      ? `\n누락: ${stats.missingEnv.join(', ')}`
+      : '';
     return (
       <div className="animate-fadeIn">
         <MPanel title="애드센스 수익">
-          <EmptyPanel message="AdSense 환경변수 4개를 i7 apps/server/.env에 설정 후 서버를 재시작하세요." />
+          <EmptyPanel message={`AdSense 환경변수를 i7 apps/server/.env에 설정 후 서버를 재시작하세요.${missing}\n\n※ 웹(Vercel) .env가 아닌 i7 서버 .env입니다.`} />
         </MPanel>
       </div>
     );

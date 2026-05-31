@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { authMiddleware, getWorkspaceFilter } from '../middleware/auth.js';
-import { fetchAdSenseStats, isAdSenseConfigured } from '../modules/adsense/client.js';
+import { fetchAdSenseStats, emptyAdSenseStats, isAdSenseConfigured } from '../modules/adsense/client.js';
 
 async function adsenseStatsHandler(request: FastifyRequest, reply: FastifyReply) {
   const workspace = String((request.query as { workspace?: string }).workspace ?? 'quizoasis');
@@ -12,10 +12,7 @@ async function adsenseStatsHandler(request: FastifyRequest, reply: FastifyReply)
     return reply.code(400).send({ error: 'AdSense는 퀴즈오아시스만 지원합니다' });
   }
   if (!isAdSenseConfigured(workspace)) {
-    return reply.code(503).send({
-      error: 'AdSense 환경변수 미설정 (CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN, ACCOUNT_ID)',
-      configured: false,
-    });
+    return emptyAdSenseStats(workspace);
   }
 
   try {

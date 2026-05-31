@@ -157,6 +157,7 @@ export const api = {
   adsenseStats: (workspace: string) =>
     request<{
       configured: boolean;
+      missingEnv?: string[];
       todayEarnings: number;
       yesterdayEarnings: number;
       monthEarnings: number;
