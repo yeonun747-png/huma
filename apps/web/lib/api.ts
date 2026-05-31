@@ -17,7 +17,13 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (token) headers['X-HUMA-KEY'] = token;
 
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers }).catch(() => {
-    throw new Error(`API 서버에 연결할 수 없습니다 (${API_BASE}). npm run dev:server 실행 및 .env 설정을 확인하세요.`);
+    const hint =
+      path.includes('adsense') || path.includes('monetization')
+        ? ' 브라우저 광고 차단 확장 프로그램이 API 요청을 막았을 수 있습니다.'
+        : '';
+    throw new Error(
+      `API 서버에 연결할 수 없습니다 (${API_BASE}). i7 서버·Cloudflare Tunnel 실행 여부와 NEXT_PUBLIC_HUMA_API_URL을 확인하세요.${hint}`,
+    );
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
@@ -168,7 +174,7 @@ export const api = {
         ctr: { current: number; previous: number; changePp: number; changePct: number };
       };
       monthlyTrend: Array<{ month: string; earnings: number; pageViews: number; rpm: number }>;
-    }>(`/api/adsense/stats?workspace=${encodeURIComponent(workspace)}`),
+    }>(`/api/monetization/stats?workspace=${encodeURIComponent(workspace)}`),
   stopAll: () => request('/api/stop-all', { method: 'POST' }),
   resumeAll: () => request('/api/resume-all', { method: 'POST' }),
 };

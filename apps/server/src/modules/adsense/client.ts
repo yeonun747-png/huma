@@ -49,7 +49,10 @@ function envKey(workspace: string, suffix: string): string | undefined {
     const specific = process.env[`ADSENSE_${suffix}_${ws}`]?.trim();
     if (specific) return specific;
   }
-  return process.env[`ADSENSE_${suffix}`]?.trim();
+  return (
+    process.env[`ADSENSE_${suffix}`]?.trim() ??
+    process.env[`GOOGLE_ADSENSE_${suffix}`]?.trim()
+  );
 }
 
 function getAdSenseClient(workspace: string) {
