@@ -597,3 +597,91 @@
   .m-ai-engine-sub { font-size: 9px; color: var(--t3); font-family: var(--font-jetbrains), monospace; }
 
 }
+
+.huma-legal-doc {
+  color: var(--t);
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.huma-legal-doc > div + div {
+  margin-top: 28px;
+}
+
+.huma-legal-doc h3 {
+  margin: 0 0 12px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--t);
+}
+
+.huma-legal-doc h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--t);
+}
+
+.huma-legal-doc p {
+  margin: 0 0 8px;
+}
+
+.huma-legal-doc ol,
+.huma-legal-doc ul {
+  margin: 0 0 10px 18px;
+  padding-left: 14px;
+}
+
+.huma-legal-doc ol {
+  list-style: decimal;
+}
+
+.huma-legal-doc ul {
+  list-style: disc;
+}
+
+.huma-legal-doc li + li {
+  margin-top: 4px;
+}
+
+.huma-legal-doc ol ol,
+.huma-legal-doc ol ul,
+.huma-legal-doc ul ol,
+.huma-legal-doc ul ul {
+  margin-top: 8px;
+}
+
+.huma-legal-doc table {
+  width: 100%;
+  margin: 12px 0;
+  border-collapse: collapse;
+  font-size: 13px;
+  background: var(--bg3);
+}
+
+.huma-legal-doc th,
+.huma-legal-doc td {
+  border: 1px solid var(--bdr);
+  padding: 10px 12px;
+  vertical-align: top;
+  text-align: left;
+}
+
+.huma-legal-doc thead th {
+  background: var(--bg4);
+  font-weight: 700;
+}
+
+.huma-legal-doc-note {
+  padding: 12px 14px;
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  background: var(--warn-bg);
+}
+
+.huma-legal-doc-footnote {
+  padding-top: 14px;
+  border-top: 1px solid var(--bdr2);
+  color: var(--t3);
+  font-size: 12px;
+}

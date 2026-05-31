@@ -4,17 +4,21 @@ import { useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
 import { WorkspaceProvider } from '@/components/dashboard/workspace-context';
+import { isPublicPath } from '@/lib/public-paths';
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { token, loading } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  const isPublic = isPublicPath(pathname);
 
   useEffect(() => {
-    if (!loading && !token && pathname !== '/login') {
+    if (!loading && !token && !isPublic) {
       router.replace('/login');
     }
-  }, [loading, token, pathname, router]);
+  }, [loading, token, isPublic, router]);
+
+  if (isPublic) return <>{children}</>;
 
   if (loading) {
     return (
@@ -24,15 +28,18 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!token && pathname !== '/login') return null;
+  if (!token) return null;
   return <>{children}</>;
 }
 
 export function Providers({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const isPublic = isPublicPath(pathname);
+
   return (
     <AuthProvider>
       <AuthGuard>
-        <WorkspaceProvider>{children}</WorkspaceProvider>
+        {isPublic ? children : <WorkspaceProvider>{children}</WorkspaceProvider>}
       </AuthGuard>
     </AuthProvider>
   );

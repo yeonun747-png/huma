@@ -69,6 +69,15 @@ export default function LoginPage() {
         <button type="submit" disabled={loading} className="btn-primary w-full py-2">
           {loading ? '로그인 중...' : '로그인'}
         </button>
+        <p className="text-center font-mono text-[10px] text-huma-t4">
+          <a href="/terms" className="hover:text-huma-t2">
+            이용약관
+          </a>
+          {' · '}
+          <a href="/privacy" className="hover:text-huma-t2">
+            개인정보처리방침
+          </a>
+        </p>
       </form>
     </div>
   );
