@@ -1,10 +1,10 @@
 import { supabase } from '../middleware/auth.js';
+import { isPostingProxyPort } from './modem-ports.js';
 import {
   POSTING_DONGLE_SLOTS,
   postingSlotByWorkspace,
   slotNumberToProxyPort,
-} from '@huma/shared';
-import { isPostingProxyPort } from './modem-ports.js';
+} from './dongle-slots.js';
 
 export const YEONUN_POSTING_PORTS = POSTING_DONGLE_SLOTS.filter((s) => s.workspace === 'yeonun').map(
   (s) => s.proxyPort,
@@ -27,7 +27,7 @@ export async function resolvePostingProxyPortForCreate(
   workspace: string,
   excludeAccountId?: string,
 ): Promise<number> {
-  const slot = postingSlotByWorkspace(workspace as 'yeonun' | 'quizoasis' | 'panana');
+  const slot = postingSlotByWorkspace(workspace);
   if (!slot) throw new Error(`포스팅 workspace 미지원: ${workspace}`);
 
   if (slot.workspace === 'yeonun') {
@@ -60,7 +60,7 @@ export async function resolvePostingProxyPortForCreate(
 }
 
 export function assertPostingProxyPortMatchesWorkspace(workspace: string, proxyPort: number): void {
-  const slot = postingSlotByWorkspace(workspace as 'yeonun' | 'quizoasis' | 'panana');
+  const slot = postingSlotByWorkspace(workspace);
   if (!slot) throw new Error(`포스팅 workspace 미지원: ${workspace}`);
 
   if (workspace === 'yeonun') {
