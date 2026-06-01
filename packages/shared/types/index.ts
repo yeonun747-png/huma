@@ -2,6 +2,7 @@ export * from './account';
 export * from './job';
 export * from './modem';
 export * from './video';
+export * from './dongle-slot';
 
 export type Workspace = import('./account').Workspace;
 

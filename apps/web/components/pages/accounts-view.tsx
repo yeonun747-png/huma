@@ -19,9 +19,9 @@ import {
 } from '@/lib/admin-scope';
 
 const POSTING_COLUMNS: { ws: Workspace; title: string; sub: string }[] = [
-  { ws: 'yeonun', title: '연운', sub: '동글 10001~10003' },
-  { ws: 'quizoasis', title: '퀴즈오아시스', sub: '동글 10004 · 계정 1개' },
-  { ws: 'panana', title: '파나나', sub: '동글 10005 · 계정 1개' },
+  { ws: 'yeonun', title: '연운', sub: '물리 동글 1~3 · 192.168.3.1~3' },
+  { ws: 'quizoasis', title: '퀴즈오아시스', sub: '물리 동글 5 · 192.168.3.5 · :10005' },
+  { ws: 'panana', title: '파나나', sub: '물리 동글 4 · 192.168.3.4 · :10004' },
 ];
 
 type AccountCategory = 'posting' | 'crank' | 'social';
@@ -405,7 +405,7 @@ export function AccountsView() {
 
           {form.category === 'posting' && (
             <p className="font-mono text-[10.5px] text-huma-t3">
-              포스팅 블로그 URL 필수 · 연운=10001~10003 · 퀴즈오아시스=:10004(1계정) · 파나나=:10005(1계정)
+              포스팅 URL 필수 · 연운=동글1~3 · 파나나=동글4(192.168.3.4) · 퀴즈=동글5(192.168.3.5)
             </p>
           )}
 

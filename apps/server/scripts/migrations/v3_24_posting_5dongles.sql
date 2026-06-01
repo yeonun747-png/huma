@@ -4,8 +4,4 @@
 UPDATE huma_modems SET modem_role = 'posting' WHERE proxy_port BETWEEN 10001 AND 10005;
 UPDATE huma_modems SET modem_role = 'crank' WHERE proxy_port IN (10006, 10007);
 
-UPDATE huma_accounts SET proxy_port = 10004
-WHERE account_type = 'posting' AND workspace = 'quizoasis';
-
-UPDATE huma_accounts SET proxy_port = 10005
-WHERE account_type = 'posting' AND workspace = 'panana';
+-- 계정 포트는 v3_25_dongle_physical_slots.sql (파나나=4·퀴즈=5)

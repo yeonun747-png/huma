@@ -1,15 +1,16 @@
 import { supabase } from '../middleware/auth.js';
+import {
+  POSTING_DONGLE_SLOTS,
+  postingSlotByWorkspace,
+  slotNumberToProxyPort,
+} from '@huma/shared';
 import { isPostingProxyPort } from './modem-ports.js';
 
-/** 연운 3동글 · 퀴즈 10004 · 파나나 10005 */
-export const YEONUN_POSTING_PORTS = [10001, 10002, 10003] as const;
-export const QUIZOASIS_POSTING_PORT = 10004;
-export const PANANA_POSTING_PORT = 10005;
-
-const DEDICATED_PORT_BY_WORKSPACE: Record<string, number> = {
-  quizoasis: QUIZOASIS_POSTING_PORT,
-  panana: PANANA_POSTING_PORT,
-};
+export const YEONUN_POSTING_PORTS = POSTING_DONGLE_SLOTS.filter((s) => s.workspace === 'yeonun').map(
+  (s) => s.proxyPort,
+);
+export const PANANA_POSTING_PORT = slotNumberToProxyPort(4);
+export const QUIZOASIS_POSTING_PORT = slotNumberToProxyPort(5);
 
 const WORKSPACE_LABEL: Record<string, string> = {
   yeonun: '연운',
@@ -21,57 +22,57 @@ function excludeIdFilter(excludeAccountId?: string) {
   return excludeAccountId ?? '00000000-0000-0000-0000-000000000000';
 }
 
-/** 포스팅 계정 생성 시 workspace별 고정/가용 동글 포트 */
+/** 포스팅 계정 생성 — 물리 동글 번호·포트 자동 매핑 */
 export async function resolvePostingProxyPortForCreate(
   workspace: string,
   excludeAccountId?: string,
 ): Promise<number> {
-  const dedicated = DEDICATED_PORT_BY_WORKSPACE[workspace];
-  if (dedicated) {
-    const { data: occupant } = await supabase
-      .from('huma_accounts')
-      .select('id, name')
-      .eq('workspace', workspace)
-      .eq('account_type', 'posting')
-      .neq('id', excludeIdFilter(excludeAccountId))
-      .maybeSingle();
-    if (occupant) {
-      throw new Error(
-        `${WORKSPACE_LABEL[workspace] ?? workspace} 포스팅은 동글 1개(:${dedicated})·계정 1개만 등록할 수 있습니다.`,
-      );
-    }
-    return dedicated;
-  }
+  const slot = postingSlotByWorkspace(workspace as 'yeonun' | 'quizoasis' | 'panana');
+  if (!slot) throw new Error(`포스팅 workspace 미지원: ${workspace}`);
 
-  if (workspace === 'yeonun') {
-    for (const port of YEONUN_POSTING_PORTS) {
+  if (slot.workspace === 'yeonun') {
+    for (const yeonunSlot of POSTING_DONGLE_SLOTS.filter((s) => s.workspace === 'yeonun')) {
       const { data: occupant } = await supabase
         .from('huma_accounts')
         .select('id')
-        .eq('proxy_port', port)
+        .eq('proxy_port', yeonunSlot.proxyPort)
         .eq('account_type', 'posting')
         .neq('id', excludeIdFilter(excludeAccountId))
         .maybeSingle();
-      if (!occupant) return port;
+      if (!occupant) return yeonunSlot.proxyPort;
     }
-    throw new Error('연운 포스팅 동글(10001~10003)이 모두 사용 중입니다.');
+    throw new Error('연운 포스팅 동글(물리 1~3 · :10001~10003)이 모두 사용 중입니다.');
   }
 
-  throw new Error(`포스팅 workspace 미지원: ${workspace}`);
+  const { data: occupant } = await supabase
+    .from('huma_accounts')
+    .select('id, name')
+    .eq('workspace', workspace)
+    .eq('account_type', 'posting')
+    .neq('id', excludeIdFilter(excludeAccountId))
+    .maybeSingle();
+  if (occupant) {
+    throw new Error(
+      `${WORKSPACE_LABEL[workspace]} 포스팅은 물리 동글 ${slot.slot}(:${slot.proxyPort})·계정 1개만 등록할 수 있습니다.`,
+    );
+  }
+  return slot.proxyPort;
 }
 
 export function assertPostingProxyPortMatchesWorkspace(workspace: string, proxyPort: number): void {
-  const dedicated = DEDICATED_PORT_BY_WORKSPACE[workspace];
-  if (dedicated && proxyPort !== dedicated) {
-    throw new Error(
-      `${WORKSPACE_LABEL[workspace]} 포스팅은 SOCKS :${dedicated} 동글만 사용할 수 있습니다.`,
-    );
+  const slot = postingSlotByWorkspace(workspace as 'yeonun' | 'quizoasis' | 'panana');
+  if (!slot) throw new Error(`포스팅 workspace 미지원: ${workspace}`);
+
+  if (workspace === 'yeonun') {
+    const ok = (YEONUN_POSTING_PORTS as readonly number[]).includes(proxyPort);
+    if (!ok) throw new Error('연운 포스팅은 물리 동글 1~3 (:10001~10003)만 사용할 수 있습니다.');
+    return;
   }
-  if (
-    workspace === 'yeonun' &&
-    !YEONUN_POSTING_PORTS.includes(proxyPort as (typeof YEONUN_POSTING_PORTS)[number])
-  ) {
-    throw new Error('연운 포스팅은 10001~10003 동글만 사용할 수 있습니다.');
+
+  if (proxyPort !== slot.proxyPort) {
+    throw new Error(
+      `${WORKSPACE_LABEL[workspace]} 포스팅은 물리 동글 ${slot.slot}(:${slot.proxyPort})만 사용할 수 있습니다.`,
+    );
   }
   if (!isPostingProxyPort(proxyPort)) {
     throw new Error('포스팅 proxy_port는 10001~10005만 사용할 수 있습니다.');
