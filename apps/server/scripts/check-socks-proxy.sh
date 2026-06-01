@@ -27,7 +27,8 @@ done
 echo ""
 echo "=== SOCKS5 curl 테스트 (naver.com) ==="
 for p in "${PORTS[@]}"; do
-  CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 --socks5-hostname "127.0.0.1:${p}" https://www.naver.com 2>/dev/null || echo "FAIL")
+  CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 --socks5-hostname "127.0.0.1:${p}" https://www.naver.com 2>/dev/null)
+  CODE=${CODE:-FAIL}
   if [ "$CODE" = "200" ] || [ "$CODE" = "301" ] || [ "$CODE" = "302" ]; then
     echo "  ✓ :${p} → HTTP ${CODE}"
   else

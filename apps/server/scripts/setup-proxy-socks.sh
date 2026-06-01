@@ -53,6 +53,7 @@ fi
 
 systemctl enable 3proxy 2>/dev/null || true
 systemctl restart 3proxy 2>/dev/null || service 3proxy restart
+sleep 2
 echo ""
 echo "※ policy routing 미설정 시 SOCKS 실패 — sudo bash $(dirname "$0")/huma-dongle-routes.sh"
 echo ""
