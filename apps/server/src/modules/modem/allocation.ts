@@ -2,8 +2,10 @@ import { supabase } from '../../middleware/auth.js';
 import { redisConnection } from '../queue/producer.js';
 import {
   CRANK_PROXY_PORTS,
+  CRANK_SCHEDULED_LOCK_TTL_SEC,
   MODEM_LOCK_TTL_SEC,
 } from '../../lib/modem-ports.js';
+import { getSchedulableCrankProxyPorts } from '../../lib/crank-modems.js';
 import { shuffleArray } from '../../lib/utils.js';
 
 function crankLockKey(port: number) {
@@ -15,7 +17,11 @@ function postingLockKey(port: number) {
 }
 
 /** v3.22 §7-13-1 — posting: DB 고정 / crank: Redis 유휴 슬롯 동적 할당 */
-export async function getModemProxyPort(accountId: string): Promise<number> {
+export async function getModemProxyPort(
+  accountId: string,
+  opts?: { lockTtlSec?: number },
+): Promise<number> {
+  const lockTtl = opts?.lockTtlSec ?? MODEM_LOCK_TTL_SEC;
   const { data: account } = await supabase
     .from('huma_accounts')
     .select('proxy_port, account_type')
@@ -35,16 +41,20 @@ export async function getModemProxyPort(accountId: string): Promise<number> {
     if (crankUsing) {
       throw new Error(`[getModemProxyPort] posting 포트 ${port} C-Rank 사용 중 (규칙 ⑬)`);
     }
-    await redisConnection.set(postingLockKey(port), accountId, 'EX', MODEM_LOCK_TTL_SEC);
+    await redisConnection.set(postingLockKey(port), accountId, 'EX', lockTtl);
     return port;
   }
 
-  for (const port of shuffleArray([...CRANK_PROXY_PORTS])) {
+  const crankPorts = await getSchedulableCrankProxyPorts();
+  const portPool =
+    crankPorts.length > 0 ? crankPorts : [...CRANK_PROXY_PORTS];
+
+  for (const port of shuffleArray(portPool)) {
     const acquired = await redisConnection.set(
       crankLockKey(port),
       accountId,
       'EX',
-      MODEM_LOCK_TTL_SEC,
+      lockTtl,
       'NX',
     );
     if (acquired !== 'OK') continue;

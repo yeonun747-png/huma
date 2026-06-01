@@ -130,6 +130,19 @@ export const api = {
     request<Array<{ id: string; title: string; job_type: string; status: string; scheduled_at: string; workspace: string }>>(
       `/api/jobs/calendar${qs(params ?? {})}`
     ),
+  crankScheduler: () =>
+    request<{
+      date_key: string;
+      active_crank_modems: number;
+      cycle_days: number;
+      daily_account_target: number;
+      max_sessions_per_modem_per_day: number;
+      today_scheduled: number;
+      today_completed: number;
+      session_duration_minutes: number;
+      modems: Array<Record<string, unknown>>;
+      accounts: Array<Record<string, unknown>>;
+    }>('/api/crank/scheduler'),
   cafeTargets: () => request<Array<Record<string, unknown>>>('/api/cafe/targets'),
   crawlCafe: () => request<{ success: boolean; count: number }>('/api/cafe/crawl', { method: 'POST' }),
   cafeViralCafes: () => request<Array<Record<string, unknown>>>('/api/cafe-viral/cafes'),

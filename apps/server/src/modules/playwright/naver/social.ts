@@ -46,16 +46,28 @@ export async function naturalVisitViaSearch(page: Page, keyword: string, scale =
   return page.url();
 }
 
+export interface RunSocialCrankOptions {
+  modemSession?: ModemSession;
+  skipModemAcquire?: boolean;
+}
+
 export async function runSocialCrank(
   accountId: string,
   payload: { ourBlogUrls: string[]; targetDate?: string },
+  options?: RunSocialCrankOptions,
 ) {
   await maybeIncrementWarmupDay(accountId);
 
-  let modemSession: ModemSession | undefined;
+  let modemSession: ModemSession | undefined = options?.modemSession;
+  const ownsModem = !options?.skipModemAcquire;
+
   try {
-    modemSession = await acquireModem(accountId);
-    if (!modemSession) throw new Error('NO_MODEM');
+    if (ownsModem) {
+      modemSession = await acquireModem(accountId);
+      if (!modemSession) throw new Error('NO_MODEM');
+    } else if (!modemSession) {
+      throw new Error('NO_MODEM');
+    }
     const accountCtx = await loadAccountForBrowser(accountId, modemSession.proxyPort);
     if (accountCtx.account_type !== 'crank') {
       throw new Error('ACCOUNT_NOT_CRANK');
@@ -138,7 +150,7 @@ export async function runSocialCrank(
     }
     throw err;
   } finally {
-    if (modemSession) await releaseModem(modemSession);
+    if (ownsModem && modemSession) await releaseModem(modemSession);
   }
 }
 

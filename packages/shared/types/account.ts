@@ -36,6 +36,7 @@ export interface HumaAccount {
   last_posted_at?: string;
   post_count_today: number;
   crank_count_today: number;
+  last_crank_at?: string;
   created_at: string;
   updated_at: string;
 }

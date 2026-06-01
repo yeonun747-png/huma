@@ -30,7 +30,21 @@ export function resolveJobStatus(scheduledAt?: string | null): 'scheduled' | 'pe
   return getScheduleDelay(scheduledAt) ? 'scheduled' : 'pending';
 }
 
+function parseSocialCrankContent(content?: string | null): Record<string, unknown> {
+  if (!content?.trim()) return {};
+  try {
+    const parsed = JSON.parse(content) as Record<string, unknown>;
+    if (parsed && typeof parsed === 'object') return parsed;
+  } catch {
+    /* plain text content */
+  }
+  return {};
+}
+
 export function buildEnqueuePayload(job: JobRecord) {
+  const crankExtras =
+    job.job_type === 'social_crank' ? parseSocialCrankContent(job.content) : {};
+
   return {
     type: job.job_type,
     accountId: job.account_id,
@@ -47,6 +61,7 @@ export function buildEnqueuePayload(job: JobRecord) {
       videoPath: job.result_url,
       caption: job.content ?? job.title,
       hashtags: job.hashtags,
+      ...crankExtras,
     },
   };
 }

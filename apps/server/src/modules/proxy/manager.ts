@@ -12,7 +12,10 @@ export interface ModemSession {
   lockKind: 'posting' | 'crank';
 }
 
-export async function acquireModem(accountId: string): Promise<ModemSession | undefined> {
+export async function acquireModem(
+  accountId: string,
+  opts?: { lockTtlSec?: number },
+): Promise<ModemSession | undefined> {
   const { data: account } = await supabase
     .from('huma_accounts')
     .select('modem_id, proxy_port, account_type')
@@ -25,7 +28,7 @@ export async function acquireModem(accountId: string): Promise<ModemSession | un
   let lockKind: 'posting' | 'crank';
 
   try {
-    proxyPort = await getModemProxyPort(accountId);
+    proxyPort = await getModemProxyPort(accountId, opts);
     lockKind =
       account.account_type === 'posting' && account.proxy_port === proxyPort ? 'posting' : 'crank';
   } catch (err) {

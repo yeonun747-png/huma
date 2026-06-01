@@ -17,6 +17,7 @@ import { executePostBlog } from './jobs/post-blog.js';
 import { executeCafePost } from './jobs/cafe-post.js';
 import { executeCafeReply } from './jobs/cafe-reply.js';
 import { executeSocialCrank } from './jobs/social-crank.js';
+import { executeScheduledSocialCrank } from '../crank/scheduled-session.js';
 import { executeVideoPipeline } from './jobs/video-pipeline.js';
 import { executeContentFull } from '../claude/auto-content-orchestrator.js';
 import { executeSocialPost } from './jobs/social-post.js';
@@ -96,14 +97,23 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
 
           const countField = dailyCountField(type);
           let limit = getDailyLimit(type);
+          const scheduledCrank = Boolean(
+            (payload as { scheduledCrank?: boolean }).scheduledCrank,
+          );
           if (type === 'social_crank' || type === 'cafe_reply') {
-            const ctx = await loadAccountForBrowser(accountId);
-            const crankCap = getCrankDailyLimit(ctx.warmup_day ?? 0);
-            limit = type === 'cafe_reply'
-              ? Math.min(getDailyLimit('cafe_reply'), crankCap)
-              : crankCap;
+            if (!scheduledCrank) {
+              const ctx = await loadAccountForBrowser(accountId);
+              const crankCap = getCrankDailyLimit(ctx.warmup_day ?? 0);
+              limit = type === 'cafe_reply'
+                ? Math.min(getDailyLimit('cafe_reply'), crankCap)
+                : crankCap;
+            } else if (type === 'social_crank') {
+              limit = 999;
+            }
           }
-          if ((await getTodayCount(accountId, countField)) >= limit) throw new Error('DAILY_LIMIT');
+          if (!scheduledCrank && (await getTodayCount(accountId, countField)) >= limit) {
+            throw new Error('DAILY_LIMIT');
+          }
         }
         const workspace = payload.workspace as string | undefined;
         if (workspace) await checkSharedWorkspaceLimit(workspace, type);
@@ -160,7 +170,20 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
             if (modemSession) await releaseModem(modemSession);
           }
         } else if (type === 'social_crank') {
-          await executeSocialCrank(accountId!, payload as { ourBlogUrls: string[] });
+          const crankPayload = payload as {
+            ourBlogUrls?: string[];
+            scheduledCrank?: boolean;
+          };
+          if (crankPayload.scheduledCrank) {
+            await executeScheduledSocialCrank(accountId!, {
+              ourBlogUrls: crankPayload.ourBlogUrls ?? [],
+              scheduledCrank: true,
+            });
+          } else {
+            await executeSocialCrank(accountId!, {
+              ourBlogUrls: crankPayload.ourBlogUrls ?? [],
+            });
+          }
         } else if (['tiktok_upload', 'instagram_reel', 'instagram_post', 'threads_post', 'twitter_post', 'pinterest_upload'].includes(type)) {
           await executeSocialPost(type, payload);
           if (humaJobId) await completeJob(humaJobId);

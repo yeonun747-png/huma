@@ -2,7 +2,10 @@
 export const POSTING_PROXY_PORTS = [10001, 10002, 10003, 10004, 10005] as const;
 export const CRANK_PROXY_PORTS = [10006, 10007] as const;
 
+/** posting·일반 crank */
 export const MODEM_LOCK_TTL_SEC = 300;
+/** 스케줄 crank: reconnect 10분 + 세션 60분 + 여유 */
+export const CRANK_SCHEDULED_LOCK_TTL_SEC = 90 * 60;
 
 export function proxyPortToSlot(proxyPort: number): number {
   return proxyPort - 10000;

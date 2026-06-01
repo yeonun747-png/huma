@@ -15,5 +15,10 @@ export interface HumaModem {
   modem_role?: ModemRole;
   response_ms?: number;
   last_reconnect_at?: string;
+  monthly_data_mb?: number;
+  crank_sessions_today?: number;
   created_at: string;
 }
+
+/** 스케줄러에서 crank 동글 가용으로 보는 상태 (idle/busy/reconnecting) */
+export type CrankModemScheduleStatus = 'idle' | 'busy' | 'reconnecting';
