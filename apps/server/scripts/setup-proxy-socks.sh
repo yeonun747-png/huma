@@ -54,6 +54,8 @@ fi
 systemctl enable 3proxy 2>/dev/null || true
 systemctl restart 3proxy 2>/dev/null || service 3proxy restart
 echo ""
+echo "※ policy routing 미설정 시 SOCKS 실패 — sudo bash $(dirname "$0")/huma-dongle-routes.sh"
+echo ""
 echo "3proxy SOCKS 재시작 완료 (${OK}슬롯). 테스트:"
 for mapping in "${SLOTS[@]}"; do
   PORT="${mapping##*:}"

@@ -1,0 +1,13 @@
+[Unit]
+Description=HUMA LTE dongle policy routing
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash /home/songchunho/huma/apps/server/scripts/huma-dongle-routes.sh
+ExecStop=/bin/true
+
+[Install]
+WantedBy=multi-user.target
