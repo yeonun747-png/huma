@@ -32,7 +32,12 @@ export const PAGE_META: Record<string, PageMeta> = {
   '/calendar': { title: '스케줄 캘린더', action: '+ 스케줄 추가', actionType: 'openScheduleForm' },
   '/monitor': { title: '발행 모니터', action: '⟳ 새로고침', actionType: 'refreshMonitor' },
   '/oplog': { title: 'Operation Log', action: '⬇ 다운로드', actionType: 'downloadOplog' },
-  '/accounts': { title: '계정 관리', action: '+ 계정 추가', actionType: 'openAccountForm' },
+  '/accounts': {
+    title: '계정 관리',
+    action: '+ 계정 추가',
+    actionType: 'openAccountForm',
+    contentClass: 'accounts-page-main',
+  },
   '/video-pipeline': { title: '영상 파이프라인', action: '▶ 파이프라인', actionType: 'startVideoPipeline' },
   '/watcher': { title: 'Layer4 Watcher', action: '↺ 새로고침', actionType: 'refreshWatcher' },
   '/human-engine': { title: '휴먼 엔진 설정', action: '저장', actionType: 'saveHuman', contentClass: 'px-[18px] py-4' },

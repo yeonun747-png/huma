@@ -19,9 +19,9 @@ import {
 } from '@/lib/admin-scope';
 
 const POSTING_COLUMNS: { ws: Workspace; title: string; sub: string }[] = [
-  { ws: 'yeonun', title: '연운', sub: '물리 동글 1~3 · 192.168.3.1~3' },
-  { ws: 'quizoasis', title: '퀴즈오아시스', sub: '물리 동글 5 · 192.168.3.5 · :10005' },
-  { ws: 'panana', title: '파나나', sub: '물리 동글 4 · 192.168.3.4 · :10004' },
+  { ws: 'yeonun', title: '연운', sub: '동글1~3 · :10001~03' },
+  { ws: 'quizoasis', title: '퀴즈오아시스', sub: '동글5 · :10005' },
+  { ws: 'panana', title: '파나나', sub: '동글4 · :10004' },
 ];
 
 type AccountCategory = 'posting' | 'crank' | 'social';
@@ -284,8 +284,8 @@ export function AccountsView() {
   }
 
   return (
-    <div className="animate-fadeIn">
-      <MGrid cols={3}>
+    <div className="accounts-view animate-fadeIn">
+      <MGrid cols={3} className="accounts-stats-row">
         <MStat label="포스팅 (지수5)" value={<>{posting}<span className="text-[11px] text-huma-t3">개</span></>} sub="블로그 발행" />
         <MStat label="C-Rank+Cafe" value={<>{crankCafe}<span className="text-[11px] text-huma-t3">개</span></>} sub="10~150 · 소통·카페" />
         <MStat label="소셜미디어 (API)" value={<>{visiblePlatforms.length}<span className="text-[11px] text-huma-t3">개</span></>} sub="TikTok·IG·Pinterest 등" />
@@ -301,7 +301,7 @@ export function AccountsView() {
                 onChange={(e) =>
                   setForm((f) => ({ ...f, registerUnit: e.target.value as BusinessUnit }))
                 }
-                className="m-model-select max-w-[180px]"
+                className="m-model-select w-full max-w-full"
               >
                 {registerUnits.map((unit) => (
                   <option key={unit} value={unit}>
@@ -332,13 +332,13 @@ export function AccountsView() {
             ))}
           </div>
 
-          <div className="flex flex-wrap items-end gap-2">
+          <div className="accounts-form-row">
             {isSocial ? (
               <>
                 <select
                   value={form.platform}
                   onChange={(e) => setForm((f) => ({ ...f, platform: e.target.value }))}
-                  className="m-model-select max-w-[140px]"
+                  className="m-model-select w-full"
                 >
                   {socialPlatforms.map((p) => (
                     <option key={p.value} value={p.value}>{p.label}</option>
@@ -348,14 +348,14 @@ export function AccountsView() {
                   placeholder="계정명 / @handle"
                   value={form.username}
                   onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
-                  className="m-model-select max-w-[160px]"
+                  className="m-model-select w-full"
                 />
                 <input
                   type="password"
                   placeholder="API Access Token"
                   value={form.access_token}
                   onChange={(e) => setForm((f) => ({ ...f, access_token: e.target.value }))}
-                  className="m-model-select min-w-[180px] flex-1"
+                  className="m-model-select w-full"
                 />
               </>
             ) : (
@@ -364,20 +364,20 @@ export function AccountsView() {
                   placeholder="표시 이름"
                   value={form.name}
                   onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                  className="m-model-select max-w-[140px]"
+                  className="m-model-select w-full"
                 />
                 <input
                   placeholder="네이버 ID"
                   value={form.naver_id}
                   onChange={(e) => setForm((f) => ({ ...f, naver_id: e.target.value }))}
-                  className="m-model-select max-w-[140px]"
+                  className="m-model-select w-full"
                 />
                 <input
                   type="password"
                   placeholder="비밀번호"
                   value={form.naver_pw}
                   onChange={(e) => setForm((f) => ({ ...f, naver_pw: e.target.value }))}
-                  className="m-model-select max-w-[140px]"
+                  className="m-model-select w-full"
                 />
                 {(form.category === 'posting' || form.category === 'crank') && (
                   <input
@@ -388,7 +388,7 @@ export function AccountsView() {
                     }
                     value={form.blog_url}
                     onChange={(e) => setForm((f) => ({ ...f, blog_url: e.target.value }))}
-                    className="m-model-select min-w-[200px] flex-1"
+                    className="m-model-select w-full"
                     required={form.category === 'posting'}
                   />
                 )}
@@ -430,12 +430,12 @@ export function AccountsView() {
           <div className="text-[12px] font-semibold text-huma-t">
             블로그 URL 수정 · {editingAccount.name}
           </div>
-          <div className="flex flex-wrap items-end gap-2">
+          <div className="accounts-form-row">
             <input
               placeholder="https://blog.naver.com/..."
               value={editBlogUrl}
               onChange={(e) => setEditBlogUrl(e.target.value)}
-              className="m-model-select min-w-[280px] flex-1"
+              className="m-model-select w-full sm:col-span-2"
             />
             <button type="button" className="btn-primary" onClick={handleSaveEdit} disabled={editSaving}>
               {editSaving ? '저장 중…' : '저장'}
@@ -488,16 +488,16 @@ export function AccountsView() {
         )}
       </div>
 
-      <MGrid cols={listGridCols}>
+      <MGrid cols={listGridCols} className="accounts-posting-cols">
         {postingColumns.map((col) => {
           const colAccounts = accountsInWorkspace(col.ws);
           const colPlatforms = platformsInWorkspace(col.ws);
 
           return (
             <div key={col.ws}>
-              <div className="m-ws-col-title">
-                {col.title}
-                <span className="ml-2 font-mono text-[10px] font-normal text-huma-t3">{col.sub}</span>
+              <div className="m-ws-col-title" title={col.sub}>
+                <span className="col-title-main">{col.title}</span>
+                <span className="col-title-sub">{col.sub}</span>
               </div>
 
               {colAccounts.length ? (

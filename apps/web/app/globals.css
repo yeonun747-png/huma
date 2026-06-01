@@ -685,3 +685,136 @@
   color: var(--t3);
   font-size: 12px;
 }
+
+/* 계정 관리 — 1080px 뷰포트(사이드바 218 + 콘텐츠 ~844) 가로 넘침 방지 */
+.accounts-page-main {
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.accounts-view {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.accounts-view .accounts-stats-row.m-g3,
+.accounts-view .accounts-posting-cols.m-g3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.accounts-view .accounts-posting-cols.m-g2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.accounts-view .accounts-posting-cols.m-g1 {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.accounts-view .m-ws-col-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  letter-spacing: 1px;
+  line-height: 1.35;
+  overflow: hidden;
+}
+
+.accounts-view .col-title-main {
+  flex-shrink: 0;
+}
+
+.accounts-view .col-title-sub {
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.5px;
+  text-transform: none;
+  color: var(--t3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1 1 4rem;
+}
+
+.accounts-view .m-ac {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.accounts-view .m-ac-top {
+  min-width: 0;
+}
+
+.accounts-view .m-ac-name {
+  font-size: 12.5px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-all;
+}
+
+.accounts-view .m-ac-url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+}
+
+.accounts-view .m-ac-stats {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.accounts-view .m-am {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.accounts-view .m-am-v {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accounts-view .m-ac-foot {
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.accounts-view .m-af {
+  flex: 1 1 calc(50% - 4px);
+  min-width: 0;
+  max-width: 100%;
+  padding: 3px 6px;
+  font-size: 10.5px;
+  text-align: center;
+}
+
+.accounts-view .accounts-form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 8px;
+  align-items: end;
+}
+
+.accounts-view .accounts-form-row .btn-primary,
+.accounts-view .accounts-form-row .btn-ghost {
+  width: 100%;
+}
+
+@media (max-width: 1180px) {
+  .accounts-view .accounts-stats-row.m-g3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .accounts-view .m-sc-v {
+    font-size: 1.15rem;
+  }
+}
