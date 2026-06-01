@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AccountType, HumaAccount, Workspace } from '@huma/shared';
+import { CRANK_POOL_WORKSPACE, isCrankPoolAccount } from '@huma/shared';
 import { api } from '@/lib/api';
 import { WORKSPACES } from '@/lib/constants';
 import { MAccountCard, MGrid, MStat, MTypeBadge } from '@/components/mockup/primitives';
@@ -54,7 +55,11 @@ const TYPE_LABEL: Record<AccountType, string> = {
 };
 
 function isCrankPool(ac: HumaAccount) {
-  return ac.account_type === 'crank' || ac.account_type === 'cafe';
+  return isCrankPoolAccount(ac);
+}
+
+function isPostingAccount(ac: HumaAccount) {
+  return ac.account_type === 'posting';
 }
 
 function belongsToGroup(ws: string, group: AccountGroup): boolean {
@@ -128,6 +133,10 @@ export function AccountsView() {
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [editingAccount, setEditingAccount] = useState<HumaAccount | null>(null);
+  const [editBlogUrl, setEditBlogUrl] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
 
   const listGridCols = (visibleGroups.length >= 2 ? 2 : 1) as 1 | 2;
 
@@ -155,9 +164,9 @@ export function AccountsView() {
     );
   });
 
-  const visibleAccounts = useMemo(
-    () => accounts.filter((a) => visibleGroups.some((g) => belongsToGroup(a.workspace, g))),
-    [accounts, visibleGroups],
+  const crankPoolAccounts = useMemo(
+    () => accounts.filter(isCrankPool).sort((a, b) => a.name.localeCompare(b.name)),
+    [accounts],
   );
 
   const visiblePlatforms = useMemo(
@@ -165,8 +174,14 @@ export function AccountsView() {
     [platforms, visibleGroups],
   );
 
-  const posting = visibleAccounts.filter((a) => a.account_type === 'posting').length;
-  const crankCafe = visibleAccounts.filter((a) => isCrankPool(a)).length;
+  const posting = useMemo(
+    () =>
+      accounts.filter(
+        (a) => isPostingAccount(a) && visibleGroups.some((g) => belongsToGroup(a.workspace, g)),
+      ).length,
+    [accounts, visibleGroups],
+  );
+  const crankCafe = crankPoolAccounts.length;
   const isSocial = form.category === 'social';
   const socialPlatforms =
     form.registerGroup === 'quizoasis_panana' ? SOCIAL_PLATFORMS_QUIZOASIS : SOCIAL_PLATFORMS_BASE;
@@ -196,8 +211,9 @@ export function AccountsView() {
           setError('표시 이름과 네이버 ID는 필수입니다.');
           return;
         }
-        const targetWs = resolveNaverWorkspace(form.registerGroup);
-        await api.createAccount({
+        const targetWs =
+          form.category === 'crank' ? CRANK_POOL_WORKSPACE : resolveNaverWorkspace(form.registerGroup);
+        const created = (await api.createAccount({
           workspace: targetWs,
           name: form.name.trim(),
           naver_id: form.naver_id.trim(),
@@ -211,7 +227,17 @@ export function AccountsView() {
           health_score: 100,
           blog_index: form.category === 'posting' ? 5 : 0,
           wpm: 55,
-        });
+        })) as HumaAccount;
+        if (form.category === 'posting' && !form.blog_url.trim() && created?.id) {
+          setResolvingId(created.id);
+          try {
+            await api.resolveBlogUrl(created.id);
+          } catch (resolveErr) {
+            alertAccountError(resolveErr, { naverId: form.naver_id });
+          } finally {
+            setResolvingId(null);
+          }
+        }
       }
       setShowForm(false);
       load();
@@ -222,10 +248,55 @@ export function AccountsView() {
     }
   };
 
+  const handleStartEditPosting = (ac: HumaAccount) => {
+    setEditingAccount(ac);
+    setEditBlogUrl(ac.blog_url ?? '');
+    setError('');
+  };
+
+  const handleCancelEdit = () => {
+    setEditingAccount(null);
+    setEditBlogUrl('');
+  };
+
+  const handleResolveBlogUrl = async (ac: HumaAccount) => {
+    if (resolvingId) return;
+    setResolvingId(ac.id);
+    setError('');
+    try {
+      await api.resolveBlogUrl(ac.id);
+      load();
+    } catch (e) {
+      alertAccountError(e, { naverId: ac.naver_id });
+    } finally {
+      setResolvingId(null);
+    }
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingAccount) return;
+    if (!editBlogUrl.trim()) {
+      setError('포스팅 계정은 블로그 URL이 필수입니다.');
+      return;
+    }
+    setEditSaving(true);
+    setError('');
+    try {
+      await api.updateAccount(editingAccount.id, { blog_url: editBlogUrl.trim() });
+      handleCancelEdit();
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '수정 실패');
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
   const handleDeleteNaver = async (ac: HumaAccount) => {
     if (!(await confirmDelete(ac.name))) return;
     try {
       await api.deleteAccount(ac.id);
+      if (editingAccount?.id === ac.id) handleCancelEdit();
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : '삭제 실패');
@@ -252,7 +323,7 @@ export function AccountsView() {
   };
 
   const accountsInGroup = (group: AccountGroup) =>
-    accounts.filter((a) => belongsToGroup(a.workspace, group));
+    accounts.filter((a) => isPostingAccount(a) && belongsToGroup(a.workspace, group));
 
   const platformsInGroup = (group: AccountGroup) =>
     platforms.filter((p) => belongsToGroup(String(p.workspace), group));
@@ -370,7 +441,11 @@ export function AccountsView() {
                 />
                 {(form.category === 'posting' || form.category === 'crank') && (
                   <input
-                    placeholder="블로그 URL (선택)"
+                    placeholder={
+                      form.category === 'posting'
+                        ? '블로그 URL (비우면 i7 자동 수집)'
+                        : '블로그 URL (선택)'
+                    }
                     value={form.blog_url}
                     onChange={(e) => setForm((f) => ({ ...f, blog_url: e.target.value }))}
                     className="m-model-select min-w-[200px] flex-1"
@@ -387,6 +462,18 @@ export function AccountsView() {
             </button>
           </div>
 
+          {form.category === 'posting' && (
+            <p className="font-mono text-[10.5px] text-huma-t3">
+              포스팅 계정은 i7 동글(10001~10004) 프록시로 로그인해 블로그 URL을 자동 수집합니다. 관리 PC에서 네이버 로그인할 필요 없습니다.
+            </p>
+          )}
+
+          {form.category === 'crank' && (
+            <p className="font-mono text-[10.5px] text-huma-t3">
+              C-Rank+Cafe는 연운·퀴즈+파나나 공용 풀입니다. 모든 담당자가 동일 계정을 관리합니다.
+            </p>
+          )}
+
           {!superAdmin && form.registerGroup === 'quizoasis_panana' && isSocial && (
             <p className="font-mono text-[10.5px] text-huma-t3">
               퀴즈·파나나는 네이버·C-Rank 계정을 공유합니다. 소셜 API만 서비스별로 등록하세요.
@@ -396,6 +483,69 @@ export function AccountsView() {
           {error && <p className="text-xs text-huma-err">{error}</p>}
         </div>
       )}
+
+      {editingAccount && (
+        <div className="m-panel mb-3 space-y-2">
+          <div className="text-[12px] font-semibold text-huma-t">
+            블로그 URL 수정 · {editingAccount.name}
+          </div>
+          <div className="flex flex-wrap items-end gap-2">
+            <input
+              placeholder="https://blog.naver.com/..."
+              value={editBlogUrl}
+              onChange={(e) => setEditBlogUrl(e.target.value)}
+              className="m-model-select min-w-[280px] flex-1"
+            />
+            <button type="button" className="btn-primary" onClick={handleSaveEdit} disabled={editSaving}>
+              {editSaving ? '저장 중…' : '저장'}
+            </button>
+            <button type="button" className="btn-ghost" onClick={handleCancelEdit}>
+              취소
+            </button>
+          </div>
+          {!editingAccount.blog_url && (
+            <p className="font-mono text-[10.5px] text-huma-warn">블로그 URL 미등록 — 발행 job에 필요합니다.</p>
+          )}
+          {error && editingAccount && <p className="text-xs text-huma-err">{error}</p>}
+        </div>
+      )}
+
+      <div className="mb-3">
+        <div className="m-ws-col-title">C-Rank+Cafe · 공용 풀</div>
+        {crankPoolAccounts.length ? (
+          crankPoolAccounts.map((ac) => (
+            <MAccountCard
+              key={ac.id}
+              icon="🔗"
+              iconBg="var(--warn-bg)"
+              name={
+                <>
+                  {ac.name}{' '}
+                  <span className="ml-1 rounded bg-huma-bg2 px-1.5 py-px font-mono text-[9px] uppercase text-huma-acc">
+                    {TYPE_LABEL[ac.account_type]}
+                  </span>
+                  <span className="ml-1 font-mono text-[9px] text-huma-t3">공용</span>
+                </>
+              }
+              url={ac.blog_url ?? `${ac.naver_id} · 워밍업 ${ac.warmup_day ?? 0}일`}
+              status={statusLabel(ac)}
+              statusTone={statusTone(ac)}
+              stats={[
+                { label: 'Health', value: ac.health_score ?? '—', tone: (ac.health_score ?? 100) >= 80 ? 'text-huma-ok' : 'text-huma-warn' },
+                { label: 'Warmup', value: ac.warmup_day ?? 0 },
+                { label: '오늘 소통', value: ac.crank_count_today ?? 0 },
+              ]}
+              actions={[
+                { label: ac.is_active ? '정지' : '재개', primary: true, onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(load) },
+                { label: '로그', onClick: () => api.accountLogs(ac.id).then((logs) => console.log(logs)) },
+                { label: '삭제', danger: true, onClick: () => handleDeleteNaver(ac) },
+              ]}
+            />
+          ))
+        ) : (
+          <div className="m-ac text-center text-[11px] text-huma-t3">공용 C-Rank+Cafe 계정 없음</div>
+        )}
+      </div>
 
       <MGrid cols={listGridCols}>
         {visibleGroups.map((group) => {
@@ -411,18 +561,18 @@ export function AccountsView() {
                 groupAccounts.map((ac) => (
                   <MAccountCard
                     key={ac.id}
-                    icon={isCrankPool(ac) ? '🔗' : '📝'}
-                    iconBg={isCrankPool(ac) ? 'var(--warn-bg)' : 'var(--ok-bg)'}
+                    icon="📝"
+                    iconBg="var(--ok-bg)"
                     name={
                       <>
                         {ac.name}{' '}
                         <span className="ml-1 rounded bg-huma-bg2 px-1.5 py-px font-mono text-[9px] uppercase text-huma-acc">
                           {TYPE_LABEL[ac.account_type]}
                         </span>
-                        {ac.account_type === 'posting' && group === 'quizoasis_panana' && (
+                        {group === 'quizoasis_panana' && (
                           <MTypeBadge type="shared" />
                         )}
-                        {ac.account_type === 'posting' && group === 'yeonun' && (
+                        {group === 'yeonun' && (
                           <MTypeBadge type="posting" />
                         )}
                         {ac.workspace === 'quizoasis' && group === 'quizoasis_panana' && (
@@ -433,15 +583,21 @@ export function AccountsView() {
                         )}
                       </>
                     }
-                    url={ac.blog_url ?? `${ac.naver_id} · 지수${ac.blog_index ?? 5}`}
+                    url={ac.blog_url ?? `${ac.naver_id} · 지수${ac.blog_index ?? 5}${!ac.blog_url ? ' · URL 미등록' : ''}`}
                     status={statusLabel(ac)}
-                    statusTone={statusTone(ac)}
+                    statusTone={!ac.blog_url ? 'warn' : statusTone(ac)}
                     stats={[
                       { label: 'Health', value: ac.health_score ?? '—', tone: (ac.health_score ?? 100) >= 80 ? 'text-huma-ok' : 'text-huma-warn' },
                       { label: 'Index', value: ac.blog_index ?? '—' },
-                      { label: isCrankPool(ac) ? '오늘 소통' : 'WPM', value: isCrankPool(ac) ? ac.crank_count_today : ac.wpm ?? '—' },
+                      { label: 'WPM', value: ac.wpm ?? '—' },
                     ]}
                     actions={[
+                      {
+                        label: resolvingId === ac.id ? '수집 중…' : ac.blog_url ? 'URL 재수집' : 'URL 자동 수집',
+                        primary: !ac.blog_url,
+                        onClick: () => handleResolveBlogUrl(ac),
+                      },
+                      { label: '수정', onClick: () => handleStartEditPosting(ac) },
                       { label: ac.is_active ? '정지' : '재개', primary: true, onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(load) },
                       { label: '로그', onClick: () => api.accountLogs(ac.id).then((logs) => console.log(logs)) },
                       { label: '삭제', danger: true, onClick: () => handleDeleteNaver(ac) },

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { AccountType, HumaAccount } from '@huma/shared';
+import { isCrankPoolAccount } from '@huma/shared';
 import { api } from '@/lib/api';
 import { useWorkspace } from '@/components/dashboard/workspace-context';
 import { cn } from '@/lib/constants';
@@ -22,7 +23,14 @@ export function AccountList() {
   const [loading, setLoading] = useState(false);
 
   const load = () => {
-    api.accounts().then((all) => setAccounts(all.filter((a) => a.workspace === workspace))).catch(() => setAccounts([]));
+    api
+      .accounts()
+      .then((all) =>
+        setAccounts(
+          all.filter((a) => a.workspace === workspace || isCrankPoolAccount(a)),
+        ),
+      )
+      .catch(() => setAccounts([]));
   };
 
   useEffect(() => {

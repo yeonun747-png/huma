@@ -2,6 +2,16 @@ export type Workspace = 'yeonun' | 'quizoasis' | 'panana';
 
 export type AccountType = 'posting' | 'crank' | 'cafe';
 
+/** C-Rank·카페 공용 풀 — workspace와 무관하게 전체 admin 노출 */
+export const CRANK_POOL_ACCOUNT_TYPES: AccountType[] = ['crank', 'cafe'];
+
+export function isCrankPoolAccount(ac: { account_type: AccountType }): boolean {
+  return CRANK_POOL_ACCOUNT_TYPES.includes(ac.account_type);
+}
+
+/** 공용 crank 풀 DB workspace (등록 시 canonical) */
+export const CRANK_POOL_WORKSPACE: Workspace = 'yeonun';
+
 export interface HumaAccount {
   id: string;
   name: string;
