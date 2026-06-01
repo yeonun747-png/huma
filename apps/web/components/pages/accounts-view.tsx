@@ -136,7 +136,6 @@ export function AccountsView() {
   const [editingAccount, setEditingAccount] = useState<HumaAccount | null>(null);
   const [editBlogUrl, setEditBlogUrl] = useState('');
   const [editSaving, setEditSaving] = useState(false);
-  const [resolvingId, setResolvingId] = useState<string | null>(null);
 
   const listGridCols = (visibleGroups.length >= 2 ? 2 : 1) as 1 | 2;
 
@@ -211,9 +210,13 @@ export function AccountsView() {
           setError('표시 이름과 네이버 ID는 필수입니다.');
           return;
         }
+        if (form.category === 'posting' && !form.blog_url.trim()) {
+          setError('포스팅 계정은 블로그 URL이 필수입니다.');
+          return;
+        }
         const targetWs =
           form.category === 'crank' ? CRANK_POOL_WORKSPACE : resolveNaverWorkspace(form.registerGroup);
-        const created = (await api.createAccount({
+        await api.createAccount({
           workspace: targetWs,
           name: form.name.trim(),
           naver_id: form.naver_id.trim(),
@@ -227,17 +230,7 @@ export function AccountsView() {
           health_score: 100,
           blog_index: form.category === 'posting' ? 5 : 0,
           wpm: 55,
-        })) as HumaAccount;
-        if (form.category === 'posting' && !form.blog_url.trim() && created?.id) {
-          setResolvingId(created.id);
-          try {
-            await api.resolveBlogUrl(created.id);
-          } catch (resolveErr) {
-            alertAccountError(resolveErr, { naverId: form.naver_id });
-          } finally {
-            setResolvingId(null);
-          }
-        }
+        });
       }
       setShowForm(false);
       load();
@@ -257,20 +250,6 @@ export function AccountsView() {
   const handleCancelEdit = () => {
     setEditingAccount(null);
     setEditBlogUrl('');
-  };
-
-  const handleResolveBlogUrl = async (ac: HumaAccount) => {
-    if (resolvingId) return;
-    setResolvingId(ac.id);
-    setError('');
-    try {
-      await api.resolveBlogUrl(ac.id);
-      load();
-    } catch (e) {
-      alertAccountError(e, { naverId: ac.naver_id });
-    } finally {
-      setResolvingId(null);
-    }
   };
 
   const handleSaveEdit = async () => {
@@ -443,12 +422,13 @@ export function AccountsView() {
                   <input
                     placeholder={
                       form.category === 'posting'
-                        ? '블로그 URL (비우면 i7 자동 수집)'
+                        ? '블로그 URL (필수) https://blog.naver.com/...'
                         : '블로그 URL (선택)'
                     }
                     value={form.blog_url}
                     onChange={(e) => setForm((f) => ({ ...f, blog_url: e.target.value }))}
                     className="m-model-select min-w-[200px] flex-1"
+                    required={form.category === 'posting'}
                   />
                 )}
               </>
@@ -464,7 +444,7 @@ export function AccountsView() {
 
           {form.category === 'posting' && (
             <p className="font-mono text-[10.5px] text-huma-t3">
-              포스팅 계정은 i7 동글(10001~10004) 프록시로 로그인해 블로그 URL을 자동 수집합니다. 관리 PC에서 네이버 로그인할 필요 없습니다.
+              포스팅 계정은 발행에 사용할 블로그 URL을 직접 입력해야 합니다. (예: https://blog.naver.com/본인블로그ID)
             </p>
           )}
 
@@ -592,11 +572,6 @@ export function AccountsView() {
                       { label: 'WPM', value: ac.wpm ?? '—' },
                     ]}
                     actions={[
-                      {
-                        label: resolvingId === ac.id ? '수집 중…' : ac.blog_url ? 'URL 재수집' : 'URL 자동 수집',
-                        primary: !ac.blog_url,
-                        onClick: () => handleResolveBlogUrl(ac),
-                      },
                       { label: '수정', onClick: () => handleStartEditPosting(ac) },
                       { label: ac.is_active ? '정지' : '재개', primary: true, onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(load) },
                       { label: '로그', onClick: () => api.accountLogs(ac.id).then((logs) => console.log(logs)) },

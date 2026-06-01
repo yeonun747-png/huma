@@ -94,8 +94,6 @@ export const api = {
   updateAccount: (id: string, body: Record<string, unknown>) =>
     request(`/api/accounts/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteAccount: (id: string) => request(`/api/accounts/${id}`, { method: 'DELETE' }),
-  resolveBlogUrl: (id: string) =>
-    request<HumaAccount>(`/api/accounts/${id}/resolve-blog-url`, { method: 'POST' }),
   accountLogs: (id: string) => request(`/api/accounts/${id}/logs`),
   modems: () => request<HumaModem[]>('/api/modems'),
   reconnectModem: (id: string) => request(`/api/modems/${id}/reconnect`, { method: 'POST' }),

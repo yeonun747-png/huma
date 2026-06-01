@@ -39,10 +39,15 @@ export function AccountList() {
 
   const handleCreate = async () => {
     if (!form.name || !form.naver_id) return;
+    if (form.account_type === 'posting' && !form.blog_url.trim()) {
+      alertAccountError(new Error('포스팅 계정은 블로그 URL이 필수입니다.'));
+      return;
+    }
     setLoading(true);
     try {
       await api.createAccount({
         ...form,
+        blog_url: form.blog_url.trim() || undefined,
         workspace,
         is_active: true,
         health_score: 100,
@@ -88,6 +93,14 @@ export function AccountList() {
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>
+          {form.account_type === 'posting' && (
+            <Input
+              placeholder="블로그 URL (필수)"
+              value={form.blog_url}
+              onChange={(e) => setForm((f) => ({ ...f, blog_url: e.target.value }))}
+              className="min-w-[220px] flex-1"
+            />
+          )}
           <Button onClick={handleCreate} disabled={loading}>추가</Button>
         </CardContent>
       </Card>
