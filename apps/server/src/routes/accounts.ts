@@ -13,6 +13,10 @@ import {
   isCrankPoolAccountType,
 } from '../lib/crank-pool.js';
 import { ensureAccountAntiDetect } from '../modules/playwright/account-loader.js';
+import {
+  assertPostingProxyPortMatchesWorkspace,
+  resolvePostingProxyPortForCreate,
+} from '../lib/posting-proxy.js';
 
 async function loadAccountRow(id: string) {
   const { data } = await supabase.from('huma_accounts').select('*').eq('id', id).maybeSingle();
@@ -59,6 +63,11 @@ export async function registerAccountRoutes(app: FastifyInstance) {
     if (blogUrl) body.blog_url = blogUrl;
     else delete body.blog_url;
 
+    if (accountType === 'posting') {
+      const ws = (body.workspace as string) ?? 'yeonun';
+      body.proxy_port = await resolvePostingProxyPortForCreate(ws);
+    }
+
     const { data, error } = await supabase.from('huma_accounts').insert(body).select().single();
     if (error) return reply.code(400).send({ error: mapAccountDbError(error.message) });
     if (data?.id) {
@@ -87,6 +96,15 @@ export async function registerAccountRoutes(app: FastifyInstance) {
     if (body.blog_url !== undefined) {
       if (blogUrl) body.blog_url = blogUrl;
       else body.blog_url = null;
+    }
+
+    const ws = (body.workspace as string | undefined) ?? existing.workspace;
+    if (accountType === 'posting') {
+      const nextPort = (body.proxy_port as number | undefined) ?? existing.proxy_port;
+      if (nextPort) {
+        assertPostingProxyPortMatchesWorkspace(ws, nextPort);
+        body.proxy_port = nextPort;
+      }
     }
 
     const { data, error } = await supabase

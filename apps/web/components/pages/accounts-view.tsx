@@ -5,24 +5,26 @@ import type { AccountType, HumaAccount, Workspace } from '@huma/shared';
 import { CRANK_POOL_WORKSPACE, isCrankPoolAccount } from '@huma/shared';
 import { api } from '@/lib/api';
 import { WORKSPACES } from '@/lib/constants';
-import { MAccountCard, MGrid, MStat, MTypeBadge } from '@/components/mockup/primitives';
+import { MAccountCard, MGrid, MStat } from '@/components/mockup/primitives';
 import { useRegisterPageAction } from '@/components/dashboard/page-action-context';
 import { useWorkspace } from '@/components/dashboard/workspace-context';
 import { useAuth } from '@/lib/auth-context';
 import { alertAccountError } from '@/lib/account-errors';
 import {
   defaultAccountGroup,
+  getAccessibleSubWorkspaces,
   getAccountGroups,
   isSuperAdmin,
   type AccountGroup,
 } from '@/lib/admin-scope';
 
-const ACCOUNT_GROUPS: { id: AccountGroup; title: string }[] = [
-  { id: 'yeonun', title: '연운' },
-  { id: 'quizoasis_panana', title: '퀴즈+파나나' },
-];
-
 const QP_WORKSPACES: Workspace[] = ['quizoasis', 'panana'];
+
+const POSTING_COLUMNS: { ws: Workspace; title: string; proxyPort: number; sub: string }[] = [
+  { ws: 'yeonun', title: '연운', proxyPort: 10001, sub: '동글 10001~10002' },
+  { ws: 'quizoasis', title: '퀴즈오아시스', proxyPort: 10003, sub: '동글 10003 · 계정 1개' },
+  { ws: 'panana', title: '파나나', proxyPort: 10004, sub: '동글 10004 · 계정 1개' },
+];
 
 type AccountCategory = 'posting' | 'crank' | 'social';
 
@@ -62,9 +64,21 @@ function isPostingAccount(ac: HumaAccount) {
   return ac.account_type === 'posting';
 }
 
-function belongsToGroup(ws: string, group: AccountGroup): boolean {
-  if (group === 'yeonun') return ws === 'yeonun';
-  return ws === 'quizoasis' || ws === 'panana';
+function visiblePostingColumns(admin: ReturnType<typeof useAuth>['admin']) {
+  const groups = getAccountGroups(admin);
+  const cols: typeof POSTING_COLUMNS = [];
+  if (groups.includes('yeonun')) {
+    cols.push(POSTING_COLUMNS.find((c) => c.ws === 'yeonun')!);
+  }
+  if (groups.includes('quizoasis_panana')) {
+    const allowed = getAccessibleSubWorkspaces(admin, 'quizoasis_panana');
+    for (const ws of QP_WORKSPACES) {
+      if (allowed.includes(ws)) {
+        cols.push(POSTING_COLUMNS.find((c) => c.ws === ws)!);
+      }
+    }
+  }
+  return cols;
 }
 
 function statusTone(ac: HumaAccount): 'ok' | 'warn' | 'err' | 'live' | 'idle' {
@@ -85,10 +99,12 @@ async function confirmDelete(label: string) {
 function emptyForm(opts: {
   registerGroup: AccountGroup;
   socialWorkspace: Workspace;
+  postingWorkspace?: Workspace;
 }) {
   return {
     registerGroup: opts.registerGroup,
     socialWorkspace: opts.socialWorkspace,
+    postingWorkspace: opts.postingWorkspace ?? 'quizoasis',
     category: 'posting' as AccountCategory,
     name: '',
     naver_id: '',
@@ -100,9 +116,9 @@ function emptyForm(opts: {
   };
 }
 
-function resolveNaverWorkspace(group: AccountGroup): Workspace {
+function resolvePostingWorkspace(group: AccountGroup, postingWorkspace: Workspace): Workspace {
   if (group === 'yeonun') return 'yeonun';
-  return 'quizoasis';
+  return postingWorkspace;
 }
 
 function resolveSocialWorkspace(group: AccountGroup, form: ReturnType<typeof emptyForm>): Workspace {
@@ -116,8 +132,6 @@ export function AccountsView() {
   const superAdmin = isSuperAdmin(admin);
   const adminWorkspaces = admin?.workspaces ?? [];
 
-  const visibleGroups = useMemo(() => getAccountGroups(admin), [admin]);
-
   const defaultGroup = defaultAccountGroup(admin);
   const defaultSocialWs: Workspace = adminWorkspaces.includes('quizoasis')
     ? 'quizoasis'
@@ -129,7 +143,11 @@ export function AccountsView() {
   const [platforms, setPlatforms] = useState<Array<Record<string, unknown>>>([]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(() =>
-    emptyForm({ registerGroup: defaultGroup, socialWorkspace: defaultSocialWs }),
+    emptyForm({
+      registerGroup: defaultGroup,
+      socialWorkspace: defaultSocialWs,
+      postingWorkspace: defaultSocialWs,
+    }),
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -137,7 +155,8 @@ export function AccountsView() {
   const [editBlogUrl, setEditBlogUrl] = useState('');
   const [editSaving, setEditSaving] = useState(false);
 
-  const listGridCols = (visibleGroups.length >= 2 ? 2 : 1) as 1 | 2;
+  const postingColumns = useMemo(() => visiblePostingColumns(admin), [admin]);
+  const listGridCols = (Math.min(3, postingColumns.length) || 1) as 1 | 2 | 3;
 
   const load = useCallback(() => {
     Promise.all([api.accounts(), api.platformAccounts()])
@@ -159,6 +178,7 @@ export function AccountsView() {
       emptyForm({
         registerGroup: defaultGroup,
         socialWorkspace: QP_WORKSPACES.includes(sidebarWorkspace) ? sidebarWorkspace : defaultSocialWs,
+        postingWorkspace: QP_WORKSPACES.includes(sidebarWorkspace) ? sidebarWorkspace : defaultSocialWs,
       }),
     );
   });
@@ -169,16 +189,19 @@ export function AccountsView() {
   );
 
   const visiblePlatforms = useMemo(
-    () => platforms.filter((p) => visibleGroups.some((g) => belongsToGroup(String(p.workspace), g))),
-    [platforms, visibleGroups],
+    () =>
+      platforms.filter((p) =>
+        postingColumns.some((c) => c.ws === String(p.workspace)),
+      ),
+    [platforms, postingColumns],
   );
 
   const posting = useMemo(
     () =>
       accounts.filter(
-        (a) => isPostingAccount(a) && visibleGroups.some((g) => belongsToGroup(a.workspace, g)),
+        (a) => isPostingAccount(a) && postingColumns.some((c) => c.ws === a.workspace),
       ).length,
-    [accounts, visibleGroups],
+    [accounts, postingColumns],
   );
   const crankCafe = crankPoolAccounts.length;
   const isSocial = form.category === 'social';
@@ -186,7 +209,9 @@ export function AccountsView() {
     form.registerGroup === 'quizoasis_panana' ? SOCIAL_PLATFORMS_QUIZOASIS : SOCIAL_PLATFORMS_BASE;
 
   const registerGroupLabel =
-    ACCOUNT_GROUPS.find((g) => g.id === form.registerGroup)?.title ?? form.registerGroup;
+    form.registerGroup === 'yeonun'
+      ? '연운'
+      : `${POSTING_COLUMNS.find((c) => c.ws === form.postingWorkspace)?.title ?? '퀴즈+파나나'}`;
 
   const handleCreate = async () => {
     setError('');
@@ -215,7 +240,9 @@ export function AccountsView() {
           return;
         }
         const targetWs =
-          form.category === 'crank' ? CRANK_POOL_WORKSPACE : resolveNaverWorkspace(form.registerGroup);
+          form.category === 'crank'
+            ? CRANK_POOL_WORKSPACE
+            : resolvePostingWorkspace(form.registerGroup, form.postingWorkspace);
         await api.createAccount({
           workspace: targetWs,
           name: form.name.trim(),
@@ -223,9 +250,6 @@ export function AccountsView() {
           naver_pw: form.naver_pw,
           account_type: form.category,
           blog_url: form.blog_url.trim() || undefined,
-          ...(form.registerGroup === 'quizoasis_panana' && form.category === 'posting'
-            ? { shared_workspace: 'panana' }
-            : {}),
           is_active: true,
           health_score: 100,
           blog_index: form.category === 'posting' ? 5 : 0,
@@ -301,11 +325,11 @@ export function AccountsView() {
     return 'S';
   };
 
-  const accountsInGroup = (group: AccountGroup) =>
-    accounts.filter((a) => isPostingAccount(a) && belongsToGroup(a.workspace, group));
+  const accountsInWorkspace = (ws: Workspace) =>
+    accounts.filter((a) => isPostingAccount(a) && a.workspace === ws);
 
-  const platformsInGroup = (group: AccountGroup) =>
-    platforms.filter((p) => belongsToGroup(String(p.workspace), group));
+  const platformsInWorkspace = (ws: Workspace) =>
+    platforms.filter((p) => String(p.workspace) === ws);
 
   if (authLoading) {
     return <div className="animate-fadeIn py-8 text-center text-[12px] text-huma-t3">계정 목록 불러오는 중…</div>;
@@ -358,14 +382,19 @@ export function AccountsView() {
           </div>
 
           <div className="flex flex-wrap items-end gap-2">
-            {isSocial && form.registerGroup === 'quizoasis_panana' && (
+            {form.registerGroup === 'quizoasis_panana' && (
               <select
-                value={form.socialWorkspace}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, socialWorkspace: e.target.value as Workspace }))
-                }
+                value={isSocial ? form.socialWorkspace : form.postingWorkspace}
+                onChange={(e) => {
+                  const ws = e.target.value as Workspace;
+                  setForm((f) =>
+                    isSocial
+                      ? { ...f, socialWorkspace: ws }
+                      : { ...f, postingWorkspace: ws, socialWorkspace: ws },
+                  );
+                }}
                 className="m-model-select max-w-[140px]"
-                title="소셜 API는 서비스별로 등록"
+                title={isSocial ? '소셜 API 서비스' : '포스팅 전용 동글'}
               >
                 <option value="quizoasis">퀴즈오아시스</option>
                 <option value="panana">파나나</option>
@@ -444,7 +473,7 @@ export function AccountsView() {
 
           {form.category === 'posting' && (
             <p className="font-mono text-[10.5px] text-huma-t3">
-              포스팅 계정은 발행에 사용할 블로그 URL을 직접 입력해야 합니다. (예: https://blog.naver.com/본인블로그ID)
+              포스팅은 블로그 URL 필수 · 퀴즈오아시스=동글 :10003(계정 1개) · 파나나=동글 :10004(계정 1개) · 연운=10001~10002
             </p>
           )}
 
@@ -528,17 +557,19 @@ export function AccountsView() {
       </div>
 
       <MGrid cols={listGridCols}>
-        {visibleGroups.map((group) => {
-          const groupAccounts = accountsInGroup(group);
-          const groupPlatforms = platformsInGroup(group);
-          const title = ACCOUNT_GROUPS.find((g) => g.id === group)?.title ?? group;
+        {postingColumns.map((col) => {
+          const colAccounts = accountsInWorkspace(col.ws);
+          const colPlatforms = platformsInWorkspace(col.ws);
 
           return (
-            <div key={group}>
-              <div className="m-ws-col-title">{title}</div>
+            <div key={col.ws}>
+              <div className="m-ws-col-title">
+                {col.title}
+                <span className="ml-2 font-mono text-[10px] font-normal text-huma-t3">{col.sub}</span>
+              </div>
 
-              {groupAccounts.length ? (
-                groupAccounts.map((ac) => (
+              {colAccounts.length ? (
+                colAccounts.map((ac) => (
                   <MAccountCard
                     key={ac.id}
                     icon="📝"
@@ -549,21 +580,15 @@ export function AccountsView() {
                         <span className="ml-1 rounded bg-huma-bg2 px-1.5 py-px font-mono text-[9px] uppercase text-huma-acc">
                           {TYPE_LABEL[ac.account_type]}
                         </span>
-                        {group === 'quizoasis_panana' && (
-                          <MTypeBadge type="shared" />
-                        )}
-                        {group === 'yeonun' && (
-                          <MTypeBadge type="posting" />
-                        )}
-                        {ac.workspace === 'quizoasis' && group === 'quizoasis_panana' && (
-                          <span className="ml-1 font-mono text-[9px] text-huma-t3">퀴즈</span>
-                        )}
-                        {ac.workspace === 'panana' && group === 'quizoasis_panana' && (
-                          <span className="ml-1 font-mono text-[9px] text-huma-t3">파나나</span>
+                        {ac.proxy_port && (
+                          <span className="ml-1 font-mono text-[9px] text-huma-t3">:{ac.proxy_port}</span>
                         )}
                       </>
                     }
-                    url={ac.blog_url ?? `${ac.naver_id} · 지수${ac.blog_index ?? 5}${!ac.blog_url ? ' · URL 미등록' : ''}`}
+                    url={
+                      ac.blog_url ??
+                      `${ac.naver_id} · 지수${ac.blog_index ?? 5}${!ac.blog_url ? ' · URL 미등록' : ''}`
+                    }
                     status={statusLabel(ac)}
                     statusTone={!ac.blog_url ? 'warn' : statusTone(ac)}
                     stats={[
@@ -580,13 +605,12 @@ export function AccountsView() {
                   />
                 ))
               ) : (
-                <div className="m-ac text-center text-[11px] text-huma-t3">네이버 계정 없음</div>
+                <div className="m-ac text-center text-[11px] text-huma-t3">포스팅 계정 없음</div>
               )}
 
-              {groupPlatforms.map((p) => {
+              {colPlatforms.map((p) => {
                 const platform = String(p.platform ?? '');
                 const active = p.is_active !== false;
-                const wsShort = WORKSPACES.find((w) => w.id === p.workspace)?.short ?? String(p.workspace);
                 return (
                   <MAccountCard
                     key={String(p.id)}
@@ -596,9 +620,6 @@ export function AccountsView() {
                       <>
                         {String(p.username ?? platform)}
                         <span className="ml-1 rounded bg-huma-bg2 px-1.5 py-px font-mono text-[9px] uppercase text-huma-acc">SOCIAL</span>
-                        {group === 'quizoasis_panana' && (
-                          <span className="ml-1 font-mono text-[9px] text-huma-t3">{wsShort}</span>
-                        )}
                       </>
                     }
                     url={`${socialPlatforms.find((sp) => sp.value === platform)?.label ?? platform} · API`}
