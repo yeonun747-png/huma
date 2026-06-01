@@ -9,8 +9,8 @@
 set -e
 
 DEFAULT_SLOTS=(
-  eth0:10001 eth1:10002 eth2:10003 eth3:10004
-  eth4:10005 eth5:10006 enx344b50000000:10007
+  eth0:10001 eth1:10002 eth2:10003 eth3:10004 eth4:10005
+  eth5:10006 enx344b50000000:10007
 )
 
 if [ "$#" -gt 0 ]; then

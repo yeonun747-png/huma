@@ -6,9 +6,7 @@ import type { Workspace } from '@huma/shared';
 import { WORKSPACES, getAccessibleWorkspaces } from '@/lib/constants';
 import {
   BUSINESS_UNITS,
-  defaultWorkspaceForUnit,
   getAccessibleBusinessUnits,
-  getAccessibleSubWorkspaces,
   workspaceToBusinessUnit,
   type BusinessUnit,
 } from '@/lib/admin-scope';
@@ -68,10 +66,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const businessUnit = workspaceToBusinessUnit(workspace);
 
-  const accessibleSubWorkspaces = useMemo(() => {
-    const ids = getAccessibleSubWorkspaces(admin, 'quizoasis_panana');
-    return WORKSPACES.filter((ws) => ids.includes(ws.id));
-  }, [admin]);
+  const accessibleSubWorkspaces = useMemo(
+    () => WORKSPACES.filter((ws) => accessibleWorkspaces.includes(ws.id)),
+    [accessibleWorkspaces],
+  );
 
   useEffect(() => {
     const allowedIds = accessibleWorkspaces.map((ws) => ws.id);
@@ -81,8 +79,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       const stored = readStoredWorkspace();
       const candidate = stored && allowedIds.includes(stored) ? stored : current;
       if (allowedIds.includes(candidate)) return candidate;
-      const defaultUnit = accessibleBusinessUnitIds[0] ?? 'yeonun';
-      return defaultWorkspaceForUnit(admin, defaultUnit, stored) as Workspace;
+      return (accessibleBusinessUnitIds[0] ?? 'yeonun') as Workspace;
     });
   }, [admin, accessibleWorkspaces, accessibleBusinessUnitIds]);
 
@@ -101,13 +98,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const setBusinessUnit = (unit: BusinessUnit) => {
     if (!accessibleBusinessUnitIds.includes(unit)) return;
-    const next = defaultWorkspaceForUnit(admin, unit, readStoredWorkspace()) as Workspace;
-    setWorkspaceState(next);
+    setWorkspaceState(unit);
   };
 
   const setSubWorkspace = (ws: Workspace) => {
-    if (ws !== 'quizoasis' && ws !== 'panana') return;
-    if (!accessibleSubWorkspaces.some((item) => item.id === ws)) return;
+    if (!accessibleWorkspaces.includes(ws)) return;
     setWorkspaceState(ws);
   };
 

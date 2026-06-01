@@ -92,26 +92,6 @@ export function Sidebar() {
           </div>
         )}
 
-        {businessUnit === 'quizoasis_panana' && accessibleSubWorkspaces.length > 1 && (
-          <div className="flex gap-0.5 border-t border-huma-bdr pt-1">
-            {accessibleSubWorkspaces.map((ws) => (
-              <button
-                key={ws.id}
-                type="button"
-                onClick={() => setSubWorkspace(ws.id)}
-                className={cn(
-                  'flex flex-1 items-center justify-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium transition',
-                  workspace === ws.id
-                    ? 'bg-huma-bg2 font-bold text-huma-acc'
-                    : 'text-huma-t3 hover:bg-huma-bg2 hover:text-huma-t2',
-                )}
-              >
-                <span className={cn('h-1 w-1 shrink-0 rounded-full', ws.dotClass)} />
-                {ws.short}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
       )}
 

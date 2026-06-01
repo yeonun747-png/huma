@@ -2,7 +2,7 @@
 
 import { usePathname } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { WORKSPACES } from '@/lib/constants';
+import { BUSINESS_UNITS } from '@/lib/admin-scope';
 import { getPageMeta } from '@/lib/page-config';
 import { useWorkspace } from './workspace-context';
 import { api } from '@/lib/api';
@@ -15,12 +15,9 @@ type NotifItem = { type: 'err' | 'warn'; title: string; sub: string };
 export function Topbar({ title }: { title: string }) {
   const pathname = usePathname();
   const meta = getPageMeta(pathname);
-  const { workspace, businessUnit } = useWorkspace();
-  const wsMeta = WORKSPACES.find((w) => w.id === workspace);
-  const breadcrumb =
-    businessUnit === 'yeonun'
-      ? `HUMA › 연운 › ${title}`
-      : `HUMA › 퀴즈+파나나 › ${wsMeta?.short ?? workspace} › ${title}`;
+  const { businessUnit } = useWorkspace();
+  const unitLabel = BUSINESS_UNITS.find((u) => u.id === businessUnit)?.label ?? businessUnit;
+  const breadcrumb = `HUMA › ${unitLabel} › ${title}`;
   const [period, setPeriod] = useState<'today' | 'week' | 'month'>('today');
   const [notifOpen, setNotifOpen] = useState(false);
   const [busy, setBusy] = useState(false);

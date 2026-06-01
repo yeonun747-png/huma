@@ -11,19 +11,17 @@ import { useWorkspace } from '@/components/dashboard/workspace-context';
 import { useAuth } from '@/lib/auth-context';
 import { alertAccountError } from '@/lib/account-errors';
 import {
+  BUSINESS_UNITS,
   defaultAccountGroup,
-  getAccessibleSubWorkspaces,
-  getAccountGroups,
+  getAccessibleBusinessUnits,
   isSuperAdmin,
-  type AccountGroup,
+  type BusinessUnit,
 } from '@/lib/admin-scope';
 
-const QP_WORKSPACES: Workspace[] = ['quizoasis', 'panana'];
-
-const POSTING_COLUMNS: { ws: Workspace; title: string; proxyPort: number; sub: string }[] = [
-  { ws: 'yeonun', title: '연운', proxyPort: 10001, sub: '동글 10001~10002' },
-  { ws: 'quizoasis', title: '퀴즈오아시스', proxyPort: 10003, sub: '동글 10003 · 계정 1개' },
-  { ws: 'panana', title: '파나나', proxyPort: 10004, sub: '동글 10004 · 계정 1개' },
+const POSTING_COLUMNS: { ws: Workspace; title: string; sub: string }[] = [
+  { ws: 'yeonun', title: '연운', sub: '동글 10001~10003' },
+  { ws: 'quizoasis', title: '퀴즈오아시스', sub: '동글 10004 · 계정 1개' },
+  { ws: 'panana', title: '파나나', sub: '동글 10005 · 계정 1개' },
 ];
 
 type AccountCategory = 'posting' | 'crank' | 'social';
@@ -65,20 +63,8 @@ function isPostingAccount(ac: HumaAccount) {
 }
 
 function visiblePostingColumns(admin: ReturnType<typeof useAuth>['admin']) {
-  const groups = getAccountGroups(admin);
-  const cols: typeof POSTING_COLUMNS = [];
-  if (groups.includes('yeonun')) {
-    cols.push(POSTING_COLUMNS.find((c) => c.ws === 'yeonun')!);
-  }
-  if (groups.includes('quizoasis_panana')) {
-    const allowed = getAccessibleSubWorkspaces(admin, 'quizoasis_panana');
-    for (const ws of QP_WORKSPACES) {
-      if (allowed.includes(ws)) {
-        cols.push(POSTING_COLUMNS.find((c) => c.ws === ws)!);
-      }
-    }
-  }
-  return cols;
+  const units = getAccessibleBusinessUnits(admin);
+  return POSTING_COLUMNS.filter((c) => units.includes(c.ws));
 }
 
 function statusTone(ac: HumaAccount): 'ok' | 'warn' | 'err' | 'live' | 'idle' {
@@ -96,15 +82,9 @@ async function confirmDelete(label: string) {
   return window.confirm(`「${label}」 계정을 삭제할까요?\n삭제 후에는 복구할 수 없습니다.`);
 }
 
-function emptyForm(opts: {
-  registerGroup: AccountGroup;
-  socialWorkspace: Workspace;
-  postingWorkspace?: Workspace;
-}) {
+function emptyForm(registerUnit: BusinessUnit) {
   return {
-    registerGroup: opts.registerGroup,
-    socialWorkspace: opts.socialWorkspace,
-    postingWorkspace: opts.postingWorkspace ?? 'quizoasis',
+    registerUnit,
     category: 'posting' as AccountCategory,
     name: '',
     naver_id: '',
@@ -116,39 +96,17 @@ function emptyForm(opts: {
   };
 }
 
-function resolvePostingWorkspace(group: AccountGroup, postingWorkspace: Workspace): Workspace {
-  if (group === 'yeonun') return 'yeonun';
-  return postingWorkspace;
-}
-
-function resolveSocialWorkspace(group: AccountGroup, form: ReturnType<typeof emptyForm>): Workspace {
-  if (group === 'yeonun') return 'yeonun';
-  return form.socialWorkspace;
-}
-
 export function AccountsView() {
   const { admin, loading: authLoading } = useAuth();
   const { workspace: sidebarWorkspace } = useWorkspace();
   const superAdmin = isSuperAdmin(admin);
-  const adminWorkspaces = admin?.workspaces ?? [];
-
-  const defaultGroup = defaultAccountGroup(admin);
-  const defaultSocialWs: Workspace = adminWorkspaces.includes('quizoasis')
-    ? 'quizoasis'
-    : adminWorkspaces.includes('panana')
-      ? 'panana'
-      : sidebarWorkspace;
+  const defaultUnit = defaultAccountGroup(admin);
+  const registerUnits = useMemo(() => getAccessibleBusinessUnits(admin), [admin]);
 
   const [accounts, setAccounts] = useState<HumaAccount[]>([]);
   const [platforms, setPlatforms] = useState<Array<Record<string, unknown>>>([]);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState(() =>
-    emptyForm({
-      registerGroup: defaultGroup,
-      socialWorkspace: defaultSocialWs,
-      postingWorkspace: defaultSocialWs,
-    }),
-  );
+  const [form, setForm] = useState(() => emptyForm(defaultUnit));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [editingAccount, setEditingAccount] = useState<HumaAccount | null>(null);
@@ -174,13 +132,10 @@ export function AccountsView() {
   useRegisterPageAction('openAccountForm', () => {
     setShowForm((v) => !v);
     setError('');
-    setForm(
-      emptyForm({
-        registerGroup: defaultGroup,
-        socialWorkspace: QP_WORKSPACES.includes(sidebarWorkspace) ? sidebarWorkspace : defaultSocialWs,
-        postingWorkspace: QP_WORKSPACES.includes(sidebarWorkspace) ? sidebarWorkspace : defaultSocialWs,
-      }),
-    );
+    const unit = registerUnits.includes(sidebarWorkspace as BusinessUnit)
+      ? (sidebarWorkspace as BusinessUnit)
+      : defaultUnit;
+    setForm(emptyForm(unit));
   });
 
   const crankPoolAccounts = useMemo(
@@ -206,12 +161,10 @@ export function AccountsView() {
   const crankCafe = crankPoolAccounts.length;
   const isSocial = form.category === 'social';
   const socialPlatforms =
-    form.registerGroup === 'quizoasis_panana' ? SOCIAL_PLATFORMS_QUIZOASIS : SOCIAL_PLATFORMS_BASE;
+    form.registerUnit === 'yeonun' ? SOCIAL_PLATFORMS_BASE : SOCIAL_PLATFORMS_QUIZOASIS;
 
-  const registerGroupLabel =
-    form.registerGroup === 'yeonun'
-      ? '연운'
-      : `${POSTING_COLUMNS.find((c) => c.ws === form.postingWorkspace)?.title ?? '퀴즈+파나나'}`;
+  const registerUnitLabel =
+    BUSINESS_UNITS.find((u) => u.id === form.registerUnit)?.label ?? form.registerUnit;
 
   const handleCreate = async () => {
     setError('');
@@ -222,9 +175,8 @@ export function AccountsView() {
           setError('소셜 계정은 사용자명과 API 토큰이 필요합니다.');
           return;
         }
-        const targetWs = resolveSocialWorkspace(form.registerGroup, form);
         await api.createPlatformAccount({
-          workspace: targetWs,
+          workspace: form.registerUnit,
           platform: form.platform,
           username: form.username.trim(),
           access_token: form.access_token.trim(),
@@ -239,12 +191,8 @@ export function AccountsView() {
           setError('포스팅 계정은 블로그 URL이 필수입니다.');
           return;
         }
-        const targetWs =
-          form.category === 'crank'
-            ? CRANK_POOL_WORKSPACE
-            : resolvePostingWorkspace(form.registerGroup, form.postingWorkspace);
         await api.createAccount({
-          workspace: targetWs,
+          workspace: form.category === 'crank' ? CRANK_POOL_WORKSPACE : form.registerUnit,
           name: form.name.trim(),
           naver_id: form.naver_id.trim(),
           naver_pw: form.naver_pw,
@@ -347,19 +295,22 @@ export function AccountsView() {
         <div className="m-panel mb-3 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-[12px] font-semibold text-huma-t">계정 유형 선택</div>
-            {superAdmin ? (
+            {superAdmin && registerUnits.length > 1 ? (
               <select
-                value={form.registerGroup}
+                value={form.registerUnit}
                 onChange={(e) =>
-                  setForm((f) => ({ ...f, registerGroup: e.target.value as AccountGroup }))
+                  setForm((f) => ({ ...f, registerUnit: e.target.value as BusinessUnit }))
                 }
                 className="m-model-select max-w-[180px]"
               >
-                <option value="yeonun">연운</option>
-                <option value="quizoasis_panana">퀴즈+파나나</option>
+                {registerUnits.map((unit) => (
+                  <option key={unit} value={unit}>
+                    {BUSINESS_UNITS.find((u) => u.id === unit)?.label ?? unit}
+                  </option>
+                ))}
               </select>
             ) : (
-              <div className="font-mono text-[11px] text-huma-acc">등록 그룹: {registerGroupLabel}</div>
+              <div className="font-mono text-[11px] text-huma-acc">등록: {registerUnitLabel}</div>
             )}
           </div>
 
@@ -382,25 +333,6 @@ export function AccountsView() {
           </div>
 
           <div className="flex flex-wrap items-end gap-2">
-            {form.registerGroup === 'quizoasis_panana' && (
-              <select
-                value={isSocial ? form.socialWorkspace : form.postingWorkspace}
-                onChange={(e) => {
-                  const ws = e.target.value as Workspace;
-                  setForm((f) =>
-                    isSocial
-                      ? { ...f, socialWorkspace: ws }
-                      : { ...f, postingWorkspace: ws, socialWorkspace: ws },
-                  );
-                }}
-                className="m-model-select max-w-[140px]"
-                title={isSocial ? '소셜 API 서비스' : '포스팅 전용 동글'}
-              >
-                <option value="quizoasis">퀴즈오아시스</option>
-                <option value="panana">파나나</option>
-              </select>
-            )}
-
             {isSocial ? (
               <>
                 <select
@@ -473,7 +405,7 @@ export function AccountsView() {
 
           {form.category === 'posting' && (
             <p className="font-mono text-[10.5px] text-huma-t3">
-              포스팅은 블로그 URL 필수 · 퀴즈오아시스=동글 :10003(계정 1개) · 파나나=동글 :10004(계정 1개) · 연운=10001~10002
+              포스팅 블로그 URL 필수 · 연운=10001~10003 · 퀴즈오아시스=:10004(1계정) · 파나나=:10005(1계정)
             </p>
           )}
 
@@ -483,9 +415,9 @@ export function AccountsView() {
             </p>
           )}
 
-          {!superAdmin && form.registerGroup === 'quizoasis_panana' && isSocial && (
+          {form.registerUnit !== 'yeonun' && isSocial && (
             <p className="font-mono text-[10.5px] text-huma-t3">
-              퀴즈·파나나는 네이버·C-Rank 계정을 공유합니다. 소셜 API만 서비스별로 등록하세요.
+              소셜 API는 선택한 사업 단위({registerUnitLabel})에 등록됩니다.
             </p>
           )}
 

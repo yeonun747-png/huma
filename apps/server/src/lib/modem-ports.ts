@@ -1,6 +1,6 @@
-/** v3.22 §7-13 — LTE 동글 슬롯·포트 매핑 */
-export const POSTING_PROXY_PORTS = [10001, 10002, 10003, 10004] as const;
-export const CRANK_PROXY_PORTS = [10005, 10006, 10007, 10008, 10009, 10010] as const;
+/** v3.24 — 포스팅 5동글(10001~10005) · C-Rank 2동글(10006~10007) · i7 7슬롯 */
+export const POSTING_PROXY_PORTS = [10001, 10002, 10003, 10004, 10005] as const;
+export const CRANK_PROXY_PORTS = [10006, 10007] as const;
 
 export const MODEM_LOCK_TTL_SEC = 300;
 
