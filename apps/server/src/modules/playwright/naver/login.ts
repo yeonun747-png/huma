@@ -5,11 +5,16 @@ import { humanSleep } from '../../human-engine/typing.js';
 import { shadowWalk } from '../shadow-walk.js';
 import { hasStoredSession } from '../account-loader.js';
 
+const NAVER_LOGIN_URL = 'https://nid.naver.com/nidlogin.login';
+const NAV_TIMEOUT_MS = 60_000;
+
 export async function naverLogin(
   context: BrowserContext,
   accountId: string,
-  options?: { profilePath?: string }
+  options?: { profilePath?: string; skipShadowWalk?: boolean; navTimeoutMs?: number }
 ) {
+  const navTimeout = options?.navTimeoutMs ?? NAV_TIMEOUT_MS;
+
   const { data: account } = await supabase
     .from('huma_accounts')
     .select('naver_id, naver_pw_enc, profile_path')
@@ -23,12 +28,12 @@ export async function naverLogin(
 
   const page = await context.newPage();
 
-  if (!hasSession) {
+  if (!hasSession && !options?.skipShadowWalk) {
     await shadowWalk(page);
   }
 
-  await page.goto('https://nid.naver.com/nidlogin.login');
-  await page.waitForLoadState('networkidle');
+  await page.goto(NAVER_LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: navTimeout });
+  await page.waitForSelector('#id', { timeout: 30_000 });
   await humanSleep(1000, 2000);
 
   const password = decrypt(account.naver_pw_enc);
@@ -37,7 +42,9 @@ export async function naverLogin(
   await page.fill('#pw', password);
   await humanSleep(800, 1500);
   await page.click('#log\\.login');
-  await page.waitForLoadState('networkidle');
+  await page
+    .waitForURL((url) => !url.href.includes('nidlogin.login'), { timeout: navTimeout })
+    .catch(() => page.waitForLoadState('domcontentloaded'));
   await humanSleep(2000, 4000);
 
   if (page.url().includes('captcha') || page.url().includes('challenge')) {

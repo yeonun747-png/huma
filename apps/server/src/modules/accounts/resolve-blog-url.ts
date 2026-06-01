@@ -64,7 +64,10 @@ export async function runResolvePostingBlogUrl(accountId: string): Promise<{
     const { context } = await createBrowserForAccount(accountCtx);
 
     try {
-      await naverLogin(context, accountId, { profilePath: accountCtx.profile_path });
+      await naverLogin(context, accountId, {
+        profilePath: accountCtx.profile_path,
+        skipShadowWalk: true,
+      });
       const page = await context.newPage();
       let blogUrl: string;
       try {
