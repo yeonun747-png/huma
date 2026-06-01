@@ -18,7 +18,7 @@ function sync3proxyExternalIp(proxyPort: number, newIp: string): void {
   if (process.platform === 'win32') return;
   try {
     execSync(
-      `sed -i 's/proxy -p${proxyPort} .*/proxy -p${proxyPort} -i127.0.0.1 -e${newIp}/' /etc/3proxy/3proxy.cfg`,
+      `sed -i -E 's/^(socks|proxy) -p${proxyPort} .*/socks -p${proxyPort} -i127.0.0.1 -e${newIp}/' /etc/3proxy/3proxy.cfg`,
       { stdio: 'pipe' },
     );
     execSync('systemctl reload 3proxy', { stdio: 'pipe' });

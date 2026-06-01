@@ -16,7 +16,7 @@ for i in "${!IFACES[@]}"; do
   PORT="${PORTS[$i]}"
   IP=$(ip -4 addr show "$IFACE" 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
   if [ -n "$IP" ]; then
-    echo "proxy -p${PORT} -i127.0.0.1 -e${IP}" >> "$CFG"
+    echo "socks -p${PORT} -i127.0.0.1 -e${IP}" >> "$CFG"
     ROLE="C-Rank 순환"
     if [ "$i" -lt 4 ]; then ROLE="포스팅 전용"; fi
     echo "✓ ${IFACE} → port ${PORT} → ${IP} (${ROLE})"

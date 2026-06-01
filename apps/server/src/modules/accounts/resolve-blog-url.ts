@@ -11,6 +11,7 @@ import { loadAccountForBrowser } from '../playwright/account-loader.js';
 import { naverLogin } from '../playwright/naver/login.js';
 import { resolveNaverBlogUrl } from '../playwright/naver/resolve-blog-url.js';
 import { getModemProxyPort, releaseModemLocks } from '../modem/allocation.js';
+import { assertSocksProxyReady } from '../../lib/socks-proxy-check.js';
 
 async function ensurePostingProxyPort(accountId: string, proxyPort?: number | null): Promise<number> {
   if (proxyPort && isPostingProxyPort(proxyPort)) {
@@ -58,6 +59,7 @@ export async function runResolvePostingBlogUrl(accountId: string): Promise<{
 
     proxyPort = await ensurePostingProxyPort(accountId, row.proxy_port);
     proxyPort = await getModemProxyPort(accountId);
+    await assertSocksProxyReady(proxyPort);
     const accountCtx = await loadAccountForBrowser(accountId, proxyPort);
     const { context } = await createBrowserForAccount(accountCtx);
 
