@@ -67,7 +67,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const businessUnit = workspaceToBusinessUnit(workspace);
 
   const accessibleSubWorkspaces = useMemo(
-    () => WORKSPACES.filter((ws) => accessibleWorkspaces.includes(ws.id)),
+    () => WORKSPACES.filter((ws) => accessibleWorkspaces.some((a) => a.id === ws.id)),
     [accessibleWorkspaces],
   );
 
@@ -102,7 +102,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   };
 
   const setSubWorkspace = (ws: Workspace) => {
-    if (!accessibleWorkspaces.includes(ws)) return;
+    if (!accessibleWorkspaces.some((a) => a.id === ws)) return;
     setWorkspaceState(ws);
   };
 
