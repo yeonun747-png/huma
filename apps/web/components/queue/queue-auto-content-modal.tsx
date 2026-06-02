@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import type { HumaJob } from '@huma/shared';
 import { buildScheduledAt } from '@/lib/queue-repeat';
+import { formatScheduleLabel } from './job-schedule-form';
 
 export interface AutoContentFormValues {
   title: string;
@@ -15,24 +17,67 @@ export interface AutoContentFormValues {
 
 interface QueueAutoContentModalProps {
   open: boolean;
+  editJob?: HumaJob | null;
   onClose: () => void;
   onSubmit: (values: AutoContentFormValues) => Promise<void>;
 }
 
-export function QueueAutoContentModal({ open, onClose, onSubmit }: QueueAutoContentModalProps) {
+const EMPTY_FORM: AutoContentFormValues = {
+  title: '',
+  source_url: '',
+  synopsis: '',
+  content_type: 'auto',
+  auto_schedule: true,
+  schedule_time: '10:00',
+};
+
+function extractScheduleTime(iso?: string): string {
+  if (!iso) return '10:00';
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function jobToForm(job: HumaJob): AutoContentFormValues {
+  const contentType: AutoContentFormValues['content_type'] = job.content_type_auto
+    ? 'auto'
+    : job.content_type === 'B'
+      ? 'B'
+      : 'A';
+
+  return {
+    title: job.title ?? '',
+    source_url: job.link_url ?? '',
+    synopsis: job.content ?? '',
+    content_type: contentType,
+    auto_schedule: job.auto_scheduled ?? true,
+    screenshot_base64: job.image_urls?.[0],
+    schedule_time: extractScheduleTime(job.scheduled_at),
+  };
+}
+
+export function QueueAutoContentModal({ open, editJob, onClose, onSubmit }: QueueAutoContentModalProps) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [form, setForm] = useState<AutoContentFormValues>({
-    title: '',
-    source_url: '',
-    synopsis: '',
-    content_type: 'auto',
-    auto_schedule: true,
-    schedule_time: '10:00',
-  });
+  const isEdit = Boolean(editJob);
+  const editable = !editJob || ['pending', 'scheduled', 'paused'].includes(editJob.status);
+
+  const [form, setForm] = useState<AutoContentFormValues>(EMPTY_FORM);
   const [screenshotName, setScreenshotName] = useState('');
   const [previewOpen, setPreviewOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    if (editJob) {
+      setForm(jobToForm(editJob));
+      setScreenshotName(editJob.image_urls?.[0] ? '기존 캡처' : '');
+    } else {
+      setForm(EMPTY_FORM);
+      setScreenshotName('');
+    }
+    setPreviewOpen(false);
+    setError('');
+  }, [open, editJob]);
 
   useEffect(() => {
     if (!previewOpen) return;
@@ -46,7 +91,7 @@ export function QueueAutoContentModal({ open, onClose, onSubmit }: QueueAutoCont
   if (!open) return null;
 
   const handleFile = (file?: File | null) => {
-    if (!file) return;
+    if (!file || !editable) return;
     const reader = new FileReader();
     reader.onload = () => {
       const data = String(reader.result ?? '');
@@ -65,20 +110,14 @@ export function QueueAutoContentModal({ open, onClose, onSubmit }: QueueAutoCont
     setLoading(true);
     try {
       await onSubmit(form);
-      setForm({
-        title: '',
-        source_url: '',
-        synopsis: '',
-        content_type: 'auto',
-        auto_schedule: true,
-        schedule_time: '10:00',
-        screenshot_base64: undefined,
-      });
-      setScreenshotName('');
-      setPreviewOpen(false);
+      if (!isEdit) {
+        setForm(EMPTY_FORM);
+        setScreenshotName('');
+        setPreviewOpen(false);
+      }
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : '등록 실패');
+      setError(e instanceof Error ? e.message : isEdit ? '저장 실패' : '등록 실패');
     } finally {
       setLoading(false);
     }
@@ -87,7 +126,22 @@ export function QueueAutoContentModal({ open, onClose, onSubmit }: QueueAutoCont
   return (
     <div className="m-modal-bg open" onClick={onClose} role="presentation">
       <div className="m-modal m-modal-queue" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-        <div className="m-modal-t">✨ AI 자동 콘텐츠 생성 + 발행</div>
+        <div className="m-modal-t">{isEdit ? '✨ AI 자동 콘텐츠 수정' : '✨ AI 자동 콘텐츠 생성 + 발행'}</div>
+
+        {isEdit && editJob && (
+          <div className="mb-3 rounded-md border border-huma-bdr bg-huma-bg3 px-3 py-2 text-xs text-huma-t3">
+            <span className="font-mono text-huma-t2">{editJob.status}</span>
+            {editJob.scheduled_at ? (
+              <>
+                {' · '}
+                <span className="text-huma-acc">{formatScheduleLabel(editJob.scheduled_at)}</span>
+              </>
+            ) : null}
+            {!editable && (
+              <span className="ml-2 text-huma-warn">진행 중·완료·실패 작업은 저장할 수 없습니다</span>
+            )}
+          </div>
+        )}
 
         <div className="m-ai-engine-row">
           <div className="m-ai-engine main">
@@ -107,6 +161,7 @@ export function QueueAutoContentModal({ open, onClose, onSubmit }: QueueAutoCont
           <div className="flex gap-2">
             <button
               type="button"
+              disabled={!editable}
               className={`flex-1 rounded-md border px-3 py-2 text-left text-xs ${form.content_type === 'auto' ? 'border-huma-acc bg-huma-glow text-huma-acc' : 'border-huma-bdr text-huma-t3'}`}
               onClick={() => setForm((f) => ({ ...f, content_type: 'auto' }))}
             >
@@ -115,6 +170,7 @@ export function QueueAutoContentModal({ open, onClose, onSubmit }: QueueAutoCont
             </button>
             <button
               type="button"
+              disabled={!editable}
               className={`flex-1 rounded-md border px-3 py-2 text-left text-xs ${form.content_type === 'A' ? 'border-huma-acc bg-huma-glow text-huma-acc' : 'border-huma-bdr text-huma-t3'}`}
               onClick={() => setForm((f) => ({ ...f, content_type: 'A' }))}
             >
@@ -123,6 +179,7 @@ export function QueueAutoContentModal({ open, onClose, onSubmit }: QueueAutoCont
             </button>
             <button
               type="button"
+              disabled={!editable}
               className={`flex-1 rounded-md border px-3 py-2 text-left text-xs ${form.content_type === 'B' ? 'border-huma-acc bg-huma-glow text-huma-acc' : 'border-huma-bdr text-huma-t3'}`}
               onClick={() => setForm((f) => ({ ...f, content_type: 'B' }))}
             >
@@ -138,6 +195,7 @@ export function QueueAutoContentModal({ open, onClose, onSubmit }: QueueAutoCont
             className="m-modal-input"
             placeholder="예: 2026년 병오년 사주 총운 분석"
             value={form.title}
+            disabled={!editable}
             onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
           />
         </div>
@@ -148,6 +206,7 @@ export function QueueAutoContentModal({ open, onClose, onSubmit }: QueueAutoCont
             className="m-modal-input"
             placeholder="https://yeonun.ai/fortune/2026"
             value={form.source_url}
+            disabled={!editable}
             onChange={(e) => setForm((f) => ({ ...f, source_url: e.target.value }))}
           />
         </div>
@@ -157,9 +216,13 @@ export function QueueAutoContentModal({ open, onClose, onSubmit }: QueueAutoCont
           <button
             type="button"
             className="m-modal-drop m-modal-drop-screenshot"
+            disabled={!editable}
             onClick={() => fileRef.current?.click()}
             onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => { e.preventDefault(); handleFile(e.dataTransfer.files[0]); }}
+            onDrop={(e) => {
+              e.preventDefault();
+              handleFile(e.dataTransfer.files[0]);
+            }}
           >
             {form.screenshot_base64 ? (
               <>
@@ -209,15 +272,17 @@ export function QueueAutoContentModal({ open, onClose, onSubmit }: QueueAutoCont
             className="m-modal-input m-modal-textarea"
             placeholder={'예: 올해는 변화의 해. 두렵지 않아도 돼.\n(방향성·톤·핵심 메시지를 자유롭게 입력)'}
             value={form.synopsis}
+            disabled={!editable}
             onChange={(e) => setForm((f) => ({ ...f, synopsis: e.target.value }))}
           />
         </div>
 
         <div className="m-modal-field">
-          <label className="flex cursor-pointer items-center gap-2 text-xs text-huma-t2">
+          <label className={`flex items-center gap-2 text-xs text-huma-t2 ${editable ? 'cursor-pointer' : 'opacity-60'}`}>
             <input
               type="checkbox"
               checked={form.auto_schedule}
+              disabled={!editable}
               onChange={(e) => setForm((f) => ({ ...f, auto_schedule: e.target.checked }))}
             />
             플랫폼별 최적 시간 자동 배분 (Haiku + optimal_schedule)
@@ -231,30 +296,35 @@ export function QueueAutoContentModal({ open, onClose, onSubmit }: QueueAutoCont
               type="time"
               className="m-modal-input"
               value={form.schedule_time}
+              disabled={!editable}
               onChange={(e) => setForm((f) => ({ ...f, schedule_time: e.target.value }))}
             />
           </div>
         )}
 
-        <div className="m-modal-cost">
-          <div className="text-[11.5px] font-mono text-huma-t3">예상 AI 비용 (건당)</div>
-          <div className="text-[13.5px] font-semibold text-huma-t">
-            약 104원 <span className="text-[10.5px] font-normal text-huma-t3">(Sonnet $0.069 + Haiku $0.0025)</span>
+        {!isEdit && (
+          <div className="m-modal-cost">
+            <div className="text-[11.5px] font-mono text-huma-t3">예상 AI 비용 (건당)</div>
+            <div className="text-[13.5px] font-semibold text-huma-t">
+              약 104원 <span className="text-[10.5px] font-normal text-huma-t3">(Sonnet $0.069 + Haiku $0.0025)</span>
+            </div>
           </div>
-        </div>
+        )}
 
         {error && <p className="mb-2 text-xs text-huma-err">{error}</p>}
 
         <div className="m-modal-foot">
-          <button type="button" className="btn-primary flex-[2] py-2" onClick={handleSubmit} disabled={loading}>
-            {loading ? 'AI 생성 중…' : '🚀 AI 생성 + 발행 큐 등록'}
+          <button type="button" className="btn-primary flex-[2] py-2" onClick={handleSubmit} disabled={loading || !editable}>
+            {loading ? (isEdit ? '저장 중…' : 'AI 생성 중…') : isEdit ? '저장' : '🚀 AI 생성 + 발행 큐 등록'}
           </button>
-          <button type="button" className="btn-ghost flex-1 py-2" onClick={onClose} disabled={loading}>취소</button>
+          <button type="button" className="btn-ghost flex-1 py-2" onClick={onClose} disabled={loading}>
+            취소
+          </button>
         </div>
         <p className="mt-2 text-center font-mono text-[10.5px] text-huma-t3">
           {form.auto_schedule
-            ? '플랫폼별 최적 시간은 실행 시 Haiku가 자동 결정합니다'
-            : `예약: ${buildScheduledAt(form.schedule_time).slice(0, 16).replace('T', ' ')}`}
+            ? '등록 직후 AI 생성 시작 · 네이버·SNS 발행 시각만 Haiku가 결정합니다'
+            : `생성·발행 시작: ${buildScheduledAt(form.schedule_time).slice(0, 16).replace('T', ' ')}`}
         </p>
       </div>
     </div>

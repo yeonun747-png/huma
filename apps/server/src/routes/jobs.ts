@@ -9,8 +9,8 @@ import {
 } from '../lib/job-scheduler.js';
 import { enqueueJob } from '../modules/queue/producer.js';
 import {
-  buildScheduledAtFromTime,
   registerAutoContentJobs,
+  resolveAutoContentStartAt,
 } from '../modules/claude/auto-content-orchestrator.js';
 import { assertCafeNewPostAccount, assertCafeReplyAccount } from '../lib/cafe-accounts.js';
 import { assertManualSocialCrankAllowed } from '../lib/crank-guard.js';
@@ -89,9 +89,7 @@ export async function registerJobRoutes(app: FastifyInstance) {
         const autoScheduled = autoSchedule !== false;
         const scheduledAt =
           (body.scheduled_at as string) ||
-          (autoScheduled
-            ? buildScheduledAtFromTime('09:00')
-            : buildScheduledAtFromTime((body.schedule_time as string) ?? '10:00'));
+          resolveAutoContentStartAt(autoScheduled, (body.schedule_time as string) ?? undefined);
         const result = await registerAutoContentJobs({
           workspace: body.workspace as string,
           title: String(body.title).trim(),
@@ -166,9 +164,7 @@ export async function registerJobRoutes(app: FastifyInstance) {
 
     try {
       const autoScheduled = body.auto_schedule !== false;
-      const scheduledAt = autoScheduled
-        ? buildScheduledAtFromTime('09:00')
-        : buildScheduledAtFromTime(body.schedule_time ?? '10:00');
+      const scheduledAt = resolveAutoContentStartAt(autoScheduled, body.schedule_time);
       const result = await registerAutoContentJobs({
         workspace: body.workspace,
         title: body.title.trim(),
@@ -197,14 +193,26 @@ export async function registerJobRoutes(app: FastifyInstance) {
     const { data: existing } = await supabase.from('huma_jobs').select('*').eq('id', id).single();
     if (!existing) return reply.code(404).send({ error: '작업 없음' });
 
-    const scheduledAt = (body.scheduled_at ?? existing.scheduled_at) as string | undefined;
+    const patch: Record<string, unknown> = {};
+    if (typeof body.title === 'string') patch.title = body.title.trim();
+    if (body.content === null || typeof body.content === 'string') patch.content = body.content;
+    if (typeof body.scheduled_at === 'string') patch.scheduled_at = body.scheduled_at;
+    if (body.link_url === null || typeof body.link_url === 'string') patch.link_url = body.link_url;
+    if (body.repeat_rule === null || typeof body.repeat_rule === 'string') patch.repeat_rule = body.repeat_rule;
+    if (Array.isArray(body.hashtags)) patch.hashtags = body.hashtags;
+    if (typeof body.content_type === 'string') patch.content_type = body.content_type;
+    if (typeof body.content_type_auto === 'boolean') patch.content_type_auto = body.content_type_auto;
+    if (typeof body.auto_scheduled === 'boolean') patch.auto_scheduled = body.auto_scheduled;
+    if (Array.isArray(body.image_urls)) patch.image_urls = body.image_urls;
+
+    const scheduledAt = (patch.scheduled_at ?? existing.scheduled_at) as string | undefined;
     const status = ['completed', 'failed', 'running'].includes(existing.status)
       ? existing.status
       : resolveJobStatus(scheduledAt);
 
     const { data, error } = await supabase
       .from('huma_jobs')
-      .update({ ...body, status })
+      .update({ ...patch, status })
       .eq('id', id)
       .select()
       .single();

@@ -14,11 +14,11 @@ import { MGrid, MPanel, MQueueItem, MStat } from '@/components/mockup/primitives
 
 import { useRegisterPageAction } from '@/components/dashboard/page-action-context';
 
-import { formatScheduledAt } from './job-schedule-form';
+import { formatScheduleLabel } from './job-schedule-form';
 
 import { QueueAutoContentModal, type AutoContentFormValues } from './queue-auto-content-modal';
 
-import { repeatLabel } from '@/lib/queue-repeat';
+import { buildScheduledAt, repeatLabel } from '@/lib/queue-repeat';
 
 
 
@@ -39,7 +39,7 @@ function tagFor(job: HumaJob): { label: string; tone: 'live' | 'warn' | 'idle' }
 
   if (job.status === 'running') return { label: 'LIVE', tone: 'live' };
 
-  if (job.scheduled_at) return { label: formatScheduledAt(job.scheduled_at).slice(-5), tone: 'warn' };
+  if (job.scheduled_at) return { label: formatScheduleLabel(job.scheduled_at), tone: 'warn' };
 
   return { label: job.status, tone: 'idle' };
 
@@ -51,14 +51,21 @@ function jobSub(job: HumaJob): string {
 
   const parts: string[] = [];
 
-  if (job.content_type) parts.push(`타입 ${job.content_type}`);
-  if (job.link_url) parts.push('AI 생성');
+  if (job.job_type === 'content_full') {
+    parts.push('AI 생성·발행 분배');
+    if (['pending', 'scheduled', 'paused'].includes(job.status)) parts.push('클릭하여 수정');
+  }
+  else if (job.content_type) parts.push(`타입 ${job.content_type}`);
+  else if (job.link_url) parts.push('AI 생성');
 
-  parts.push(job.platform ?? 'naver');
+  parts.push(job.platform ?? (job.job_type === 'content_full' ? '전체' : 'naver'));
 
   if (job.scheduled_at) {
-
-    parts.push(`${formatScheduledAt(job.scheduled_at).slice(-5)} 예약`);
+    const scheduleHint =
+      job.job_type === 'content_full' && (job.auto_scheduled ?? true)
+        ? '생성 시작'
+        : '발행 예약';
+    parts.push(`${formatScheduleLabel(job.scheduled_at)} ${scheduleHint}`);
 
     if (job.repeat_rule) parts.push(`반복: ${repeatLabel(job.repeat_rule)}`);
 
@@ -83,6 +90,7 @@ export function QueueManager() {
   const [jobs, setJobs] = useState<HumaJob[]>([]);
 
   const [showModal, setShowModal] = useState(false);
+  const [editingJob, setEditingJob] = useState<HumaJob | null>(null);
 
 
 
@@ -112,18 +120,40 @@ export function QueueManager() {
 
 
 
-  const handleAutoContent = async (values: AutoContentFormValues) => {
-    await api.createAutoContentJob({
-      workspace,
-      title: values.title.trim(),
-      source_url: values.source_url.trim(),
-      synopsis: values.synopsis.trim() || undefined,
-      content_type: values.content_type === 'auto' ? undefined : values.content_type,
-      content_type_auto: values.content_type === 'auto',
-      auto_schedule: values.auto_schedule,
-      schedule_time: values.schedule_time,
-      screenshot_base64: values.screenshot_base64,
-    });
+  const handleAutoContentSubmit = async (values: AutoContentFormValues) => {
+    if (editingJob) {
+      const scheduledAt = values.auto_schedule
+        ? new Date().toISOString()
+        : buildScheduledAt(values.schedule_time);
+      const patch: Partial<HumaJob> = {
+        title: values.title.trim(),
+        link_url: values.source_url.trim(),
+        content: values.synopsis.trim() || undefined,
+        content_type: values.content_type === 'auto' ? 'A' : values.content_type,
+        content_type_auto: values.content_type === 'auto',
+        auto_scheduled: values.auto_schedule,
+        scheduled_at: scheduledAt,
+      };
+      if (
+        values.screenshot_base64 &&
+        values.screenshot_base64 !== editingJob.image_urls?.[0]
+      ) {
+        patch.image_urls = [values.screenshot_base64];
+      }
+      await api.updateJob(editingJob.id, patch);
+    } else {
+      await api.createAutoContentJob({
+        workspace,
+        title: values.title.trim(),
+        source_url: values.source_url.trim(),
+        synopsis: values.synopsis.trim() || undefined,
+        content_type: values.content_type === 'auto' ? undefined : values.content_type,
+        content_type_auto: values.content_type === 'auto',
+        auto_schedule: values.auto_schedule,
+        schedule_time: values.schedule_time,
+        screenshot_base64: values.screenshot_base64,
+      });
+    }
     load();
   };
 
@@ -146,13 +176,13 @@ export function QueueManager() {
 
 
       <QueueAutoContentModal
-
-        open={showModal}
-
-        onClose={() => setShowModal(false)}
-
-        onSubmit={handleAutoContent}
-
+        open={showModal || editingJob !== null}
+        editJob={editingJob}
+        onClose={() => {
+          setShowModal(false);
+          setEditingJob(null);
+        }}
+        onSubmit={handleAutoContentSubmit}
       />
 
 
@@ -188,11 +218,21 @@ export function QueueManager() {
               tag={tag.label}
 
               tagTone={tag.tone}
-
+              onClick={
+                job.job_type === 'content_full' ? () => setEditingJob(job) : undefined
+              }
               onRun={() => api.runJob(job.id).then(load)}
-
               onStop={() => (job.status === 'paused' ? api.resumeJob(job.id) : api.pauseJob(job.id)).then(load)}
-
+              onDelete={
+                job.status === 'running'
+                  ? undefined
+                  : () => {
+                      if (!window.confirm(`「${job.title ?? job.job_type}」 작업을 큐에서 삭제할까요?`)) return;
+                      api.deleteJob(job.id).then(load).catch((e) => {
+                        alert(e instanceof Error ? e.message : '삭제 실패');
+                      });
+                    }
+              }
             />
 
           );

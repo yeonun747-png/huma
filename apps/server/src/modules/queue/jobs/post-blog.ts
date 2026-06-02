@@ -9,7 +9,6 @@ export async function executePostBlog(params: {
   payload: Record<string, unknown>;
   humanConfig: HumanEngineConfig;
   persona?: AccountPersona;
-  useOrganicNav?: boolean;
   rttScale?: number;
 }) {
   const imgs = await Promise.all(((params.payload.imageUrls as string[]) || []).map(uniquifyImageFromUrl));
@@ -21,7 +20,6 @@ export async function executePostBlog(params: {
     linkUrl: params.payload.linkUrl as string,
     humanEngine: params.humanConfig,
     persona: params.persona,
-    useOrganicNav: params.useOrganicNav,
     rttScale: params.rttScale,
   });
 }

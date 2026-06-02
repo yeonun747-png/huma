@@ -4,16 +4,7 @@ import { logOperation } from '../../lib/log-emitter.js';
 import { sleep } from '../../lib/utils.js';
 import { proxyPortToSlot } from '../../lib/modem-ports.js';
 import { readDongleInterfaceFromConf, isPlaceholderInterfaceName } from '../../lib/dongle-interfaces.js';
-
-function readInterfaceIp(interfaceName: string): string | null {
-  try {
-    const out = execSync(`ip -4 addr show ${interfaceName}`, { encoding: 'utf8' });
-    const match = out.match(/inet\s+(\d+\.\d+\.\d+\.\d+)/);
-    return match?.[1] ?? null;
-  } catch {
-    return null;
-  }
-}
+import { readInterfaceIp } from '../../lib/dongle-health.js';
 
 function sync3proxyExternalIp(proxyPort: number, newIp: string): void {
   if (process.platform === 'win32') return;

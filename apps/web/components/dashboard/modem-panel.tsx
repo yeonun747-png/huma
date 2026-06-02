@@ -9,7 +9,7 @@ export function ModemPanel() {
   const [modems, setModems] = useState<HumaModem[]>([]);
 
   useEffect(() => {
-    api.modems().then(setModems).catch(() => setModems([]));
+    api.modems({ probe: true }).then(setModems).catch(() => setModems([]));
   }, []);
 
   const STATUS: Record<string, string> = {
@@ -34,7 +34,7 @@ export function ModemPanel() {
             <div className="stat-value text-base">:{m.proxy_port}</div>
             <div className="font-mono text-[10.5px] text-huma-t3">{m.current_ip ?? '—'}</div>
             <div className="font-mono text-[10.5px] text-huma-t3">{m.carrier ?? ''} · {m.response_ms ?? '—'}ms</div>
-            <button type="button" className="btn-ghost mt-2 w-full text-[10px]" onClick={() => api.reconnectModem(m.id).then(() => api.modems().then(setModems))}>
+            <button type="button" className="btn-ghost mt-2 w-full text-[10px]" onClick={() => api.reconnectModem(m.id).then(() => api.modems({ probe: true }).then(setModems))}>
               IP 재발급
             </button>
           </div>

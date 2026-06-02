@@ -34,7 +34,7 @@ interface JobScheduleFormProps {
   submitLabel?: string;
 }
 
-function toLocalDatetimeValue(iso?: string) {
+export function toLocalDatetimeValue(iso?: string) {
   const d = iso ? new Date(iso) : new Date();
   d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
   return d.toISOString().slice(0, 16);
@@ -129,5 +129,26 @@ export function formatScheduledAt(iso?: string) {
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+  });
+}
+
+/** 큐 카드용 — 오늘/내일/날짜 + 시각 */
+export function formatScheduleLabel(iso?: string): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  const now = new Date();
+  const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate());
+  const diffDays = Math.round((startOf(d).getTime() - startOf(now).getTime()) / 86_400_000);
+  const time = d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  if (diffDays === 0) return `오늘 ${time}`;
+  if (diffDays === 1) return `내일 ${time}`;
+  if (diffDays === -1) return `어제 ${time}`;
+  return d.toLocaleString('ko-KR', {
+    month: 'short',
+    day: 'numeric',
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
   });
 }

@@ -4,6 +4,8 @@ import { supabase } from '../../middleware/auth.js';
 import { createBrowserForAccount, closeBrowserContext, createBrowser } from '../playwright/browser.js';
 import { loadAccountForBrowser } from '../playwright/account-loader.js';
 import { naverLogin } from '../playwright/naver/login.js';
+import { preSessionWarmup } from '../playwright/naver/pre-session-warmup.js';
+import { parsePersona } from '../playwright/persona.js';
 import { measureRTT, rttScale } from '../human-engine/timing.js';
 import { getHumanEngineConfig } from '../../lib/settings.js';
 import {
@@ -178,23 +180,32 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
           }
 
           try {
-            if (accountId) await naverLogin(context, accountId, { profilePath: accountCtx?.profile_path });
-            const page = await context.newPage();
             let resultUrl = '';
 
             if (type === 'post_blog') {
+              const persona = parsePersona(accountCtx?.persona);
+              const warmupPage = await context.newPage();
+              await preSessionWarmup(warmupPage, persona, 'posting', humanConfig);
+              await warmupPage.close();
+              if (accountId) {
+                await naverLogin(context, accountId, { profilePath: accountCtx?.profile_path });
+              }
+              const page = await context.newPage();
               ({ resultUrl } = await executePostBlog({
                 page,
                 payload,
                 humanConfig,
-                persona: accountCtx?.persona,
-                useOrganicNav: accountCtx?.account_type === 'posting',
+                persona,
                 rttScale: rttScaleFactor,
               }));
-            } else if (type === 'cafe_new_post') {
-              ({ resultUrl } = await executeCafePost({ page, payload, humanConfig }));
-            } else if (type === 'cafe_reply') {
-              ({ resultUrl } = await executeCafeReply({ page, payload, humanConfig }));
+            } else {
+              if (accountId) await naverLogin(context, accountId, { profilePath: accountCtx?.profile_path });
+              const page = await context.newPage();
+              if (type === 'cafe_new_post') {
+                ({ resultUrl } = await executeCafePost({ page, payload, humanConfig }));
+              } else if (type === 'cafe_reply') {
+                ({ resultUrl } = await executeCafeReply({ page, payload, humanConfig }));
+              }
             }
 
             if (humaJobId && resultUrl) await completeJob(humaJobId, resultUrl);

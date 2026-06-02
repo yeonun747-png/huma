@@ -493,6 +493,8 @@
 
   .m-qi { background: var(--bg3); border: 1px solid var(--bdr2); border-radius: 7px; padding: 10px 12px; margin-bottom: 7px; display: flex; align-items: center; gap: 10px; transition: all 0.2s; }
   .m-qi:hover { border-color: var(--acc); }
+  .m-qi-clickable { cursor: pointer; }
+  .m-qi-clickable:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
   .m-qi-ico { font-size: 17px; flex-shrink: 0; }
   .m-qi-title { font-size: 13.5px; font-weight: 500; color: var(--t); }
   .m-qi-sub { font-size: 11px; color: var(--t3); font-family: var(--font-jetbrains), monospace; margin-top: 2px; }
@@ -500,6 +502,8 @@
   .m-q-btn { width: 24px; height: 24px; border-radius: 4px; border: 1px solid var(--bdr); background: transparent; color: var(--t2); cursor: pointer; font-size: 11.5px; display: flex; align-items: center; justify-content: center; }
   .m-q-btn.run { border-color: var(--ok); color: var(--ok); }
   .m-q-btn.stop { border-color: var(--err); color: var(--err); }
+  .m-q-btn.del { border-color: var(--t4); color: var(--t3); font-size: 10px; }
+  .m-q-btn.del:hover { border-color: var(--err); color: var(--err); background: rgba(255, 80, 80, 0.08); }
 
   .m-pub-multi { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 12px; }
   .m-pub-card { background: var(--bg2); border: 1px solid var(--bdr); border-radius: 9px; padding: 12px; }

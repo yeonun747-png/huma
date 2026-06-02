@@ -55,7 +55,7 @@ export async function getHumanEngineConfig(): Promise<HumanEngineConfig> {
     wpm_sigma: 18,
     typo_rate: 0.04,
     backspace_delay_ms: [200, 800],
-    paragraph_pause_ms: [2000, 8000],
+    paragraph_pause_ms: [5000, 20000],
     review_duration_ms: [120000, 300000],
     night_ban_start: 1,
     night_ban_end: 7,

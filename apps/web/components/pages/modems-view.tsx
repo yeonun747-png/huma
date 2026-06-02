@@ -74,7 +74,7 @@ export function ModemsView() {
   const [accounts, setAccounts] = useState<HumaAccount[]>([]);
 
   const load = () => {
-    Promise.all([api.modems(), api.accounts()])
+    Promise.all([api.modems({ probe: true }), api.accounts()])
       .then(([m, a]) => {
         setModems(m);
         setAccounts(a);

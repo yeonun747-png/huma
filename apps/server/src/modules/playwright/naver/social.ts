@@ -13,6 +13,13 @@ import type { AccountPersona } from '../persona.js';
 import { acquireModem, releaseModem, type ModemSession } from '../../proxy/manager.js';
 import { handleLayer4Detection, isCaptchaError, isBlockError } from '../../watcher/detector.js';
 import { generateCrankComment } from './crank-comment.js';
+import { preSessionWarmup } from './pre-session-warmup.js';
+import { selectCrankKeywords } from './crank-keywords.js';
+import {
+  reconnectModemIfAccountSwitched,
+  recordLastAccountOnModem,
+} from '../../../lib/modem-last-account.js';
+import { applyCrankResourceBlocking } from './crank-resource-block.js';
 
 interface SocialCrankConfig {
   visits_per_session: number;
@@ -55,6 +62,7 @@ export async function runSocialCrank(
     if (ownsModem) {
       modemSession = await acquireModem(accountId);
       if (!modemSession) throw new Error('NO_MODEM');
+      await reconnectModemIfAccountSwitched(modemSession.proxyPort, accountId);
     } else if (!modemSession) {
       throw new Error('NO_MODEM');
     }
@@ -92,6 +100,11 @@ export async function runSocialCrank(
     const { context } = await createBrowserForAccount(accountCtx);
 
     try {
+      const warmupPage = await context.newPage();
+      await preSessionWarmup(warmupPage, persona, 'crank');
+      await warmupPage.close();
+      await applyCrankResourceBlocking(context);
+
       await naverLogin(context, accountId, { profilePath: accountCtx.profile_path });
       const page = await context.newPage();
 
@@ -102,7 +115,8 @@ export async function runSocialCrank(
         ourTarget,
         config.min_visit_interval_days,
       );
-      const otherBlogs = await searchRelatedBlogs(page, config.keywords, otherTarget, scale);
+      const crankKeywords = selectCrankKeywords(config.keywords);
+      const otherBlogs = await searchRelatedBlogs(page, crankKeywords, otherTarget, scale);
       const allTargets = shuffleArray([...ourBlogs, ...otherBlogs]).slice(0, maxVisits);
 
       let likesDone = 0;
@@ -131,6 +145,7 @@ export async function runSocialCrank(
 
       await updateVisitHistory(accountId, ourBlogs.map((b) => b.url));
       await updateCrankCount(accountId, allTargets.length);
+      await recordLastAccountOnModem(modemSession.proxyPort, accountId);
     } finally {
       await closeBrowserContext(context);
     }

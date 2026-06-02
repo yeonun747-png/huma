@@ -114,19 +114,38 @@ export function MQueueItem({
   sub,
   tag,
   tagTone,
+  onClick,
   onRun,
   onStop,
+  onDelete,
 }: {
   icon: string;
   title: string;
   sub: string;
   tag: string;
   tagTone: 'live' | 'warn' | 'idle';
+  onClick?: () => void;
   onRun?: () => void;
   onStop?: () => void;
+  onDelete?: () => void;
 }) {
   return (
-    <div className="m-qi">
+    <div
+      className={onClick ? 'm-qi m-qi-clickable' : 'm-qi'}
+      onClick={onClick}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+    >
       <div className="m-qi-ico">{icon}</div>
       <div className="min-w-0 flex-1">
         <div className="m-qi-title">{title}</div>
@@ -134,8 +153,41 @@ export function MQueueItem({
       </div>
       <div className="m-qi-r">
         <MTag tone={tagTone}>{tag}</MTag>
-        <button type="button" className="m-q-btn run" onClick={onRun}>▶</button>
-        <button type="button" className="m-q-btn stop" onClick={onStop}>■</button>
+        <button
+          type="button"
+          className="m-q-btn run"
+          title="지금 실행"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRun?.();
+          }}
+        >
+          ▶
+        </button>
+        <button
+          type="button"
+          className="m-q-btn stop"
+          title="일시정지"
+          onClick={(e) => {
+            e.stopPropagation();
+            onStop?.();
+          }}
+        >
+          ■
+        </button>
+        {onDelete ? (
+          <button
+            type="button"
+            className="m-q-btn del"
+            title="삭제"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+          >
+            ✕
+          </button>
+        ) : null}
       </div>
     </div>
   );

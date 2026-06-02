@@ -30,15 +30,19 @@ export function buildScheduledAtFromTime(time: string): string {
   return toTodayDatetime(time) ?? new Date().toISOString();
 }
 
+/** 자동 배분: AI 생성은 즉시 큐. 플랫폼별 발행 시각만 Haiku가 content_full 실행 시 결정 */
+export function resolveAutoContentStartAt(autoScheduled: boolean, scheduleTime?: string): string {
+  if (autoScheduled) return new Date().toISOString();
+  return buildScheduledAtFromTime(scheduleTime ?? '10:00');
+}
+
 export async function registerAutoContentJobs(body: AutoContentRequest): Promise<AutoContentResult> {
   const contentTypeAuto = body.content_type_auto ?? body.content_type == null;
   const autoScheduled = body.auto_schedule !== false;
 
   const scheduledAt =
     body.scheduled_at ??
-    (autoScheduled
-      ? buildScheduledAtFromTime('09:00')
-      : buildScheduledAtFromTime(body.schedule_time ?? '10:00'));
+    resolveAutoContentStartAt(autoScheduled, body.schedule_time);
 
   const status = new Date(scheduledAt).getTime() > Date.now() ? 'scheduled' : 'pending';
 

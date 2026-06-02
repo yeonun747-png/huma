@@ -95,7 +95,8 @@ export const api = {
     request(`/api/accounts/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteAccount: (id: string) => request(`/api/accounts/${id}`, { method: 'DELETE' }),
   accountLogs: (id: string) => request(`/api/accounts/${id}/logs`),
-  modems: () => request<HumaModem[]>('/api/modems'),
+  modems: (opts?: { probe?: boolean }) =>
+    request<HumaModem[]>(`/api/modems${opts?.probe ? '?probe=1' : ''}`),
   reconnectModem: (id: string) => request(`/api/modems/${id}/reconnect`, { method: 'POST' }),
   logs: (params?: { level?: string; platform?: string; limit?: string }) =>
     request<Array<Record<string, unknown>>>(`/api/logs${qs(params ?? {})}`),
