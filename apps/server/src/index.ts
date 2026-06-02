@@ -36,6 +36,7 @@ import { setLogSocket } from './lib/log-emitter.js';
 import { startWorker } from './modules/queue/worker.js';
 import { recoverScheduledJobs } from './lib/job-scheduler.js';
 import { startCrankScheduler } from './lib/crank-scheduler.js';
+import { startCafeActivityScheduler } from './lib/cafe-activity-scheduler.js';
 import { registerCrankRoutes } from './routes/crank.js';
 
 
@@ -122,7 +123,8 @@ async function main() {
     startWorker();
     await recoverScheduledJobs();
     startCrankScheduler();
-    app.log.info('BullMQ worker + crank scheduler started');
+    startCafeActivityScheduler();
+    app.log.info('BullMQ worker + crank scheduler + cafe activity scheduler started');
 
   } catch (err) {
 

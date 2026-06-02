@@ -1,5 +1,6 @@
 import { askClaudeWithModel } from '../../lib/anthropic-client.js';
 import { getMainClaudeModel, getSubClaudeModel } from '../../lib/ai-engine.js';
+import { withHumanWritingMandate, withHumanWritingSystem } from '../../lib/ai-human-writing.js';
 
 export interface ContentGenerationInput {
   title: string;
@@ -80,10 +81,16 @@ function parseScreenshotBase64(raw: string): { mediaType: 'image/jpeg' | 'image/
 }
 
 function fallbackContent(input: ContentGenerationInput, urlSummary: string): ContentGenerationOutput {
-  const body = input.synopsis
-    ? `${input.title}\n\n${input.synopsis}\n\n${urlSummary}\n\n원문: ${input.sourceUrl}`
-    : `${input.title}\n\n${urlSummary}\n\n원문: ${input.sourceUrl}`;
-  const short = `${input.title}. ${input.synopsis?.slice(0, 80) ?? urlSummary.slice(0, 80)}`;
+  const intro = input.synopsis?.trim() || input.title.trim();
+  const body = [
+    intro,
+    '',
+    urlSummary.slice(0, 600),
+    '',
+    `자세히 보기: ${input.sourceUrl}`,
+  ].join('\n');
+  const short = `${input.title}. ${(input.synopsis ?? urlSummary).slice(0, 80).trim()}`;
+  const wsTag = input.workspace === 'quizoasis' ? '#심리테스트' : input.workspace === 'panana' ? '#AI캐릭터' : '#사주';
   return {
     blog_post: body,
     tiktok_caption: short.slice(0, 150),
@@ -92,8 +99,8 @@ function fallbackContent(input: ContentGenerationInput, urlSummary: string): Con
     x_text: `${short.slice(0, 220)} ${input.sourceUrl}`.slice(0, 280),
     image_prompt: `Cinematic vertical 9:16 image about ${input.title}, moody lighting, high detail`,
     video_prompt: `Cinematic 9:16 vertical video about ${input.title}, smooth camera motion`,
-    tts_script: short,
-    hashtags: ['#운세', '#AI', '#콘텐츠'],
+    tts_script: short.slice(0, 200),
+    hashtags: [wsTag, '#AI', '#콘텐츠'],
   };
 }
 
@@ -113,7 +120,7 @@ async function generateMainContent(
   const userParts: Array<Record<string, unknown>> = [
     {
       type: 'text',
-      text: `URL 핵심:\n${urlSummary}\n\n제목: ${input.title}${synopsisGuide}${typeGuide}\n\n순수 JSON만 (코드블록 없이):
+      text: withHumanWritingMandate(`URL 핵심:\n${urlSummary}\n\n제목: ${input.title}${synopsisGuide}${typeGuide}\n\n순수 JSON만 (코드블록 없이):
 {
   "blog_post": "네이버 블로그 글 2000자 이상",
   "tiktok_caption": "TikTok 캡션 150자 이내",
@@ -123,7 +130,7 @@ async function generateMainContent(
   "image_prompt": "Higgsfield 이미지 프롬프트 (영문)",
   "video_prompt": "Higgsfield 9:16 영상 프롬프트 (영문)",
   "tts_script": "TTS 나레이션 30~60초 한국어"
-}`,
+}`),
     },
   ];
 
@@ -139,7 +146,7 @@ async function generateMainContent(
   const raw = await askClaudeWithModel({
     model: (await getMainClaudeModel()) || SONNET_MODEL_FALLBACK,
     max_tokens: 4096,
-    system: SYSTEM_PROMPTS[input.workspace] ?? SYSTEM_PROMPTS.yeonun,
+    system: withHumanWritingSystem(SYSTEM_PROMPTS[input.workspace] ?? SYSTEM_PROMPTS.yeonun),
     content: userParts,
   });
 
@@ -189,7 +196,29 @@ export async function generateAllContent(input: ContentGenerationInput): Promise
       generateSubContent(input.title, urlSummary, input.workspace),
     ]);
     return { ...mainContent, ...subContent };
-  } catch {
+  } catch (mainErr) {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return fallbackContent(input, urlSummary);
+    }
+    try {
+      const retryRaw = await askClaudeWithModel({
+        model: (await getSubClaudeModel()) || HAIKU_MODEL_FALLBACK,
+        max_tokens: 2000,
+        system: withHumanWritingSystem(SYSTEM_PROMPTS[input.workspace] ?? SYSTEM_PROMPTS.yeonun),
+        prompt: withHumanWritingMandate(
+          `제목: ${input.title}\nURL 요약: ${urlSummary.slice(0, 500)}\n\n네이버 블로그용 800자 이상 본문과 TikTok/Instagram/Threads/X용 짧은 캡션을 JSON으로:\n{"blog_post":"...","tiktok_caption":"...","instagram_caption":"...","threads_text":"...","x_text":"...","image_prompt":"...","video_prompt":"...","tts_script":"..."}`,
+        ),
+      });
+      const jsonMatch = retryRaw?.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]) as Omit<ContentGenerationOutput, 'hashtags'>;
+        const sub = await generateSubContent(input.title, urlSummary, input.workspace);
+        if (parsed.blog_post) return { ...parsed, ...sub };
+      }
+    } catch {
+      /* fall through */
+    }
+    console.warn('[content-generator] Sonnet failed, using fallback:', (mainErr as Error).message);
     return fallbackContent(input, urlSummary);
   }
 }

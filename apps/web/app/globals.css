@@ -584,6 +584,14 @@
   .m-modal-textarea { height: 72px; resize: none; }
   .m-modal-drop { width: 100%; background: var(--bg3); border: 1px dashed var(--bdr); border-radius: 6px; padding: 12px; text-align: center; cursor: pointer; transition: border-color 0.2s; }
   .m-modal-drop:hover { border-color: var(--acc); }
+  .m-modal-drop-screenshot { height: 100px; min-height: 100px; padding: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; position: relative; }
+  .m-modal-drop-screenshot:hover { border-color: var(--acc); }
+  .m-modal-drop-screenshot-img { max-height: 100%; max-width: 100%; width: auto; height: auto; object-fit: contain; display: block; cursor: zoom-in; }
+  .m-modal-drop-screenshot-hint { position: absolute; bottom: 4px; left: 0; right: 0; font-size: 10px; color: var(--t3); font-family: var(--font-jetbrains), monospace; pointer-events: none; opacity: 0; transition: opacity 0.2s; }
+  .m-modal-drop-screenshot:hover .m-modal-drop-screenshot-hint { opacity: 1; }
+  .m-screenshot-lightbox { position: fixed; inset: 0; z-index: 300; background: rgba(0, 0, 0, 0.88); display: flex; align-items: center; justify-content: center; padding: 24px; cursor: zoom-out; }
+  .m-screenshot-lightbox img { max-width: min(95vw, 1200px); max-height: 92vh; width: auto; height: auto; object-fit: contain; border-radius: 8px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5); cursor: default; }
+  .m-screenshot-lightbox-close { position: absolute; top: 16px; right: 20px; color: rgba(255, 255, 255, 0.7); font-size: 13px; font-family: var(--font-jetbrains), monospace; pointer-events: none; }
   .m-modal-foot { display: flex; gap: 8px; margin-top: 16px; }
   .m-modal-cost { background: var(--bg3); border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; }
   .m-ai-engine-row { display: flex; gap: 6px; margin-bottom: 14px; }

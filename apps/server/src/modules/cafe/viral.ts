@@ -1,6 +1,8 @@
 import type { Frame, Page } from 'playwright';
 import { askClaudeWithModel } from '../../lib/anthropic-client.js';
 import { getSubClaudeModel } from '../../lib/ai-engine.js';
+import { withHumanWritingMandate } from '../../lib/ai-human-writing.js';
+import { resolveCafeClubId } from '../../lib/cafe-nav.js';
 import { supabase } from '../../middleware/auth.js';
 import { randomBetween, sleep } from '../../lib/utils.js';
 import {
@@ -12,6 +14,7 @@ import {
 import { writeCafeReply } from '../playwright/naver/cafe.js';
 import { getHumanEngineConfig } from '../../lib/settings.js';
 import type { AccountPersona } from '../playwright/persona.js';
+import { generateCafeComment } from './cafe-comment.js';
 
 export interface CafePostHit {
   title: string;
@@ -27,7 +30,7 @@ export interface GradeRequirements {
   note?: string;
 }
 
-const PRODUCT_TOPIC_MAP: Record<string, string> = {
+export const PRODUCT_TOPIC_MAP: Record<string, string> = {
   '그 사람은 지금 무슨 생각': '헤어진 사람 마음 궁금할 때',
   '그 사람과 다시 만날 수 있을까': '재회 가능성 고민',
   '미래 배우자운': '결혼 인연 걱정될 때',
@@ -58,37 +61,65 @@ const SEASON_MAP: Record<number, string> = {
   12: '연말·새해 준비',
 };
 
+export function pickRandomProductTopic(): string {
+  const keys = Object.keys(PRODUCT_TOPIC_MAP);
+  return keys[Math.floor(Math.random() * keys.length)] ?? '정통 사주풀이 종합';
+}
+
+/** @deprecated generateCafeComment({ style: 'viral' }) 직접 사용 권장 */
 export async function generateViralReply(params: {
   postTitle: string;
+  postExcerpt?: string;
   workspace: string;
   persona?: Partial<AccountPersona> & { gender?: string; occupation?: string };
 }): Promise<string> {
-  const config = await getCafeViralConfig();
+  return generateCafeComment({
+    title: params.postTitle,
+    excerpt: params.postExcerpt,
+    workspace: params.workspace,
+    style: 'viral',
+    persona: params.persona,
+  });
+}
+
+export async function generateGreetingPost(params: {
+  persona?: Partial<AccountPersona> & { gender?: string; occupation?: string };
+  cafeName?: string;
+}): Promise<{ title: string; content: string }> {
   const age = params.persona?.age ?? 32;
   const gender = params.persona?.gender ?? '여성';
-  const serviceHint =
-    params.workspace === 'yeonun'
-      ? '"사주 앱 써봤는데" 또는 "점 봤더니" 형식으로 간접 경험담 (서비스명 직접 언급 금지)'
-      : '';
+  const job = params.persona?.occupation ?? params.persona?.job ?? '직장인';
+  const cafeName = params.cafeName ?? '카페';
 
-  const raw = await askClaudeWithModel({
-    model: (await getSubClaudeModel()) || 'claude-haiku-4-5-20251001',
-    max_tokens: 300,
-    prompt: `너는 ${age}세 ${gender} 일반 카페 회원이야.
-아래 게시글에 ${config.reply_style} 댓글을 달아줘.
-
-게시글: "${params.postTitle}"
+  const prompt = withHumanWritingMandate(`너는 ${age}세 ${gender} ${job} 네이버 카페 신규 회원이야.
+"${cafeName}" 카페 가입인사 게시글을 써줘.
 
 규칙:
-- 서비스명(연운, 퀴즈오아시스, 파나나 등) 직접 언급 금지
-- ${serviceHint}
-- 2~3문장, 구어체, 이모지 1~2개
-- 광고처럼 보이면 안 됨
+- 서비스·앱·사이트 언급 절대 금지
+- 광고·홍보처럼 보이면 안 됨
+- 자연스러운 일상 소개 + 카페 활동 의사
+- 제목 10자 이내, 본문 2~4문장 구어체, 이모지 0~1개
+- JSON만: {"title":"...","content":"..."}`);
 
-댓글만 출력.`,
-  });
+  const model = (await getSubClaudeModel()) || 'claude-haiku-4-5-20251001';
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const raw = await askClaudeWithModel({
+      model,
+      max_tokens: 300,
+      prompt: attempt === 1 ? `${prompt}\n\n(다시 한 번, 더 자연스럽게)` : prompt,
+    });
+    if (raw) {
+      try {
+        const jsonMatch = raw.match(/\{[\s\S]*\}/);
+        const parsed = JSON.parse(jsonMatch?.[0] ?? raw) as { title: string; content: string };
+        if (parsed.title && parsed.content) return parsed;
+      } catch {
+        /* retry */
+      }
+    }
+  }
 
-  return raw?.trim() || '저도 비슷한 고민 있었어요. 공감돼요 🙏';
+  throw new Error('가입인사 AI 생성 실패');
 }
 
 export async function generateSelfQuestion(params: {
@@ -103,10 +134,8 @@ export async function generateSelfQuestion(params: {
   const gender = params.persona?.gender ?? '여성';
   const occupation = params.persona?.occupation ?? params.persona?.job ?? '직장인';
 
-  const raw = await askClaudeWithModel({
-    model: (await getSubClaudeModel()) || 'claude-haiku-4-5-20251001',
-    max_tokens: 400,
-    prompt: `너는 ${age}세 ${gender} 네이버 카페 일반 회원 (${occupation}).
+  const model = (await getSubClaudeModel()) || 'claude-haiku-4-5-20251001';
+  const basePrompt = withHumanWritingMandate(`너는 ${age}세 ${gender} 네이버 카페 일반 회원 (${occupation}).
 주제 "${topic}"으로 자연스러운 고민·질문 게시글을 써줘.
 
 이번 글의 감정 각도: ${emotion}
@@ -122,22 +151,26 @@ export async function generateSelfQuestion(params: {
 - 제목 15자 이내, 본문 3~5문장 구어체, 이모지 자연스럽게
 - 같은 주제라도 매번 다른 시각·말투로 작성
 
-JSON만 출력: {"title":"...","content":"..."}`,
-  });
+JSON만 출력: {"title":"...","content":"..."}`);
 
-  if (raw) {
-    try {
-      const jsonMatch = raw.match(/\{[\s\S]*\}/);
-      return JSON.parse(jsonMatch?.[0] ?? raw) as { title: string; content: string };
-    } catch {
-      /* fallback */
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const raw = await askClaudeWithModel({
+      model,
+      max_tokens: 400,
+      prompt: attempt === 1 ? `${basePrompt}\n\n(다시 한 번, 더 자연스럽게)` : basePrompt,
+    });
+    if (raw) {
+      try {
+        const jsonMatch = raw.match(/\{[\s\S]*\}/);
+        const parsed = JSON.parse(jsonMatch?.[0] ?? raw) as { title: string; content: string };
+        if (parsed.title && parsed.content) return parsed;
+      } catch {
+        /* retry */
+      }
     }
   }
 
-  return {
-    title: '요즘 고민이 많아요',
-    content: `${topic} 관련해서 고민이 있는데 비슷한 경험 있으신 분 계신가요? 조언 부탁드려요 🙏`,
-  };
+  throw new Error(`자문자답 질문 AI 생성 실패: ${topic}`);
 }
 
 async function waitForCafeMainFrame(page: Page): Promise<Frame | null> {
@@ -173,55 +206,6 @@ export async function assertCafeBrowseAccess(page: Page): Promise<void> {
       '비공개 카페 — 네이버 로그인·카페 가입된 계정으로 스캔해야 합니다. 계정관리에서 계정을 등록하고 럭키포에버에 가입하세요.',
     );
   }
-}
-
-async function resolveCafeClubId(page: Page, slug: string): Promise<string | null> {
-  await page.goto(`https://cafe.naver.com/${slug}`, { waitUntil: 'domcontentloaded' });
-  await sleep(randomBetween(1500, 3000));
-
-  const frame = await waitForCafeMainFrame(page);
-
-  const clubId = await page
-    .evaluate(() => {
-      const w = window as unknown as { g_sClubId?: string };
-      if (w.g_sClubId && /^\d+$/.test(w.g_sClubId)) return w.g_sClubId;
-
-      const iframe = document.querySelector('#cafe_main') as HTMLIFrameElement | null;
-      if (iframe?.src) {
-        const m = iframe.src.match(/clubid=(\d+)/i);
-        if (m) return m[1];
-      }
-
-      const html = document.documentElement.innerHTML;
-      const patterns = [
-        /g_sClubId\s*=\s*['"](\d+)['"]/,
-        /"clubId"\s*:\s*(\d+)/,
-        /clubid[=:]["']?(\d{5,})/i,
-      ];
-      for (const re of patterns) {
-        const m = html.match(re);
-        if (m) return m[1];
-      }
-      return null;
-    })
-    .catch(() => null);
-
-  if (clubId) return clubId;
-
-  if (frame) {
-    const fromFrame = await frame
-      .evaluate(() => {
-        const w = window as unknown as { g_sClubId?: string };
-        if (w.g_sClubId && /^\d+$/.test(w.g_sClubId)) return w.g_sClubId;
-        const html = document.documentElement.innerHTML;
-        const m = html.match(/clubid[=:]["']?(\d{5,})/i);
-        return m?.[1] ?? null;
-      })
-      .catch(() => null);
-    if (fromFrame) return fromFrame;
-  }
-
-  return null;
 }
 
 function isArticleUrl(url: string): boolean {

@@ -43,22 +43,22 @@ export function computeCrankSchedulePolicy(activeModemCount: number): CrankSched
   };
 }
 
-/** 08:00~22:00 KST 균등 분산 + ±15분 지터 */
+/** 08:00~22:00 KST 균등 분산 + ±15분 지터 (window는 active_hours에서 파생 가능) */
 export function distributeCrankStartTimesKst(
   count: number,
   dayOffset = 0,
+  window?: { start: number; end: number },
 ): Date[] {
   if (count <= 0) return [];
 
-  const windowMinutes =
-    (SCHEDULE_WINDOW_END_HOUR - SCHEDULE_WINDOW_START_HOUR) * 60;
+  const startHour = window?.start ?? SCHEDULE_WINDOW_START_HOUR;
+  const endHour = window?.end ?? SCHEDULE_WINDOW_END_HOUR;
+  const windowMinutes = (endHour - startHour) * 60;
   const interval = windowMinutes / count;
 
   return Array.from({ length: count }, (_, i) => {
-    const baseMinutes =
-      SCHEDULE_WINDOW_START_HOUR * 60 + interval * i + interval / 2;
-    const jitter =
-      (Math.random() * 2 - 1) * START_JITTER_MINUTES;
+    const baseMinutes = startHour * 60 + interval * i + interval / 2;
+    const jitter = (Math.random() * 2 - 1) * START_JITTER_MINUTES;
     const totalMin = Math.round(baseMinutes + jitter);
     const hour = Math.floor(totalMin / 60);
     const minute = totalMin % 60;
@@ -108,6 +108,16 @@ export function getKstClock(from = new Date()): { hour: number; minute: number; 
   const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? 0);
   const day = Number(parts.find((p) => p.type === 'day')?.value ?? 0);
   return { hour, minute, day };
+}
+
+export function isKstNightBan(
+  nightBanStart = 1,
+  nightBanEnd = 7,
+  from = new Date(),
+): boolean {
+  const { hour } = getKstClock(from);
+  if (nightBanStart < nightBanEnd) return hour >= nightBanStart && hour < nightBanEnd;
+  return hour >= nightBanStart || hour < nightBanEnd;
 }
 
 export function addDaysToIso(iso: string | null | undefined, days: number): string | null {

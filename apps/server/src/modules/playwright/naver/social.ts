@@ -12,13 +12,7 @@ import { getTodayPlan, maxCrankVisitsForWarmup } from '../warmup.js';
 import type { AccountPersona } from '../persona.js';
 import { acquireModem, releaseModem, type ModemSession } from '../../proxy/manager.js';
 import { handleLayer4Detection, isCaptchaError, isBlockError } from '../../watcher/detector.js';
-
-const COMMENT_TEMPLATES = [
-  '정말 유익한 글이네요! 많은 도움이 됐습니다',
-  '이런 좋은 정보 감사해요. 앞으로도 좋은 글 부탁드려요!',
-  '공감되는 내용이에요. 자주 놀러올게요',
-  '글을 읽고 많이 배웠습니다. 감사합니다!',
-];
+import { generateCrankComment } from './crank-comment.js';
 
 interface SocialCrankConfig {
   visits_per_session: number;
@@ -26,10 +20,6 @@ interface SocialCrankConfig {
   other_blog_ratio: number;
   min_visit_interval_days: number;
   keywords: string[];
-}
-
-function generateCrankComment(): string {
-  return COMMENT_TEMPLATES[Math.floor(Math.random() * COMMENT_TEMPLATES.length)];
 }
 
 export async function naturalVisitViaSearch(page: Page, keyword: string, scale = 1): Promise<string | null> {
@@ -134,7 +124,7 @@ export async function runSocialCrank(
 
         await visitBlogActions(page, { ...target, doLike, doComment }, scale);
         if (doLike) likesDone++;
-        if (doComment && target.commentText) commentsDone++;
+        if (doComment) commentsDone++;
 
         await humanSleep(30000, 120000);
       }
@@ -167,15 +157,20 @@ async function visitBlogActions(
     }
   }
 
-  if (target.doComment && target.commentText) {
+  if (target.doComment) {
     const commentArea = page.locator('.u_cbox_write_wrap textarea');
     if (await commentArea.isVisible()) {
-      await scaledHumanSleep(5000, 15000, scale);
-      await commentArea.click();
-      const humanConfig = await getHumanEngineConfig();
-      await humanType(page, commentArea, target.commentText, humanConfig);
-      await scaledHumanSleep(2000, 5000, scale);
-      await humanClick(page, '.u_cbox_btn_upload');
+      try {
+        const commentText = target.commentText ?? (await generateCrankComment(page));
+        await scaledHumanSleep(5000, 15000, scale);
+        await commentArea.click();
+        const humanConfig = await getHumanEngineConfig();
+        await humanType(page, commentArea, commentText, humanConfig);
+        await scaledHumanSleep(2000, 5000, scale);
+        await humanClick(page, '.u_cbox_btn_upload');
+      } catch {
+        /* AI 댓글 생성 실패 — 고정 템플릿 대신 스킵 */
+      }
     }
   }
 }
@@ -209,7 +204,7 @@ async function selectOurBlogsToVisit(
       isOurBlog: true,
       doLike: Math.random() < persona.likeProb,
       doComment: Math.random() < persona.commentProb,
-      commentText: generateCrankComment(),
+      commentText: undefined,
       useSearch: false,
       keyword: undefined as string | undefined,
     }));

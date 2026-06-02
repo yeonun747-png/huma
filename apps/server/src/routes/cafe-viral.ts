@@ -160,6 +160,7 @@ export async function registerCafeViralRoutes(app: FastifyInstance) {
 
     const reply = await generateViralReply({
       postTitle: post.post_title ?? '',
+      postExcerpt: post.post_content ?? undefined,
       workspace: post.workspace,
     });
     await supabase.from('huma_cafe_viral_posts').update({ reply_drafted: reply }).eq('id', id);

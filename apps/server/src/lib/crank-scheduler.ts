@@ -16,6 +16,7 @@ import {
 import { getSetting } from './settings.js';
 import { enqueueHumaJob, type JobRecord } from './job-scheduler.js';
 import { logOperation } from './log-emitter.js';
+import { getCrankScheduleWindow } from './human-engine-policy.js';
 
 const DAILY_JOB_TITLE_PREFIX = 'C-Rank 스케줄';
 
@@ -105,7 +106,8 @@ export async function runDailyCrankScheduler(): Promise<void> {
   }
 
   const ourBlogUrls = await fetchPostingBlogUrls();
-  const startTimes = distributeCrankStartTimesKst(accounts.length);
+  const scheduleWindow = await getCrankScheduleWindow();
+  const startTimes = distributeCrankStartTimesKst(accounts.length, 0, scheduleWindow);
 
   for (let i = 0; i < accounts.length; i++) {
     const account = accounts[i];

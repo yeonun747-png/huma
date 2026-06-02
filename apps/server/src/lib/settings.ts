@@ -1,4 +1,5 @@
 import { supabase } from '../middleware/auth.js';
+import { isKstNightBan } from './crank-schedule-config.js';
 
 const cache = new Map<string, unknown>();
 
@@ -61,11 +62,8 @@ export async function getHumanEngineConfig(): Promise<HumanEngineConfig> {
   });
 }
 
+/** @deprecated worker는 isNightBanActive() 사용 (KST + app_settings) */
 export function isNightBan(config?: HumanEngineConfig): boolean {
-  const hour = new Date().getHours();
   const c = config ?? { night_ban_start: 1, night_ban_end: 7 };
-  if (c.night_ban_start < c.night_ban_end) {
-    return hour >= c.night_ban_start && hour < c.night_ban_end;
-  }
-  return hour >= c.night_ban_start || hour < c.night_ban_end;
+  return isKstNightBan(c.night_ban_start, c.night_ban_end);
 }

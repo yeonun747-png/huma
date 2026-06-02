@@ -1,6 +1,12 @@
 import axios from 'axios';
 import { supabase } from '../../middleware/auth.js';
 import { logOperation } from '../../lib/log-emitter.js';
+import {
+  getHumanEngineScheduleConfig,
+  getWatcherSettings,
+  resolveRecoveryDelayMs,
+  shouldNotifySlack,
+} from '../../lib/human-engine-policy.js';
 import { reconnectModem } from '../modem/reconnect.js';
 import type { ModemSession } from '../proxy/manager.js';
 import { getModemIdByProxyPort } from '../proxy/manager.js';
@@ -27,6 +33,7 @@ function kstDateKey(): string {
 }
 
 async function postSlack(text: string) {
+  if (!(await shouldNotifySlack())) return;
   const webhook = process.env.SLACK_WEBHOOK_URL?.trim();
   if (!webhook) return;
   await axios.post(webhook, { text }).catch(() => {});
@@ -58,6 +65,10 @@ function clearRecoveryTimers(accountId: string) {
 
 export function scheduleRecovery(accountId: string, delayMs: number) {
   clearRecoveryTimers(accountId);
+  if (delayMs <= 0) {
+    void resumeAccount(accountId);
+    return;
+  }
   const t = setTimeout(async () => {
     await resumeAccount(accountId);
     await logOperation({
@@ -151,8 +162,15 @@ export async function handleLayer4Detection(
   err: unknown,
   session?: ModemSession,
 ) {
+  const watcher = await getWatcherSettings();
+  const human = await getHumanEngineScheduleConfig();
   const { countToday, tier } = await bumpDetectionState(accountId);
-  await pauseAccount(accountId);
+
+  const autoPause =
+    watcher.auto_pause !== false && human.fingerprint?.auto_pause_on_detect !== false;
+  if (autoPause) {
+    await pauseAccount(accountId);
+  }
 
   if (countToday >= 3) {
     await setWeekRest(accountId);
@@ -170,29 +188,30 @@ export async function handleLayer4Detection(
 
   const captcha = isCaptchaError(err);
   const is429 = is429Error(err);
+  const delayMs = resolveRecoveryDelayMs(tier, is429, watcher, human);
 
   if (tier >= 3) {
     const { data } = await supabase.from('huma_accounts').select('health_score').eq('id', accountId).single();
     const health = Math.max(0, (data?.health_score ?? 100) - 15);
     await supabase.from('huma_accounts').update({ health_score: health }).eq('id', accountId);
-    scheduleRecovery(accountId, 120 * 60 * 1000);
+    scheduleRecovery(accountId, delayMs);
     await postSlack(
-      `🚨 Layer4 3차 연속 탐지\n계정: ${accountId}\nhealth→${health}\n2시간 후 재개`,
+      `🚨 Layer4 3차 연속 탐지\n계정: ${accountId}\nhealth→${health}\n${Math.round(delayMs / 60000)}분 후 재개`,
     );
   } else if (is429 || tier >= 2) {
     await handle429Reconnect(accountId, session);
-    scheduleRecovery(accountId, 30 * 60 * 1000);
+    scheduleRecovery(accountId, delayMs);
     await postSlack(
-      `⚠️ Layer4 2차 (429/재CAPTCHA)\n계정: ${accountId}\n티어: ${tier}\n30분 후 자동 재개`,
+      `⚠️ Layer4 2차 (429/재CAPTCHA)\n계정: ${accountId}\n티어: ${tier}\n${Math.round(delayMs / 60000)}분 후 자동 재개`,
     );
   } else if (captcha || isBlockError(err)) {
-    scheduleRecovery(accountId, 12 * 60 * 1000);
+    scheduleRecovery(accountId, delayMs);
     await postSlack(
-      `⚠️ Layer4 1차 CAPTCHA\n계정: ${accountId}\n12분 후 자동 재개`,
+      `⚠️ Layer4 1차 CAPTCHA\n계정: ${accountId}\n${Math.round(delayMs / 60000)}분 후 자동 재개`,
     );
   } else {
-    scheduleRecovery(accountId, 12 * 60 * 1000);
-    await postSlack(`⚠️ Layer4 탐지\n계정: ${accountId}\n12분 후 자동 재개`);
+    scheduleRecovery(accountId, delayMs);
+    await postSlack(`⚠️ Layer4 탐지\n계정: ${accountId}\n${Math.round(delayMs / 60000)}분 후 자동 재개`);
   }
 
   await logOperation({

@@ -5,11 +5,19 @@ import { createBrowserForAccount, closeBrowserContext, createBrowser } from '../
 import { loadAccountForBrowser } from '../playwright/account-loader.js';
 import { naverLogin } from '../playwright/naver/login.js';
 import { measureRTT, rttScale } from '../human-engine/timing.js';
-import { getHumanEngineConfig, isNightBan } from '../../lib/settings.js';
+import { getHumanEngineConfig } from '../../lib/settings.js';
+import {
+  checkMinPublishInterval,
+  getEffectiveDailyLimit,
+  getHumanEngineScheduleConfig,
+  isNightBanActive,
+  msUntilNextActiveHour,
+  passesActiveHoursGate,
+  passesWeekendVolumeGate,
+} from '../../lib/human-engine-policy.js';
 import { handleLayer4Detection, isCaptchaError, isBlockError } from '../watcher/detector.js';
 import { acquireModem, releaseModem, type ModemSession } from '../proxy/manager.js';
 import { acquireAccount, releaseAccount } from '../../lib/account-lock.js';
-import { getDailyLimit } from '../../lib/limits.js';
 import { getCrankDailyLimit } from '../playwright/warmup.js';
 import { checkSharedWorkspaceLimit } from '../../lib/shared-limit.js';
 import { logOperation } from '../../lib/log-emitter.js';
@@ -66,6 +74,13 @@ function dailyCountField(jobType: string): 'post_count_today' | 'crank_count_tod
   return 'post_count_today';
 }
 
+const PLAYWRIGHT_AND_CRANK = [...PLAYWRIGHT_JOBS, 'social_crank'];
+const POSTING_JOBS = ['post_blog', 'cafe_new_post'];
+
+async function deferJob(job: { moveToDelayed: (ts: number) => Promise<void> }, delayMs: number) {
+  await job.moveToDelayed(Date.now() + Math.max(60_000, delayMs));
+}
+
 export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURRENCY) || 5) {  const worker = new Worker(
     'huma-jobs',
     async (job) => {
@@ -78,10 +93,32 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         humaJobId?: string;
       };
 
-      const humanConfig = await getHumanEngineConfig();
-      if (PLAYWRIGHT_JOBS.includes(type) || type === 'social_crank') {
-        if (isNightBan(humanConfig)) throw new Error('NIGHT_BAN');
+      if (PLAYWRIGHT_AND_CRANK.includes(type)) {
+        if (await isNightBanActive()) {
+          await deferJob(job, 60 * 60 * 1000);
+          return;
+        }
+        if (!(await passesActiveHoursGate())) {
+          const human = await getHumanEngineScheduleConfig();
+          await deferJob(job, msUntilNextActiveHour(human.active_hours ?? []));
+          return;
+        }
       }
+
+      if (POSTING_JOBS.includes(type) && !(await passesWeekendVolumeGate())) {
+        await deferJob(job, 2 * 60 * 60 * 1000);
+        return;
+      }
+
+      if (accountId && POSTING_JOBS.includes(type)) {
+        const waitMs = await checkMinPublishInterval(accountId, type);
+        if (waitMs) {
+          await deferJob(job, waitMs);
+          return;
+        }
+      }
+
+      const humanConfig = await getHumanEngineConfig();
 
       if (accountId && !acquireAccount(accountId)) {
         throw new Error('ACCOUNT_BUSY');
@@ -97,7 +134,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
           if (type === 'cafe_reply') await assertCafeReplyAccount(accountId);
 
           const countField = dailyCountField(type);
-          let limit = getDailyLimit(type);
+          let limit = await getEffectiveDailyLimit(type);
           const scheduledCrank = Boolean(
             (payload as { scheduledCrank?: boolean }).scheduledCrank,
           );
@@ -106,7 +143,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
               const ctx = await loadAccountForBrowser(accountId);
               const crankCap = getCrankDailyLimit(ctx.warmup_day ?? 0);
               limit = type === 'cafe_reply'
-                ? Math.min(getDailyLimit('cafe_reply'), crankCap)
+                ? Math.min(await getEffectiveDailyLimit('cafe_reply'), crankCap)
                 : crankCap;
             } else if (type === 'social_crank') {
               limit = 999;

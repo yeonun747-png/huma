@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { buildScheduledAt } from '@/lib/queue-repeat';
 
 export interface AutoContentFormValues {
@@ -30,8 +30,18 @@ export function QueueAutoContentModal({ open, onClose, onSubmit }: QueueAutoCont
     schedule_time: '10:00',
   });
   const [screenshotName, setScreenshotName] = useState('');
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!previewOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPreviewOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [previewOpen]);
 
   if (!open) return null;
 
@@ -65,6 +75,7 @@ export function QueueAutoContentModal({ open, onClose, onSubmit }: QueueAutoCont
         screenshot_base64: undefined,
       });
       setScreenshotName('');
+      setPreviewOpen(false);
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : '등록 실패');
@@ -145,18 +156,52 @@ export function QueueAutoContentModal({ open, onClose, onSubmit }: QueueAutoCont
           <div className="m-modal-label">③ 서비스 화면 캡처 <span className="text-huma-t3">선택 — Claude 비전으로 분석</span></div>
           <button
             type="button"
-            className="m-modal-drop"
+            className="m-modal-drop m-modal-drop-screenshot"
             onClick={() => fileRef.current?.click()}
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => { e.preventDefault(); handleFile(e.dataTransfer.files[0]); }}
           >
-            <div className="text-lg">📸</div>
-            <div className="text-xs text-huma-t3">
-              {screenshotName || 'PNG·JPG 드래그 또는 클릭'}
-            </div>
+            {form.screenshot_base64 ? (
+              <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={form.screenshot_base64}
+                  alt={screenshotName || '서비스 화면 캡처'}
+                  className="m-modal-drop-screenshot-img"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPreviewOpen(true);
+                  }}
+                />
+                <span className="m-modal-drop-screenshot-hint">클릭하여 크게 보기 · 드래그로 교체</span>
+              </>
+            ) : (
+              <>
+                <div className="text-lg">📸</div>
+                <div className="text-xs text-huma-t3">PNG·JPG 드래그 또는 클릭</div>
+              </>
+            )}
           </button>
           <input ref={fileRef} type="file" accept="image/png,image/jpeg" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
         </div>
+
+        {previewOpen && form.screenshot_base64 && (
+          <div
+            className="m-screenshot-lightbox"
+            role="dialog"
+            aria-modal="true"
+            aria-label="캡처 이미지 크게 보기"
+            onClick={() => setPreviewOpen(false)}
+          >
+            <span className="m-screenshot-lightbox-close">ESC 또는 바깥 클릭으로 닫기</span>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={form.screenshot_base64}
+              alt={screenshotName || '서비스 화면 캡처'}
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+        )}
 
         <div className="m-modal-field">
           <div className="m-modal-label">④ 포스팅 시놉 <span className="text-huma-t3">선택 — 없으면 Claude가 자율 작성</span></div>

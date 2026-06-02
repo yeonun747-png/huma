@@ -13,6 +13,7 @@ import {
   registerAutoContentJobs,
 } from '../modules/claude/auto-content-orchestrator.js';
 import { assertCafeNewPostAccount, assertCafeReplyAccount } from '../lib/cafe-accounts.js';
+import { assertManualSocialCrankAllowed } from '../lib/crank-guard.js';
 
 export async function registerJobRoutes(app: FastifyInstance) {
   app.get('/api/jobs', { preHandler: authMiddleware }, async (request) => {
@@ -120,6 +121,9 @@ export async function registerJobRoutes(app: FastifyInstance) {
     try {
       if (jobType === 'cafe_new_post' && accountId) await assertCafeNewPostAccount(accountId);
       if (jobType === 'cafe_reply' && accountId) await assertCafeReplyAccount(accountId);
+      if (jobType === 'social_crank' && accountId) {
+        await assertManualSocialCrankAllowed(accountId, body.content as string | undefined);
+      }
     } catch (err) {
       return reply.code(400).send({ error: (err as Error).message });
     }
@@ -248,10 +252,18 @@ export async function registerJobRoutes(app: FastifyInstance) {
     return { success: true };
   });
 
-  app.post('/api/jobs/:id/run-now', { preHandler: authMiddleware }, async (request) => {
+  app.post('/api/jobs/:id/run-now', { preHandler: authMiddleware }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const { data: job } = await supabase.from('huma_jobs').select('*').eq('id', id).single();
     if (!job) return { error: '작업 없음' };
+
+    if (job.job_type === 'social_crank' && job.account_id) {
+      try {
+        await assertManualSocialCrankAllowed(job.account_id, job.content);
+      } catch (err) {
+        return reply.code(400).send({ error: (err as Error).message });
+      }
+    }
 
     await removeBullJob(job.bull_job_id);
     await enqueueJob(buildEnqueuePayload(job as JobRecord), { jobId: `huma-${job.id}-now-${Date.now()}` });
