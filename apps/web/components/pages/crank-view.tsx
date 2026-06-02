@@ -18,6 +18,7 @@ import { useRegisterPageAction } from '@/components/dashboard/page-action-contex
 type SchedulerStatus = {
   date_key: string;
   active_crank_modems: number;
+  planned_crank_modems?: number;
   cycle_days: number;
   daily_account_target: number;
   max_sessions_per_modem_per_day: number;
@@ -32,6 +33,7 @@ type SchedulerStatus = {
     monthly_data_mb: number;
     crank_sessions_today: number;
     schedule_excluded: boolean;
+    reserved?: boolean;
     carrier?: string;
     current_ip?: string;
   }>;
@@ -114,13 +116,22 @@ export function CrankView() {
 
   const modemRows =
     scheduler?.modems.map((m) => {
-      const tone = m.schedule_excluded
-        ? 'err'
-        : m.status === 'error'
+      const tone = m.reserved
+        ? 'idle'
+        : m.schedule_excluded
           ? 'err'
-          : m.status === 'reconnecting'
-            ? 'warn'
-            : 'ok';
+          : m.status === 'error'
+            ? 'err'
+            : m.status === 'reconnecting'
+              ? 'warn'
+              : 'ok';
+      const statusLabel = m.reserved
+        ? '예비·미연결'
+        : m.schedule_excluded
+          ? '월한도'
+          : m.status === 'idle'
+            ? '가동'
+            : m.status;
       return [
         `동글 ${m.slot_number}`,
         `:${m.proxy_port}`,
@@ -129,7 +140,7 @@ export function CrankView() {
         </span>,
         String(m.crank_sessions_today),
         <MTag key="s" tone={tone}>
-          {m.schedule_excluded ? '월한도' : m.status === 'idle' ? '정상' : m.status}
+          {statusLabel}
         </MTag>,
       ];
     }) ?? [];
@@ -148,9 +159,9 @@ export function CrankView() {
         {scheduler ? (
           <MGrid cols={4}>
             <MProgressStat
-              label="활성 crank 동글"
+              label="가동 crank 동글"
               current={scheduler.active_crank_modems}
-              max={10}
+              max={scheduler.planned_crank_modems ?? 5}
             />
             <MProgressStat
               label={`활동 주기 (${scheduler.cycle_days}일)`}
@@ -172,14 +183,15 @@ export function CrankView() {
           <EmptyPanel message="스케줄러 상태를 불러오지 못했습니다." />
         )}
         <p className="mt-2 font-mono text-[10.5px] text-huma-t3">
-          매일 00:01 KST 큐 생성 · 08:00~22:00 분산(±15분) · 세션 60분(재연결 10분+소통) ·
-          동글당 일 6세션·월 2500MB · 포스팅 동글 제외
+          매일 00:01 KST 큐 생성 · 08:00~22:00 분산(±15분) · 세션 60분 · 동글당 일 6세션·월 2500MB ·
+          예비 슬롯(8~10)은 스케줄 제외
         </p>
         {scheduler && (
           <>
             <p className="mb-2 mt-3 text-xs text-huma-t2">
-              오늘({scheduler.date_key}) 목표 {scheduler.daily_account_target}계정 · 동글{' '}
-              {scheduler.active_crank_modems}개 기준 {scheduler.cycle_days}일 주기
+              오늘({scheduler.date_key}) 목표 {scheduler.daily_account_target}계정 · 가동 동글{' '}
+              {scheduler.active_crank_modems}개(목표 {scheduler.planned_crank_modems ?? 5}개) ·{' '}
+              {scheduler.cycle_days}일 주기
             </p>
             <MTable
               head={['동글', 'SOCKS', '월 데이터', '오늘 세션', '상태']}

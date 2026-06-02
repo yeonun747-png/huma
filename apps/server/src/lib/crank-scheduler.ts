@@ -9,9 +9,12 @@ import {
 } from './crank-schedule-config.js';
 import {
   countActiveCrankModems,
+  listSchedulableCrankModems,
+  listReservedCrankModems,
   resetAllMonthlyDataMb,
   resetDailyCrankCounters,
 } from './crank-modems.js';
+import { getSetting } from './settings.js';
 import { enqueueHumaJob, type JobRecord } from './job-scheduler.js';
 import { logOperation } from './log-emitter.js';
 
@@ -157,6 +160,12 @@ export async function getCrankSchedulerStatus() {
   const policy = computeCrankSchedulePolicy(activeModems);
   const dateKey = formatKstDateKey();
 
+  const crankCfg = await getSetting<{ planned_crank_modems?: number }>('social_crank', {});
+  const plannedCrankModems = Math.max(activeModems, crankCfg.planned_crank_modems ?? 5);
+
+  const schedulableModems = await listSchedulableCrankModems();
+  const reservedModems = await listReservedCrankModems();
+
   const { data: todayJobs } = await supabase
     .from('huma_jobs')
     .select('id, status, account_id, scheduled_at, completed_at, title')
@@ -172,14 +181,6 @@ export async function getCrankSchedulerStatus() {
     .select('id, name, last_crank_at, is_active')
     .eq('account_type', 'crank')
     .order('name');
-
-  const { data: crankModems } = await supabase
-    .from('huma_modems')
-    .select(
-      'id, slot_number, proxy_port, status, monthly_data_mb, crank_sessions_today, carrier, current_ip, modem_role',
-    )
-    .eq('modem_role', 'crank')
-    .order('slot_number');
 
   const accountsWithNext = (crankAccounts ?? []).map((a) => {
     const last = a.last_crank_at as string | null;
@@ -200,27 +201,37 @@ export async function getCrankSchedulerStatus() {
     };
   });
 
+  const mapModemRow = (m: (typeof schedulableModems)[0], reserved: boolean) => ({
+    id: m.id,
+    slot_number: m.slot_number,
+    proxy_port: m.proxy_port,
+    status: m.status,
+    monthly_data_mb: Number(m.monthly_data_mb ?? 0),
+    crank_sessions_today: m.crank_sessions_today ?? 0,
+    schedule_excluded:
+      reserved ||
+      Number(m.monthly_data_mb ?? 0) > 2500 ||
+      m.status === 'error' ||
+      m.status === 'offline',
+    reserved,
+    carrier: m.carrier,
+    current_ip: m.current_ip,
+  });
+
   return {
     date_key: dateKey,
     active_crank_modems: activeModems,
+    planned_crank_modems: plannedCrankModems,
     cycle_days: policy.cycleDays,
     daily_account_target: policy.dailyAccountCount,
     max_sessions_per_modem_per_day: policy.maxSessionsPerModemPerDay,
     today_scheduled: todayScheduled,
     today_completed: todayCompleted,
     session_duration_minutes: 60,
-    modems: (crankModems ?? []).map((m) => ({
-      id: m.id,
-      slot_number: m.slot_number,
-      proxy_port: m.proxy_port,
-      status: m.status,
-      monthly_data_mb: Number(m.monthly_data_mb ?? 0),
-      crank_sessions_today: m.crank_sessions_today ?? 0,
-      schedule_excluded:
-        Number(m.monthly_data_mb ?? 0) > 2500 || m.status === 'error',
-      carrier: m.carrier,
-      current_ip: m.current_ip,
-    })),
+    modems: [
+      ...schedulableModems.map((m) => mapModemRow(m, false)),
+      ...reservedModems.map((m) => mapModemRow(m, true)),
+    ],
     accounts: accountsWithNext,
   };
 }
