@@ -50,14 +50,15 @@ function qs(params: Record<string, string | undefined>) {
 
 export const api = {
   health: () => request<{ status: string }>('/api/health'),
-  status: () => request<{
-    healthy: boolean;
-    queueActive: boolean;
-    pendingJobs: number;
-    activeAccounts: number;
-    errors: number;
-    paused: boolean;
-  }>('/api/status'),
+  status: (params?: { workspace?: string }) =>
+    request<{
+      healthy: boolean;
+      queueActive: boolean;
+      pendingJobs: number;
+      activeAccounts: number;
+      errors: number;
+      paused: boolean;
+    }>(`/api/status${qs(params ?? {})}`),
   login: (username: string, password: string) =>
     request<{
       token: string;
@@ -87,7 +88,8 @@ export const api = {
   runJob: (id: string) => request(`/api/jobs/${id}/run-now`, { method: 'POST' }),
   updateJob: (id: string, body: Partial<HumaJob>) =>
     request<HumaJob>(`/api/jobs/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
-  navBadges: () => request<{ queue: number; video: number; watcher: number }>('/api/jobs/nav-badges'),
+  navBadges: (params?: { workspace?: string }) =>
+    request<{ queue: number; video: number; watcher: number }>(`/api/jobs/nav-badges${qs(params ?? {})}`),
   accounts: () => request<HumaAccount[]>('/api/accounts'),
   createAccount: (body: Record<string, unknown>) =>
     request('/api/accounts', { method: 'POST', body: JSON.stringify(body) }),

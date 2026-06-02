@@ -27,11 +27,14 @@ export function Sidebar() {
     setBadges((prev) => ({ ...prev, queue: apiBadges.queue, video: apiBadges.video, watcher: apiBadges.watcher }));
 
   useEffect(() => {
-    api.navBadges().then(mergeBadges).catch(() => {});
-    api.status().then((s) => setPendingJobs(s.pendingJobs)).catch(() => {});
+    setBadges((prev) => ({ ...prev, queue: 0, video: 0, watcher: 0 }));
+    setPendingJobs(0);
+    const scope = { workspace };
+    api.navBadges(scope).then(mergeBadges).catch(() => {});
+    api.status(scope).then((s) => setPendingJobs(s.pendingJobs)).catch(() => {});
     const t = setInterval(() => {
-      api.navBadges().then(mergeBadges).catch(() => {});
-      api.status().then((s) => setPendingJobs(s.pendingJobs)).catch(() => {});
+      api.navBadges(scope).then(mergeBadges).catch(() => {});
+      api.status(scope).then((s) => setPendingJobs(s.pendingJobs)).catch(() => {});
     }, 30000);
     return () => clearInterval(t);
   }, [workspace]);

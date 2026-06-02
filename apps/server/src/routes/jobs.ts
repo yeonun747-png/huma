@@ -42,7 +42,10 @@ export async function registerJobRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/jobs/nav-badges', { preHandler: authMiddleware }, async (request) => {
-    const workspaces = getWorkspaceFilter(request);
+    const allowed = getWorkspaceFilter(request);
+    const { workspace: workspaceQuery } = request.query as { workspace?: string };
+    const workspaces =
+      workspaceQuery && allowed.includes(workspaceQuery) ? [workspaceQuery] : allowed;
     const dayAgo = new Date(Date.now() - 86400000).toISOString();
 
     const [

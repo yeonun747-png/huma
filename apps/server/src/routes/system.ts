@@ -10,7 +10,10 @@ export async function registerSystemRoutes(app: FastifyInstance) {
   }));
 
   app.get('/api/status', { preHandler: authMiddleware }, async (request) => {
-    const workspaces = getWorkspaceFilter(request);
+    const allowed = getWorkspaceFilter(request);
+    const { workspace: workspaceQuery } = request.query as { workspace?: string };
+    const workspaces =
+      workspaceQuery && allowed.includes(workspaceQuery) ? [workspaceQuery] : allowed;
     const paused = getSystemPaused();
 
     const [{ count: pendingJobs }, { count: scheduledJobs }, { count: activeAccounts }, { count: errors }] = await Promise.all([
