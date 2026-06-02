@@ -33,7 +33,8 @@ type SchedulerStatus = {
     monthly_data_mb: number;
     crank_sessions_today: number;
     schedule_excluded: boolean;
-    reserved?: boolean;
+    display_status?: string;
+    modem_role?: string;
     carrier?: string;
     current_ip?: string;
   }>;
@@ -114,24 +115,26 @@ export function CrankView() {
     await api.updateSetting('social_crank', next);
   };
 
+  const displayStatusLabel: Record<string, string> = {
+    active: '가동',
+    reserved: '예비·미연결',
+    error: '오류',
+    offline: '오프라인',
+    missing: 'DB 없음',
+    wrong_role: '역할 오류',
+    excluded: '한도 초과',
+  };
+
   const modemRows =
     scheduler?.modems.map((m) => {
-      const tone = m.reserved
-        ? 'idle'
-        : m.schedule_excluded
-          ? 'err'
-          : m.status === 'error'
-            ? 'err'
-            : m.status === 'reconnecting'
-              ? 'warn'
-              : 'ok';
-      const statusLabel = m.reserved
-        ? '예비·미연결'
-        : m.schedule_excluded
-          ? '월한도'
-          : m.status === 'idle'
-            ? '가동'
-            : m.status;
+      const ds = m.display_status ?? (m.reserved ? 'reserved' : 'active');
+      const tone =
+        ds === 'active'
+          ? 'ok'
+          : ds === 'reserved' || ds === 'offline'
+            ? 'idle'
+            : 'err';
+      const statusLabel = displayStatusLabel[ds] ?? m.status;
       return [
         `동글 ${m.slot_number}`,
         `:${m.proxy_port}`,

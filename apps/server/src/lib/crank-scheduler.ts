@@ -9,8 +9,7 @@ import {
 } from './crank-schedule-config.js';
 import {
   countActiveCrankModems,
-  listSchedulableCrankModems,
-  listReservedCrankModems,
+  listCrankModemsForDashboard,
   resetAllMonthlyDataMb,
   resetDailyCrankCounters,
 } from './crank-modems.js';
@@ -163,8 +162,7 @@ export async function getCrankSchedulerStatus() {
   const crankCfg = await getSetting<{ planned_crank_modems?: number }>('social_crank', {});
   const plannedCrankModems = Math.max(activeModems, crankCfg.planned_crank_modems ?? 5);
 
-  const schedulableModems = await listSchedulableCrankModems();
-  const reservedModems = await listReservedCrankModems();
+  const displayModems = await listCrankModemsForDashboard();
 
   const { data: todayJobs } = await supabase
     .from('huma_jobs')
@@ -201,19 +199,17 @@ export async function getCrankSchedulerStatus() {
     };
   });
 
-  const mapModemRow = (m: (typeof schedulableModems)[0], reserved: boolean) => ({
+  const mapModemRow = (m: (typeof displayModems)[0]) => ({
     id: m.id,
     slot_number: m.slot_number,
     proxy_port: m.proxy_port,
     status: m.status,
+    modem_role: m.modem_role,
     monthly_data_mb: Number(m.monthly_data_mb ?? 0),
     crank_sessions_today: m.crank_sessions_today ?? 0,
-    schedule_excluded:
-      reserved ||
-      Number(m.monthly_data_mb ?? 0) > 2500 ||
-      m.status === 'error' ||
-      m.status === 'offline',
-    reserved,
+    schedule_excluded: m.display_status !== 'active',
+    reserved: m.display_status === 'reserved',
+    display_status: m.display_status,
     carrier: m.carrier,
     current_ip: m.current_ip,
   });
@@ -228,10 +224,7 @@ export async function getCrankSchedulerStatus() {
     today_scheduled: todayScheduled,
     today_completed: todayCompleted,
     session_duration_minutes: 60,
-    modems: [
-      ...schedulableModems.map((m) => mapModemRow(m, false)),
-      ...reservedModems.map((m) => mapModemRow(m, true)),
-    ],
+    modems: displayModems.map(mapModemRow),
     accounts: accountsWithNext,
   };
 }

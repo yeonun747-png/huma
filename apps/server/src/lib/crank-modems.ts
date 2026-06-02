@@ -45,26 +45,58 @@ export async function listSchedulableCrankModems(): Promise<CrankModemRow[]> {
   return (data ?? []).filter(isSchedulableCrankRow) as CrankModemRow[];
 }
 
-/** 예비·미연결 C-Rank 슬롯 (reserved 또는 crank+offline) — UI 표시용 */
-export async function listReservedCrankModems(): Promise<CrankModemRow[]> {
-  const { data: reserved } = await supabase
+const CRANK_DISPLAY_SLOTS = [6, 7, 8, 9, 10] as const;
+const CRANK_SLOT_PORTS: Record<number, number> = {
+  6: 10006,
+  7: 10007,
+  8: 10008,
+  9: 10009,
+  10: 10010,
+};
+
+export type CrankModemDisplayRow = CrankModemRow & {
+  display_status: 'active' | 'reserved' | 'error' | 'offline' | 'missing' | 'wrong_role' | 'excluded';
+};
+
+function classifyCrankDisplayRow(m: CrankModemRow): CrankModemDisplayRow['display_status'] {
+  if (m.slot_number >= 8 && (m.modem_role === 'reserved' || m.status === 'offline')) {
+    return 'reserved';
+  }
+  if (m.modem_role && m.modem_role !== 'crank') return 'wrong_role';
+  if (m.status === 'error') return 'error';
+  if (m.status === 'offline') return 'offline';
+  if (isSchedulableCrankRow(m)) return 'active';
+  return 'excluded';
+}
+
+/** UI용 — 슬롯 6~10 전부 표시 (error·DB 누락·role 오류 포함) */
+export async function listCrankModemsForDashboard(): Promise<CrankModemDisplayRow[]> {
+  const { data } = await supabase
     .from('huma_modems')
     .select(
       'id, slot_number, proxy_port, status, modem_role, monthly_data_mb, crank_sessions_today, carrier, current_ip',
     )
-    .eq('modem_role', 'reserved')
+    .in('slot_number', [...CRANK_DISPLAY_SLOTS])
     .order('slot_number');
 
-  const { data: offlineCrank } = await supabase
-    .from('huma_modems')
-    .select(
-      'id, slot_number, proxy_port, status, modem_role, monthly_data_mb, crank_sessions_today, carrier, current_ip',
-    )
-    .eq('modem_role', 'crank')
-    .eq('status', 'offline')
-    .order('slot_number');
+  const bySlot = new Map((data ?? []).map((m) => [m.slot_number as number, m as CrankModemRow]));
 
-  return [...(reserved ?? []), ...(offlineCrank ?? [])] as CrankModemRow[];
+  return CRANK_DISPLAY_SLOTS.map((slot) => {
+    const row = bySlot.get(slot);
+    if (!row) {
+      const placeholder: CrankModemRow = {
+        id: `missing-slot-${slot}`,
+        slot_number: slot,
+        proxy_port: CRANK_SLOT_PORTS[slot],
+        status: 'offline',
+        modem_role: slot <= 7 ? 'crank' : 'reserved',
+        monthly_data_mb: 0,
+        crank_sessions_today: 0,
+      };
+      return { ...placeholder, display_status: 'missing' as const };
+    }
+    return { ...row, display_status: classifyCrankDisplayRow(row) };
+  });
 }
 
 export async function countActiveCrankModems(): Promise<number> {
