@@ -3,6 +3,7 @@ import { supabase } from '../../middleware/auth.js';
 import { logOperation } from '../../lib/log-emitter.js';
 import { sleep } from '../../lib/utils.js';
 import { proxyPortToSlot } from '../../lib/modem-ports.js';
+import { readDongleInterfaceFromConf, isPlaceholderInterfaceName } from '../../lib/dongle-interfaces.js';
 
 function readInterfaceIp(interfaceName: string): string | null {
   try {
@@ -43,12 +44,26 @@ export async function reconnectModemBySlot(slotNumber: number): Promise<string> 
     .eq('slot_number', slotNumber)
     .single();
 
-  if (!modem?.interface_name) {
+  if (!modem) {
     throw new Error(`modem slot ${slotNumber} 없음`);
   }
 
-  const oldIp = modem.current_ip ?? readInterfaceIp(modem.interface_name);
-  const iface = modem.interface_name;
+  const confIface = readDongleInterfaceFromConf(slotNumber);
+  const iface =
+    confIface ??
+    (!isPlaceholderInterfaceName(modem.interface_name) ? modem.interface_name : null);
+
+  if (!iface) {
+    throw new Error(
+      `modem slot ${slotNumber} interface 없음 — /etc/huma/dongle-slot-interfaces.conf 에 ${slotNumber}=ethX 추가`,
+    );
+  }
+
+  if (confIface && confIface !== modem.interface_name) {
+    await supabase.from('huma_modems').update({ interface_name: confIface }).eq('slot_number', slotNumber);
+  }
+
+  const oldIp = modem.current_ip ?? readInterfaceIp(iface);
 
   await supabase
     .from('huma_modems')
