@@ -127,7 +127,7 @@ export function CrankView() {
 
   const modemRows =
     scheduler?.modems.map((m) => {
-      const ds = m.display_status ?? (m.reserved ? 'reserved' : 'active');
+      const ds = m.display_status ?? 'active';
       const tone =
         ds === 'active'
           ? 'ok'
