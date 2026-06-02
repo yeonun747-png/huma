@@ -8,7 +8,9 @@ export const PLATFORM_DAILY_LIMITS: Record<string, number> = {
   youtube_upload: 2,
   instagram_post: 25,
   threads_post: 250,
+  threads_reply: 250,
   twitter_post: 50,
+  twitter_reply: 50,
   video_pipeline: 999,
 };
 

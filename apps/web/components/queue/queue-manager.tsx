@@ -60,7 +60,7 @@ function jobSub(job: HumaJob): string {
 
     parts.push(`${formatScheduledAt(job.scheduled_at).slice(-5)} 예약`);
 
-    parts.push(`반복: ${repeatLabel(job.repeat_rule)}`);
+    if (job.repeat_rule) parts.push(`반복: ${repeatLabel(job.repeat_rule)}`);
 
   }
 
@@ -122,7 +122,6 @@ export function QueueManager() {
       content_type_auto: values.content_type === 'auto',
       auto_schedule: values.auto_schedule,
       schedule_time: values.schedule_time,
-      repeat_rule: values.repeat_rule || undefined,
       screenshot_base64: values.screenshot_base64,
     });
     load();

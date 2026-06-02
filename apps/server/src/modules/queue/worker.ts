@@ -22,6 +22,7 @@ import { executeVideoPipeline } from './jobs/video-pipeline.js';
 import { executeContentFull } from '../claude/auto-content-orchestrator.js';
 import { executeSocialPost } from './jobs/social-post.js';
 import { scheduleRepeatIfNeeded } from '../../lib/repeat-scheduler.js';
+import { activatePendingSocialReplies } from '../../lib/social-reply-chain.js';
 import { isSlimDataCapError, scheduleSlimCapRetry } from '../../lib/slim-retry.js';
 import { assertCafeNewPostAccount, assertCafeReplyAccount } from '../../lib/cafe-accounts.js';
 let systemPaused = false;
@@ -184,9 +185,23 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
               ourBlogUrls: crankPayload.ourBlogUrls ?? [],
             });
           }
-        } else if (['tiktok_upload', 'instagram_reel', 'instagram_post', 'threads_post', 'twitter_post', 'pinterest_upload'].includes(type)) {
-          await executeSocialPost(type, payload);
-          if (humaJobId) await completeJob(humaJobId);
+        } else if (
+          [
+            'tiktok_upload',
+            'instagram_reel',
+            'instagram_post',
+            'threads_post',
+            'threads_reply',
+            'twitter_post',
+            'twitter_reply',
+            'pinterest_upload',
+          ].includes(type)
+        ) {
+          const platformPostId = await executeSocialPost(type, payload);
+          if (humaJobId) await completeJob(humaJobId, platformPostId);
+          if (humaJobId && platformPostId && (type === 'threads_post' || type === 'twitter_post')) {
+            await activatePendingSocialReplies(humaJobId, platformPostId);
+          }
         } else if (type === 'video_pipeline') {
           await executeVideoPipeline(payload.videoQueueId as string);
           if (humaJobId) await completeJob(humaJobId);

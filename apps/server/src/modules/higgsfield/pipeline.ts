@@ -20,6 +20,7 @@ import { uploadPinterestVideoPin } from '../social-api/pinterest.js';
 import { uploadQuizOasisInstagramVariants } from '../social/quizoasis-reels.js';
 
 import { buildBlogVideoAppend } from '../queue/jobs/content-orchestrator.js';
+import { createPausedSocialReplyJob } from '../../lib/social-reply-chain.js';
 
 import { copyFile, mkdir } from 'fs/promises';
 
@@ -122,23 +123,53 @@ async function finalizeTypeBJobs(
   const links = buildBlogVideoAppend(blogTitle, tiktokUrl, instagramUrl, youtubeUrl);
 
   if (videoJob.blog_job_id) {
-
     await resumePausedJob(String(videoJob.blog_job_id), links);
-
   }
 
+  // Step 6 (㉝㉞): reply job 먼저 등록 → 본문 발행 완료 시 자동 활성화
   if (videoJob.threads_job_id && tiktokUrl) {
-
-    await resumePausedJob(String(videoJob.threads_job_id), `\n\n${tiktokUrl}`);
-
+    const { data: parentJob } = await supabase
+      .from('huma_jobs')
+      .select('workspace, platform_account_id, title')
+      .eq('id', videoJob.threads_job_id)
+      .maybeSingle();
+    if (parentJob?.workspace) {
+      await createPausedSocialReplyJob({
+        jobType: 'threads_reply',
+        workspace: parentJob.workspace,
+        platformAccountId: parentJob.platform_account_id,
+        parentJobId: String(videoJob.threads_job_id),
+        tiktokUrl,
+        title: `[threads reply] ${parentJob.title ?? 'TikTok'}`,
+      });
+    }
   }
 
   if (videoJob.twitter_job_id && tiktokUrl) {
-
-    await resumePausedJob(String(videoJob.twitter_job_id), `\n\n${tiktokUrl}`);
-
+    const { data: parentJob } = await supabase
+      .from('huma_jobs')
+      .select('workspace, platform_account_id, title')
+      .eq('id', videoJob.twitter_job_id)
+      .maybeSingle();
+    if (parentJob?.workspace) {
+      await createPausedSocialReplyJob({
+        jobType: 'twitter_reply',
+        workspace: parentJob.workspace,
+        platformAccountId: parentJob.platform_account_id,
+        parentJobId: String(videoJob.twitter_job_id),
+        tiktokUrl,
+        title: `[twitter reply] ${parentJob.title ?? 'TikTok'}`,
+      });
+    }
   }
 
+  if (videoJob.threads_job_id) {
+    await resumePausedJob(String(videoJob.threads_job_id));
+  }
+
+  if (videoJob.twitter_job_id) {
+    await resumePausedJob(String(videoJob.twitter_job_id));
+  }
 }
 
 

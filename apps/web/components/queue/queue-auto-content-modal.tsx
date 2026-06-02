@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { REPEAT_OPTIONS, buildScheduledAt } from '@/lib/queue-repeat';
+import { buildScheduledAt } from '@/lib/queue-repeat';
 
 export interface AutoContentFormValues {
   title: string;
@@ -11,7 +11,6 @@ export interface AutoContentFormValues {
   auto_schedule: boolean;
   screenshot_base64?: string;
   schedule_time: string;
-  repeat_rule: string;
 }
 
 interface QueueAutoContentModalProps {
@@ -29,7 +28,6 @@ export function QueueAutoContentModal({ open, onClose, onSubmit }: QueueAutoCont
     content_type: 'auto',
     auto_schedule: true,
     schedule_time: '10:00',
-    repeat_rule: '',
   });
   const [screenshotName, setScreenshotName] = useState('');
   const [loading, setLoading] = useState(false);
@@ -64,7 +62,6 @@ export function QueueAutoContentModal({ open, onClose, onSubmit }: QueueAutoCont
         content_type: 'auto',
         auto_schedule: true,
         schedule_time: '10:00',
-        repeat_rule: '',
         screenshot_base64: undefined,
       });
       setScreenshotName('');
@@ -182,31 +179,17 @@ export function QueueAutoContentModal({ open, onClose, onSubmit }: QueueAutoCont
           </label>
         </div>
 
-        <div className="flex gap-2">
-          {!form.auto_schedule && (
-            <div className="m-modal-field flex-1">
-              <div className="m-modal-label">예약 시간</div>
-              <input
-                type="time"
-                className="m-modal-input"
-                value={form.schedule_time}
-                onChange={(e) => setForm((f) => ({ ...f, schedule_time: e.target.value }))}
-              />
-            </div>
-          )}
-          <div className={`m-modal-field ${form.auto_schedule ? 'flex-1' : 'flex-1'}`}>
-            <div className="m-modal-label">반복</div>
-            <select
-              className="m-modal-input font-mono"
-              value={form.repeat_rule}
-              onChange={(e) => setForm((f) => ({ ...f, repeat_rule: e.target.value }))}
-            >
-              {REPEAT_OPTIONS.map((o) => (
-                <option key={o.label} value={o.value}>{o.label}</option>
-              ))}
-            </select>
+        {!form.auto_schedule && (
+          <div className="m-modal-field">
+            <div className="m-modal-label">예약 시간</div>
+            <input
+              type="time"
+              className="m-modal-input"
+              value={form.schedule_time}
+              onChange={(e) => setForm((f) => ({ ...f, schedule_time: e.target.value }))}
+            />
           </div>
-        </div>
+        )}
 
         <div className="m-modal-cost">
           <div className="text-[11.5px] font-mono text-huma-t3">예상 AI 비용 (건당)</div>

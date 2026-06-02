@@ -45,6 +45,8 @@ export function buildEnqueuePayload(job: JobRecord) {
   const crankExtras =
     job.job_type === 'social_crank' ? parseSocialCrankContent(job.content) : {};
 
+  const stripBodyLink = ['threads_post', 'twitter_post'].includes(job.job_type);
+
   return {
     type: job.job_type,
     accountId: job.account_id,
@@ -56,9 +58,13 @@ export function buildEnqueuePayload(job: JobRecord) {
       text: job.content,
       imageUrl: job.image_urls?.[0],
       imageUrls: job.image_urls,
-      linkUrl: job.link_url,
+      linkUrl: stripBodyLink ? undefined : job.link_url,
+      parentPostId:
+        job.job_type === 'threads_reply' || job.job_type === 'twitter_reply'
+          ? job.result_url
+          : undefined,
       workspace: job.workspace,
-      videoPath: job.result_url,
+      videoPath: ['threads_reply', 'twitter_reply'].includes(job.job_type) ? undefined : job.result_url,
       caption: job.content ?? job.title,
       hashtags: job.hashtags,
       ...crankExtras,

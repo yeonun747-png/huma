@@ -11,7 +11,9 @@ export type JobType =
   | 'instagram_reel'
   | 'instagram_post'
   | 'threads_post'
+  | 'threads_reply'
   | 'twitter_post'
+  | 'twitter_reply'
   | 'pinterest_upload';
 
 export type ContentType = 'A' | 'B';

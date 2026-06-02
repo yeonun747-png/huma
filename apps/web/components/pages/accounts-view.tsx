@@ -34,11 +34,17 @@ const CATEGORY_OPTIONS: { value: AccountCategory; label: string; sub: string }[]
 
 const SOCIAL_PLATFORMS_BASE = [
   { value: 'tiktok', label: 'TikTok' },
-  { value: 'instagram', label: 'Instagram' },
   { value: 'threads', label: 'Threads' },
   { value: 'twitter', label: 'X (Twitter)' },
 ];
 
+/** 연운 — Instagram 단일 */
+const SOCIAL_PLATFORMS_YEONUN = [
+  ...SOCIAL_PLATFORMS_BASE,
+  { value: 'instagram', label: 'Instagram' },
+];
+
+/** 퀴즈오아시스·파나나 — Instagram (EN/KR)만 (중복 Instagram 제거) */
 const SOCIAL_PLATFORMS_QUIZOASIS = [
   ...SOCIAL_PLATFORMS_BASE,
   { value: 'instagram_en', label: 'Instagram (EN)' },
@@ -161,7 +167,7 @@ export function AccountsView() {
   const crankCafe = crankPoolAccounts.length;
   const isSocial = form.category === 'social';
   const socialPlatforms =
-    form.registerUnit === 'yeonun' ? SOCIAL_PLATFORMS_BASE : SOCIAL_PLATFORMS_QUIZOASIS;
+    form.registerUnit === 'yeonun' ? SOCIAL_PLATFORMS_YEONUN : SOCIAL_PLATFORMS_QUIZOASIS;
 
   const registerUnitLabel =
     BUSINESS_UNITS.find((u) => u.id === form.registerUnit)?.label ?? form.registerUnit;
@@ -267,9 +273,10 @@ export function AccountsView() {
 
   const platformIcon = (platform: string) => {
     if (platform === 'tiktok') return 'T';
-    if (platform === 'instagram') return 'I';
+    if (platform === 'instagram' || platform.startsWith('instagram_')) return 'I';
     if (platform === 'threads') return '@';
-    if (platform === 'twitter') return 'X';
+    if (platform === 'twitter' || platform.startsWith('twitter_')) return 'X';
+    if (platform === 'pinterest') return 'P';
     return 'S';
   };
 

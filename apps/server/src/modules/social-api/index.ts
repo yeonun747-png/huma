@@ -186,17 +186,17 @@ export async function uploadInstagramImage(params: {
   );
 }
 
+/** ㉝ — 본문에 외부 링크 삽입 금지 (linkUrl 무시) */
 export async function postToThreads(params: {
   workspace: string;
   text: string;
   imageUrl?: string;
   linkUrl?: string;
-}) {
+}): Promise<string> {
   const account = await getPlatformAccount(params.workspace, 'threads');
-  const fullText = params.linkUrl ? `${params.text}\n\n${params.linkUrl}` : params.text;
   const containerParams: Record<string, string> = {
     media_type: params.imageUrl ? 'IMAGE' : 'TEXT',
-    text: fullText,
+    text: params.text,
   };
   if (params.imageUrl) containerParams.image_url = params.imageUrl;
 
@@ -206,19 +206,46 @@ export async function postToThreads(params: {
     { params: { access_token: account.access_token } }
   );
   await sleep(1000);
-  await axios.post(
+  const { data: published } = await axios.post(
     `https://graph.threads.net/v1.0/${account.platform_user_id}/threads_publish`,
     { creation_id: c.id },
     { params: { access_token: account.access_token } }
   );
+  return String(published.id);
 }
 
+/** ㉞ — 발행 직후 첫 댓글(reply)로 TikTok URL만 */
+export async function replyToThreads(params: {
+  workspace: string;
+  parentPostId: string;
+  text: string;
+}): Promise<string> {
+  const account = await getPlatformAccount(params.workspace, 'threads');
+  const { data: c } = await axios.post(
+    `https://graph.threads.net/v1.0/${account.platform_user_id}/threads`,
+    {
+      media_type: 'TEXT',
+      text: params.text,
+      reply_to_id: params.parentPostId,
+    },
+    { params: { access_token: account.access_token } }
+  );
+  await sleep(1000);
+  const { data: published } = await axios.post(
+    `https://graph.threads.net/v1.0/${account.platform_user_id}/threads_publish`,
+    { creation_id: c.id },
+    { params: { access_token: account.access_token } }
+  );
+  return String(published.id);
+}
+
+/** ㉝ — 본문에 외부 링크 삽입 금지 (linkUrl 무시) */
 export async function postToTwitter(params: {
   workspace: string;
   text: string;
   imageUrls?: string[];
   linkUrl?: string;
-}) {
+}): Promise<string> {
   const creds = await getPlatformAccount(params.workspace, 'twitter');
   const { TwitterApi } = await import('twitter-api-v2');
   const client = new TwitterApi({
@@ -227,8 +254,29 @@ export async function postToTwitter(params: {
     accessToken: creds.access_token,
     accessSecret: creds.refresh_token!,
   });
-  const fullText = params.linkUrl ? `${params.text}\n\n${params.linkUrl}` : params.text;
-  await client.v2.tweet({ text: fullText.slice(0, 280) });
+  const { data } = await client.v2.tweet({ text: params.text.slice(0, 280) });
+  return data.id;
+}
+
+/** ㉞ — 발행 직후 첫 댓글(reply)로 TikTok URL만 */
+export async function replyToTwitter(params: {
+  workspace: string;
+  parentTweetId: string;
+  text: string;
+}): Promise<string> {
+  const creds = await getPlatformAccount(params.workspace, 'twitter');
+  const { TwitterApi } = await import('twitter-api-v2');
+  const client = new TwitterApi({
+    appKey: process.env.TWITTER_API_KEY!,
+    appSecret: process.env.TWITTER_API_SECRET!,
+    accessToken: creds.access_token,
+    accessSecret: creds.refresh_token!,
+  });
+  const { data } = await client.v2.tweet({
+    text: params.text.slice(0, 280),
+    reply: { in_reply_to_tweet_id: params.parentTweetId },
+  });
+  return data.id;
 }
 
 async function uploadToSupabaseStorage(filePath: string): Promise<string> {

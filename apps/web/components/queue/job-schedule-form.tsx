@@ -14,7 +14,9 @@ const JOB_TYPES: { value: JobType; label: string }[] = [
   { value: 'tiktok_upload', label: 'TikTok' },
   { value: 'instagram_reel', label: 'Instagram Reel' },
   { value: 'threads_post', label: 'Threads' },
+  { value: 'threads_reply', label: 'Threads 댓글(링크)' },
   { value: 'twitter_post', label: 'Twitter/X' },
+  { value: 'twitter_reply', label: 'X 댓글(링크)' },
 ];
 
 export interface JobScheduleFormValues {
