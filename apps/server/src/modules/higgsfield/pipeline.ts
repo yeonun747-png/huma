@@ -220,33 +220,21 @@ export async function runVideoPipeline(videoJobId: string) {
 
     await updateVideoJob(videoJobId, { source_video_url: videoUrl });
 
-
-
-    await updateStep(videoJobId, 'tts_generating');
-
     let audioUrl: string | null = null;
-
     let finalVideoUrl = videoUrl;
+    const ttsScript = typeof job.tts_script === 'string' ? job.tts_script.trim() : '';
 
-    if (job.tts_script) {
-
-      audioUrl = await generateTTS({ script: job.tts_script, model: job.tts_model as TTSModel });
-
+    if (ttsScript) {
+      await updateStep(videoJobId, 'tts_generating');
+      audioUrl = await generateTTS({ script: ttsScript, model: job.tts_model as TTSModel });
       await updateVideoJob(videoJobId, { tts_audio_url: audioUrl });
 
-
-
       await updateStep(videoJobId, 'lipsync_generating');
-
       finalVideoUrl = await generateLipsync({ videoUrl, audioUrl });
-
       await updateVideoJob(videoJobId, { source_video_url: finalVideoUrl });
-
     }
 
-
-
-    // v3.12: 별도 BGM 없음 — Kling 3.0 내장 오디오 또는 TTS+립싱크 결과 사용
+    // v3.26: TTS 없음 → Kling 3.0 내장 오디오 그대로 사용
     await updateStep(videoJobId, 'finalizing');
 
     await mkdir(tmpDir, { recursive: true });

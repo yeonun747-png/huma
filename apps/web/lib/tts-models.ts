@@ -1,4 +1,4 @@
-/** Higgsfield Plus Audio — TTS 모델 (Voiceover UI 기준) */
+/** 레거시 — v3.26 기본 경로는 Kling 3.0 내장 오디오. tts_script 있을 때만 pipeline TTS 사용 */
 export const TTS_MODELS = [
   { id: 'eleven-v3', label: 'Eleven v3', emoji: '🎙', sub: '감정 제어 · 표현력 있는 AI 보이스', credits: 14 },
   { id: 'minimax-speech-2.8', label: 'MiniMax Speech 2.8 HD', emoji: '🔊', sub: '스튜디오급 TTS', credits: 12 },

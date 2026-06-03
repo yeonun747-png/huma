@@ -50,9 +50,9 @@ export function SettingsView() {
             onChange={(v) => patchApp('claude_api', v)}
           />
           <MToggle
-            label="Higgsfield API (Plus)"
-            sub="이미지(GPT Image 2) · 영상(Kling 3.0) · TTS(Eleven Labs v3) 통합"
-            sub2="Plus $39/월 · 1,000크레딧/월"
+            label="Google Imagen 4 + Higgsfield Cloud"
+            sub="이미지(Imagen 4 Fast/Standard) · 영상(Kling 3.0 Cloud · 내장 오디오)"
+            sub2="영상 ~24크레딧/15s · TTS 기본 미사용 (v3.26)"
             value={Boolean(app.higgsfield_api ?? true)}
             onChange={(v) => patchApp('higgsfield_api', v)}
           />

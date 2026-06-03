@@ -22,7 +22,7 @@ export interface HumaVideoQueue {
   video_prompt?: string;
   duration_sec: number;
   source_video_url?: string;
-  tts_model: string;
+  tts_model?: string | null;
   tts_script?: string;
   tts_audio_url?: string;
   output_video_path?: string;

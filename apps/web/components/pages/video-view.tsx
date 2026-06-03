@@ -1,309 +1,204 @@
 'use client';
 
-
-
 import { useCallback, useEffect, useRef, useState } from 'react';
-
 import type { HumaVideoQueue } from '@huma/shared';
-
 import { api } from '@/lib/api';
-
 import { useWorkspace } from '@/components/dashboard/workspace-context';
-
 import {
-
   DEFAULT_IMAGE_MODEL,
-
   DEFAULT_VIDEO_MODEL,
-
   IMAGE_MODELS,
-
   VIDEO_MODELS,
   type ImageModelId,
   type VideoModelId,
   imageModelLabel,
-
   imageModelOptionLabel,
-
   normalizeImageModel,
-
   normalizeVideoModel,
-
   videoModelLabel,
-
   videoModelOptionLabel,
-
 } from '@/lib/higgsfield-models';
-
-import { DEFAULT_TTS_MODEL, TTS_MODELS, normalizeTtsModel, ttsModelLabel, ttsModelOptionLabel } from '@/lib/tts-models';
-
+import { ttsModelLabel } from '@/lib/tts-models';
 import { MGrid, MPanel, MStat, MTable, MTag } from '@/components/mockup/primitives';
 import { EmptyPanel } from '@/components/ui/empty-panel';
-
 import { useRegisterPageAction } from '@/components/dashboard/page-action-context';
 
+/** v3.26 — Kling 내장 오디오 기본 (TTS·립싱크 스텝 없음) */
+const PIPE_STEPS = ['image_generating', 'video_generating', 'finalizing', 'uploading'] as const;
 
+const STEP_LABELS: Record<string, string> = {
+  image_generating: 'Imagen 4 이미지',
+  video_generating: 'Kling 3.0 영상 (내장 오디오)',
+  tts_generating: 'TTS (레거시)',
+  lipsync_generating: '립싱크 (레거시)',
+  finalizing: '합성',
+  uploading: '업로드',
+};
 
-const PIPE_STEPS = ['image_generating', 'video_generating', 'tts_generating', 'lipsync_generating', 'finalizing', 'uploading'];
+function normalizeDisplayStep(step?: string | null): string {
+  if (step === 'tts_generating' || step === 'lipsync_generating') return 'video_generating';
+  if (step && step in STEP_LABELS) return step;
+  return 'image_generating';
+}
 
-
+function audioLabel(v: HumaVideoQueue): string {
+  if (v.tts_script?.trim()) return ttsModelLabel(v.tts_model ?? 'eleven-v3');
+  return 'Kling 내장';
+}
 
 export function VideoPipelineView() {
-
   const { workspace } = useWorkspace();
-
   const [items, setItems] = useState<HumaVideoQueue[]>([]);
-
   const [imgModel, setImgModel] = useState<ImageModelId>(DEFAULT_IMAGE_MODEL);
-
   const [vidModel, setVidModel] = useState<VideoModelId>(DEFAULT_VIDEO_MODEL);
-
-  const [ttsModel, setTtsModel] = useState(DEFAULT_TTS_MODEL);
   const [creditsRemaining, setCreditsRemaining] = useState<number | null>(null);
-
   const formRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(() => {
-
-    Promise.all([
-
-      api.videoQueue(),
-
-      api.getSetting('higgsfield').catch(() => ({})),
-
-    ]).then(([all, hg]) => {
-
-      setItems(all.filter((v) => v.workspace === workspace));
-
-      const settings = hg as Record<string, unknown>;
-
-      setImgModel(normalizeImageModel(String(settings.default_image_model ?? DEFAULT_IMAGE_MODEL)));
-
-      setVidModel(normalizeVideoModel(String(settings.default_video_model ?? DEFAULT_VIDEO_MODEL)));
-
-      setTtsModel(normalizeTtsModel(String(settings.default_tts_model ?? DEFAULT_TTS_MODEL)));
-      const remaining = settings.credits_remaining;
-      setCreditsRemaining(typeof remaining === 'number' ? remaining : null);
-
-    }).catch(() => setItems([]));
-
+    Promise.all([api.videoQueue(), api.getSetting('higgsfield').catch(() => ({}))])
+      .then(([all, hg]) => {
+        setItems(all.filter((v) => v.workspace === workspace));
+        const settings = hg as Record<string, unknown>;
+        setImgModel(normalizeImageModel(String(settings.default_image_model ?? DEFAULT_IMAGE_MODEL)));
+        setVidModel(normalizeVideoModel(String(settings.default_video_model ?? DEFAULT_VIDEO_MODEL)));
+        const remaining = settings.credits_remaining;
+        setCreditsRemaining(typeof remaining === 'number' ? remaining : null);
+      })
+      .catch(() => setItems([]));
   }, [workspace]);
 
-
-
-  useEffect(() => { load(); }, [load]);
-
-
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const selectedImg = IMAGE_MODELS.find((m) => m.id === imgModel);
-  const selectedTts = TTS_MODELS.find((m) => m.id === ttsModel);
-
-
 
   const startPipeline = async () => {
-
-    const model = normalizeTtsModel(ttsModel);
-
     await api.createVideo({
-
       workspace,
-
       image_prompt: 'cinematic character portrait, 9:16',
-
       video_prompt: 'slow camera zoom, emotional scene',
-
-      tts_script: '오늘 하루, 당신에게 전하는 위로의 말.',
-
       image_model: imgModel,
-
       video_model: vidModel,
-
-      tts_model: model,
-
       upload_platforms: ['tiktok', 'instagram', 'youtube'],
-
     });
-
     load();
-
   };
-
-
 
   useRegisterPageAction('startVideoPipeline', startPipeline);
 
-
-
   const running = items.find((v) => v.status !== 'done' && v.status !== 'failed');
-
   const doneToday = items.filter((v) => v.status === 'done').length;
-
-
+  const displayStep = normalizeDisplayStep(running?.current_step ?? running?.status);
 
   return (
-
     <div className="animate-fadeIn">
-
       <MGrid cols={4}>
-
         <MStat label="오늘 생성" value={items.length} sub="9:16 완료" />
-
         <MStat label="진행중" value={running ? 1 : 0} tone="warn" sub="파이프라인 중" />
-
         <MStat label="업로드 완료" value={doneToday} tone="ok" sub="TikTok·IG·YouTube" />
-
-        <MStat label="크레딧 잔여" value={creditsRemaining ?? '—'} sub={creditsRemaining != null ? 'Higgsfield' : 'API 연동 후 표시'} />
-
+        <MStat
+          label="크레딧 잔여"
+          value={creditsRemaining ?? '—'}
+          sub={creditsRemaining != null ? 'Higgsfield Cloud' : 'API 연동 후 표시'}
+        />
       </MGrid>
 
       <MGrid cols={2}>
-
         <MPanel title="새 영상 생성 요청">
-
           <div ref={formRef} className="flex flex-col gap-2.5">
-
             <div>
-
               <div className="mb-1 font-mono text-[11px] tracking-wide text-huma-t3">
-
                 ① 이미지 모델 {selectedImg ? `(${selectedImg.credits} 크레딧)` : ''}
-
               </div>
-
-              <select className="m-model-select" value={imgModel} onChange={(e) => setImgModel(normalizeImageModel(e.target.value))}>
-
+              <select
+                className="m-model-select"
+                value={imgModel}
+                onChange={(e) => setImgModel(normalizeImageModel(e.target.value))}
+              >
                 {IMAGE_MODELS.map((m) => (
-
-                  <option key={m.id} value={m.id}>{imageModelOptionLabel(m)}</option>
-
+                  <option key={m.id} value={m.id}>
+                    {imageModelOptionLabel(m)}
+                  </option>
                 ))}
-
               </select>
-
             </div>
-
             <div>
-
-              <div className="mb-1 font-mono text-[11px] tracking-wide text-huma-t3">② 영상 모델 (크레딧/5s)</div>
-
-              <select className="m-model-select" value={vidModel} onChange={(e) => setVidModel(normalizeVideoModel(e.target.value))}>
-
-                {VIDEO_MODELS.map((m) => (
-
-                  <option key={m.id} value={m.id}>{videoModelOptionLabel(m)}</option>
-
-                ))}
-
-              </select>
-
-            </div>
-
-            <div>
-
               <div className="mb-1 font-mono text-[11px] tracking-wide text-huma-t3">
-
-                ③ TTS 모델 {selectedTts ? `(${selectedTts.credits} 크레딧)` : ''}
-
+                ② 영상 모델 (크레딧/5s)
               </div>
-
-              <select className="m-model-select" value={ttsModel} onChange={(e) => setTtsModel(normalizeTtsModel(e.target.value))}>
-
-                {TTS_MODELS.map((m) => (
-
-                  <option key={m.id} value={m.id}>{ttsModelOptionLabel(m)}</option>
-
+              <select
+                className="m-model-select"
+                value={vidModel}
+                onChange={(e) => setVidModel(normalizeVideoModel(e.target.value))}
+              >
+                {VIDEO_MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {videoModelOptionLabel(m)}
+                  </option>
                 ))}
-
               </select>
-
-              <div className="mt-1 font-mono text-[10.5px] text-huma-t3">
-
-                {ttsModelLabel(ttsModel)} · Higgsfield Plus
-
-              </div>
-
             </div>
-
             <div className="rounded-md border border-huma-bdr bg-huma-bg3 px-2.5 py-2 text-[11px] text-huma-t3">
-              ④ 오디오 — Kling 3.0 내장 (TTS 선택 시 립싱크)
+              ③ 오디오 — Kling 3.0 내장 BGM·효과음 (v3.26: TTS·립싱크 기본 미사용)
             </div>
-
-            <button type="button" className="btn-primary w-full py-2" onClick={startPipeline}>▶ 파이프라인 시작</button>
-
+            <button type="button" className="btn-primary w-full py-2" onClick={startPipeline}>
+              ▶ 파이프라인 시작
+            </button>
           </div>
-
         </MPanel>
 
         <MPanel title="진행 중인 파이프라인">
-
           {PIPE_STEPS.map((step, i) => {
-
-            const active = running?.current_step === step || running?.status === step;
-
-            const done = running && PIPE_STEPS.indexOf(running.current_step ?? '') > i;
-
+            const active = displayStep === step;
+            const done = PIPE_STEPS.indexOf(displayStep as (typeof PIPE_STEPS)[number]) > i;
             return (
-
               <div key={step} className={`m-pipe-step ${!running ? 'opacity-50' : ''}`}>
-
-                <div className={`m-pipe-step-num ${done ? 'done' : active ? 'running' : 'idle'}`}>{i + 1}</div>
-
-                <div className="flex-1">
-
-                  <div className="m-pipe-step-title">{step.replace(/_/g, ' ')}</div>
-
-                  <div className="m-pipe-step-sub">{running?.image_prompt?.slice(0, 40) ?? '대기 중'}</div>
-
+                <div className={`m-pipe-step-num ${done ? 'done' : active ? 'running' : 'idle'}`}>
+                  {i + 1}
                 </div>
-
+                <div className="flex-1">
+                  <div className="m-pipe-step-title">{STEP_LABELS[step] ?? step}</div>
+                  <div className="m-pipe-step-sub">{running?.image_prompt?.slice(0, 40) ?? '대기 중'}</div>
+                </div>
                 <span className="m-model-badge">{done ? '완료' : active ? '진행중' : '대기'}</span>
-
               </div>
-
             );
-
           })}
-
         </MPanel>
-
       </MGrid>
 
       <MPanel title="완료·진행 영상">
         {items.length === 0 ? (
           <EmptyPanel message="영상 파이프라인 작업이 없습니다" />
         ) : (
-        <MTable
-
-          head={['영상', '이미지 모델', '영상 모델', 'TTS', '상태', '업로드']}
-
-          rows={items.slice(0, 10).map((v) => [
-
-            v.image_prompt?.slice(0, 20) ?? v.id.slice(0, 8),
-
-            <span key="i" className="font-mono text-[11px]">{imageModelLabel(v.image_model ?? imgModel)}</span>,
-
-            <span key="v" className="font-mono text-[11px]">{videoModelLabel(v.video_model ?? vidModel)}</span>,
-
-            <span key="t" className="font-mono text-[11px]">{ttsModelLabel(v.tts_model ?? ttsModel)}</span>,
-
-            <MTag key="s" tone={v.status === 'done' ? 'ok' : v.status === 'failed' ? 'err' : 'warn'}>{v.status}</MTag>,
-
-            <MTag key="u" tone={v.status === 'done' ? 'ok' : 'idle'}>
-              {v.status === 'done'
-                ? [v.tiktok_result_url && 'TT', v.instagram_result_url && 'IG', v.youtube_result_url && 'YT'].filter(Boolean).join('·') || '완료'
-                : '대기'}
-            </MTag>,
-
-          ])}
-
-        />
+          <MTable
+            head={['영상', '이미지 모델', '영상 모델', '오디오', '상태', '업로드']}
+            rows={items.slice(0, 10).map((v) => [
+              v.image_prompt?.slice(0, 20) ?? v.id.slice(0, 8),
+              <span key="i" className="font-mono text-[11px]">
+                {imageModelLabel(v.image_model ?? imgModel)}
+              </span>,
+              <span key="v" className="font-mono text-[11px]">
+                {videoModelLabel(v.video_model ?? vidModel)}
+              </span>,
+              <span key="t" className="font-mono text-[11px]">
+                {audioLabel(v)}
+              </span>,
+              <MTag key="s" tone={v.status === 'done' ? 'ok' : v.status === 'failed' ? 'err' : 'warn'}>
+                {v.status}
+              </MTag>,
+              <MTag key="u" tone={v.status === 'done' ? 'ok' : 'idle'}>
+                {v.status === 'done'
+                  ? [v.tiktok_result_url && 'TT', v.instagram_result_url && 'IG', v.youtube_result_url && 'YT']
+                      .filter(Boolean)
+                      .join('·') || '완료'
+                  : '대기'}
+              </MTag>,
+            ])}
+          />
         )}
       </MPanel>
-
     </div>
-
   );
-
 }
-
-

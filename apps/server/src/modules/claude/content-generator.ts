@@ -19,7 +19,8 @@ export interface ContentGenerationOutput {
   x_text: string;
   image_prompt: string;
   video_prompt: string;
-  tts_script: string;
+  /** v3.26: 비우면 Kling 3.0 내장 오디오 (TTS 미사용) */
+  tts_script?: string;
   hashtags: string[];
 }
 
@@ -99,7 +100,6 @@ function fallbackContent(input: ContentGenerationInput, urlSummary: string): Con
     x_text: `${short.slice(0, 220)} ${input.sourceUrl}`.slice(0, 280),
     image_prompt: `Cinematic vertical 9:16 image about ${input.title}, moody lighting, high detail`,
     video_prompt: `Cinematic 9:16 vertical video about ${input.title}, smooth camera motion`,
-    tts_script: short.slice(0, 200),
     hashtags: [wsTag, '#AI', '#콘텐츠'],
   };
 }
@@ -114,8 +114,8 @@ async function generateMainContent(
 
   const typeGuide =
     input.content_type === 'A'
-      ? '\n콘텐츠 타입 A: 텍스트+이미지 중심. video_prompt·tts_script는 짧게 작성해도 됨.'
-      : '\n콘텐츠 타입 B: 텍스트+이미지+영상. video_prompt·tts_script를 풍부하게 작성.';
+      ? '\n콘텐츠 타입 A: 텍스트+이미지 중심. video_prompt는 짧게.'
+      : '\n콘텐츠 타입 B: 텍스트+이미지+영상. video_prompt를 풍부하게. 오디오는 Kling 3.0 내장 — tts_script 필드 생략.';
 
   const userParts: Array<Record<string, unknown>> = [
     {
@@ -127,9 +127,8 @@ async function generateMainContent(
   "instagram_caption": "Instagram 캡션 300자 이내",
   "threads_text": "Threads 텍스트 500자 이내, 링크 포함",
   "x_text": "X 텍스트 280자 이내, 링크 포함",
-  "image_prompt": "Higgsfield 이미지 프롬프트 (영문)",
-  "video_prompt": "Higgsfield 9:16 영상 프롬프트 (영문)",
-  "tts_script": "TTS 나레이션 30~60초 한국어"
+  "image_prompt": "Imagen 4 이미지 프롬프트 (영문)",
+  "video_prompt": "Kling 3.0 9:16 영상 프롬프트 (영문, 내장 오디오)"
 }`),
     },
   ];
@@ -206,7 +205,7 @@ export async function generateAllContent(input: ContentGenerationInput): Promise
         max_tokens: 2000,
         system: withHumanWritingSystem(SYSTEM_PROMPTS[input.workspace] ?? SYSTEM_PROMPTS.yeonun),
         prompt: withHumanWritingMandate(
-          `제목: ${input.title}\nURL 요약: ${urlSummary.slice(0, 500)}\n\n네이버 블로그용 800자 이상 본문과 TikTok/Instagram/Threads/X용 짧은 캡션을 JSON으로:\n{"blog_post":"...","tiktok_caption":"...","instagram_caption":"...","threads_text":"...","x_text":"...","image_prompt":"...","video_prompt":"...","tts_script":"..."}`,
+          `제목: ${input.title}\nURL 요약: ${urlSummary.slice(0, 500)}\n\n네이버 블로그용 800자 이상 본문과 TikTok/Instagram/Threads/X용 짧은 캡션을 JSON으로 (tts_script 생략, Kling 내장 오디오):\n{"blog_post":"...","tiktok_caption":"...","instagram_caption":"...","threads_text":"...","x_text":"...","image_prompt":"...","video_prompt":"..."}`,
         ),
       });
       const jsonMatch = retryRaw?.match(/\{[\s\S]*\}/);

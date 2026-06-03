@@ -5,15 +5,16 @@ import type { HumaVideoQueue } from '@huma/shared';
 import {
   DEFAULT_IMAGE_MODEL,
   DEFAULT_VIDEO_MODEL,
+  IMAGE_MODELS,
+  VIDEO_MODELS,
   normalizeImageModel,
   normalizeVideoModel,
 } from '@/lib/higgsfield-models';
-import { DEFAULT_TTS_MODEL, normalizeTtsModel } from '@/lib/tts-models';
 import { api } from '@/lib/api';
 import { useWorkspace } from '@/components/dashboard/workspace-context';
 import { cn } from '@/lib/constants';
 
-const STEPS = ['pending', 'image_generating', 'video_generating', 'tts_generating', 'lipsync_generating', 'finalizing', 'uploading', 'done'];
+const STEPS = ['pending', 'image_generating', 'video_generating', 'finalizing', 'uploading', 'done'];
 
 export function VideoPipelineList() {
   const { workspace } = useWorkspace();
@@ -33,10 +34,8 @@ export function VideoPipelineList() {
             workspace,
             image_prompt: 'mystical fortune teller, cinematic',
             video_prompt: 'slow camera zoom, ethereal glow',
-            tts_script: '오늘의 운세를 알려드립니다.',
             image_model: normalizeImageModel(String(hg.default_image_model ?? DEFAULT_IMAGE_MODEL)),
             video_model: normalizeVideoModel(String(hg.default_video_model ?? DEFAULT_VIDEO_MODEL)),
-            tts_model: normalizeTtsModel(String(hg.default_tts_model ?? DEFAULT_TTS_MODEL)),
             upload_platforms: ['tiktok', 'instagram', 'youtube'],
           });
           api.videoQueue().then(setItems);

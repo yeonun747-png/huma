@@ -13,7 +13,6 @@ import {
   normalizeVideoModel,
   videoModelOptionLabel,
 } from '@/lib/higgsfield-models';
-import { DEFAULT_TTS_MODEL, TTS_MODELS, normalizeTtsModel, ttsModelLabel, ttsModelOptionLabel } from '@/lib/tts-models';
 import { useHumanEngineSave } from '@/components/dashboard/human-engine-save-context';
 
 type Range = [number, number];
@@ -53,7 +52,6 @@ interface ImageEngineConfig {
 interface MediaConfig {
   default_image_model: string;
   default_video_model: string;
-  tts_engine: string;
   whisper_subtitle_sync: boolean;
 }
 
@@ -101,7 +99,6 @@ const DEFAULT_IMAGE: ImageEngineConfig = {
 const DEFAULT_MEDIA: MediaConfig = {
   default_image_model: DEFAULT_IMAGE_MODEL,
   default_video_model: DEFAULT_VIDEO_MODEL,
-  tts_engine: DEFAULT_TTS_MODEL,
   whisper_subtitle_sync: true,
 };
 
@@ -222,7 +219,6 @@ export function HumanEngineSettings() {
       setMedia({
         default_image_model: normalizeImageModel(String(hg.default_image_model ?? DEFAULT_IMAGE_MODEL)),
         default_video_model: normalizeVideoModel(String(hg.default_video_model ?? DEFAULT_VIDEO_MODEL)),
-        tts_engine: normalizeTtsModel(String(hg.default_tts_model ?? DEFAULT_TTS_MODEL)),
         whisper_subtitle_sync: Boolean(hg.whisper_subtitle_sync ?? true),
       });
     });
@@ -237,7 +233,6 @@ export function HumanEngineSettings() {
       api.updateSetting('higgsfield', {
         default_image_model: normalizeImageModel(media.default_image_model),
         default_video_model: normalizeVideoModel(media.default_video_model),
-        default_tts_model: normalizeTtsModel(media.tts_engine),
         aspect_ratio: '9:16',
         default_video_resolution: FIXED_VIDEO_RESOLUTION,
         whisper_subtitle_sync: media.whisper_subtitle_sync,
@@ -254,8 +249,6 @@ export function HumanEngineSettings() {
     if (!saveCtx) return;
     return saveCtx.register(persist);
   }, [saveCtx, persist]);
-
-  const ttsLabel = ttsModelLabel(media.tts_engine);
 
   return (
     <div className="animate-fadeIn">
@@ -387,19 +380,7 @@ export function HumanEngineSettings() {
               ))}
             </select>
           </div>
-          <div className="he-slider-row">
-            <span className="he-slider-label">TTS 엔진</span>
-            <select
-              value={media.tts_engine}
-              onChange={(e) => setMedia((m) => ({ ...m, tts_engine: normalizeTtsModel(e.target.value) }))}
-              className="m-model-select max-w-[180px] ml-auto"
-            >
-              {TTS_MODELS.map((m) => (
-                <option key={m.id} value={m.id}>{ttsModelOptionLabel(m)}</option>
-              ))}
-            </select>
-          </div>
-          <div className="he-chart-caption">{ttsLabel} · Higgsfield Plus</div>
+          <div className="he-chart-caption">v3.26 · Imagen 4 + Kling 3.0 내장 오디오 (TTS 기본 미사용)</div>
           <HeStaticRow label="영상 해상도" value={`${FIXED_VIDEO_DIMENSIONS} · ${FIXED_VIDEO_RESOLUTION} 고정`} />
           <HeToggle
             label="자막 자동 싱크 (Whisper)"

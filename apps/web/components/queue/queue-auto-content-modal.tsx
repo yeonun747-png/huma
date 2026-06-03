@@ -147,7 +147,7 @@ export function QueueAutoContentModal({ open, editJob, onClose, onSubmit }: Queu
           <div className="m-ai-engine main">
             <div className="m-ai-engine-tag">MAIN</div>
             <div className="m-ai-engine-name">Claude Sonnet 4.6</div>
-            <div className="m-ai-engine-sub">블로그·소셜·영상 프롬프트·TTS</div>
+            <div className="m-ai-engine-sub">블로그·소셜·영상 프롬프트</div>
           </div>
           <div className="m-ai-engine sub">
             <div className="m-ai-engine-tag">SUB</div>

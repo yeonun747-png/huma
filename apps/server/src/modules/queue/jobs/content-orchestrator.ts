@@ -294,7 +294,9 @@ async function runTypeB(
       image_prompt: generated.image_prompt,
       video_prompt: generated.video_prompt,
       video_model: videoModel,
-      tts_script: generated.tts_script,
+      ...(generated.tts_script?.trim()
+        ? { tts_script: generated.tts_script.trim() }
+        : {}),
       caption: generated.tiktok_caption,
       hashtags: generated.hashtags,
       upload_platforms: ['tiktok', 'instagram', 'youtube'],
