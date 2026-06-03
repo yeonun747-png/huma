@@ -1,5 +1,6 @@
 import { supabase } from '../middleware/auth.js';
 import { applyModemProxyProbe, shouldRunModemProxyProbe } from './modem-proxy-probe.js';
+import { probeModemsWithConcurrency } from './modem-socks-probe.js';
 import {
   MODEM_MONTHLY_DATA_CAP_MB,
   MAX_CRANK_SESSIONS_PER_MODEM_PER_DAY,
@@ -95,18 +96,17 @@ export async function applyLiveProbeToCrankDisplay(
     .filter((r) => (PHYSICAL_CRANK_PROBE_SLOTS as readonly number[]).includes(r.slot_number))
     .filter((r) => isPersistableModemId(r.id));
 
-  const probedPairs = await Promise.all(
-    targets.map(async (row) => {
-      const probed = await applyModemProxyProbe({
-        id: row.id,
-        slot_number: row.slot_number,
-        proxy_port: row.proxy_port,
-        status: row.status,
-        interface_name: row.interface_name,
-      });
-      return [row.slot_number, probed] as const;
-    }),
-  );
+  const probedPairs: Array<readonly [number, Awaited<ReturnType<typeof applyModemProxyProbe>>]> = [];
+  await probeModemsWithConcurrency(targets, 1, async (row) => {
+    const probed = await applyModemProxyProbe({
+      id: row.id,
+      slot_number: row.slot_number,
+      proxy_port: row.proxy_port,
+      status: row.status,
+      interface_name: row.interface_name,
+    });
+    probedPairs.push([row.slot_number, probed] as const);
+  });
   for (const [slot, probed] of probedPairs) probeBySlot.set(slot, probed);
 
   return rows.map((row) => {

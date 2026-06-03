@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { authMiddleware, supabase } from '../middleware/auth.js';
 import { reconnectModem } from '../modules/modem/reconnect.js';
 import { applyModemProxyProbe, shouldRunModemProxyProbe } from '../lib/modem-proxy-probe.js';
+import { probeModemsWithConcurrency } from '../lib/modem-socks-probe.js';
 
 function parseProbeSlots(raw: string | undefined): Set<number> | null {
   if (!raw?.trim()) return null;
@@ -12,7 +13,9 @@ function parseProbeSlots(raw: string | undefined): Set<number> | null {
   return slots.length > 0 ? new Set(slots) : null;
 }
 
-const MODEM_PROBE_ROUTE_MS = 14_000;
+const MODEM_PROBE_CONCURRENCY = 2;
+const MODEM_PROBE_ROUTE_MS_FULL = 45_000;
+const MODEM_PROBE_ROUTE_MS_PARTIAL = 20_000;
 
 async function probeModemsInRoute(
   modems: Array<Record<string, unknown> & { slot_number: number; proxy_port?: number | null }>,
@@ -25,18 +28,16 @@ async function probeModemsInRoute(
   );
 
   const probedBySlot = new Map<number, Awaited<ReturnType<typeof applyModemProxyProbe>>>();
-  await Promise.all(
-    probeTargets.map(async (modem) => {
-      const probed = await applyModemProxyProbe({
-        id: String(modem.id),
-        slot_number: modem.slot_number,
-        proxy_port: Number(modem.proxy_port),
-        status: String(modem.status ?? 'offline'),
-        interface_name: modem.interface_name as string | null | undefined,
-      });
-      probedBySlot.set(modem.slot_number, probed);
-    }),
-  );
+  await probeModemsWithConcurrency(probeTargets, MODEM_PROBE_CONCURRENCY, async (modem) => {
+    const probed = await applyModemProxyProbe({
+      id: String(modem.id),
+      slot_number: modem.slot_number,
+      proxy_port: Number(modem.proxy_port),
+      status: String(modem.status ?? 'offline'),
+      interface_name: modem.interface_name as string | null | undefined,
+    });
+    probedBySlot.set(modem.slot_number, probed);
+  });
 
   return modems.map((modem) => {
     const probed = probedBySlot.get(modem.slot_number);
@@ -60,9 +61,10 @@ export async function registerModemRoutes(app: FastifyInstance) {
 
     if (!probe) return modems;
 
+    const routeMs = probeSlots ? MODEM_PROBE_ROUTE_MS_PARTIAL : MODEM_PROBE_ROUTE_MS_FULL;
     const probed = await Promise.race([
       probeModemsInRoute(modems, probeSlots),
-      new Promise<typeof modems>((resolve) => setTimeout(() => resolve(modems), MODEM_PROBE_ROUTE_MS)),
+      new Promise<typeof modems>((resolve) => setTimeout(() => resolve(modems), routeMs)),
     ]);
     return probed;
   });

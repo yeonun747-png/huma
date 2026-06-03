@@ -47,10 +47,33 @@ export async function probeModemSocks(
   timeoutMs = MODEM_SOCKS_PROBE_TIMEOUT_MS,
 ): Promise<{ ok: boolean; ms: number | null }> {
   const hardMs = timeoutMs + 1500;
-  return Promise.race([
-    probeModemSocksOnce(proxyPort, timeoutMs),
-    new Promise<{ ok: boolean; ms: number | null }>((resolve) =>
-      setTimeout(() => resolve(PROBE_FAIL), hardMs),
-    ),
-  ]);
+  const once = () =>
+    Promise.race([
+      probeModemSocksOnce(proxyPort, timeoutMs),
+      new Promise<{ ok: boolean; ms: number | null }>((resolve) =>
+        setTimeout(() => resolve(PROBE_FAIL), hardMs),
+      ),
+    ]);
+
+  const first = await once();
+  if (first.ok) return first;
+
+  await new Promise((r) => setTimeout(r, 400));
+  return once();
+}
+
+/** 동시 probe 과부하 방지 (7동글 병렬 시 enx·3proxy 간헐 타임아웃) */
+export async function probeModemsWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  probe: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (next < items.length) {
+      const idx = next++;
+      await probe(items[idx]!);
+    }
+  });
+  await Promise.all(workers);
 }
