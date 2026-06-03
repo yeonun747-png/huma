@@ -157,11 +157,18 @@ export async function runMonthlyCrankDataReset(): Promise<void> {
   await logOperation({ level: 'info', message: '[crank-scheduler] monthly_data_mb 전체 초기화' });
 }
 
-export async function getCrankSchedulerStatus() {
+export type CrankSchedulerStatusOptions = {
+  /** true면 슬롯 6·7 SOCKS probe 생략 (DB만 표시) */
+  skipProbe?: boolean;
+};
+
+export async function getCrankSchedulerStatus(options?: CrankSchedulerStatusOptions) {
   const dateKey = formatKstDateKey();
 
   let displayModems = await listCrankModemsForDashboard();
-  if (process.env.HUMA_SKIP_CRANK_PROBE !== '1') {
+  const skipProbe =
+    options?.skipProbe === true || process.env.HUMA_SKIP_CRANK_PROBE === '1';
+  if (!skipProbe) {
     displayModems = await applyLiveProbeToCrankDisplay(displayModems);
   }
 

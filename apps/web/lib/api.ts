@@ -2,12 +2,29 @@ import type { HumaJob, HumaAccount, HumaModem, HumaVideoQueue } from '@huma/shar
 
 const API_BASE = process.env.NEXT_PUBLIC_HUMA_API_URL ?? 'http://localhost:3100';
 
+function resolveRequestUrl(path: string, sameOrigin?: boolean): string {
+  if (sameOrigin && typeof window !== 'undefined') {
+    return new URL(path, window.location.origin).href;
+  }
+  if (sameOrigin) return path;
+  return `${API_BASE}${path}`;
+}
+
 function getToken(): string | null {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem('huma_token');
 }
 
 type RequestOptions = RequestInit & { sameOrigin?: boolean };
+
+function requestTimeoutSignal(timeoutMs: number): AbortSignal {
+  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+    return AbortSignal.timeout(timeoutMs);
+  }
+  const ctrl = new AbortController();
+  setTimeout(() => ctrl.abort(), timeoutMs);
+  return ctrl.signal;
+}
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { sameOrigin, ...fetchOptions } = options;
@@ -19,14 +36,27 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   if (hasBody) headers['Content-Type'] = 'application/json';
   if (token) headers['X-HUMA-KEY'] = token;
 
-  const url = sameOrigin ? path : `${API_BASE}${path}`;
+  const url = resolveRequestUrl(path, sameOrigin);
 
-  const res = await fetch(url, { ...fetchOptions, headers }).catch(() => {
+  const res = await fetch(url, { ...fetchOptions, headers }).catch((err: unknown) => {
     const hint = !sameOrigin && (path.includes('adsense') || path.includes('monetization'))
       ? ' 브라우저 광고 차단 확장 프로그램이 API 요청을 막았을 수 있습니다.'
       : '';
+    const target = sameOrigin
+      ? typeof window !== 'undefined'
+        ? `${window.location.origin} → HUMA_API_URL`
+        : '동일 출처 프록시'
+      : API_BASE;
+    const isTimeout =
+      err instanceof Error &&
+      (err.name === 'AbortError' || err.name === 'TimeoutError');
+    if (isTimeout) {
+      throw new Error(
+        `요청 시간 초과(15초). ${target} — i7 스케줄러가 응답하지 않습니다(SOCKS probe hang). i7 서버 코드 재배포 필요.${hint}`,
+      );
+    }
     throw new Error(
-      `API 서버에 연결할 수 없습니다 (${sameOrigin ? '동일 출처 프록시' : API_BASE}). i7 서버·Cloudflare Tunnel 실행 여부와 NEXT_PUBLIC_HUMA_API_URL을 확인하세요.${hint}`,
+      `API 서버에 연결할 수 없습니다 (${target}). apps/web에서 npm run dev 실행·HUMA_API_URL 확인.${hint}`,
     );
   });
   if (!res.ok) {
@@ -145,7 +175,11 @@ export const api = {
       session_duration_minutes: number;
       modems: Array<Record<string, unknown>>;
       accounts: Array<Record<string, unknown>>;
-    }>('/api/crank/scheduler'),
+    }>('/api/crank/scheduler', {
+      sameOrigin: typeof window === 'undefined' ? false : true,
+      cache: 'no-store',
+      signal: requestTimeoutSignal(15_000),
+    }),
   cafeTargets: () => request<Array<Record<string, unknown>>>('/api/cafe/targets'),
   crawlCafe: () => request<{ success: boolean; count: number }>('/api/cafe/crawl', { method: 'POST' }),
   cafeViralCafes: () => request<Array<Record<string, unknown>>>('/api/cafe-viral/cafes'),

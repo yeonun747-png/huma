@@ -6,9 +6,10 @@ import {
 } from '../lib/crank-scheduler.js';
 
 export async function registerCrankRoutes(app: FastifyInstance) {
-  app.get('/api/crank/scheduler', { preHandler: authMiddleware }, async (_request, reply) => {
+  app.get('/api/crank/scheduler', { preHandler: authMiddleware }, async (request, reply) => {
     try {
-      return await getCrankSchedulerStatus();
+      const skipProbe = (request.query as { skip_probe?: string }).skip_probe === '1';
+      return await getCrankSchedulerStatus({ skipProbe });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return reply.code(500).send({ error: message });

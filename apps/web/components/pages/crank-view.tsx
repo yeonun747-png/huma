@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { useWorkspace } from '@/components/dashboard/workspace-context';
 import { EmptyPanel } from '@/components/ui/empty-panel';
@@ -71,27 +71,44 @@ export function CrankView() {
   const [targets, setTargets] = useState<Array<Record<string, unknown>>>([]);
   const [scheduler, setScheduler] = useState<SchedulerStatus | null>(null);
   const [schedulerError, setSchedulerError] = useState<string | null>(null);
+  const [schedulerLoading, setSchedulerLoading] = useState(true);
+  const schedulerLoadRef = useRef(0);
+  const schedulerInitialRef = useRef(true);
+
+  const loadScheduler = useCallback(async () => {
+    const loadId = ++schedulerLoadRef.current;
+    if (schedulerInitialRef.current) setSchedulerLoading(true);
+
+    try {
+      const sched = await api.crankScheduler();
+      if (loadId !== schedulerLoadRef.current) return;
+      setScheduler(sched as SchedulerStatus);
+      setSchedulerError(null);
+      schedulerInitialRef.current = false;
+    } catch (err: unknown) {
+      if (loadId !== schedulerLoadRef.current) return;
+      setScheduler(null);
+      const msg =
+        err instanceof Error ? err.message : typeof err === 'string' ? err : '스케줄러 API 실패';
+      setSchedulerError(msg);
+      schedulerInitialRef.current = false;
+    } finally {
+      if (loadId === schedulerLoadRef.current) setSchedulerLoading(false);
+    }
+  }, []);
 
   const load = useCallback(() => {
     void api.getSetting('social_crank').then(setConfig).catch(() => setConfig({}));
     void api.cafeTargets().then(setTargets).catch(() => setTargets([]));
-    void api
-      .crankScheduler()
-      .then((sched) => {
-        setScheduler(sched as SchedulerStatus);
-        setSchedulerError(null);
-      })
-      .catch((err: unknown) => {
-        setScheduler(null);
-        setSchedulerError(err instanceof Error ? err.message : '스케줄러 API 실패');
-      });
-  }, []);
+    void loadScheduler();
+  }, [loadScheduler]);
 
   useEffect(() => {
     load();
-    const id = setInterval(load, 30_000);
+    if (schedulerError) return;
+    const id = setInterval(load, 60_000);
     return () => clearInterval(id);
-  }, [load]);
+  }, [load, schedulerError]);
 
   useRegisterPageAction('startCrank', async () => {
     await api.createJob({
@@ -191,13 +208,30 @@ export function CrankView() {
             />
           </MGrid>
         ) : (
-          <EmptyPanel
-            message={
-              schedulerError
-                ? `스케줄러 상태를 불러오지 못했습니다. ${schedulerError}`
-                : '스케줄러 상태를 불러오지 못했습니다.'
-            }
-          />
+          <div>
+            <EmptyPanel
+              message={
+                schedulerLoading
+                  ? '스케줄러 상태를 불러오는 중…'
+                  : schedulerError
+                    ? `스케줄러 상태를 불러오지 못했습니다. ${schedulerError}`
+                    : '스케줄러 상태를 불러오지 못했습니다. (원인 미상 — 웹·API 재배포 후 다시 시도)'
+              }
+            />
+            {schedulerError && !schedulerLoading && (
+              <button
+                type="button"
+                className="mt-2 text-xs text-huma-accent underline"
+                onClick={() => {
+                  setSchedulerError(null);
+                  schedulerInitialRef.current = true;
+                  void loadScheduler();
+                }}
+              >
+                다시 시도
+              </button>
+            )}
+          </div>
         )}
         <p className="mt-2 font-mono text-[10.5px] text-huma-t3">
           매일 00:01 KST 큐 생성 · 08:00~22:00 분산(±15분) · 세션 60분 · 동글당 일 6세션·월 2500MB ·
