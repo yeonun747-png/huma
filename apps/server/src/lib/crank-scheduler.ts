@@ -165,7 +165,13 @@ export async function getCrankSchedulerStatus() {
   const crankCfg = await getSetting<{ planned_crank_modems?: number }>('social_crank', {});
   const plannedCrankModems = Math.max(activeModems, crankCfg.planned_crank_modems ?? 5);
 
-  await syncCrankModemProbeStatus([6, 7]);
+  // probe는 백그라운드 — SOCKS 미구동·Windows dev에서 API 45s+ hang 방지
+  if (process.env.HUMA_SKIP_CRANK_PROBE !== '1') {
+    void syncCrankModemProbeStatus([6, 7]).catch((err) =>
+      console.warn('[crank-scheduler] background probe:', err),
+    );
+  }
+
   const displayModems = await listCrankModemsForDashboard();
 
   const { data: todayJobs } = await supabase
@@ -178,11 +184,20 @@ export async function getCrankSchedulerStatus() {
   const todayCompleted = scheduled.filter((j) => j.status === 'completed').length;
   const todayScheduled = scheduled.length;
 
-  const { data: crankAccounts } = await supabase
+  const { data: crankAccounts, error: accountsError } = await supabase
     .from('huma_accounts')
     .select('id, name, last_crank_at, is_active')
     .eq('account_type', 'crank')
     .order('name');
+
+  if (accountsError) {
+    if (/column .* does not exist/i.test(accountsError.message)) {
+      throw new Error(
+        'DB 마이그레이션 필요: apps/server/scripts/migrations/v3_26_social_crank_scheduler.sql',
+      );
+    }
+    throw new Error(`C-Rank 계정 조회 실패: ${accountsError.message}`);
+  }
 
   const accountsWithNext = (crankAccounts ?? []).map((a) => {
     const last = a.last_crank_at as string | null;

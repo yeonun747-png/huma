@@ -41,12 +41,13 @@ export async function measureRTT(proxyPort: number): Promise<number> {
 /** SOCKS 프록시 실제 응답 여부 (모뎀 대시보드 probe용) */
 export async function probeProxyHealth(
   proxyPort: number,
+  timeoutMs = 8000,
 ): Promise<{ ok: boolean; ms: number | null }> {
   const start = Date.now();
   try {
     const res = await axios.get('https://www.naver.com', {
       proxy: { host: '127.0.0.1', port: proxyPort, protocol: 'socks5' },
-      timeout: 8000,
+      timeout: timeoutMs,
       validateStatus: (s) => s < 500,
     });
     if (res.status >= 400) return { ok: false, ms: null };

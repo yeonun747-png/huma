@@ -70,37 +70,73 @@ function classifyCrankDisplayRow(m: CrankModemRow): CrankModemDisplayRow['displa
   return 'excluded';
 }
 
-/** i7 물리 C-Rank 동글 — 프록시 관리와 동일 SOCKS probe 후 DB status 동기화 */
+const PROBE_TIMEOUT_MS = 3500;
+
+async function probeAndPatchModem(modem: {
+  id: string;
+  proxy_port: number;
+  status: string | null;
+}): Promise<void> {
+  const health = await probeProxyHealth(modem.proxy_port, PROBE_TIMEOUT_MS);
+  const patch: Record<string, unknown> = { response_ms: health.ms };
+  if (health.ok) {
+    if (!['busy', 'reconnecting'].includes(String(modem.status))) patch.status = 'idle';
+  } else if (modem.status !== 'reconnecting') {
+    patch.status = 'error';
+  }
+  await supabase.from('huma_modems').update(patch).eq('id', modem.id);
+}
+
+/** i7 물리 C-Rank 동글 — SOCKS probe 후 DB status 동기화 (실패해도 API는 계속) */
 export async function syncCrankModemProbeStatus(
   slots: readonly number[] = [6, 7],
 ): Promise<void> {
-  const { data } = await supabase
-    .from('huma_modems')
-    .select('id, proxy_port, status')
-    .in('slot_number', [...slots]);
+  try {
+    const { data, error } = await supabase
+      .from('huma_modems')
+      .select('id, proxy_port, status')
+      .in('slot_number', [...slots]);
 
-  for (const modem of data ?? []) {
-    if (!modem.proxy_port) continue;
-    const health = await probeProxyHealth(modem.proxy_port);
-    const patch: Record<string, unknown> = { response_ms: health.ms };
-    if (health.ok) {
-      if (!['busy', 'reconnecting'].includes(String(modem.status))) patch.status = 'idle';
-    } else if (modem.status !== 'reconnecting') {
-      patch.status = 'error';
+    if (error) {
+      console.warn('[crank-modems] probe sync skip:', error.message);
+      return;
     }
-    await supabase.from('huma_modems').update(patch).eq('id', modem.id);
+
+    const modems = (data ?? []).filter((m) => m.proxy_port);
+    await Promise.all(
+      modems.map((modem) =>
+        probeAndPatchModem(modem as { id: string; proxy_port: number; status: string | null }).catch(
+          (err) => console.warn(`[crank-modems] probe slot failed:`, err),
+        ),
+      ),
+    );
+  } catch (err) {
+    console.warn('[crank-modems] probe sync error:', err);
   }
 }
 
 /** UI용 — 슬롯 6~10 전부 표시 (error·DB 누락·role 오류 포함) */
+function isMissingColumnError(message: string): boolean {
+  return /column .* does not exist/i.test(message);
+}
+
 export async function listCrankModemsForDashboard(): Promise<CrankModemDisplayRow[]> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('huma_modems')
     .select(
       'id, slot_number, proxy_port, status, modem_role, monthly_data_mb, crank_sessions_today, carrier, current_ip',
     )
     .in('slot_number', [...CRANK_DISPLAY_SLOTS])
     .order('slot_number');
+
+  if (error) {
+    if (isMissingColumnError(error.message)) {
+      throw new Error(
+        'DB 마이그레이션 필요: apps/server/scripts/migrations/v3_26_social_crank_scheduler.sql',
+      );
+    }
+    throw new Error(`동글 조회 실패: ${error.message}`);
+  }
 
   const bySlot = new Map((data ?? []).map((m) => [m.slot_number as number, m as CrankModemRow]));
 

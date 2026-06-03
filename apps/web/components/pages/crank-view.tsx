@@ -68,22 +68,20 @@ export function CrankView() {
   const [config, setConfig] = useState<Record<string, unknown>>({});
   const [targets, setTargets] = useState<Array<Record<string, unknown>>>([]);
   const [scheduler, setScheduler] = useState<SchedulerStatus | null>(null);
+  const [schedulerError, setSchedulerError] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    Promise.all([
-      api.getSetting('social_crank'),
-      api.cafeTargets(),
-      api.crankScheduler(),
-    ])
-      .then(([cfg, t, sched]) => {
-        setConfig(cfg);
-        setTargets(t);
+    void api.getSetting('social_crank').then(setConfig).catch(() => setConfig({}));
+    void api.cafeTargets().then(setTargets).catch(() => setTargets([]));
+    void api
+      .crankScheduler()
+      .then((sched) => {
         setScheduler(sched as SchedulerStatus);
+        setSchedulerError(null);
       })
-      .catch(() => {
-        setConfig({});
-        setTargets([]);
+      .catch((err: unknown) => {
         setScheduler(null);
+        setSchedulerError(err instanceof Error ? err.message : '스케줄러 API 실패');
       });
   }, []);
 
@@ -139,7 +137,7 @@ export function CrankView() {
         `동글 ${m.slot_number}`,
         `:${m.proxy_port}`,
         <span key="mb" className="font-mono">
-          {m.monthly_data_mb.toFixed(1)} MB
+          {Number(m.monthly_data_mb ?? 0).toFixed(1)} MB
         </span>,
         String(m.crank_sessions_today),
         <MTag key="s" tone={tone}>
@@ -183,7 +181,13 @@ export function CrankView() {
             />
           </MGrid>
         ) : (
-          <EmptyPanel message="스케줄러 상태를 불러오지 못했습니다." />
+          <EmptyPanel
+            message={
+              schedulerError
+                ? `스케줄러 상태를 불러오지 못했습니다. ${schedulerError}`
+                : '스케줄러 상태를 불러오지 못했습니다.'
+            }
+          />
         )}
         <p className="mt-2 font-mono text-[10.5px] text-huma-t3">
           매일 00:01 KST 큐 생성 · 08:00~22:00 분산(±15분) · 세션 60분 · 동글당 일 6세션·월 2500MB ·
