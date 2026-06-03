@@ -52,7 +52,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       (err.name === 'AbortError' || err.name === 'TimeoutError');
     if (isTimeout) {
       throw new Error(
-        `요청 시간 초과(15초). ${target} — i7 스케줄러가 응답하지 않습니다(SOCKS probe hang). i7 서버 코드 재배포 필요.${hint}`,
+        `요청 시간 초과(35초). ${target} — i7 스케줄러·SOCKS probe 확인.${hint}`,
       );
     }
     throw new Error(
@@ -178,7 +178,7 @@ export const api = {
     }>('/api/crank/scheduler', {
       sameOrigin: typeof window === 'undefined' ? false : true,
       cache: 'no-store',
-      signal: requestTimeoutSignal(15_000),
+      signal: requestTimeoutSignal(35_000),
     }),
   cafeTargets: () => request<Array<Record<string, unknown>>>('/api/cafe/targets'),
   crawlCafe: () => request<{ success: boolean; count: number }>('/api/cafe/crawl', { method: 'POST' }),

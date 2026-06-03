@@ -4,6 +4,7 @@ import { loadEnvConfig } from '@next/env';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 function loadWebEnv(): void {
   const cwd = process.cwd();
@@ -20,9 +21,9 @@ const API_BASE =
   process.env.NEXT_PUBLIC_HUMA_API_URL?.trim() ||
   'http://localhost:3100';
 
-/** i7: 슬롯 6·7 SOCKS 순차 probe(8초×2) + DB */
-const UPSTREAM_MS = 25_000;
-const HANDLER_MS = 28_000;
+/** i7: 슬롯 6·7 SOCKS 병렬 probe(~10초) + DB */
+const UPSTREAM_MS = 30_000;
+const HANDLER_MS = 32_000;
 
 async function proxyScheduler(token: string | null): Promise<NextResponse> {
   const ctrl = new AbortController();
@@ -41,7 +42,7 @@ async function proxyScheduler(token: string | null): Promise<NextResponse> {
   } catch (err) {
     const detail =
       err instanceof Error && err.name === 'AbortError'
-        ? `i7 무응답(${UPSTREAM_MS / 1000}초, SOCKS probe hang 가능)`
+        ? `i7 무응답(${UPSTREAM_MS / 1000}초)`
         : err instanceof Error
           ? err.message
           : '';
@@ -54,7 +55,6 @@ async function proxyScheduler(token: string | null): Promise<NextResponse> {
   }
 }
 
-/** 브라우저는 localhost만 호출 — Next가 i7로 프록시(rewrite는 타임아웃 불가) */
 export async function GET(request: NextRequest) {
   const token = request.headers.get('x-huma-key');
   return Promise.race([
@@ -64,9 +64,7 @@ export async function GET(request: NextRequest) {
         () =>
           resolve(
             NextResponse.json(
-              {
-                error: `프록시 시간 초과(${HANDLER_MS / 1000}초). i7 스케줄러(SOCKS probe) 재배포 필요.`,
-              },
+              { error: `프록시 시간 초과(${HANDLER_MS / 1000}초). i7 스케줄러 응답 없음.` },
               { status: 504 },
             ),
           ),

@@ -92,19 +92,21 @@ export async function applyLiveProbeToCrankDisplay(
   const targets = rows
     .filter((r) => shouldRunModemProxyProbe(r.slot_number, r.proxy_port))
     .filter((r) => (PHYSICAL_CRANK_PROBE_SLOTS as readonly number[]).includes(r.slot_number))
-    .sort((a, b) => a.slot_number - b.slot_number);
+    .filter((r) => isPersistableModemId(r.id));
 
-  for (const row of targets) {
-    if (!isPersistableModemId(row.id)) continue;
-    const probed = await applyModemProxyProbe({
-      id: row.id,
-      slot_number: row.slot_number,
-      proxy_port: row.proxy_port,
-      status: row.status,
-      interface_name: row.interface_name,
-    });
-    probeBySlot.set(row.slot_number, probed);
-  }
+  const probedPairs = await Promise.all(
+    targets.map(async (row) => {
+      const probed = await applyModemProxyProbe({
+        id: row.id,
+        slot_number: row.slot_number,
+        proxy_port: row.proxy_port,
+        status: row.status,
+        interface_name: row.interface_name,
+      });
+      return [row.slot_number, probed] as const;
+    }),
+  );
+  for (const [slot, probed] of probedPairs) probeBySlot.set(slot, probed);
 
   return rows.map((row) => {
     const probed = probeBySlot.get(row.slot_number);
