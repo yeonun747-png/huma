@@ -8,11 +8,11 @@ import {
   getKstYmd,
 } from './crank-schedule-config.js';
 import {
+  applyLiveProbeToCrankDisplay,
   countActiveCrankModems,
   listCrankModemsForDashboard,
   resetAllMonthlyDataMb,
   resetDailyCrankCounters,
-  syncCrankModemProbeStatus,
 } from './crank-modems.js';
 import { getSetting } from './settings.js';
 import { enqueueHumaJob, type JobRecord } from './job-scheduler.js';
@@ -158,21 +158,18 @@ export async function runMonthlyCrankDataReset(): Promise<void> {
 }
 
 export async function getCrankSchedulerStatus() {
-  const activeModems = await countActiveCrankModems();
-  const policy = computeCrankSchedulePolicy(activeModems);
   const dateKey = formatKstDateKey();
+
+  let displayModems = await listCrankModemsForDashboard();
+  if (process.env.HUMA_SKIP_CRANK_PROBE !== '1') {
+    displayModems = await applyLiveProbeToCrankDisplay(displayModems);
+  }
+
+  const activeModems = displayModems.filter((m) => m.display_status === 'active').length;
+  const policy = computeCrankSchedulePolicy(activeModems);
 
   const crankCfg = await getSetting<{ planned_crank_modems?: number }>('social_crank', {});
   const plannedCrankModems = Math.max(activeModems, crankCfg.planned_crank_modems ?? 5);
-
-  // probe는 백그라운드 — SOCKS 미구동·Windows dev에서 API 45s+ hang 방지
-  if (process.env.HUMA_SKIP_CRANK_PROBE !== '1') {
-    void syncCrankModemProbeStatus([6, 7]).catch((err) =>
-      console.warn('[crank-scheduler] background probe:', err),
-    );
-  }
-
-  const displayModems = await listCrankModemsForDashboard();
 
   const { data: todayJobs } = await supabase
     .from('huma_jobs')
@@ -229,6 +226,8 @@ export async function getCrankSchedulerStatus() {
     schedule_excluded: m.display_status !== 'active',
     reserved: m.display_status === 'reserved',
     display_status: m.display_status,
+    probe_ok: m.probe_ok,
+    response_ms: m.response_ms ?? null,
     carrier: m.carrier,
     current_ip: m.current_ip,
   });

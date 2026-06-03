@@ -34,6 +34,8 @@ type SchedulerStatus = {
     crank_sessions_today: number;
     schedule_excluded: boolean;
     display_status?: string;
+    probe_ok?: boolean;
+    response_ms?: number | null;
     modem_role?: string;
     carrier?: string;
     current_ip?: string;
@@ -133,6 +135,13 @@ export function CrankView() {
             ? 'idle'
             : 'err';
       const statusLabel = displayStatusLabel[ds] ?? m.status;
+      const probeHint =
+        m.slot_number <= 7 && m.probe_ok === true && m.response_ms != null
+          ? ` · SOCKS ${m.response_ms}ms`
+          : m.slot_number <= 7 && m.probe_ok === false
+            ? ' · SOCKS 실패'
+            : '';
+
       return [
         `동글 ${m.slot_number}`,
         `:${m.proxy_port}`,
@@ -142,6 +151,7 @@ export function CrankView() {
         String(m.crank_sessions_today),
         <MTag key="s" tone={tone}>
           {statusLabel}
+          {probeHint}
         </MTag>,
       ];
     }) ?? [];

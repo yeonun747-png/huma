@@ -57,7 +57,14 @@ const CRANK_SLOT_PORTS: Record<number, number> = {
 
 export type CrankModemDisplayRow = CrankModemRow & {
   display_status: 'active' | 'reserved' | 'error' | 'offline' | 'missing' | 'wrong_role' | 'excluded';
+  /** 물리 슬롯 6·7 — SOCKS probe 결과 (프록시 관리와 동일 기준) */
+  probe_ok?: boolean;
+  response_ms?: number | null;
 };
+
+/** i7 물리 C-Rank 동글 — 프록시 관리와 동일 SOCKS probe */
+const PHYSICAL_CRANK_PROBE_SLOTS = [6, 7] as const;
+const LIVE_PROBE_TIMEOUT_MS = 8000;
 
 function classifyCrankDisplayRow(m: CrankModemRow): CrankModemDisplayRow['display_status'] {
   if (m.slot_number >= 8 && (m.modem_role === 'reserved' || m.status === 'offline')) {
@@ -70,49 +77,70 @@ function classifyCrankDisplayRow(m: CrankModemRow): CrankModemDisplayRow['displa
   return 'excluded';
 }
 
-const PROBE_TIMEOUT_MS = 3500;
-
-async function probeAndPatchModem(modem: {
-  id: string;
-  proxy_port: number;
-  status: string | null;
-}): Promise<void> {
-  const health = await probeProxyHealth(modem.proxy_port, PROBE_TIMEOUT_MS);
-  const patch: Record<string, unknown> = { response_ms: health.ms };
-  if (health.ok) {
-    if (!['busy', 'reconnecting'].includes(String(modem.status))) patch.status = 'idle';
-  } else if (modem.status !== 'reconnecting') {
-    patch.status = 'error';
-  }
-  await supabase.from('huma_modems').update(patch).eq('id', modem.id);
+function isPersistableModemId(id: string): boolean {
+  return Boolean(id) && !id.startsWith('missing-slot-');
 }
 
-/** i7 물리 C-Rank 동글 — SOCKS probe 후 DB status 동기화 (실패해도 API는 계속) */
-export async function syncCrankModemProbeStatus(
-  slots: readonly number[] = [6, 7],
+/** probe 성공 시에만 DB를 idle로 — 실패 시 error 덮어쓰기 금지 (프록시 정상·DB만 error 방지) */
+async function patchModemAfterProbe(
+  id: string,
+  status: string,
+  health: { ok: boolean; ms: number | null },
 ): Promise<void> {
-  try {
-    const { data, error } = await supabase
-      .from('huma_modems')
-      .select('id, proxy_port, status')
-      .in('slot_number', [...slots]);
+  const patch: Record<string, unknown> = { response_ms: health.ms };
+  if (health.ok && !['busy', 'reconnecting'].includes(status)) {
+    patch.status = 'idle';
+  }
+  await supabase.from('huma_modems').update(patch).eq('id', id);
+}
 
-    if (error) {
-      console.warn('[crank-modems] probe sync skip:', error.message);
-      return;
+/**
+ * C-Rank UI — 슬롯 6·7은 DB가 아니라 SOCKS probe로 표시 (프록시 관리와 동일).
+ * 2포트 병렬 probe, 최대 ~8초.
+ */
+export async function applyLiveProbeToCrankDisplay(
+  rows: CrankModemDisplayRow[],
+): Promise<CrankModemDisplayRow[]> {
+  const targets = rows.filter(
+    (r) => (PHYSICAL_CRANK_PROBE_SLOTS as readonly number[]).includes(r.slot_number) && r.proxy_port,
+  );
+
+  const probeBySlot = new Map<number, { ok: boolean; ms: number | null }>();
+  await Promise.all(
+    targets.map(async (row) => {
+      const health = await probeProxyHealth(row.proxy_port, LIVE_PROBE_TIMEOUT_MS);
+      probeBySlot.set(row.slot_number, health);
+    }),
+  );
+
+  return rows.map((row) => {
+    const health = probeBySlot.get(row.slot_number);
+    if (!health) return row;
+
+    if (isPersistableModemId(row.id)) {
+      void patchModemAfterProbe(row.id, row.status, health).catch((err) =>
+        console.warn(`[crank-modems] DB patch slot ${row.slot_number}:`, err),
+      );
     }
 
-    const modems = (data ?? []).filter((m) => m.proxy_port);
-    await Promise.all(
-      modems.map((modem) =>
-        probeAndPatchModem(modem as { id: string; proxy_port: number; status: string | null }).catch(
-          (err) => console.warn(`[crank-modems] probe slot failed:`, err),
-        ),
-      ),
-    );
-  } catch (err) {
-    console.warn('[crank-modems] probe sync error:', err);
-  }
+    if (!(PHYSICAL_CRANK_PROBE_SLOTS as readonly number[]).includes(row.slot_number)) {
+      return { ...row, probe_ok: health.ok, response_ms: health.ms };
+    }
+
+    const effectiveStatus = health.ok
+      ? ['busy', 'reconnecting'].includes(row.status)
+        ? row.status
+        : 'idle'
+      : row.status;
+
+    const effectiveRow: CrankModemRow = { ...row, status: effectiveStatus };
+    return {
+      ...effectiveRow,
+      probe_ok: health.ok,
+      response_ms: health.ms,
+      display_status: classifyCrankDisplayRow(effectiveRow),
+    };
+  });
 }
 
 /** UI용 — 슬롯 6~10 전부 표시 (error·DB 누락·role 오류 포함) */
