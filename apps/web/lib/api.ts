@@ -172,7 +172,7 @@ export const api = {
     request<Array<{ id: string; title: string; job_type: string; status: string; scheduled_at: string; workspace: string }>>(
       `/api/jobs/calendar${qs(params ?? {})}`
     ),
-  crankScheduler: () =>
+  crankScheduler: (opts?: { probe?: boolean }) =>
     request<{
       date_key: string;
       active_crank_modems: number;
@@ -184,10 +184,10 @@ export const api = {
       session_duration_minutes: number;
       modems: Array<Record<string, unknown>>;
       accounts: Array<Record<string, unknown>>;
-    }>('/api/crank/scheduler', {
+    }>(`/api/crank/scheduler${qs({ probe: opts?.probe ? '1' : undefined })}`, {
       sameOrigin: typeof window === 'undefined' ? false : true,
       cache: 'no-store',
-      signal: requestTimeoutSignal(20_000),
+      timeoutMs: opts?.probe ? 20_000 : 10_000,
     }),
   cafeTargets: () => request<Array<Record<string, unknown>>>('/api/cafe/targets'),
   crawlCafe: () => request<{ success: boolean; count: number }>('/api/cafe/crawl', { method: 'POST' }),

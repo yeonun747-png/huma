@@ -97,7 +97,7 @@ export async function applyLiveProbeToCrankDisplay(
     .filter((r) => isPersistableModemId(r.id));
 
   const probedPairs: Array<readonly [number, Awaited<ReturnType<typeof applyModemProxyProbe>>]> = [];
-  await probeModemsWithConcurrency(targets, 1, async (row) => {
+  await probeModemsWithConcurrency(targets, 2, async (row) => {
     const probed = await applyModemProxyProbe({
       id: row.id,
       slot_number: row.slot_number,

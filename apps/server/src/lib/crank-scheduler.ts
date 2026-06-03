@@ -157,11 +157,14 @@ export async function runMonthlyCrankDataReset(): Promise<void> {
   await logOperation({ level: 'info', message: '[crank-scheduler] monthly_data_mb 전체 초기화' });
 }
 
-export async function getCrankSchedulerStatus() {
+export async function getCrankSchedulerStatus(options?: { probe?: boolean }) {
   const dateKey = formatKstDateKey();
 
-  /** 슬롯 6·7 — i7에서 SOCKS probe 후 DB·표시 동기화 (브라우저 modems API 불필요) */
-  const displayModems = await applyLiveProbeToCrankDisplay(await listCrankModemsForDashboard());
+  const dashboardRows = await listCrankModemsForDashboard();
+  /** probe=1 일 때만 i7 SOCKS curl (슬롯 6·7, ~2~4초). 기본은 DB만 (~수백 ms) */
+  const displayModems = options?.probe
+    ? await applyLiveProbeToCrankDisplay(dashboardRows)
+    : dashboardRows;
 
   const activeModems = displayModems.filter((m) => m.display_status === 'active').length;
   const policy = computeCrankSchedulePolicy(activeModems);

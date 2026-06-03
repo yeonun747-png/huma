@@ -76,49 +76,59 @@ export function CrankView() {
   const schedulerLoadRef = useRef(0);
   const schedulerInitialRef = useRef(true);
 
-  const loadScheduler = useCallback(async () => {
+  const loadScheduler = useCallback(async (opts?: { probe?: boolean; background?: boolean }) => {
     const loadId = ++schedulerLoadRef.current;
-    if (schedulerInitialRef.current) setSchedulerLoading(true);
+    const withProbe = opts?.probe === true;
+    if (!opts?.background && schedulerInitialRef.current) setSchedulerLoading(true);
 
     try {
-      const sched = await api.crankScheduler();
+      const sched = await api.crankScheduler({ probe: withProbe });
       if (loadId !== schedulerLoadRef.current) return;
       setScheduler(sched as SchedulerStatus);
       setSchedulerError(null);
       schedulerInitialRef.current = false;
     } catch (err: unknown) {
       if (loadId !== schedulerLoadRef.current) return;
-      setScheduler(null);
-      const msg =
-        err instanceof Error ? err.message : typeof err === 'string' ? err : '스케줄러 API 실패';
-      setSchedulerError(msg);
-      schedulerInitialRef.current = false;
+      if (!opts?.background) {
+        setScheduler(null);
+        const msg =
+          err instanceof Error ? err.message : typeof err === 'string' ? err : '스케줄러 API 실패';
+        setSchedulerError(msg);
+        schedulerInitialRef.current = false;
+      }
     } finally {
-      if (loadId === schedulerLoadRef.current) setSchedulerLoading(false);
+      if (!opts?.background && loadId === schedulerLoadRef.current) setSchedulerLoading(false);
     }
   }, []);
 
-  const syncProxyModems = useCallback(async () => {
+  const refreshWithProbe = useCallback(async () => {
     setSyncingProxy(true);
     try {
-      await loadScheduler();
+      await loadScheduler({ probe: true, background: true });
     } finally {
       setSyncingProxy(false);
     }
   }, [loadScheduler]);
 
+  const syncProxyModems = useCallback(async () => {
+    await refreshWithProbe();
+  }, [refreshWithProbe]);
+
   const load = useCallback(() => {
     void api.getSetting('social_crank').then(setConfig).catch(() => setConfig({}));
     void api.cafeTargets().then(setTargets).catch(() => setTargets([]));
     void loadScheduler();
-  }, [loadScheduler]);
+    void refreshWithProbe();
+  }, [loadScheduler, refreshWithProbe]);
 
   useEffect(() => {
     load();
     if (schedulerError) return;
-    const id = setInterval(load, 60_000);
+    const id = setInterval(() => {
+      void loadScheduler({ background: true });
+    }, 60_000);
     return () => clearInterval(id);
-  }, [load, schedulerError]);
+  }, [load, loadScheduler, schedulerError]);
 
   useRegisterPageAction('startCrank', async () => {
     await api.createJob({
@@ -235,7 +245,7 @@ export function CrankView() {
                 onClick={() => {
                   setSchedulerError(null);
                   schedulerInitialRef.current = true;
-                  void loadScheduler();
+                  load();
                 }}
               >
                 다시 시도
@@ -245,7 +255,7 @@ export function CrankView() {
         )}
         <p className="mt-2 font-mono text-[10.5px] text-huma-t3">
           매일 00:01 KST 큐 생성 · 08:00~22:00 분산(±15분) · 세션 60분 · 동글당 일 6세션·월 2500MB ·
-          예비 슬롯(8~10)은 스케줄 제외 · 슬롯 6·7 SOCKS는 스케줄러 API에서 i7 probe
+          예비 슬롯(8~10)은 스케줄 제외 · 슬롯 6·7 SOCKS는 DB 즉시 표시 후 백그라운드 probe
           {syncingProxy ? ' (검사 중…)' : ''}
           {!syncingProxy && (
             <>
