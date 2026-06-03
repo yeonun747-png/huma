@@ -35,13 +35,9 @@ export function toTodayDatetime(timeStr?: string): string | undefined {
   return dt.toISOString();
 }
 
-export function selectImageModel(workspace: string): string {
-  const modelMap: Record<string, string> = {
-    yeonun: 'nano-banana-pro',
-    quizoasis: 'gpt-image-2',
-    panana: 'higgsfield-soul-2',
-  };
-  return modelMap[workspace] ?? 'nano-banana-pro';
+/** v3.26 — Imagen 4 Fast 기본, generateImage()에서 프롬프트 기반 Haiku 판단 */
+export function selectImageModel(_workspace: string): string {
+  return 'imagen-4.0-fast-generate-001';
 }
 
 function spreadScheduleTime(timeStr: string, spreadMinutes: number): string {
@@ -151,12 +147,12 @@ export async function autoDecide(params: {
 아래 기준으로 JSON 결정 (JSON만, 설명 없이):
 
 content_type 결정 기준:
-  B (영상 포함): 감성·스토리·서비스소개·캐릭터·신규출시 → 크레딧 50개 이상일 때
-  A (이미지만):  정보성·공지·이벤트안내·크레딧 50개 미만
+  B (영상 포함): 감성·스토리·서비스소개·캐릭터·신규출시 → Higgsfield Cloud 크레딧 50개 이상 (Kling 15초=24크레딧)
+  A (이미지만):  정보성·공지·이벤트안내·크레딧 50개 미만 (이미지는 Google Imagen, Higgsfield 크레딧 불필요)
 
 video_model 결정 기준:
   "seedance-2.0": 연운·파나나 감성 콘텐츠 (고품질 우선)
-  "kling-3.0":    퀴즈오아시스 or 크레딧 200개 미만 (비용 우선)
+  "kling-3.0":    퀴즈오아시스 or 크레딧 200개 미만 (비용 우선, 15초 24크레딧)
   "veo-3.1-fast": 특별 프로모션·핵심 콘텐츠 (크레딧 400개 이상)
 
 schedule (오늘 기준 최적 시간, 플랫폼별 분산):

@@ -2,7 +2,7 @@ import { execFile } from 'child_process';
 import { copyFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { promisify } from 'util';
-import { generateImage } from '../higgsfield/image.js';
+import { generateImage } from '../google/imagen.js';
 import { uploadInstagramReel } from '../social-api/index.js';
 import { askClaudeWithModel } from '../../lib/anthropic-client.js';
 import { getSubClaudeModel } from '../../lib/ai-engine.js';

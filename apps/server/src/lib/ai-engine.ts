@@ -12,7 +12,7 @@ export interface AiEngineConfig {
 const DEFAULT_AI_ENGINE: AiEngineConfig = {
   main_model: 'claude-sonnet-4-6',
   sub_model: 'claude-haiku-4-5-20251001',
-  main_tasks: ['blog_post', 'social_caption', 'tts_script', 'video_prompt'],
+  main_tasks: ['blog_post', 'social_caption', 'video_prompt'],
   sub_tasks: ['hashtags', 'summary', 'autoDecide'],
   max_input_tokens: 8000,
   max_output_tokens: 4000,

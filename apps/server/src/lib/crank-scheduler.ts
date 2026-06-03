@@ -12,6 +12,7 @@ import {
   listCrankModemsForDashboard,
   resetAllMonthlyDataMb,
   resetDailyCrankCounters,
+  syncCrankModemProbeStatus,
 } from './crank-modems.js';
 import { getSetting } from './settings.js';
 import { enqueueHumaJob, type JobRecord } from './job-scheduler.js';
@@ -164,6 +165,7 @@ export async function getCrankSchedulerStatus() {
   const crankCfg = await getSetting<{ planned_crank_modems?: number }>('social_crank', {});
   const plannedCrankModems = Math.max(activeModems, crankCfg.planned_crank_modems ?? 5);
 
+  await syncCrankModemProbeStatus([6, 7]);
   const displayModems = await listCrankModemsForDashboard();
 
   const { data: todayJobs } = await supabase

@@ -1,9 +1,13 @@
 import axios from 'axios';
 import { sleep } from '../../lib/utils.js';
 
-const API_BASE = 'https://cloud.higgsfield.ai/api/v1';
+/** Keys: cloud.higgsfield.ai · REST: platform.higgsfield.ai/{model_id} (공식 Python SDK와 동일) */
+const API_BASE =
+  process.env.HIGGSFIELD_API_BASE?.trim()?.replace(/\/$/, '') || 'https://platform.higgsfield.ai';
 
-/** cloud.higgsfield.ai — Authorization: Key {API_KEY_ID}:{API_KEY_SECRET} */
+const TERMINAL_FAILURE = new Set(['failed', 'nsfw', 'canceled', 'cancelled', 'error']);
+
+/** Authorization: Key {API_KEY_ID}:{API_KEY_SECRET} — JSON body에 키 넣지 않음 */
 export function getHiggsfieldAuthorization(): string | null {
   const id = process.env.HIGGSFIELD_API_KEY_ID?.trim();
   const secret = process.env.HIGGSFIELD_API_KEY_SECRET?.trim();
@@ -25,28 +29,75 @@ function headers() {
   return {
     Authorization: authorization,
     'Content-Type': 'application/json',
+    'User-Agent': 'huma-server/1.0',
   };
 }
 
+function formatAxiosError(err: unknown, phase: string): Error {
+  if (axios.isAxiosError(err)) {
+    const status = err.response?.status;
+    const data = err.response?.data;
+    let detail = err.message;
+    if (data && typeof data === 'object' && 'detail' in data) {
+      detail = String((data as { detail: unknown }).detail);
+    } else if (typeof data === 'string' && data.length < 200) {
+      detail = data;
+    }
+    return new Error(`Higgsfield ${phase} 실패 (${status ?? '?'}): ${detail}`);
+  }
+  return err instanceof Error ? err : new Error(String(err));
+}
+
+function resolveStatusUrl(job: Record<string, unknown>): string {
+  const fromResponse = job.status_url as string | undefined;
+  if (fromResponse) return fromResponse;
+
+  const requestId = job.request_id as string | undefined;
+  if (requestId) return `${API_BASE}/requests/${requestId}/status`;
+
+  throw new Error('Higgsfield 응답에 request_id/status_url 없음');
+}
+
+/**
+ * POST {API_BASE}/{application} + arguments JSON
+ * 폴링 후 completed 본문 반환 (images / video_url 등)
+ */
 export async function higgsfieldRequest(
-  model: string,
+  application: string,
   args: Record<string, unknown>
 ): Promise<Record<string, unknown>> {
-  const { data: job } = await axios.post(
-    `${API_BASE}/submit`,
-    { model, arguments: args },
-    { headers: headers() }
-  );
+  const path = application.replace(/^\//, '');
+  const submitUrl = `${API_BASE}/${path}`;
 
-  const jobId = job.request_id as string;
+  let job: Record<string, unknown>;
+  try {
+    const { data } = await axios.post(submitUrl, args, {
+      headers: headers(),
+      timeout: 120_000,
+    });
+    job = data as Record<string, unknown>;
+  } catch (err) {
+    throw formatAxiosError(err, 'submit');
+  }
+
+  const statusUrl = resolveStatusUrl(job);
+
   while (true) {
     await sleep(3000);
-    const { data: status } = await axios.get(`${API_BASE}/status/${jobId}`, {
-      headers: headers(),
-    });
-    if (status.status === 'COMPLETED') return status.output as Record<string, unknown>;
-    if (['FAILED', 'ERROR', 'CANCELLED'].includes(status.status as string)) {
-      throw new Error(`Higgsfield 오류: ${status.status}`);
+    let statusData: Record<string, unknown>;
+    try {
+      const { data } = await axios.get(statusUrl, { headers: headers(), timeout: 60_000 });
+      statusData = data as Record<string, unknown>;
+    } catch (err) {
+      throw formatAxiosError(err, 'status');
+    }
+
+    const status = String(statusData.status ?? '').toLowerCase();
+    if (status === 'completed') {
+      return statusData;
+    }
+    if (TERMINAL_FAILURE.has(status)) {
+      throw new Error(`Higgsfield 오류: ${status}`);
     }
   }
 }
@@ -54,14 +105,6 @@ export async function higgsfieldRequest(
 /** Higgsfield 잔여 크레딧 (API 실패 시 설정값 또는 999) */
 export async function getHiggsfieldCredits(): Promise<number> {
   if (!hasHiggsfieldCredentials()) return 999;
-
-  try {
-    const { data } = await axios.get(`${API_BASE}/credits`, { headers: headers(), timeout: 5000 });
-    const remaining = (data as { remaining?: number; credits?: number }).remaining ?? (data as { credits?: number }).credits;
-    if (typeof remaining === 'number') return remaining;
-  } catch {
-    // fallback below
-  }
 
   try {
     const { getSetting } = await import('../../lib/settings.js');

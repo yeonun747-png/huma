@@ -1,4 +1,5 @@
 import { supabase } from '../middleware/auth.js';
+import { probeProxyHealth } from '../modules/human-engine/timing.js';
 import {
   MODEM_MONTHLY_DATA_CAP_MB,
   MAX_CRANK_SESSIONS_PER_MODEM_PER_DAY,
@@ -67,6 +68,28 @@ function classifyCrankDisplayRow(m: CrankModemRow): CrankModemDisplayRow['displa
   if (m.status === 'offline') return 'offline';
   if (isSchedulableCrankRow(m)) return 'active';
   return 'excluded';
+}
+
+/** i7 물리 C-Rank 동글 — 프록시 관리와 동일 SOCKS probe 후 DB status 동기화 */
+export async function syncCrankModemProbeStatus(
+  slots: readonly number[] = [6, 7],
+): Promise<void> {
+  const { data } = await supabase
+    .from('huma_modems')
+    .select('id, proxy_port, status')
+    .in('slot_number', [...slots]);
+
+  for (const modem of data ?? []) {
+    if (!modem.proxy_port) continue;
+    const health = await probeProxyHealth(modem.proxy_port);
+    const patch: Record<string, unknown> = { response_ms: health.ms };
+    if (health.ok) {
+      if (!['busy', 'reconnecting'].includes(String(modem.status))) patch.status = 'idle';
+    } else if (modem.status !== 'reconnecting') {
+      patch.status = 'error';
+    }
+    await supabase.from('huma_modems').update(patch).eq('id', modem.id);
+  }
 }
 
 /** UI용 — 슬롯 6~10 전부 표시 (error·DB 누락·role 오류 포함) */
