@@ -4,7 +4,7 @@ import { loadEnvConfig } from '@next/env';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 30;
 
 function loadWebEnv(): void {
   const cwd = process.cwd();
@@ -21,9 +21,8 @@ const API_BASE =
   process.env.NEXT_PUBLIC_HUMA_API_URL?.trim() ||
   'http://localhost:3100';
 
-/** i7: 슬롯 6·7 SOCKS 병렬 probe(~10초) + DB */
-const UPSTREAM_MS = 30_000;
-const HANDLER_MS = 32_000;
+const UPSTREAM_MS = 18_000;
+const HANDLER_MS = 20_000;
 
 async function proxyScheduler(token: string | null): Promise<NextResponse> {
   const ctrl = new AbortController();

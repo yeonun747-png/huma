@@ -8,7 +8,6 @@ import {
   getKstYmd,
 } from './crank-schedule-config.js';
 import {
-  applyLiveProbeToCrankDisplay,
   countActiveCrankModems,
   listCrankModemsForDashboard,
   resetAllMonthlyDataMb,
@@ -157,20 +156,11 @@ export async function runMonthlyCrankDataReset(): Promise<void> {
   await logOperation({ level: 'info', message: '[crank-scheduler] monthly_data_mb 전체 초기화' });
 }
 
-export type CrankSchedulerStatusOptions = {
-  /** true면 슬롯 6·7 SOCKS probe 생략 (DB만 표시) */
-  skipProbe?: boolean;
-};
-
-export async function getCrankSchedulerStatus(options?: CrankSchedulerStatusOptions) {
+export async function getCrankSchedulerStatus() {
   const dateKey = formatKstDateKey();
 
-  let displayModems = await listCrankModemsForDashboard();
-  const skipProbe =
-    options?.skipProbe === true || process.env.HUMA_SKIP_CRANK_PROBE === '1';
-  if (!skipProbe) {
-    displayModems = await applyLiveProbeToCrankDisplay(displayModems);
-  }
+  /** 슬롯 6·7 — 프록시 관리(?probe=1)가 DB에 저장한 status·response_ms 사용 (스케줄러에서 재-probe 안 함) */
+  const displayModems = await listCrankModemsForDashboard();
 
   const activeModems = displayModems.filter((m) => m.display_status === 'active').length;
   const policy = computeCrankSchedulePolicy(activeModems);

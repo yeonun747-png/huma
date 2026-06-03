@@ -72,6 +72,7 @@ export function CrankView() {
   const [scheduler, setScheduler] = useState<SchedulerStatus | null>(null);
   const [schedulerError, setSchedulerError] = useState<string | null>(null);
   const [schedulerLoading, setSchedulerLoading] = useState(true);
+  const [syncingProxy, setSyncingProxy] = useState(false);
   const schedulerLoadRef = useRef(0);
   const schedulerInitialRef = useRef(true);
 
@@ -96,6 +97,16 @@ export function CrankView() {
       if (loadId === schedulerLoadRef.current) setSchedulerLoading(false);
     }
   }, []);
+
+  const syncProxyModems = useCallback(async () => {
+    setSyncingProxy(true);
+    try {
+      await api.modems({ probe: true });
+      await loadScheduler();
+    } finally {
+      setSyncingProxy(false);
+    }
+  }, [loadScheduler]);
 
   const load = useCallback(() => {
     void api.getSetting('social_crank').then(setConfig).catch(() => setConfig({}));
@@ -153,10 +164,10 @@ export function CrankView() {
             : 'err';
       const statusLabel = displayStatusLabel[ds] ?? m.status;
       const probeHint =
-        m.slot_number <= 7 && m.probe_ok === true && m.response_ms != null
+        m.slot_number <= 7 && m.status === 'idle' && m.response_ms != null
           ? ` · SOCKS ${m.response_ms}ms`
-          : m.slot_number <= 7 && m.probe_ok === false
-            ? ' · SOCKS 실패'
+          : m.slot_number <= 7 && m.status === 'error'
+            ? ' · 프록시 오류'
             : '';
 
       return [
@@ -235,7 +246,16 @@ export function CrankView() {
         )}
         <p className="mt-2 font-mono text-[10.5px] text-huma-t3">
           매일 00:01 KST 큐 생성 · 08:00~22:00 분산(±15분) · 세션 60분 · 동글당 일 6세션·월 2500MB ·
-          예비 슬롯(8~10)은 스케줄 제외
+          예비 슬롯(8~10)은 스케줄 제외 · 슬롯 6·7 상태는{' '}
+          <button
+            type="button"
+            className="text-huma-accent underline disabled:opacity-50"
+            disabled={syncingProxy}
+            onClick={() => void syncProxyModems()}
+          >
+            {syncingProxy ? '프록시 검사 중…' : '프록시 관리 DB 기준'}
+          </button>
+          (불일치 시 클릭해 동기화)
         </p>
         {scheduler && (
           <>

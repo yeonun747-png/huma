@@ -19,6 +19,7 @@ export interface CrankModemRow {
   carrier?: string | null;
   current_ip?: string | null;
   interface_name?: string | null;
+  response_ms?: number | null;
 }
 
 function isSchedulableCrankRow(m: {
@@ -136,7 +137,7 @@ export async function listCrankModemsForDashboard(): Promise<CrankModemDisplayRo
   const { data, error } = await supabase
     .from('huma_modems')
     .select(
-      'id, slot_number, proxy_port, status, modem_role, monthly_data_mb, crank_sessions_today, carrier, current_ip, interface_name',
+      'id, slot_number, proxy_port, status, modem_role, monthly_data_mb, crank_sessions_today, carrier, current_ip, interface_name, response_ms',
     )
     .in('slot_number', [...CRANK_DISPLAY_SLOTS])
     .order('slot_number');
