@@ -1,8 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { authMiddleware, supabase } from '../middleware/auth.js';
 import { reconnectModem } from '../modules/modem/reconnect.js';
-import { probeModemSocks } from '../lib/modem-socks-probe.js';
-import { readInterfaceIp } from '../lib/dongle-health.js';
+import { applyModemProxyProbe, shouldRunModemProxyProbe } from '../lib/modem-proxy-probe.js';
 
 export async function registerModemRoutes(app: FastifyInstance) {
   app.get('/api/modems', { preHandler: authMiddleware }, async (request) => {
@@ -14,24 +13,23 @@ export async function registerModemRoutes(app: FastifyInstance) {
 
     const updated = [];
     for (const modem of modems) {
-      if (!modem.proxy_port || modem.slot_number > 7) {
+      if (!shouldRunModemProxyProbe(modem.slot_number, modem.proxy_port)) {
         updated.push(modem);
         continue;
       }
-      const health = await probeModemSocks(modem.proxy_port);
-      const ifaceIp =
-        modem.interface_name && !modem.interface_name.startsWith('dongle')
-          ? readInterfaceIp(modem.interface_name)
-          : null;
-      const patch: Record<string, unknown> = { response_ms: health.ms };
-      if (health.ok) {
-        if (!['busy', 'reconnecting'].includes(modem.status)) patch.status = 'idle';
-      } else if (modem.status !== 'reconnecting') {
-        patch.status = 'error';
-      }
-      if (ifaceIp) patch.current_ip = ifaceIp;
-      await supabase.from('huma_modems').update(patch).eq('id', modem.id);
-      updated.push({ ...modem, ...patch });
+      const probed = await applyModemProxyProbe({
+        id: modem.id,
+        slot_number: modem.slot_number,
+        proxy_port: modem.proxy_port,
+        status: modem.status,
+        interface_name: modem.interface_name,
+      });
+      updated.push({
+        ...modem,
+        status: probed.status,
+        response_ms: probed.response_ms,
+        ...(probed.current_ip ? { current_ip: probed.current_ip } : {}),
+      });
     }
     return updated;
   });

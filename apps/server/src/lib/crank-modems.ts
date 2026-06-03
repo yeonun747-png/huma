@@ -1,5 +1,5 @@
 import { supabase } from '../middleware/auth.js';
-import { probeModemSocks } from './modem-socks-probe.js';
+import { applyModemProxyProbe, shouldRunModemProxyProbe } from './modem-proxy-probe.js';
 import {
   MODEM_MONTHLY_DATA_CAP_MB,
   MAX_CRANK_SESSIONS_PER_MODEM_PER_DAY,
@@ -18,6 +18,7 @@ export interface CrankModemRow {
   crank_sessions_today: number | null;
   carrier?: string | null;
   current_ip?: string | null;
+  interface_name?: string | null;
 }
 
 function isSchedulableCrankRow(m: {
@@ -80,62 +81,45 @@ function isPersistableModemId(id: string): boolean {
   return Boolean(id) && !id.startsWith('missing-slot-');
 }
 
-/** probe 성공 시에만 DB를 idle로 — 실패 시 error 덮어쓰기 금지 (프록시 정상·DB만 error 방지) */
-async function patchModemAfterProbe(
-  id: string,
-  status: string,
-  health: { ok: boolean; ms: number | null },
-): Promise<void> {
-  const patch: Record<string, unknown> = { response_ms: health.ms };
-  if (health.ok && !['busy', 'reconnecting'].includes(status)) {
-    patch.status = 'idle';
-  }
-  await supabase.from('huma_modems').update(patch).eq('id', id);
-}
-
 /**
- * C-Rank UI — 슬롯 6·7은 DB가 아니라 SOCKS probe로 표시 (프록시 관리와 동일 8초·순차).
+ * C-Rank 슬롯 6·7 — 프록시 관리와 동일 `applyModemProxyProbe` 결과로 표시 (DB status 무시).
  */
 export async function applyLiveProbeToCrankDisplay(
   rows: CrankModemDisplayRow[],
 ): Promise<CrankModemDisplayRow[]> {
+  const probeBySlot = new Map<number, Awaited<ReturnType<typeof applyModemProxyProbe>>>();
+
   const targets = rows
-    .filter(
-      (r) => (PHYSICAL_CRANK_PROBE_SLOTS as readonly number[]).includes(r.slot_number) && r.proxy_port,
-    )
+    .filter((r) => shouldRunModemProxyProbe(r.slot_number, r.proxy_port))
+    .filter((r) => (PHYSICAL_CRANK_PROBE_SLOTS as readonly number[]).includes(r.slot_number))
     .sort((a, b) => a.slot_number - b.slot_number);
 
-  const probeBySlot = new Map<number, { ok: boolean; ms: number | null }>();
   for (const row of targets) {
-    const health = await probeModemSocks(row.proxy_port);
-    probeBySlot.set(row.slot_number, health);
+    if (!isPersistableModemId(row.id)) continue;
+    const probed = await applyModemProxyProbe({
+      id: row.id,
+      slot_number: row.slot_number,
+      proxy_port: row.proxy_port,
+      status: row.status,
+      interface_name: row.interface_name,
+    });
+    probeBySlot.set(row.slot_number, probed);
   }
 
   return rows.map((row) => {
-    const health = probeBySlot.get(row.slot_number);
-    if (!health) return row;
+    const probed = probeBySlot.get(row.slot_number);
+    if (!probed) return row;
 
-    if (isPersistableModemId(row.id)) {
-      void patchModemAfterProbe(row.id, row.status, health).catch((err) =>
-        console.warn(`[crank-modems] DB patch slot ${row.slot_number}:`, err),
-      );
-    }
+    const effectiveRow: CrankModemRow = {
+      ...row,
+      status: probed.status,
+      ...(probed.current_ip ? { current_ip: probed.current_ip } : {}),
+    };
 
-    if (!(PHYSICAL_CRANK_PROBE_SLOTS as readonly number[]).includes(row.slot_number)) {
-      return { ...row, probe_ok: health.ok, response_ms: health.ms };
-    }
-
-    const effectiveStatus = health.ok
-      ? ['busy', 'reconnecting'].includes(row.status)
-        ? row.status
-        : 'idle'
-      : row.status;
-
-    const effectiveRow: CrankModemRow = { ...row, status: effectiveStatus };
     return {
       ...effectiveRow,
-      probe_ok: health.ok,
-      response_ms: health.ms,
+      probe_ok: probed.probe_ok,
+      response_ms: probed.response_ms,
       display_status: classifyCrankDisplayRow(effectiveRow),
     };
   });
@@ -150,7 +134,7 @@ export async function listCrankModemsForDashboard(): Promise<CrankModemDisplayRo
   const { data, error } = await supabase
     .from('huma_modems')
     .select(
-      'id, slot_number, proxy_port, status, modem_role, monthly_data_mb, crank_sessions_today, carrier, current_ip',
+      'id, slot_number, proxy_port, status, modem_role, monthly_data_mb, crank_sessions_today, carrier, current_ip, interface_name',
     )
     .in('slot_number', [...CRANK_DISPLAY_SLOTS])
     .order('slot_number');
