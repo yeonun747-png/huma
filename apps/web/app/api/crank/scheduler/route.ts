@@ -20,9 +20,9 @@ const API_BASE =
   process.env.NEXT_PUBLIC_HUMA_API_URL?.trim() ||
   'http://localhost:3100';
 
-/** i7: SOCKS probe 최대 ~7초 + DB 조회 */
-const UPSTREAM_MS = 20_000;
-const HANDLER_MS = 22_000;
+/** i7: 슬롯 6·7 SOCKS 순차 probe(8초×2) + DB */
+const UPSTREAM_MS = 25_000;
+const HANDLER_MS = 28_000;
 
 async function proxyScheduler(token: string | null): Promise<NextResponse> {
   const ctrl = new AbortController();

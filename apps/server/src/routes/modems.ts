@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { authMiddleware, supabase } from '../middleware/auth.js';
 import { reconnectModem } from '../modules/modem/reconnect.js';
-import { probeProxyHealth } from '../modules/human-engine/timing.js';
+import { probeModemSocks } from '../lib/modem-socks-probe.js';
 import { readInterfaceIp } from '../lib/dongle-health.js';
 
 export async function registerModemRoutes(app: FastifyInstance) {
@@ -18,7 +18,7 @@ export async function registerModemRoutes(app: FastifyInstance) {
         updated.push(modem);
         continue;
       }
-      const health = await probeProxyHealth(modem.proxy_port);
+      const health = await probeModemSocks(modem.proxy_port);
       const ifaceIp =
         modem.interface_name && !modem.interface_name.startsWith('dongle')
           ? readInterfaceIp(modem.interface_name)

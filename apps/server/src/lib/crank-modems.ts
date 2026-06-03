@@ -1,5 +1,5 @@
 import { supabase } from '../middleware/auth.js';
-import { probeProxyHealth } from '../modules/human-engine/timing.js';
+import { probeModemSocks } from './modem-socks-probe.js';
 import {
   MODEM_MONTHLY_DATA_CAP_MB,
   MAX_CRANK_SESSIONS_PER_MODEM_PER_DAY,
@@ -64,8 +64,6 @@ export type CrankModemDisplayRow = CrankModemRow & {
 
 /** i7 물리 C-Rank 동글 — 프록시 관리와 동일 SOCKS probe */
 const PHYSICAL_CRANK_PROBE_SLOTS = [6, 7] as const;
-const LIVE_PROBE_TIMEOUT_MS = 4000;
-const DISPLAY_PROBE_DEADLINE_MS = 7000;
 
 function classifyCrankDisplayRow(m: CrankModemRow): CrankModemDisplayRow['display_status'] {
   if (m.slot_number >= 8 && (m.modem_role === 'reserved' || m.status === 'offline')) {
@@ -95,37 +93,23 @@ async function patchModemAfterProbe(
   await supabase.from('huma_modems').update(patch).eq('id', id);
 }
 
-function withDeadline<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
-  ]);
-}
-
 /**
- * C-Rank UI — 슬롯 6·7은 DB가 아니라 SOCKS probe로 표시 (프록시 관리와 동일).
- * 2포트 병렬 probe, 전체 상한 ~7초 (hang 시 DB 행 그대로 반환).
+ * C-Rank UI — 슬롯 6·7은 DB가 아니라 SOCKS probe로 표시 (프록시 관리와 동일 8초·순차).
  */
 export async function applyLiveProbeToCrankDisplay(
   rows: CrankModemDisplayRow[],
 ): Promise<CrankModemDisplayRow[]> {
-  return withDeadline(applyLiveProbeToCrankDisplayInner(rows), DISPLAY_PROBE_DEADLINE_MS, rows);
-}
-
-async function applyLiveProbeToCrankDisplayInner(
-  rows: CrankModemDisplayRow[],
-): Promise<CrankModemDisplayRow[]> {
-  const targets = rows.filter(
-    (r) => (PHYSICAL_CRANK_PROBE_SLOTS as readonly number[]).includes(r.slot_number) && r.proxy_port,
-  );
+  const targets = rows
+    .filter(
+      (r) => (PHYSICAL_CRANK_PROBE_SLOTS as readonly number[]).includes(r.slot_number) && r.proxy_port,
+    )
+    .sort((a, b) => a.slot_number - b.slot_number);
 
   const probeBySlot = new Map<number, { ok: boolean; ms: number | null }>();
-  await Promise.all(
-    targets.map(async (row) => {
-      const health = await probeProxyHealth(row.proxy_port, LIVE_PROBE_TIMEOUT_MS);
-      probeBySlot.set(row.slot_number, health);
-    }),
-  );
+  for (const row of targets) {
+    const health = await probeModemSocks(row.proxy_port);
+    probeBySlot.set(row.slot_number, health);
+  }
 
   return rows.map((row) => {
     const health = probeBySlot.get(row.slot_number);
