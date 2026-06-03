@@ -12,6 +12,44 @@ function parseProbeSlots(raw: string | undefined): Set<number> | null {
   return slots.length > 0 ? new Set(slots) : null;
 }
 
+const MODEM_PROBE_ROUTE_MS = 14_000;
+
+async function probeModemsInRoute(
+  modems: Array<Record<string, unknown> & { slot_number: number; proxy_port?: number | null }>,
+  probeSlots: Set<number> | null,
+) {
+  const probeTargets = modems.filter(
+    (modem) =>
+      shouldRunModemProxyProbe(modem.slot_number, modem.proxy_port) &&
+      (!probeSlots || probeSlots.has(modem.slot_number)),
+  );
+
+  const probedBySlot = new Map<number, Awaited<ReturnType<typeof applyModemProxyProbe>>>();
+  await Promise.all(
+    probeTargets.map(async (modem) => {
+      const probed = await applyModemProxyProbe({
+        id: String(modem.id),
+        slot_number: modem.slot_number,
+        proxy_port: Number(modem.proxy_port),
+        status: String(modem.status ?? 'offline'),
+        interface_name: modem.interface_name as string | null | undefined,
+      });
+      probedBySlot.set(modem.slot_number, probed);
+    }),
+  );
+
+  return modems.map((modem) => {
+    const probed = probedBySlot.get(modem.slot_number);
+    if (!probed) return modem;
+    return {
+      ...modem,
+      status: probed.status,
+      response_ms: probed.response_ms,
+      ...(probed.current_ip ? { current_ip: probed.current_ip } : {}),
+    };
+  });
+}
+
 export async function registerModemRoutes(app: FastifyInstance) {
   app.get('/api/modems', { preHandler: authMiddleware }, async (request) => {
     const query = request.query as { probe?: string; slots?: string };
@@ -22,36 +60,11 @@ export async function registerModemRoutes(app: FastifyInstance) {
 
     if (!probe) return modems;
 
-    const probeTargets = modems.filter(
-      (modem) =>
-        shouldRunModemProxyProbe(modem.slot_number, modem.proxy_port) &&
-        (!probeSlots || probeSlots.has(modem.slot_number)),
-    );
-
-    const probedBySlot = new Map<number, Awaited<ReturnType<typeof applyModemProxyProbe>>>();
-    await Promise.all(
-      probeTargets.map(async (modem) => {
-        const probed = await applyModemProxyProbe({
-          id: modem.id,
-          slot_number: modem.slot_number,
-          proxy_port: modem.proxy_port,
-          status: modem.status,
-          interface_name: modem.interface_name,
-        });
-        probedBySlot.set(modem.slot_number, probed);
-      }),
-    );
-
-    return modems.map((modem) => {
-      const probed = probedBySlot.get(modem.slot_number);
-      if (!probed) return modem;
-      return {
-        ...modem,
-        status: probed.status,
-        response_ms: probed.response_ms,
-        ...(probed.current_ip ? { current_ip: probed.current_ip } : {}),
-      };
-    });
+    const probed = await Promise.race([
+      probeModemsInRoute(modems, probeSlots),
+      new Promise<typeof modems>((resolve) => setTimeout(() => resolve(modems), MODEM_PROBE_ROUTE_MS)),
+    ]);
+    return probed;
   });
 
   app.post('/api/modems/:id/reconnect', { preHandler: authMiddleware }, async (request, reply) => {

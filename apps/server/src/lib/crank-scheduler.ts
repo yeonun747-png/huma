@@ -8,6 +8,7 @@ import {
   getKstYmd,
 } from './crank-schedule-config.js';
 import {
+  applyLiveProbeToCrankDisplay,
   countActiveCrankModems,
   listCrankModemsForDashboard,
   resetAllMonthlyDataMb,
@@ -159,8 +160,8 @@ export async function runMonthlyCrankDataReset(): Promise<void> {
 export async function getCrankSchedulerStatus() {
   const dateKey = formatKstDateKey();
 
-  /** 슬롯 6·7 — 프록시 관리(?probe=1)가 DB에 저장한 status·response_ms 사용 (스케줄러에서 재-probe 안 함) */
-  const displayModems = await listCrankModemsForDashboard();
+  /** 슬롯 6·7 — i7에서 SOCKS probe 후 DB·표시 동기화 (브라우저 modems API 불필요) */
+  const displayModems = await applyLiveProbeToCrankDisplay(await listCrankModemsForDashboard());
 
   const activeModems = displayModems.filter((m) => m.display_status === 'active').length;
   const policy = computeCrankSchedulePolicy(activeModems);

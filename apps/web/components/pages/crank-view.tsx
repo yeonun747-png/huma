@@ -76,17 +76,11 @@ export function CrankView() {
   const schedulerLoadRef = useRef(0);
   const schedulerInitialRef = useRef(true);
 
-  const syncCrankModemProxy = useCallback(async () => {
-    await api.modems({ probe: true, slots: [6, 7] });
-  }, []);
-
   const loadScheduler = useCallback(async () => {
     const loadId = ++schedulerLoadRef.current;
     if (schedulerInitialRef.current) setSchedulerLoading(true);
 
     try {
-      await syncCrankModemProxy();
-      if (loadId !== schedulerLoadRef.current) return;
       const sched = await api.crankScheduler();
       if (loadId !== schedulerLoadRef.current) return;
       setScheduler(sched as SchedulerStatus);
@@ -102,7 +96,7 @@ export function CrankView() {
     } finally {
       if (loadId === schedulerLoadRef.current) setSchedulerLoading(false);
     }
-  }, [syncCrankModemProxy]);
+  }, []);
 
   const syncProxyModems = useCallback(async () => {
     setSyncingProxy(true);
@@ -251,7 +245,8 @@ export function CrankView() {
         )}
         <p className="mt-2 font-mono text-[10.5px] text-huma-t3">
           매일 00:01 KST 큐 생성 · 08:00~22:00 분산(±15분) · 세션 60분 · 동글당 일 6세션·월 2500MB ·
-          예비 슬롯(8~10)은 스케줄 제외 · 슬롯 6·7은 프록시 관리와 동일 SOCKS 검사 후 표시
+          예비 슬롯(8~10)은 스케줄 제외 · 슬롯 6·7 SOCKS는 스케줄러 API에서 i7 probe
+          {syncingProxy ? ' (검사 중…)' : ''}
           {!syncingProxy && (
             <>
               {' '}

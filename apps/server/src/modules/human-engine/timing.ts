@@ -1,7 +1,7 @@
 import type { Page, Locator } from 'playwright';
-import axios from 'axios';
 import { gaussianRandom, randomBetween, sleep, wpmToDelay } from '../../lib/utils.js';
 import type { HumanEngineConfig } from '../../lib/settings.js';
+import { probeModemSocks } from '../../lib/modem-socks-probe.js';
 import { humanSleep, humanType } from './typing.js';
 
 export async function scrollWithReverse(
@@ -34,42 +34,8 @@ export async function scrollRead(page: Page, durationMs: number) {
 }
 
 export async function measureRTT(proxyPort: number): Promise<number> {
-  const probed = await probeProxyHealth(proxyPort);
+  const probed = await probeModemSocks(proxyPort);
   return probed.ms ?? 3000;
-}
-
-const PROBE_FAIL = { ok: false, ms: null } as const;
-
-async function probeProxyHealthOnce(
-  proxyPort: number,
-  timeoutMs: number,
-): Promise<{ ok: boolean; ms: number | null }> {
-  const start = Date.now();
-  try {
-    const res = await axios.get('https://www.naver.com', {
-      proxy: { host: '127.0.0.1', port: proxyPort, protocol: 'socks5' },
-      timeout: timeoutMs,
-      validateStatus: (s) => s < 500,
-    });
-    if (res.status >= 400) return PROBE_FAIL;
-    return { ok: true, ms: Date.now() - start };
-  } catch {
-    return PROBE_FAIL;
-  }
-}
-
-/** SOCKS 프록시 실제 응답 여부 (모뎀 대시보드 probe용) */
-export async function probeProxyHealth(
-  proxyPort: number,
-  timeoutMs = 8000,
-): Promise<{ ok: boolean; ms: number | null }> {
-  const hardMs = timeoutMs + 1500;
-  return Promise.race([
-    probeProxyHealthOnce(proxyPort, timeoutMs),
-    new Promise<{ ok: boolean; ms: number | null }>((resolve) =>
-      setTimeout(() => resolve(PROBE_FAIL), hardMs),
-    ),
-  ]);
 }
 
 export function rttScale(rtt: number): number {

@@ -15,7 +15,7 @@ function getToken(): string | null {
   return localStorage.getItem('huma_token');
 }
 
-type RequestOptions = RequestInit & { sameOrigin?: boolean };
+type RequestOptions = RequestInit & { sameOrigin?: boolean; timeoutMs?: number };
 
 function requestTimeoutSignal(timeoutMs: number): AbortSignal {
   if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
@@ -27,7 +27,7 @@ function requestTimeoutSignal(timeoutMs: number): AbortSignal {
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { sameOrigin, ...fetchOptions } = options;
+  const { sameOrigin, timeoutMs, ...fetchOptions } = options;
   const token = getToken();
   const hasBody = fetchOptions.body !== undefined && fetchOptions.body !== null && fetchOptions.body !== '';
   const headers: Record<string, string> = {
@@ -37,8 +37,11 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   if (token) headers['X-HUMA-KEY'] = token;
 
   const url = resolveRequestUrl(path, sameOrigin);
+  const signal =
+    fetchOptions.signal ??
+    (timeoutMs != null ? requestTimeoutSignal(timeoutMs) : undefined);
 
-  const res = await fetch(url, { ...fetchOptions, headers }).catch((err: unknown) => {
+  const res = await fetch(url, { ...fetchOptions, headers, signal }).catch((err: unknown) => {
     const hint = !sameOrigin && (path.includes('adsense') || path.includes('monetization'))
       ? ' 브라우저 광고 차단 확장 프로그램이 API 요청을 막았을 수 있습니다.'
       : '';
@@ -127,12 +130,13 @@ export const api = {
     request(`/api/accounts/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteAccount: (id: string) => request(`/api/accounts/${id}`, { method: 'DELETE' }),
   accountLogs: (id: string) => request(`/api/accounts/${id}/logs`),
-  modems: (opts?: { probe?: boolean; slots?: number[] }) =>
+  modems: (opts?: { probe?: boolean; slots?: number[]; timeoutMs?: number }) =>
     request<HumaModem[]>(
       `/api/modems${qs({
         probe: opts?.probe ? '1' : undefined,
         slots: opts?.slots?.length ? opts.slots.join(',') : undefined,
       })}`,
+      { timeoutMs: opts?.timeoutMs ?? (opts?.probe ? 18_000 : undefined) },
     ),
   reconnectModem: (id: string) => request(`/api/modems/${id}/reconnect`, { method: 'POST' }),
   logs: (params?: { level?: string; platform?: string; limit?: string }) =>
