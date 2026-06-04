@@ -55,8 +55,8 @@ export const SPEC_NAV_ITEMS: Record<string, { href: string; label: string; icon:
     { href: '/adsense', label: '애드센스 수익', icon: '💰' },
   ],
   panana: [
-    { href: '/scenario', label: '영상 시나리오', icon: '🎬', badgeKey: 'scenario' },
-    { href: '/social', label: '소셜 분석·DM 자동화', icon: '📱' },
+    { href: '/scenario', label: '영상 시나리오', icon: '📝', badgeKey: 'scenario' },
+    { href: '/social', label: '소셜 분석·DM 자동화', icon: '📊' },
   ],
 };
 

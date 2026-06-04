@@ -4,14 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/constants';
 import {
-  DEFAULT_IMAGE_MODEL,
   DEFAULT_VIDEO_MODEL,
-  IMAGE_MODELS,
-  VIDEO_MODELS,
-  imageModelOptionLabel,
-  normalizeImageModel,
+  HUMAN_ENGINE_IMAGE_LABEL,
   normalizeVideoModel,
-  videoModelOptionLabel,
 } from '@/lib/higgsfield-models';
 import { useHumanEngineSave } from '@/components/dashboard/human-engine-save-context';
 
@@ -50,7 +45,6 @@ interface ImageEngineConfig {
 }
 
 interface MediaConfig {
-  default_image_model: string;
   default_video_model: string;
   whisper_subtitle_sync: boolean;
 }
@@ -97,7 +91,6 @@ const DEFAULT_IMAGE: ImageEngineConfig = {
 };
 
 const DEFAULT_MEDIA: MediaConfig = {
-  default_image_model: DEFAULT_IMAGE_MODEL,
   default_video_model: DEFAULT_VIDEO_MODEL,
   whisper_subtitle_sync: true,
 };
@@ -217,7 +210,6 @@ export function HumanEngineSettings() {
       setImage({ ...DEFAULT_IMAGE, ...(img as object), block_duplicate: (img as ImageEngineConfig).block_duplicate ?? true });
       const hg = higgs as Record<string, unknown>;
       setMedia({
-        default_image_model: normalizeImageModel(String(hg.default_image_model ?? DEFAULT_IMAGE_MODEL)),
         default_video_model: normalizeVideoModel(String(hg.default_video_model ?? DEFAULT_VIDEO_MODEL)),
         whisper_subtitle_sync: Boolean(hg.whisper_subtitle_sync ?? true),
       });
@@ -231,7 +223,6 @@ export function HumanEngineSettings() {
       api.updateSetting('human_engine', human),
       api.updateSetting('image_engine', image),
       api.updateSetting('higgsfield', {
-        default_image_model: normalizeImageModel(media.default_image_model),
         default_video_model: normalizeVideoModel(media.default_video_model),
         aspect_ratio: '9:16',
         default_video_resolution: FIXED_VIDEO_RESOLUTION,
@@ -356,30 +347,7 @@ export function HumanEngineSettings() {
           <HeToggle label="EXIF GPS 랜덤 주입" value={image.gps_randomize} onChange={(v) => setImage((img) => ({ ...img, gps_randomize: v }))} />
           <HeStaticRow label="JPEG 품질 범위" value="90~96%" />
           <HeToggle label="중복 이미지 차단" value={image.block_duplicate} onChange={(v) => setImage((img) => ({ ...img, block_duplicate: v }))} />
-          <div className="he-slider-row">
-            <span className="he-slider-label">기본 이미지 모델</span>
-            <select
-              value={media.default_image_model}
-              onChange={(e) => setMedia((m) => ({ ...m, default_image_model: normalizeImageModel(e.target.value) }))}
-              className="m-model-select max-w-[220px] ml-auto"
-            >
-              {IMAGE_MODELS.map((m) => (
-                <option key={m.id} value={m.id}>{imageModelOptionLabel(m)}</option>
-              ))}
-            </select>
-          </div>
-          <div className="he-slider-row">
-            <span className="he-slider-label">기본 영상 모델</span>
-            <select
-              value={media.default_video_model}
-              onChange={(e) => setMedia((m) => ({ ...m, default_video_model: normalizeVideoModel(e.target.value) }))}
-              className="m-model-select max-w-[220px] ml-auto"
-            >
-              {VIDEO_MODELS.map((m) => (
-                <option key={m.id} value={m.id}>{videoModelOptionLabel(m)}</option>
-              ))}
-            </select>
-          </div>
+          <HeStaticRow label="기본 이미지 모델" value={HUMAN_ENGINE_IMAGE_LABEL} />
           <div className="he-chart-caption">v3.26 · Imagen 4 + Kling 3.0 내장 오디오 (TTS 기본 미사용)</div>
           <HeStaticRow label="영상 해상도" value={`${FIXED_VIDEO_DIMENSIONS} · ${FIXED_VIDEO_RESOLUTION} 고정`} />
           <HeToggle

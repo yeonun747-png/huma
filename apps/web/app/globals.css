@@ -556,7 +556,8 @@
   .m-kw-chg { font-family: var(--font-jetbrains), monospace; font-size: 12px; width: 36px; text-align: right; }
 
   .m-model-select { background: var(--bg3); border: 1px solid var(--bdr); border-radius: 6px; padding: 5px 10px; color: var(--t); font-family: var(--font-jetbrains), monospace; font-size: 12.5px; cursor: pointer; outline: none; width: 100%; }
-  .m-pipe-step { display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: var(--bg3); border: 1px solid var(--bdr2); border-radius: 8px; margin-bottom: 8px; }
+  .m-pipe-step { display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: var(--bg3); border: 1px solid var(--bdr2); border-radius: 8px; margin-bottom: 8px; transition: all .2s; }
+  .m-pipe-step:hover { border-color: var(--acc); }
   .m-pipe-step-num { width: 24px; height: 24px; border-radius: 50%; background: var(--acc); color: #fff; font-family: var(--font-jetbrains), monospace; font-size: 12.5px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
   .m-pipe-step-num.done { background: var(--ok); }
   .m-pipe-step-num.running { background: var(--warn); animation: blink 1.2s infinite; }
@@ -564,6 +565,13 @@
   .m-pipe-step-title { font-size: 14.5px; font-weight: 600; color: var(--t); margin-bottom: 2px; }
   .m-pipe-step-sub { font-size: 11.5px; color: var(--t3); font-family: var(--font-jetbrains), monospace; }
   .m-model-badge { font-size: 10.5px; padding: 2px 7px; border-radius: 4px; background: var(--glow); border: 1px solid var(--acc); color: var(--acc); font-family: var(--font-jetbrains), monospace; }
+  .m-badge-google { background: rgba(66,133,244,.12); border-color: #4285f4; color: #4285f4; }
+  .m-badge-warn { background: var(--warn-bg); border-color: var(--warn); color: var(--warn); }
+  .m-badge-ok { background: var(--ok-bg); border-color: var(--ok); color: var(--ok); }
+  .m-badge-idle { background: var(--bg4); border-color: var(--bdr); color: var(--t3); }
+  .m-tgl-sm { width: 24px; height: 14px; }
+  .m-tgl-sm::after { width: 9px; height: 9px; }
+  .m-tgl-sm.on::after { transform: translateX(10px); }
 
   .m-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
   .m-cal-head { font-size: 9.5px; color: var(--t2); font-family: var(--font-jetbrains), monospace; text-align: center; padding: 4px 0; }

@@ -35,8 +35,135 @@ export const VIDEO_MODELS = [
 export type ImageModelId = (typeof IMAGE_MODELS)[number]['id'];
 export type VideoModelId = (typeof VIDEO_MODELS)[number]['id'];
 
-export const DEFAULT_IMAGE_MODEL: ImageModelId = 'nano-banana-pro';
+export const DEFAULT_IMAGE_MODEL: ImageModelId = 'gpt-image-2';
 export const DEFAULT_VIDEO_MODEL: VideoModelId = 'kling-3.0';
+
+/** v3.26+ 영상 파이프라인 — Google Imagen 4 (Haiku가 Fast/Standard 자동 선택) */
+export const PIPELINE_IMAGE_STEP_LABEL = 'Imagen 4 Fast/Standard (자동)';
+export const HUMAN_ENGINE_IMAGE_LABEL = 'Haiku 자동 (Fast/Std)';
+
+export type ImagenPipelineChoice =
+  | 'auto'
+  | 'imagen-4.0-fast-generate-001'
+  | 'imagen-4.0-generate-001';
+
+export const IMAGEN_PIPELINE_OPTIONS: ReadonlyArray<{ id: ImagenPipelineChoice; label: string }> = [
+  { id: 'auto', label: '🤖 Haiku 자동 선택 — 텍스트→Standard, 일반→Fast' },
+  { id: 'imagen-4.0-fast-generate-001', label: '⚡ Imagen 4 Fast — $0.02/장 · 블로그 대량 자동' },
+  { id: 'imagen-4.0-generate-001', label: '✨ Imagen 4 Standard — $0.04/장 · 텍스트·배너 고화질' },
+];
+
+/** v3.26 목업 — 파이프라인 영상 모델 (5종) */
+export const PIPELINE_VIDEO_OPTIONS = [
+  {
+    selectValue: 'kling-3.0',
+    id: 'kling-3.0' as VideoModelId,
+    label: '🎥 Kling 3.0 — $1.20/15초 (24크레딧) · 시네마틱+내장오디오',
+    videoUsd: 1.2,
+    durationLabel: '15초',
+  },
+  {
+    selectValue: 'seedance-2.0-fast',
+    id: 'seedance-2.0' as VideoModelId,
+    label: '⚡ Seedance 2.0 Fast — $0.85/5s · 빠른 생성',
+    videoUsd: 0.85,
+    durationLabel: '5s',
+  },
+  {
+    selectValue: 'seedance-2.0',
+    id: 'seedance-2.0' as VideoModelId,
+    label: '🌟 Seedance 2.0 — $1.25/5s · 최고화질',
+    videoUsd: 1.25,
+    durationLabel: '5s',
+  },
+  {
+    selectValue: 'veo-3.1-fast',
+    id: 'veo-3.1-lite' as VideoModelId,
+    label: '🚀 Veo 3.1 Fast — $1.10/8s · Google',
+    videoUsd: 1.1,
+    durationLabel: '8s',
+  },
+  {
+    selectValue: 'higgsfield-dop',
+    id: 'higgsfield-dop' as VideoModelId,
+    label: '🎞 Higgsfield DOP — VFX·카메라 정밀 제어',
+    videoUsd: 1.2,
+    durationLabel: '15s',
+  },
+] as const;
+
+export function normalizePipelineVideoSelect(raw?: string | null): string {
+  const v = raw ?? DEFAULT_VIDEO_MODEL;
+  const hit = PIPELINE_VIDEO_OPTIONS.find((o) => o.selectValue === v || o.id === v);
+  return hit?.selectValue ?? 'kling-3.0';
+}
+
+export function pipelineVideoFromSelect(selectValue: string): VideoModelId {
+  const hit = PIPELINE_VIDEO_OPTIONS.find((o) => o.selectValue === selectValue);
+  return hit?.id ?? DEFAULT_VIDEO_MODEL;
+}
+
+export function normalizeImagenPipelineChoice(raw?: string | null): ImagenPipelineChoice {
+  if (raw === 'imagen-4.0-fast-generate-001' || raw === 'imagen-4.0-generate-001') return raw;
+  return 'auto';
+}
+
+export function pipelineImageCost(choice: ImagenPipelineChoice) {
+  if (choice === 'auto') {
+    return { label: 'Haiku 자동', display: '$0.02~$0.04', minUsd: 0.02, maxUsd: 0.04 };
+  }
+  if (choice === 'imagen-4.0-fast-generate-001') {
+    return { label: 'Imagen 4 Fast', display: '$0.02', minUsd: 0.02, maxUsd: 0.02 };
+  }
+  return { label: 'Imagen 4 Standard', display: '$0.04', minUsd: 0.04, maxUsd: 0.04 };
+}
+
+export function pipelineVideoCost(modelId: string) {
+  const normalized = normalizeVideoModel(modelId);
+  const opt =
+    PIPELINE_VIDEO_OPTIONS.find((o) => o.selectValue === modelId || o.id === normalized) ??
+    PIPELINE_VIDEO_OPTIONS[0];
+  return {
+    usd: opt.videoUsd,
+    durationLabel: opt.durationLabel,
+  };
+}
+
+export function pipelineTotalCostDisplay(img: ImagenPipelineChoice, videoModelId: string) {
+  const imgCost = pipelineImageCost(img);
+  const vid = pipelineVideoCost(videoModelId);
+  const min = imgCost.minUsd + vid.usd;
+  const max = imgCost.maxUsd + vid.usd;
+  if (min === max) return `$${min.toFixed(2)}`;
+  return `$${min.toFixed(2)}~$${max.toFixed(2)}`;
+}
+
+export function tableImageModelLabel(imageModel?: string | null): string {
+  if (imageModel === 'imagen-4.0-generate-001') return 'imagen-4-std';
+  if (imageModel === 'imagen-4.0-fast-generate-001') return 'imagen-4-fast';
+  return 'imagen-4-auto';
+}
+
+export function estimateTodayPipelineCost(items: Array<{ status: string; image_model?: string | null; video_model?: string | null }>) {
+  let imageUsd = 0;
+  let videoUsd = 0;
+  let done = 0;
+  for (const item of items) {
+    if (item.status !== 'done') continue;
+    done += 1;
+    const img = normalizeImagenPipelineChoice(item.image_model);
+    const imgC = pipelineImageCost(img);
+    imageUsd += (imgC.minUsd + imgC.maxUsd) / 2;
+    videoUsd += pipelineVideoCost(item.video_model ?? DEFAULT_VIDEO_MODEL).usd;
+  }
+  const total = imageUsd + videoUsd;
+  return {
+    totalUsd: total,
+    totalDisplay: total > 0 ? `$${total.toFixed(2)}` : '$0.00',
+    subDisplay: done > 0 ? `영상$${videoUsd.toFixed(2)} + 이미지$${imageUsd.toFixed(2)}` : '완료 건 없음',
+    done,
+  };
+}
 
 const LEGACY_IMAGE: Record<string, ImageModelId> = {
   'flux2-max': 'flux2',
