@@ -203,7 +203,7 @@ export async function getCrankSchedulerStatus(options?: { probe?: boolean }) {
 
   const { data: todayJobs } = await supabase
     .from('huma_jobs')
-    .select('id, status, account_id, scheduled_at, completed_at, title')
+    .select('id, status, account_id, scheduled_at, completed_at, title, error_message')
     .eq('job_type', 'social_crank')
     .like('title', `${DAILY_JOB_TITLE_PREFIX} ${dateKey}%`);
 
@@ -244,6 +244,7 @@ export async function getCrankSchedulerStatus(options?: { probe?: boolean }) {
       last_crank_at: last,
       next_run_at: todayJob?.scheduled_at ?? nextRunAt,
       today_job_status: todayJob?.status ?? null,
+      today_job_error: todayJob?.error_message ?? null,
     };
   });
 

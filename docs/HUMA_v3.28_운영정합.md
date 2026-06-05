@@ -63,7 +63,7 @@ git pull && cd apps/server && npm run build && pm2 restart huma-server
 | **슬롯6·7 병렬** | track1 = track0 **+2~5분** |
 | **같은 동글 연속** | **60분** (세션 길이) |
 | **트랙 고정** | track0→`:10006`, track1→`:10007` |
-| **큐 UI** | 일반 admin: **자기 workspace**만 · **super admin**: 전체 social_crank |
+| **큐 UI** | **워크스페이스 탭별** 해당 workspace job만 (연운/퀴즈/파나나 분리) · 전체 풀은 **C-Rank 운영** 탭 |
 
 - Redis `modem_last_account:{port}` — 마지막 사용 계정 추적
 - ~~`HUMA_CRANK_RECONNECT_WAIT_MS`~~ v3.33에서 **미사용** (10분 고정 대기 제거)

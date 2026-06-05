@@ -31,6 +31,44 @@ export function formatJobErrorLabel(message: string | null | undefined): string 
   const linksErr = formatLinksNotFoundError(raw);
   if (linksErr) return linksErr;
 
+  if (raw.includes('CAPTCHA_DETECTED') || (raw.includes('CAPTCHA') && !raw.includes('LAYER4'))) {
+    return '네이버 로그인 실패: 캡차(보안문자) 감지';
+  }
+  if (raw.includes('NAVER_LOGIN_TIMEOUT:page_load')) {
+    return '네이버 로그인 실패: 로그인 페이지 로드 타임아웃';
+  }
+  if (raw.includes('NAVER_LOGIN_TIMEOUT:login_form')) {
+    return '네이버 로그인 실패: 로그인 폼 대기 타임아웃';
+  }
+  if (raw.includes('NAVER_LOGIN_TIMEOUT:redirect')) {
+    return '네이버 로그인 실패: 로그인 후 리다이렉트 타임아웃';
+  }
+  if (raw.includes('NAVER_LOGIN_TIMEOUT:shadow_walk')) {
+    return '네이버 로그인 실패: 사전 탐색(shadow walk) 타임아웃';
+  }
+  if (raw.includes('NAVER_LOGIN_TIMEOUT')) {
+    return '네이버 로그인 실패: 타임아웃';
+  }
+  if (raw.includes('NAVER_LOGIN_CREDENTIALS')) {
+    return '네이버 로그인 실패: 아이디 또는 비밀번호 오류';
+  }
+  if (raw.includes('NAVER_LOGIN_2FA')) {
+    return '네이버 로그인 실패: 2단계 인증 필요';
+  }
+  if (raw.includes('NAVER_LOGIN_DEVICE_VERIFY')) {
+    return '네이버 로그인 실패: 새 기기·환경 인증 필요';
+  }
+  if (raw.startsWith('NAVER_LOGIN_FAILED:redirect_stuck')) {
+    return '네이버 로그인 실패: 로그인 페이지에 머무름(캡차·인증·비밀번호 확인)';
+  }
+  if (raw.startsWith('NAVER_LOGIN_FAILED:')) {
+    const detail = raw.slice('NAVER_LOGIN_FAILED:'.length).trim();
+    return detail ? `네이버 로그인 실패: ${detail}` : '네이버 로그인 실패';
+  }
+  if (/timeout.*exceeded/i.test(raw) && /nidlogin|login|#id|waitForURL/i.test(raw)) {
+    return '네이버 로그인 실패: 타임아웃';
+  }
+
   if (raw.includes('NO_IDLE_MODEM')) {
     return 'C-Rank 동글 대기 — 슬롯 6·7이 사용 중이어서 15분 후 자동 재예약됩니다';
   }

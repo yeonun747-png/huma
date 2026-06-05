@@ -24,6 +24,7 @@ import {
   MTag,
   MToggle,
 } from '@/components/mockup/primitives';
+import { formatJobErrorLabel } from '@/lib/job-error-label';
 import { useRegisterPageAction } from '@/components/dashboard/page-action-context';
 
 type SchedulerStatus = {
@@ -60,8 +61,27 @@ type SchedulerStatus = {
     last_crank_at: string | null;
     next_run_at: string | null;
     today_job_status: string | null;
+    today_job_error: string | null;
   }>;
 };
+
+function formatTodayJobLabel(status: string | null, error: string | null): string {
+  if (!status) return '—';
+  const statusKo: Record<string, string> = {
+    completed: '완료',
+    running: '실행 중',
+    scheduled: '예약',
+    pending: '대기',
+    paused: '일시정지',
+    failed: '실패',
+  };
+  const base = statusKo[status] ?? status;
+  if (status === 'failed' && error?.trim()) {
+    const reason = formatJobErrorLabel(error);
+    return reason ? `${base} · ${reason}` : base;
+  }
+  return base;
+}
 
 function formatKstShort(iso: string | null): string {
   if (!iso) return '—';
@@ -270,7 +290,7 @@ export function CrankView() {
       a.crank_label?.trim() ? `${a.crank_label} · ${a.name}` : a.name,
       formatKstShort(a.last_crank_at),
       formatKstShort(a.next_run_at),
-      a.today_job_status ?? '—',
+      formatTodayJobLabel(a.today_job_status, a.today_job_error),
     ]) ?? [];
 
   const kpi = crankFeed?.kpi ?? { visit: { current: 0, max: 200 }, like: { current: 0, max: 150 }, comment: { current: 0, max: 50 }, neighbor: { current: 0, max: 20 } };
@@ -591,7 +611,7 @@ export function CrankView() {
               rows={modemRows}
             />
             <MTable
-              head={['계정', '마지막 crank', '다음 예정', '오늘 job']}
+              head={['계정', '마지막 crank', '다음 예정', '오늘 job / 실패 사유']}
               rows={accountRows}
             />
           </>
