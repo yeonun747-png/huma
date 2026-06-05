@@ -19,6 +19,7 @@ import {
 } from '../../lib/human-engine-policy.js';
 import { handleLayer4Detection, isCaptchaError, isBlockError } from '../watcher/detector.js';
 import { acquireModem, releaseModem, type ModemSession } from '../proxy/manager.js';
+import { hasIdleCrankModem } from '../modem/allocation.js';
 import { acquireAccount, releaseAccount } from '../../lib/account-lock.js';
 import { getCrankDailyLimit } from '../playwright/warmup.js';
 import { checkSharedWorkspaceLimit } from '../../lib/shared-limit.js';
@@ -79,8 +80,36 @@ function dailyCountField(jobType: string): 'post_count_today' | 'crank_count_tod
 const PLAYWRIGHT_AND_CRANK = [...PLAYWRIGHT_JOBS, 'social_crank'];
 const POSTING_JOBS = ['post_blog', 'cafe_new_post'];
 
+const CRANK_MODEM_DEFER_MS = 15 * 60 * 1000;
+
 async function deferJob(job: { moveToDelayed: (ts: number) => Promise<void> }, delayMs: number) {
   await job.moveToDelayed(Date.now() + Math.max(60_000, delayMs));
+}
+
+async function deferCrankForIdleModem(
+  job: { moveToDelayed: (ts: number) => Promise<void> },
+  humaJobId: string | undefined,
+  accountId: string | undefined,
+): Promise<void> {
+  await deferJob(job, CRANK_MODEM_DEFER_MS);
+  const nextAt = new Date(Date.now() + CRANK_MODEM_DEFER_MS).toISOString();
+  if (humaJobId) {
+    await supabase
+      .from('huma_jobs')
+      .update({
+        status: 'scheduled',
+        scheduled_at: nextAt,
+        started_at: null,
+        error_message: null,
+      })
+      .eq('id', humaJobId);
+  }
+  await logOperation({
+    level: 'warn',
+    message: `[crank] 유휴 동글 없음 — 15분 후 재예약 (슬롯 6·7 사용 중)`,
+    job_id: humaJobId,
+    account_id: accountId,
+  });
 }
 
 export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURRENCY) || 5) {  const worker = new Worker(
@@ -118,6 +147,11 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
           await deferJob(job, waitMs);
           return;
         }
+      }
+
+      if (type === 'social_crank' && !(await hasIdleCrankModem())) {
+        await deferCrankForIdleModem(job, humaJobId, accountId);
+        return;
       }
 
       const humanConfig = await getHumanEngineConfig();
@@ -269,6 +303,10 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
             job_id: humaJobId,
             account_id: accountId,
           });
+          return;
+        }
+        if (humaJobId && type === 'social_crank' && (err as Error).message === 'NO_IDLE_MODEM') {
+          await deferCrankForIdleModem(job, humaJobId, accountId);
           return;
         }
         if (humaJobId) {          await supabase

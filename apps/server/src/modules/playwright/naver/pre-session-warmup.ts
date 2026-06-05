@@ -1,6 +1,6 @@
-import type { Locator, Page } from 'playwright';
+import type { Page } from 'playwright';
 import { humanType, humanSleep } from '../../human-engine/typing.js';
-import { humanClickLocator, humanNavigateViaLink } from '../../human-engine/mouse.js';
+import { humanClickLocator } from '../../human-engine/mouse.js';
 import { scrollWithReverse } from '../../human-engine/timing.js';
 import { randomBetween } from '../../../lib/utils.js';
 import type { HumanEngineConfig } from '../../../lib/settings.js';
@@ -10,8 +10,24 @@ import { notifySlack } from '../../watcher/detector.js';
 
 export type WarmupAccountType = 'posting' | 'crank';
 
-const RESULT_LINK_SELECTOR = '.news_wrap a, .total_wrap .link_tit, .view_wrap .api_txt_lines';
-const BLOG_RESULT_SELECTOR = '.total_wrap .api_txt_lines';
+/** 네이버 통합 검색 — DOM 변경 대비 복수 셀렉터 */
+const SEARCH_LINK_SELECTORS = [
+  'a.api_txt_lines.total_tit',
+  '.view_wrap a.api_txt_lines',
+  '.total_wrap a.api_txt_lines',
+  '.news_wrap a[href^="http"]',
+  'a.link_tit[href^="http"]',
+  '.fds-comps-lib-body a[href^="http"]',
+];
+
+/** 네이버 블로그 탭 검색 */
+const BLOG_LINK_SELECTORS = [
+  'a.api_txt_lines.total_tit',
+  '.total_tit a[href*="blog.naver.com"]',
+  '.view_wrap a[href*="blog.naver.com"]',
+  '.total_wrap a[href*="blog.naver.com"]',
+  'a[href*="blog.naver.com/"]',
+];
 
 const KEYWORD_POOL: Record<string, string[]> = {
   연애: ['연애고민', '남자친구', '썸', '짝사랑', '재회방법'],
@@ -22,24 +38,60 @@ const KEYWORD_POOL: Record<string, string[]> = {
   일상: ['맛집추천', '카페투어', '주말여행', '요리레시피', '드라마추천'],
 };
 
-async function collectHttpLinkIndices(links: Locator, max: number): Promise<number[]> {
-  const count = await links.count();
-  const indices: number[] = [];
-  for (let i = 0; i < count && indices.length < max; i++) {
-    const href = await links.nth(i).getAttribute('href');
-    if (href?.startsWith('http')) indices.push(i);
+function normalizeHref(href: string | null | undefined): string | null {
+  if (!href?.trim()) return null;
+  const h = href.trim();
+  if (h.startsWith('http://') || h.startsWith('https://')) return h;
+  if (h.startsWith('//')) return `https:${h}`;
+  if (h.startsWith('/')) return `https://search.naver.com${h}`;
+  return null;
+}
+
+/** 여러 셀렉터에서 http(s) 링크 URL 수집 */
+async function collectPageUrls(
+  page: Page,
+  selectors: string[],
+  filter: (url: string) => boolean,
+  max: number,
+): Promise<string[]> {
+  const urls: string[] = [];
+  for (const selector of selectors) {
+    const links = page.locator(selector);
+    const count = await links.count();
+    for (let i = 0; i < count && urls.length < max; i++) {
+      const href = normalizeHref(await links.nth(i).getAttribute('href'));
+      if (!href || !filter(href) || urls.includes(href)) continue;
+      urls.push(href);
+    }
+    if (urls.length >= max) break;
   }
-  return indices;
+  return urls;
 }
 
 async function failWarmupNoLinks(context: string): Promise<never> {
-  const message = `워밍업 실패: ${context} — 검색 결과 링크 없음 (WARMUP_NO_LINKS_FOUND)`;
+  const message = `워밍업 실패: ${context} — 검색 결과 링크 없음 (NO_LINKS_FOUND)`;
   await notifySlack(message);
-  throw new Error('WARMUP_NO_LINKS_FOUND');
+  throw new Error(`NO_LINKS_FOUND:warmup:${context}`);
 }
 
 async function warmupStayScroll(page: Page, durationMs: number): Promise<void> {
   await scrollWithReverse(page, durationMs, [300, 800], [2000, 5000], 0.2);
+}
+
+async function visitWarmupUrls(
+  page: Page,
+  urls: string[],
+  visitCount: number,
+  stayMin: number,
+  stayMax: number,
+): Promise<void> {
+  for (const url of urls.slice(0, visitCount)) {
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    await humanSleep(stayMin, stayMax);
+    await warmupStayScroll(page, randomBetween(4000, 12000));
+    await page.goBack({ waitUntil: 'domcontentloaded' }).catch(() => {});
+    await humanSleep(2000, 4000);
+  }
 }
 
 /** v3.25 §7-14-1 — posting·crank 세션 진입 전 필수 워밍업 */
@@ -67,7 +119,7 @@ export async function preSessionWarmup(
 ): Promise<void> {
   const config = humanEngine ?? (await getHumanEngineConfig());
 
-  await page.goto('https://www.naver.com');
+  await page.goto('https://www.naver.com', { waitUntil: 'domcontentloaded' });
   await humanSleep(3000, 8000);
 
   const keyword = selectWarmupKeyword(persona);
@@ -76,6 +128,7 @@ export async function preSessionWarmup(
   await humanType(page, searchBox, keyword, config);
   await humanSleep(500, 1500);
   await page.keyboard.press('Enter');
+  await page.waitForLoadState('networkidle').catch(() => {});
   await humanSleep(2000, 4000);
 
   const visitCount =
@@ -83,44 +136,65 @@ export async function preSessionWarmup(
   const stayMin = accountType === 'posting' ? 15000 : 60000;
   const stayMax = accountType === 'posting' ? 45000 : 180000;
 
-  const resultLinks = page.locator(RESULT_LINK_SELECTOR);
-  const linkIndices = await collectHttpLinkIndices(resultLinks, 6);
-  if (linkIndices.length === 0) {
+  let searchUrls = await collectPageUrls(
+    page,
+    SEARCH_LINK_SELECTORS,
+    (u) => !u.includes('blog.naver.com'),
+    6,
+  );
+
+  if (searchUrls.length === 0) {
+    await page.mouse.wheel(0, 400);
+    await humanSleep(1000, 2000);
+    searchUrls = await collectPageUrls(
+      page,
+      SEARCH_LINK_SELECTORS,
+      (u) => !u.includes('blog.naver.com'),
+      6,
+    );
+  }
+
+  if (searchUrls.length === 0) {
     await failWarmupNoLinks('네이버 검색 결과');
   }
 
-  for (let i = 0; i < Math.min(visitCount, linkIndices.length); i++) {
-    const link = resultLinks.nth(linkIndices[i]);
-    await humanNavigateViaLink(page, link);
-    await humanSleep(stayMin, stayMax);
-    await warmupStayScroll(page, randomBetween(4000, 12000));
-    await page.goBack({ waitUntil: 'networkidle' }).catch(() => {});
-    await humanSleep(2000, 4000);
-  }
+  await visitWarmupUrls(page, searchUrls, visitCount, stayMin, stayMax);
 
   if (accountType === 'crank') {
     const blogKeyword = selectWarmupKeyword(persona);
     await page.goto(
       `https://search.naver.com/search.naver?where=blog&query=${encodeURIComponent(blogKeyword)}`,
+      { waitUntil: 'domcontentloaded' },
     );
+    await page.waitForLoadState('networkidle').catch(() => {});
     await humanSleep(2000, 4000);
 
-    const blogLinks = page.locator(BLOG_RESULT_SELECTOR);
-    const blogIndices: number[] = [];
-    const blogCount = await blogLinks.count();
-    for (let i = 0; i < blogCount && blogIndices.length < 3; i++) {
-      const href = await blogLinks.nth(i).getAttribute('href');
-      if (href?.includes('blog.naver.com')) blogIndices.push(i);
-    }
-    if (blogIndices.length === 0) {
-      await failWarmupNoLinks('네이버 블로그 검색 결과');
+    let blogUrls = await collectPageUrls(
+      page,
+      BLOG_LINK_SELECTORS,
+      (u) => u.includes('blog.naver.com'),
+      3,
+    );
+
+    if (blogUrls.length === 0) {
+      await page.mouse.wheel(0, 400);
+      await humanSleep(1000, 2000);
+      blogUrls = await collectPageUrls(
+        page,
+        BLOG_LINK_SELECTORS,
+        (u) => u.includes('blog.naver.com'),
+        3,
+      );
     }
 
-    const blogLink = blogLinks.nth(blogIndices[0]);
-    await humanNavigateViaLink(page, blogLink);
+    if (blogUrls.length === 0) {
+      await failWarmupNoLinks('네이버 블로그 검색');
+    }
+
+    await page.goto(blogUrls[0], { waitUntil: 'domcontentloaded' });
     await humanSleep(60000, 120000);
     await warmupStayScroll(page, randomBetween(8000, 20000));
-    await page.goBack({ waitUntil: 'networkidle' }).catch(() => {});
+    await page.goBack({ waitUntil: 'domcontentloaded' }).catch(() => {});
     await humanSleep(2000, 4000);
   }
 }

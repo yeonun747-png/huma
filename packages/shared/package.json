@@ -2,13 +2,38 @@
   "name": "@huma/shared",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "main": "./types/index.ts",
   "types": "./types/index.ts",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "lint": "tsc --noEmit"
+  },
   "exports": {
-    ".": "./types/index.ts",
-    "./account": "./types/account.ts",
-    "./job": "./types/job.ts",
-    "./modem": "./types/modem.ts",
-    "./video": "./types/video.ts"
+    ".": {
+      "types": "./types/index.ts",
+      "import": "./dist/index.js",
+      "default": "./types/index.ts"
+    },
+    "./account": {
+      "types": "./types/account.ts",
+      "import": "./dist/account.js",
+      "default": "./types/account.ts"
+    },
+    "./job": {
+      "types": "./types/job.ts",
+      "import": "./dist/job.js",
+      "default": "./types/job.ts"
+    },
+    "./modem": {
+      "types": "./types/modem.ts",
+      "import": "./dist/modem.js",
+      "default": "./types/modem.ts"
+    },
+    "./video": {
+      "types": "./types/video.ts",
+      "import": "./dist/video.js",
+      "default": "./types/video.ts"
+    }
   }
 }

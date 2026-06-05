@@ -102,7 +102,7 @@ export const api = {
       admin: { name: string; email: string; workspaces: string[]; isSuper?: boolean };
     }>('/api/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
   me: () => request<{ adminId: string; email: string; workspaces: string[]; isSuper: boolean }>('/api/auth/me'),
-  jobs: (params?: { status?: string; workspace?: string; platform?: string }) =>
+  jobs: (params?: { status?: string; workspace?: string; platform?: string; limit?: string }) =>
     request<HumaJob[]>(`/api/jobs${qs(params ?? {})}`),
   createJob: (body: Partial<HumaJob>) =>
     request<HumaJob>('/api/jobs', { method: 'POST', body: JSON.stringify(body) }),
@@ -122,6 +122,21 @@ export const api = {
   pauseJob: (id: string) => request(`/api/jobs/${id}/pause`, { method: 'PATCH' }),
   resumeJob: (id: string) => request(`/api/jobs/${id}/resume`, { method: 'PATCH' }),
   deleteJob: (id: string) => request(`/api/jobs/${id}`, { method: 'DELETE' }),
+  bulkDeleteJobs: (ids: string[]) =>
+    request<{ success: boolean; deleted: number; failed: number; errors?: string[] }>(
+      '/api/jobs/bulk-delete',
+      { method: 'POST', body: JSON.stringify({ ids }) },
+    ),
+  crankJobSession: (id: string) =>
+    request<{
+      crank_workspace: string;
+      service_label: string;
+      crank_label: string | null;
+      our_blog_targets: string[];
+      our_activity: Array<{ url: string; type: string; at: string; title: string | null }>;
+      other_activity: Array<{ url: string; type: string; at: string; title: string | null }>;
+      session_started: boolean;
+    }>(`/api/jobs/${id}/crank-session`),
   runJob: (id: string) => request(`/api/jobs/${id}/run-now`, { method: 'POST' }),
   updateJob: (id: string, body: Partial<HumaJob>) =>
     request<HumaJob>(`/api/jobs/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),

@@ -47,27 +47,38 @@ export function computeCrankSchedulePolicy(
   };
 }
 
-/** 08:00~22:00 KST 균등 분산 + ±15분 지터 (window는 active_hours에서 파생 가능) */
+/** 08:00~22:00 KST — 동글 수만큼 트랙 병렬 + 세션(60분)+reconnect(10분) 간격 */
 export function distributeCrankStartTimesKst(
   count: number,
   dayOffset = 0,
   window?: { start: number; end: number },
+  modemCount = 1,
 ): Date[] {
   if (count <= 0) return [];
 
   const startHour = window?.start ?? SCHEDULE_WINDOW_START_HOUR;
   const endHour = window?.end ?? SCHEDULE_WINDOW_END_HOUR;
-  const windowMinutes = (endHour - startHour) * 60;
-  const interval = windowMinutes / count;
+  const windowStartMin = startHour * 60;
+  const windowEndMin = endHour * 60;
+  const slotMinutes = SESSION_DURATION_MINUTES + 10;
+  const tracks = Math.max(1, Math.floor(modemCount));
 
-  return Array.from({ length: count }, (_, i) => {
-    const baseMinutes = startHour * 60 + interval * i + interval / 2;
+  const times = Array.from({ length: count }, (_, i) => {
+    const track = i % tracks;
+    const wave = Math.floor(i / tracks);
+    let baseMinutes = windowStartMin + wave * slotMinutes + track * 4;
+    if (baseMinutes > windowEndMin - 20) {
+      const span = windowEndMin - windowStartMin;
+      baseMinutes = windowStartMin + (span * (i + 1)) / (count + 1);
+    }
     const jitter = (Math.random() * 2 - 1) * START_JITTER_MINUTES;
-    const totalMin = Math.round(baseMinutes + jitter);
+    const totalMin = Math.round(Math.min(windowEndMin - 10, Math.max(windowStartMin, baseMinutes + jitter)));
     const hour = Math.floor(totalMin / 60);
     const minute = totalMin % 60;
     return kstWallClockToUtcDate(hour, minute, dayOffset);
   });
+
+  return times.sort((a, b) => a.getTime() - b.getTime());
 }
 
 /** KST 달력 시각 → UTC Date (한국은 DST 없음) */

@@ -127,23 +127,30 @@ export function MQueueItem({
   onAdvance,
   onStop,
   onDelete,
+  selectable,
+  checked,
+  onSelectChange,
 }: {
   icon: string;
   title: string;
   sub: string;
   tag: string;
-  tagTone: 'live' | 'warn' | 'idle';
+  tagTone: 'live' | 'warn' | 'idle' | 'err';
   workspaceBorder?: 'yeonun' | 'quizoasis' | 'panana';
   onClick?: () => void;
   onAdvance?: () => void;
   onStop?: () => void;
   onDelete?: () => void;
+  selectable?: boolean;
+  checked?: boolean;
+  onSelectChange?: (checked: boolean) => void;
 }) {
   return (
     <div
       className={cn(
         onClick ? 'm-qi m-qi-clickable' : 'm-qi',
         workspaceBorder && `m-qi-ws-${workspaceBorder}`,
+        checked && 'm-qi-selected',
       )}
       onClick={onClick}
       onKeyDown={
@@ -159,6 +166,19 @@ export function MQueueItem({
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
     >
+      {selectable ? (
+        <input
+          type="checkbox"
+          className="m-qi-check"
+          checked={checked ?? false}
+          aria-label={`${title} 선택`}
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => {
+            e.stopPropagation();
+            onSelectChange?.(e.target.checked);
+          }}
+        />
+      ) : null}
       <div className="m-qi-ico">{icon}</div>
       <div className="min-w-0 flex-1">
         <div className="m-qi-title">{title}</div>
@@ -179,17 +199,19 @@ export function MQueueItem({
             ⏫
           </button>
         ) : null}
-        <button
-          type="button"
-          className="m-q-btn stop"
-          title={onStop ? '일시정지/재개' : '제거'}
-          onClick={(e) => {
-            e.stopPropagation();
-            onStop?.();
-          }}
-        >
-          ■
-        </button>
+        {onStop ? (
+          <button
+            type="button"
+            className="m-q-btn stop"
+            title="일시정지/재개"
+            onClick={(e) => {
+              e.stopPropagation();
+              onStop();
+            }}
+          >
+            ■
+          </button>
+        ) : null}
         {onDelete ? (
           <button
             type="button"

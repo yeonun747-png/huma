@@ -14,6 +14,20 @@ import {
 } from '../modules/claude/auto-content-orchestrator.js';
 import { assertCafeNewPostAccount, assertCafeReplyAccount } from '../lib/cafe-accounts.js';
 import { assertManualSocialCrankAllowed } from '../lib/crank-guard.js';
+import { getCrankJobSessionDetail } from '../lib/crank-job-session.js';
+import { deleteJobById, deleteJobsByIds } from '../lib/delete-job.js';
+
+async function assertJobWorkspaceAccess(
+  jobId: string,
+  allowedWorkspaces: string[],
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const { data: job } = await supabase.from('huma_jobs').select('workspace').eq('id', jobId).maybeSingle();
+  if (!job) return { ok: false, status: 404, error: '작업 없음' };
+  if (job.workspace && !allowedWorkspaces.includes(job.workspace)) {
+    return { ok: false, status: 403, error: '워크스페이스 접근 권한 없음' };
+  }
+  return { ok: true };
+}
 
 export async function registerJobRoutes(app: FastifyInstance) {
   app.get('/api/jobs', { preHandler: authMiddleware }, async (request) => {
@@ -284,12 +298,50 @@ export async function registerJobRoutes(app: FastifyInstance) {
     return data;
   });
 
-  app.delete('/api/jobs/:id', { preHandler: authMiddleware }, async (request) => {
+  app.delete('/api/jobs/:id', { preHandler: authMiddleware }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const { data: job } = await supabase.from('huma_jobs').select('bull_job_id').eq('id', id).single();
-    if (job?.bull_job_id) await removeBullJob(job.bull_job_id);
-    await supabase.from('huma_jobs').delete().eq('id', id);
+    const allowedWorkspaces = getWorkspaceFilter(request);
+    const access = await assertJobWorkspaceAccess(id, allowedWorkspaces);
+    if (!access.ok) return reply.code(access.status).send({ error: access.error });
+
+    const result = await deleteJobById(id);
+    if (!result.ok) return reply.code(400).send({ error: result.error });
     return { success: true };
+  });
+
+  app.post('/api/jobs/bulk-delete', { preHandler: authMiddleware }, async (request, reply) => {
+    const allowedWorkspaces = getWorkspaceFilter(request);
+    const { ids } = request.body as { ids?: string[] };
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return reply.code(400).send({ error: '삭제할 작업 id가 없습니다' });
+    }
+
+    const allowedIds: string[] = [];
+    for (const id of ids) {
+      const access = await assertJobWorkspaceAccess(id, allowedWorkspaces);
+      if (access.ok) allowedIds.push(id);
+    }
+
+    if (allowedIds.length === 0) {
+      return reply.code(403).send({ error: '삭제 가능한 작업이 없습니다' });
+    }
+
+    const result = await deleteJobsByIds(allowedIds);
+    if (result.deleted === 0) {
+      return reply.code(400).send({
+        error: result.errors[0] ?? '삭제 실패',
+        deleted: 0,
+        failed: result.failed,
+        errors: result.errors,
+      });
+    }
+
+    return {
+      success: true,
+      deleted: result.deleted,
+      failed: result.failed,
+      errors: result.errors,
+    };
   });
 
   app.post('/api/jobs/:id/run-now', { preHandler: authMiddleware }, async (request, reply) => {
@@ -339,5 +391,25 @@ export async function registerJobRoutes(app: FastifyInstance) {
 
     const { data } = await query;
     return data ?? [];
+  });
+
+  app.get('/api/jobs/:id/crank-session', { preHandler: authMiddleware }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const allowedWorkspaces = getWorkspaceFilter(request);
+
+    const { data: job } = await supabase
+      .from('huma_jobs')
+      .select('workspace')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (!job) return reply.code(404).send({ error: '작업 없음' });
+    if (job.workspace && !allowedWorkspaces.includes(job.workspace)) {
+      return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
+    }
+
+    const detail = await getCrankJobSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: 'C-Rank 작업 아님' });
+    return detail;
   });
 }

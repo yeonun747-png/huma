@@ -74,8 +74,12 @@ export function buildEnqueuePayload(job: JobRecord) {
 
 export async function removeBullJob(bullJobId?: string | null) {
   if (!bullJobId) return;
-  const job = await humaQueue.getJob(bullJobId);
-  if (job) await job.remove();
+  try {
+    const job = await humaQueue.getJob(bullJobId);
+    if (job) await job.remove();
+  } catch {
+    // Redis/Bull 정리 실패해도 DB 삭제는 진행
+  }
 }
 
 export async function enqueueHumaJob(job: JobRecord, opts?: { immediate?: boolean }) {

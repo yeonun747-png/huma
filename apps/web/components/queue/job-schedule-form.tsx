@@ -152,3 +152,27 @@ export function formatScheduleLabel(iso?: string): string {
     hour12: false,
   });
 }
+
+export function isSchedulePast(iso?: string): boolean {
+  if (!iso) return false;
+  return new Date(iso).getTime() < Date.now();
+}
+
+/** 미래: 「오늘 22:30 시작 예정」 / 과거: 「어제 22:30 예정 시각」 */
+export function formatScheduleStartDesc(iso?: string): string {
+  if (!iso) return '—';
+  const when = formatScheduleLabel(iso);
+  return isSchedulePast(iso) ? `${when} 예정 시각` : `${when} 시작 예정`;
+}
+
+/** 큐 태그 — 지난 예약·미실행이면 「지연」 */
+export function formatScheduleQueueTag(iso: string | undefined, status: string): string {
+  if (!iso) return status;
+  const when = formatScheduleLabel(iso);
+  if (isSchedulePast(iso) && (status === 'scheduled' || status === 'pending')) {
+    return `${when} · 지연`;
+  }
+  if (status === 'failed') return `${when} · 실패`;
+  return when;
+}
+

@@ -136,7 +136,12 @@ export async function runDailyCrankScheduler(): Promise<void> {
   );
 
   const scheduleWindow = await getCrankScheduleWindow();
-  const startTimes = distributeCrankStartTimesKst(accounts.length, 0, scheduleWindow);
+  const startTimes = distributeCrankStartTimesKst(
+    accounts.length,
+    0,
+    scheduleWindow,
+    policy.activeModemCount,
+  );
 
   for (let i = 0; i < accounts.length; i++) {
     const account = accounts[i];

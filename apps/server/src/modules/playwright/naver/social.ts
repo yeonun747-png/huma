@@ -74,7 +74,7 @@ function filterUrlsByVisitInterval(
   });
 }
 
-/** v3.28 — 네이버 블로그 검색(where=blog)으로 타겟 URL 자동 탐색 (직접 URL 입력 금지) */
+/** v3.28 — 네이버 블로그 검색(where=blog)으로 타겟 URL 자동 탐색 */
 async function searchNaverBlogs(
   page: Page,
   keywords: string[],
@@ -83,19 +83,48 @@ async function searchNaverBlogs(
 ): Promise<string[]> {
   if (limit <= 0 || keywords.length === 0) return [];
 
+  const selectors = [
+    'a.api_txt_lines.total_tit',
+    '.total_tit a[href*="blog.naver.com"]',
+    '.view_wrap a[href*="blog.naver.com"]',
+    'a[href*="blog.naver.com/"]',
+  ];
+
   const results: string[] = [];
   for (const keyword of keywords) {
     await page.goto(
       `https://search.naver.com/search.naver?where=blog&query=${encodeURIComponent(keyword)}&sm=tab_jum`,
     );
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('networkidle').catch(() => {});
     await scaledHumanSleep(2000, 4000, scale);
 
-    const links = await page.locator('.api_txt_lines.total_tit a, .total_tit a').all();
-    for (const link of links) {
-      const href = await link.getAttribute('href');
-      if (href?.includes('blog.naver.com') && !results.includes(href)) results.push(href);
+    for (const selector of selectors) {
+      const links = await page.locator(selector).all();
+      for (const link of links) {
+        let href = await link.getAttribute('href');
+        if (!href?.trim()) continue;
+        if (href.startsWith('//')) href = `https:${href}`;
+        if (href.startsWith('/')) href = `https://search.naver.com${href}`;
+        if (href.includes('blog.naver.com') && !results.includes(href)) results.push(href);
+      }
+      if (results.length >= limit) break;
     }
+
+    if (results.length < limit) {
+      await page.mouse.wheel(0, 400);
+      await scaledHumanSleep(1000, 2000, scale);
+      for (const selector of selectors) {
+        const links = await page.locator(selector).all();
+        for (const link of links) {
+          let href = await link.getAttribute('href');
+          if (!href?.trim()) continue;
+          if (href.startsWith('//')) href = `https:${href}`;
+          if (href.startsWith('/')) href = `https://search.naver.com${href}`;
+          if (href.includes('blog.naver.com') && !results.includes(href)) results.push(href);
+        }
+      }
+    }
+
     if (results.length >= limit) break;
     await scaledHumanSleep(3000, 6000, scale);
   }
@@ -194,6 +223,10 @@ export async function runSocialCrank(
         .slice(0, otherTarget);
       const ourUrls = filterUrlsByVisitInterval(shuffleArray(ourBlogUrls), visitHistory, config.min_visit_interval_days)
         .slice(0, ourTarget);
+
+      if (otherTarget > 0 && otherUrls.length === 0 && otherCandidates.length === 0) {
+        throw new Error('NO_LINKS_FOUND:session:네이버 블로그 검색');
+      }
 
       const allTargets: BlogTarget[] = [
         ...buildBlogTargets(otherUrls, persona, false),

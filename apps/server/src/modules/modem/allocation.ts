@@ -16,6 +16,23 @@ function postingLockKey(port: number) {
   return `modem_lock:posting:${port}`;
 }
 
+/** Redis 기준 유휴 C-Rank SOCKS 슬롯 수 (세션 시작 전 선확인용) */
+export async function countIdleCrankModemSlots(): Promise<number> {
+  const crankPorts = await getSchedulableCrankProxyPorts();
+  const portPool = crankPorts.length > 0 ? crankPorts : [...CRANK_PROXY_PORTS];
+  let idle = 0;
+  for (const port of portPool) {
+    const crankLock = await redisConnection.get(crankLockKey(port));
+    const postingLock = await redisConnection.get(postingLockKey(port));
+    if (!crankLock && !postingLock) idle++;
+  }
+  return idle;
+}
+
+export async function hasIdleCrankModem(): Promise<boolean> {
+  return (await countIdleCrankModemSlots()) > 0;
+}
+
 /** v3.22 §7-13-1 — posting: DB 고정 / crank: Redis 유휴 슬롯 동적 할당 */
 export async function getModemProxyPort(
   accountId: string,

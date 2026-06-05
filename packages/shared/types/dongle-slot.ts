@@ -1,4 +1,4 @@
-import type { Workspace } from './account.js';
+import type { Workspace } from './account';
 
 /** 물리 동글 번호 = slot_number = 192.168.3.{slot} (관리·3proxy bind) */
 export const POSTING_DONGLE_SLOTS = [
