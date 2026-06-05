@@ -4,10 +4,11 @@ import { supabase } from '../middleware/auth.js';
 import { getSetting } from './settings.js';
 import {
   computeCrankSchedulePolicy,
-  distributeCrankStartTimesKst,
+  distributeCrankScheduleSlotsKst,
   formatKstDateKey,
   getKstClock,
   getKstYmd,
+  proxyPortForCrankTrack,
 } from './crank-schedule-config.js';
 import {
   applyLiveProbeToCrankDisplay,
@@ -136,7 +137,7 @@ export async function runDailyCrankScheduler(): Promise<void> {
   );
 
   const scheduleWindow = await getCrankScheduleWindow();
-  const startTimes = distributeCrankStartTimesKst(
+  const scheduleSlots = distributeCrankScheduleSlotsKst(
     accounts.length,
     0,
     scheduleWindow,
@@ -145,13 +146,18 @@ export async function runDailyCrankScheduler(): Promise<void> {
 
   for (let i = 0; i < accounts.length; i++) {
     const account = accounts[i];
+    const slot = scheduleSlots[i];
     const crankWorkspace = workspaceById.get(account.id) ?? 'yeonun';
     const ourBlogUrls = await fetchPostingBlogUrls(crankWorkspace);
-    const scheduledAt = startTimes[i].toISOString();
+    const scheduledAt = slot.at.toISOString();
+    const crankTrack = slot.track;
+    const preferredProxyPort = proxyPortForCrankTrack(crankTrack);
     const sessionPayload = {
       scheduledCrank: true,
       ourBlogUrls,
       sessionMinutes: 60,
+      crankTrack,
+      preferredProxyPort,
     };
 
     const { data: job, error } = await supabase

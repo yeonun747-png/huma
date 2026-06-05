@@ -3,14 +3,6 @@ import { redisConnection } from '../modules/queue/producer.js';
 import { reconnectModemBySlot } from '../modules/modem/reconnect.js';
 import { proxyPortToSlot } from './modem-ports.js';
 import { logOperation } from './log-emitter.js';
-import { sleep } from './utils.js';
-
-/**
- * 규칙 ⑦ — 모뎀 물리 재연결 성공 후 다음 계정 세션 시작 전 대기 (네이버 탐지 회피).
- * IP 재할당용 sleep(5000)은 reconnectModemBySlot 내부 기술적 대기와 별개 맥락.
- */
-const POST_RECONNECT_SESSION_WAIT_MS =
-  Number(process.env.HUMA_CRANK_RECONNECT_WAIT_MS) || 10 * 60 * 1000;
 
 const LAST_ACCOUNT_TTL_SEC = 86400;
 
@@ -28,9 +20,9 @@ export async function recordLastAccountOnModem(port: number, accountId: string):
 }
 
 /**
- * v3.30 C-Rank — 다른 계정이 쓰던 동글이면 비행기모드 1회 시도.
- * - 성공 + IP 동일: 재시도 없이 진행 → 규칙 ⑦ 10분 대기 후 세션 시작
- * - 실패(sudo 등): WARN 로그 후 이전 IP 유지 채로 진행 (C-Rank만; 카페는 별도 rotateCafeSession)
+ * v3.33 C-Rank — 다른 계정이 쓰던 동글이면 비행기모드 1회 시도.
+ * 규칙 ⑦: 별도 고정 대기 없음 — reconnect(5s) + preSessionWarmup(2~5분)이 자연 간격.
+ * 실패(sudo 등): WARN 후 이전 IP 유지 진행 (카페는 rotateCafeSession에서 스킵).
  */
 export async function reconnectModemIfAccountSwitched(
   proxyPort: number,
@@ -50,7 +42,7 @@ export async function reconnectModemIfAccountSwitched(
   const oldIp = modem?.current_ip ?? null;
   let newIp: string;
   try {
-    // reconnectModemBySlot 내부 sleep(5000) = IP 재할당 완료 대기 (기술적)
+    // reconnectModemBySlot 내부 sleep(5000) = IP 재할당 완료 대기
     newIp = await reconnectModemBySlot(slot);
   } catch (err) {
     await logOperation({
@@ -71,10 +63,6 @@ export async function reconnectModemIfAccountSwitched(
     modem_id: modem?.id,
     account_id: accountId,
   });
-
-  if (POST_RECONNECT_SESSION_WAIT_MS > 0) {
-    await sleep(POST_RECONNECT_SESSION_WAIT_MS);
-  }
 
   return true;
 }

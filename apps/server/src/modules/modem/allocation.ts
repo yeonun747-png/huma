@@ -36,7 +36,7 @@ export async function hasIdleCrankModem(): Promise<boolean> {
 /** v3.22 §7-13-1 — posting: DB 고정 / crank: Redis 유휴 슬롯 동적 할당 */
 export async function getModemProxyPort(
   accountId: string,
-  opts?: { lockTtlSec?: number },
+  opts?: { lockTtlSec?: number; preferredProxyPort?: number },
 ): Promise<number> {
   const lockTtl = opts?.lockTtlSec ?? MODEM_LOCK_TTL_SEC;
   const { data: account } = await supabase
@@ -66,7 +66,8 @@ export async function getModemProxyPort(
   const portPool =
     crankPorts.length > 0 ? crankPorts : [...CRANK_PROXY_PORTS];
 
-  for (const port of shuffleArray(portPool)) {
+  const tryAcquirePort = async (port: number): Promise<number | null> => {
+    if (!portPool.includes(port)) return null;
     const acquired = await redisConnection.set(
       crankLockKey(port),
       accountId,
@@ -74,14 +75,26 @@ export async function getModemProxyPort(
       lockTtl,
       'NX',
     );
-    if (acquired !== 'OK') continue;
-
+    if (acquired !== 'OK') return null;
     const postingLock = await redisConnection.get(postingLockKey(port));
     if (postingLock) {
       await redisConnection.del(crankLockKey(port));
-      continue;
+      return null;
     }
     return port;
+  };
+
+  if (opts?.preferredProxyPort) {
+    const preferred = await tryAcquirePort(opts.preferredProxyPort);
+    if (preferred) return preferred;
+    throw new Error(
+      `[getModemProxyPort] C-Rank 동글 ${opts.preferredProxyPort} 사용 중 (스케줄 트랙 대기)`,
+    );
+  }
+
+  for (const port of shuffleArray(portPool)) {
+    const acquired = await tryAcquirePort(port);
+    if (acquired) return acquired;
   }
 
   throw new Error(`[getModemProxyPort] 유휴 C-Rank 동글 없음. accountId=${accountId}`);

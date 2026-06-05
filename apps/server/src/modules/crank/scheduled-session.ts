@@ -8,6 +8,8 @@ export interface ScheduledCrankPayload {
   ourBlogUrls: string[];
   scheduledCrank?: boolean;
   sessionMinutes?: number;
+  crankTrack?: number;
+  preferredProxyPort?: number;
 }
 
 /** 스케줄 세션: 모뎀 할당 → (계정 전환 시에만 IP 1회 교체) → crank → last_crank_at·데이터 누적 */
@@ -20,6 +22,7 @@ export async function executeScheduledSocialCrank(
   try {
     modemSession = await acquireModem(accountId, {
       lockTtlSec: CRANK_SCHEDULED_LOCK_TTL_SEC,
+      preferredProxyPort: payload.preferredProxyPort,
     });
     if (!modemSession) throw new Error('NO_MODEM');
 

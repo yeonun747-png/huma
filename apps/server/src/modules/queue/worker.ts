@@ -256,11 +256,15 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
           const crankPayload = payload as {
             ourBlogUrls?: string[];
             scheduledCrank?: boolean;
+            crankTrack?: number;
+            preferredProxyPort?: number;
           };
           if (crankPayload.scheduledCrank) {
             await executeScheduledSocialCrank(accountId!, {
               ourBlogUrls: crankPayload.ourBlogUrls ?? [],
               scheduledCrank: true,
+              crankTrack: crankPayload.crankTrack,
+              preferredProxyPort: crankPayload.preferredProxyPort,
             });
           } else {
             await executeSocialCrank(accountId!, {
@@ -305,7 +309,11 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
           });
           return;
         }
-        if (humaJobId && type === 'social_crank' && (err as Error).message === 'NO_IDLE_MODEM') {
+        if (
+          humaJobId &&
+          type === 'social_crank' &&
+          ((err as Error).message === 'NO_IDLE_MODEM' || (err as Error).message === 'MODEM_BUSY')
+        ) {
           await deferCrankForIdleModem(job, humaJobId, accountId);
           return;
         }

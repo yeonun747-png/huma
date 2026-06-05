@@ -166,7 +166,7 @@ export async function runSocialCrank(
     }
     if (!modemSession) throw new Error('NO_MODEM');
 
-    // v3.30 — 계정 전환 시 비행기모드 1회 + (성공 시) 규칙 ⑦ 10분 대기
+    // v3.33 — 계정 전환 시 reconnect 1회 → preSessionWarmup이 자연 간격(규칙⑦)
     await reconnectModemIfAccountSwitched(modemSession.proxyPort, accountId);
     const accountCtx = await loadAccountForBrowser(accountId, modemSession.proxyPort);
     if (accountCtx.account_type !== 'crank') {

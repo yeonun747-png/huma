@@ -69,7 +69,7 @@ export async function reconnectModemBySlot(slotNumber: number): Promise<string> 
     await sleep(3000);
   }
 
-  await sleep(5000); // IP 재할당 완료 대기 (기술적 — 규칙 ⑦ 10분 세션 간격과 별개)
+  await sleep(5000); // IP 재할당 완료 대기 (v3.33 규칙⑦: 별도 고정 대기 없음)
   const newIp = readInterfaceIp(iface);
   if (!newIp) {
     throw new Error(`${iface} IP 재발급 실패`);

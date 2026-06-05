@@ -85,7 +85,7 @@ export async function registerModemRoutes(app: FastifyInstance) {
         .eq('id', id)
         .select()
         .single();
-      return { ...data, message: '재연결 시작됨 (10분 후 완료)' };
+      return { ...data, message: '재연결 시작됨 (IP 재할당 중)' };
     } catch (err) {
       return reply.code(500).send({ error: (err as Error).message });
     }

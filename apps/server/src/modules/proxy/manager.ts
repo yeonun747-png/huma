@@ -14,7 +14,7 @@ export interface ModemSession {
 
 export async function acquireModem(
   accountId: string,
-  opts?: { lockTtlSec?: number },
+  opts?: { lockTtlSec?: number; preferredProxyPort?: number },
 ): Promise<ModemSession | undefined> {
   const { data: account } = await supabase
     .from('huma_accounts')
@@ -35,7 +35,10 @@ export async function acquireModem(
     if ((err as Error).message.includes('유휴 C-Rank')) {
       throw new Error('NO_IDLE_MODEM');
     }
-    if ((err as Error).message.includes('C-Rank 사용 중')) {
+    if (
+      (err as Error).message.includes('C-Rank 사용 중') ||
+      (err as Error).message.includes('스케줄 트랙 대기')
+    ) {
       throw new Error('MODEM_BUSY');
     }
     throw err;

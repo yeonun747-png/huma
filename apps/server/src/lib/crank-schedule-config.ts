@@ -1,3 +1,5 @@
+import { CRANK_PROXY_PORTS } from './modem-ports.js';
+
 /** 레거시 기본값 — 실제 풀 크기는 DB 활성 crank 계정 수 */
 export const CRANK_POOL_SIZE_DEFAULT = 50;
 export const SESSION_DURATION_MINUTES = 60;
@@ -7,14 +9,30 @@ export const MAX_CRANK_SESSIONS_PER_MODEM_PER_DAY = 6;
 export const SCHEDULE_WINDOW_START_HOUR = 8;
 export const SCHEDULE_WINDOW_END_HOUR = 22;
 export const START_JITTER_MINUTES = 15;
-/** 스케줄 슬롯 간격 버퍼(분). 규칙 ⑦ 10분 대기는 계정 전환 reconnect 성공 시에만 적용 */
-export const SESSION_SLOT_BUFFER_MINUTES = 1;
+
+/**
+ * v3.33 — 동글 1트랙 연속 scheduled_at 간격 = 세션 60분.
+ * 계정 전환 시 reconnect+워밍업(2~5분)은 job 시작 시 자연 소요(규칙 ⑦).
+ */
+export const SESSION_SLOT_MINUTES = SESSION_DURATION_MINUTES;
+
+export interface CrankScheduleSlot {
+  at: Date;
+  /** 0=슬롯6(:10006), 1=슬롯7(:10007) */
+  track: number;
+}
 
 export interface CrankSchedulePolicy {
   activeModemCount: number;
   cycleDays: number;
   dailyAccountCount: number;
   maxSessionsPerModemPerDay: number;
+}
+
+export function proxyPortForCrankTrack(track: number): number {
+  const ports = [...CRANK_PROXY_PORTS];
+  if (ports.length === 0) return 10006;
+  return ports[((track % ports.length) + ports.length) % ports.length]!;
 }
 
 /** 활성 crank 동글 수 + 풀 크기 → 활동 주기·일일 계정 수 (i7 7동글: C-Rank 2) */
@@ -48,38 +66,90 @@ export function computeCrankSchedulePolicy(
   };
 }
 
-/** 08:00~22:00 KST — 동글 수만큼 트랙 병렬 + 세션(60분) 간격 */
-export function distributeCrankStartTimesKst(
+function clampScheduleMinute(
+  totalMin: number,
+  windowStartMin: number,
+  windowEndMin: number,
+): number {
+  return Math.round(Math.min(windowEndMin - 10, Math.max(windowStartMin, totalMin)));
+}
+
+/**
+ * v3.33 — 08:00~22:00 KST
+ * - 트랙 고정: track0=슬롯6, track1=슬롯7 (preferredProxyPort)
+ * - 같은 트랙 wave 간격: 60분 (세션 길이)
+ * - 병렬 트랙: 동일 wave 동시 시작 (슬롯6·7 병렬)
+ */
+export function distributeCrankScheduleSlotsKst(
   count: number,
   dayOffset = 0,
   window?: { start: number; end: number },
   modemCount = 1,
-): Date[] {
+): CrankScheduleSlot[] {
   if (count <= 0) return [];
 
   const startHour = window?.start ?? SCHEDULE_WINDOW_START_HOUR;
   const endHour = window?.end ?? SCHEDULE_WINDOW_END_HOUR;
   const windowStartMin = startHour * 60;
   const windowEndMin = endHour * 60;
-  const slotMinutes = SESSION_DURATION_MINUTES + SESSION_SLOT_BUFFER_MINUTES;
+  const slotMinutes = SESSION_SLOT_MINUTES;
   const tracks = Math.max(1, Math.floor(modemCount));
+  const waveCount = Math.ceil(count / tracks);
 
-  const times = Array.from({ length: count }, (_, i) => {
-    const track = i % tracks;
-    const wave = Math.floor(i / tracks);
-    let baseMinutes = windowStartMin + wave * slotMinutes + track * 4;
-    if (baseMinutes > windowEndMin - 20) {
+  const slots: CrankScheduleSlot[] = [];
+
+  for (let wave = 0; wave < waveCount; wave++) {
+    const jitter0 = (Math.random() * 2 - 1) * START_JITTER_MINUTES;
+    let waveStartMin = clampScheduleMinute(
+      windowStartMin + wave * slotMinutes + jitter0,
+      windowStartMin,
+      windowEndMin - 10,
+    );
+
+    if (waveStartMin > windowEndMin - 20) {
       const span = windowEndMin - windowStartMin;
-      baseMinutes = windowStartMin + (span * (i + 1)) / (count + 1);
+      for (let track = 0; track < tracks; track++) {
+        const idx = wave * tracks + track;
+        if (idx >= count) break;
+        const baseMinutes = clampScheduleMinute(
+          windowStartMin + (span * (idx + 1)) / (count + 1),
+          windowStartMin,
+          windowEndMin,
+        );
+        const hour = Math.floor(baseMinutes / 60);
+        const minute = baseMinutes % 60;
+        slots.push({
+          track: track % tracks,
+          at: kstWallClockToUtcDate(hour, minute, dayOffset),
+        });
+      }
+      continue;
     }
-    const jitter = (Math.random() * 2 - 1) * START_JITTER_MINUTES;
-    const totalMin = Math.round(Math.min(windowEndMin - 10, Math.max(windowStartMin, baseMinutes + jitter)));
-    const hour = Math.floor(totalMin / 60);
-    const minute = totalMin % 60;
-    return kstWallClockToUtcDate(hour, minute, dayOffset);
-  });
 
-  return times.sort((a, b) => a.getTime() - b.getTime());
+    for (let track = 0; track < tracks; track++) {
+      const idx = wave * tracks + track;
+      if (idx >= count) break;
+      const totalMin = waveStartMin;
+      const hour = Math.floor(totalMin / 60);
+      const minute = totalMin % 60;
+      slots.push({
+        track,
+        at: kstWallClockToUtcDate(hour, minute, dayOffset),
+      });
+    }
+  }
+
+  return slots.sort((a, b) => a.at.getTime() - b.at.getTime());
+}
+
+/** @deprecated distributeCrankScheduleSlotsKst 사용 */
+export function distributeCrankStartTimesKst(
+  count: number,
+  dayOffset = 0,
+  window?: { start: number; end: number },
+  modemCount = 1,
+): Date[] {
+  return distributeCrankScheduleSlotsKst(count, dayOffset, window, modemCount).map((s) => s.at);
 }
 
 /** KST 달력 시각 → UTC Date (한국은 DST 없음) */
