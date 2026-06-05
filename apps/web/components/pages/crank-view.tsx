@@ -132,7 +132,7 @@ export function CrankView() {
       const bg = opts?.background === true;
       setSyncingProxy(true);
       try {
-        await api.modems({ probe: true, slots: [6, 7], timeoutMs: 25_000 });
+        await api.modems({ probe: true, slots: [6, 7], timeoutMs: 60_000 });
       } catch {
         /* probe 실패해도 스케줄러는 표시 */
       }

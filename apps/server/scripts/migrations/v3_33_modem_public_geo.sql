@@ -1,0 +1,3 @@
+-- 프록시 관리 UI: SOCKS 공인 IP · 지역 (목업 RESIDENTIAL PROXY)
+ALTER TABLE huma_modems ADD COLUMN IF NOT EXISTS public_ip VARCHAR(45);
+ALTER TABLE huma_modems ADD COLUMN IF NOT EXISTS geo_region VARCHAR(50);

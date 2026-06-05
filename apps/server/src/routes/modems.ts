@@ -15,8 +15,8 @@ function parseProbeSlots(raw: string | undefined): Set<number> | null {
 
 /** 3proxy·동글 동시 curl 시 간헐 타임아웃 — 순차 probe */
 const MODEM_PROBE_CONCURRENCY = 1;
-const MODEM_PROBE_ROUTE_MS_FULL = 120_000;
-const MODEM_PROBE_ROUTE_MS_PARTIAL = 90_000;
+const MODEM_PROBE_ROUTE_MS_FULL = 180_000;
+const MODEM_PROBE_ROUTE_MS_PARTIAL = 60_000;
 
 async function probeModemsInRoute(
   modems: Array<Record<string, unknown> & { slot_number: number; proxy_port?: number | null }>,
@@ -48,6 +48,8 @@ async function probeModemsInRoute(
       status: probed.status,
       response_ms: probed.response_ms,
       ...(probed.current_ip ? { current_ip: probed.current_ip } : {}),
+      ...(probed.public_ip ? { public_ip: probed.public_ip } : {}),
+      ...(probed.geo_region ? { geo_region: probed.geo_region } : {}),
     };
   });
 }

@@ -1,5 +1,6 @@
 import { supabase } from '../middleware/auth.js';
 import { readInterfaceIp } from './dongle-health.js';
+import { fetchModemPublicGeo } from './modem-geo.js';
 import { probeModemSocks } from './modem-socks-probe.js';
 
 /** 물리 동글 SOCKS probe 대상 (프록시 관리와 동일: 슬롯 1~7) */
@@ -17,8 +18,20 @@ export type ModemProbeOutput = {
   probe_ok: boolean;
   response_ms: number | null;
   status: string;
+  /** RNDIS/DHCP 사설 IP (재연결·3proxy용) */
   current_ip?: string | null;
+  /** SOCKS egress 공인 IP */
+  public_ip?: string | null;
+  geo_region?: string | null;
 };
+
+async function persistModemProbePatch(id: string, patch: Record<string, unknown>): Promise<void> {
+  const { error } = await supabase.from('huma_modems').update(patch).eq('id', id);
+  if (error && /column .* does not exist/i.test(error.message)) {
+    const { public_ip: _p, geo_region: _g, ...rest } = patch;
+    await supabase.from('huma_modems').update(rest).eq('id', id);
+  }
+}
 
 /**
  * 프록시 관리 `GET /api/modems?probe=1` 과 동일 절차:
@@ -37,11 +50,19 @@ export async function applyModemProxyProbe(
   const patch: Record<string, unknown> = { response_ms: health.ms };
   let nextStatus = modem.status;
 
+  let publicIp: string | null = null;
+  let geoRegion: string | null = null;
+
   if (health.ok) {
     if (!['busy', 'reconnecting'].includes(modem.status)) {
       patch.status = 'idle';
       nextStatus = 'idle';
     }
+    const geo = await fetchModemPublicGeo(modem.proxy_port);
+    publicIp = geo.public_ip;
+    geoRegion = geo.geo_region;
+    if (publicIp) patch.public_ip = publicIp;
+    if (geoRegion) patch.geo_region = geoRegion;
   } else if (modem.status !== 'reconnecting') {
     patch.status = 'error';
     nextStatus = 'error';
@@ -50,7 +71,7 @@ export async function applyModemProxyProbe(
   if (ifaceIp) patch.current_ip = ifaceIp;
 
   if (options?.persist !== false && modem.id) {
-    await supabase.from('huma_modems').update(patch).eq('id', modem.id);
+    await persistModemProbePatch(modem.id, patch);
   }
 
   return {
@@ -58,6 +79,8 @@ export async function applyModemProxyProbe(
     response_ms: health.ms,
     status: nextStatus,
     current_ip: ifaceIp ?? undefined,
+    public_ip: publicIp ?? undefined,
+    geo_region: geoRegion ?? undefined,
   };
 }
 

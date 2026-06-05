@@ -136,7 +136,7 @@ export const api = {
         probe: opts?.probe ? '1' : undefined,
         slots: opts?.slots?.length ? opts.slots.join(',') : undefined,
       })}`,
-      { timeoutMs: opts?.timeoutMs ?? (opts?.probe ? 18_000 : undefined) },
+      { timeoutMs: opts?.timeoutMs ?? (opts?.probe ? 180_000 : undefined) },
     ),
   reconnectModem: (id: string) => request(`/api/modems/${id}/reconnect`, { method: 'POST' }),
   logs: (params?: { level?: string; platform?: string; limit?: string }) =>

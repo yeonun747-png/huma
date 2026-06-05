@@ -18,14 +18,14 @@ function resolveCurlBin(): string {
   return 'curl';
 }
 
-const CURL_BIN = resolveCurlBin();
+export const CURL_BIN = resolveCurlBin();
 
 /** LTE 동글 SOCKS — 8초는 간헐 타임아웃(exit 28) 빈번 */
 export const MODEM_SOCKS_PROBE_TIMEOUT_MS = 18_000;
 
 const PROBE_FAIL = { ok: false, ms: null } as const;
 
-function curlSubprocessEnv(): NodeJS.ProcessEnv {
+export function curlSubprocessEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const key of [
     'http_proxy',

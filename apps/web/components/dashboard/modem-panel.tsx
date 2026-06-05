@@ -32,8 +32,11 @@ export function ModemPanel() {
               <span className={cn(STATUS[m.status] ?? 'tag-idle')}>{m.status}</span>
             </div>
             <div className="stat-value text-base">:{m.proxy_port}</div>
-            <div className="font-mono text-[10.5px] text-huma-t3">{m.current_ip ?? '—'}</div>
-            <div className="font-mono text-[10.5px] text-huma-t3">{m.carrier ?? ''} · {m.response_ms ?? '—'}ms</div>
+            <div className="font-mono text-[10.5px] text-huma-t3">
+              {m.public_ip ?? m.current_ip ?? '—'}
+              {m.geo_region ? ` · ${m.geo_region}` : ''}
+            </div>
+            <div className="font-mono text-[10.5px] text-huma-t3">{m.response_ms != null ? `${m.response_ms}ms` : '—'}</div>
             <button type="button" className="btn-ghost mt-2 w-full text-[10px]" onClick={() => api.reconnectModem(m.id).then(() => api.modems({ probe: true }).then(setModems))}>
               IP 재발급
             </button>

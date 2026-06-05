@@ -14,6 +14,23 @@ import { MPanel, MTable, MTag } from '@/components/mockup/primitives';
 import { useRegisterPageAction } from '@/components/dashboard/page-action-context';
 
 const I7_PHYSICAL_SLOTS = 7;
+/** 목업: 289ms 지연, 200ms 이하 정상 */
+const PROBE_DELAY_MS = 220;
+
+function maskPublicIp(ip: string): string {
+  const parts = ip.split('.');
+  if (parts.length === 4) return `${parts[0]}.${parts[1]}.x.x`;
+  return ip;
+}
+
+function modemStatusTag(m: HumaModem): { label: string; tone: 'ok' | 'warn' | 'err' | 'idle' } {
+  if (m.status === 'error') return { label: '오류', tone: 'err' };
+  if (m.status === 'reconnecting') return { label: '재연결', tone: 'warn' };
+  if (m.status === 'offline') return { label: '오프라인', tone: 'idle' };
+  if (m.response_ms != null && m.response_ms > PROBE_DELAY_MS) return { label: '지연', tone: 'warn' };
+  if (m.status === 'idle') return { label: '정상', tone: 'ok' };
+  return { label: m.status, tone: 'idle' };
+}
 
 const SLOT_SERVICE_LABEL: Record<number, string> = {
   1: '연운',
@@ -97,10 +114,6 @@ export function ModemsView() {
       const m = resolveModemForSlot(modems, def);
       const slot = def.slot;
       const ac = accountForModem(m, accounts);
-      const mgmtIp = dongleManagementIp(slot);
-      const displayIp = m.current_ip?.startsWith('192.168.3.')
-        ? m.current_ip
-        : mgmtIp;
       const ws =
         def.workspace ??
         postingSlotByPort(m.proxy_port)?.workspace ??
@@ -109,21 +122,32 @@ export function ModemsView() {
         SLOT_SERVICE_LABEL[slot] ??
         WORKSPACES.find((w) => w.id === ws)?.short ??
         '—';
-      const tone =
-        m.status === 'error' ? 'err' : m.status === 'reconnecting' ? 'warn' : 'ok';
+      const { label: statusLabel, tone } = modemStatusTag(m);
+      const publicIp = m.public_ip?.trim();
+      const displayIp = publicIp ? maskPublicIp(publicIp) : '—';
+      const region = m.geo_region?.trim() || '—';
+      const msTone = tone === 'ok' ? 'ok' : tone === 'warn' ? 'warn' : 'err';
 
       return [
-        def.label ?? ac?.name ?? `동글 ${slot}`,
+        ac?.name ?? def.label ?? `동글 ${slot}`,
         service,
-        <span key="ip" className="font-mono" title={`물리 동글 ${slot} · SOCKS :${m.proxy_port}`}>
+        <span
+          key="ip"
+          className="font-mono"
+          title={
+            publicIp
+              ? `${publicIp} · 동글 ${slot} · SOCKS :${m.proxy_port}`
+              : `동글 ${slot} · SOCKS :${m.proxy_port} · probe 대기`
+          }
+        >
           {displayIp}
         </span>,
-        m.carrier ?? 'KT',
-        <span key="ms" className={`font-mono ${tone === 'ok' ? 'ok' : tone === 'warn' ? 'warn' : 'err'}`}>
-          {m.response_ms ?? '—'}ms
+        region,
+        <span key="ms" className={`font-mono ${msTone}`}>
+          {m.response_ms != null ? `${m.response_ms}ms` : '—'}
         </span>,
         <MTag key="s" tone={tone}>
-          {m.status === 'idle' ? '정상' : m.status}
+          {statusLabel}
         </MTag>,
       ];
     });
@@ -134,20 +158,20 @@ export function ModemsView() {
       .filter((m) => m.slot_number > I7_PHYSICAL_SLOTS && m.slot_number <= 10)
       .sort((a, b) => a.slot_number - b.slot_number)
       .map((m) => {
-        const tone =
-          m.status === 'error' ? 'err' : m.status === 'reconnecting' ? 'warn' : 'ok';
+        const { label: statusLabel, tone } = modemStatusTag(m);
+        const publicIp = m.public_ip?.trim();
         return [
           `슬롯 ${m.slot_number}`,
           m.modem_role ?? '—',
-          <span key="ip" className="font-mono" title={`SOCKS :${m.proxy_port}`}>
-            {m.current_ip ?? '—'}
+          <span key="ip" className="font-mono" title={publicIp ?? `SOCKS :${m.proxy_port}`}>
+            {publicIp ? maskPublicIp(publicIp) : '—'}
           </span>,
-          m.carrier ?? '—',
+          m.geo_region?.trim() || '—',
           <span key="ms" className="font-mono">
-            {m.response_ms ?? '—'}ms
+            {m.response_ms != null ? `${m.response_ms}ms` : '—'}
           </span>,
           <MTag key="s" tone={tone}>
-            {m.status === 'idle' ? '정상' : m.status}
+            {statusLabel}
           </MTag>,
         ];
       });
@@ -155,10 +179,10 @@ export function ModemsView() {
 
   return (
     <div className="animate-fadeIn">
-      <MPanel title={`물리 동글 1~${I7_PHYSICAL_SLOTS} · 192.168.3.{번호}`}>
+      <MPanel title="RESIDENTIAL PROXY · 계정별 고정 IP">
         <p className="mb-2 font-mono text-[10.5px] text-huma-t3">
-          동글1~3 연운(:10001~10003) · 동글4 파나나(:10004) · 동글5 퀴즈(:10005) · C-Rank
-          동글6~7(:10006~10007)
+          물리 동글 1~{I7_PHYSICAL_SLOTS} · SOCKS probe 시 LTE 공인 IP·지역 표시 · 연운(:10001~10003)
+          · 파나나(:10004) · 퀴즈(:10005) · C-Rank(:10006~10007)
         </p>
         <MTable head={['계정', '서비스', 'IP', '지역', '응답', '상태']} rows={rows} />
         {extraRows.length > 0 && (

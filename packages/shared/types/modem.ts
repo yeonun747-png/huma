@@ -9,6 +9,10 @@ export interface HumaModem {
   proxy_port: number;
   gateway_ip?: string;
   current_ip?: string;
+  /** SOCKS egress 공인 IP (probe 시 갱신) */
+  public_ip?: string;
+  /** 공인 IP 지역 — 서울·부산 등 */
+  geo_region?: string;
   carrier?: string;
   sim_number?: string;
   status: ModemStatus;
