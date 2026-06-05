@@ -1,5 +1,8 @@
 import type { Page } from 'playwright';
+import type { Workspace } from '@huma/shared';
+import { crankWorkspaceFromLabel } from '@huma/shared';
 import { supabase } from '../../../middleware/auth.js';
+import { fetchPostingBlogUrls } from '../../../lib/crank-scheduler.js';
 import { getSetting, getHumanEngineConfig } from '../../../lib/settings.js';
 import { createBrowserForAccount, closeBrowserContext } from '../browser.js';
 import { loadAccountForBrowser, maybeIncrementWarmupDay } from '../account-loader.js';
@@ -14,7 +17,7 @@ import { acquireModem, releaseModem, type ModemSession } from '../../proxy/manag
 import { handleLayer4Detection, isCaptchaError, isBlockError } from '../../watcher/detector.js';
 import { generateCrankComment } from './crank-comment.js';
 import { preSessionWarmup } from './pre-session-warmup.js';
-import { selectCrankKeywords } from './crank-keywords.js';
+import { selectCrankKeywordsForWorkspace } from './crank-keywords.js';
 import {
   reconnectModemIfAccountSwitched,
   recordLastAccountOnModem,
@@ -23,25 +26,94 @@ import { applyCrankResourceBlocking } from './crank-resource-block.js';
 import { logCrankActivity } from '../../../lib/crank-activity.js';
 
 interface SocialCrankConfig {
-  visits_per_session: number;
+  visits_per_session?: number;
+  daily_limit_per_account?: number;
   our_blog_ratio: number;
   other_blog_ratio: number;
   min_visit_interval_days: number;
-  keywords: string[];
+  keyword_pick_count: number;
+  keyword_pools?: Partial<Record<Workspace, string[]>>;
 }
 
-export async function naturalVisitViaSearch(page: Page, keyword: string, scale = 1): Promise<string | null> {
-  await page.goto(`https://search.naver.com/search.naver?where=post&query=${encodeURIComponent(keyword)}`);
-  await page.waitForLoadState('networkidle');
-  await scrollRead(page, randomBetween(2000, 5000));
+interface BlogTarget {
+  url: string;
+  isOurBlog: boolean;
+  doLike: boolean;
+  doComment: boolean;
+}
 
-  const results = await page.locator('.api_txt_lines').all();
-  if (!results.length) return null;
-  const idx = Math.floor(Math.random() * Math.min(5, results.length));
-  await results[idx].click();
-  await scaledHumanSleep(500, 1500, scale);
-  await page.waitForLoadState('networkidle');
-  return page.url();
+async function getAccountCrankWorkspace(accountId: string): Promise<Workspace> {
+  const { data } = await supabase
+    .from('huma_accounts')
+    .select('crank_workspace, crank_label')
+    .eq('id', accountId)
+    .single();
+
+  if (data?.crank_workspace) return data.crank_workspace as Workspace;
+  return crankWorkspaceFromLabel(data?.crank_label) ?? 'yeonun';
+}
+
+async function loadVisitHistory(accountId: string): Promise<Record<string, string>> {
+  const { data } = await supabase
+    .from('huma_accounts')
+    .select('last_visited_our_blog')
+    .eq('id', accountId)
+    .single();
+  return (data?.last_visited_our_blog as Record<string, string>) || {};
+}
+
+function filterUrlsByVisitInterval(
+  urls: string[],
+  visitHistory: Record<string, string>,
+  minIntervalDays: number,
+): string[] {
+  const cutoff = new Date(Date.now() - minIntervalDays * 24 * 60 * 60 * 1000);
+  return urls.filter((url) => {
+    const lastVisit = visitHistory[url];
+    return !lastVisit || new Date(lastVisit) < cutoff;
+  });
+}
+
+/** v3.28 — 네이버 블로그 검색(where=blog)으로 타겟 URL 자동 탐색 (직접 URL 입력 금지) */
+async function searchNaverBlogs(
+  page: Page,
+  keywords: string[],
+  limit: number,
+  scale: number,
+): Promise<string[]> {
+  if (limit <= 0 || keywords.length === 0) return [];
+
+  const results: string[] = [];
+  for (const keyword of keywords) {
+    await page.goto(
+      `https://search.naver.com/search.naver?where=blog&query=${encodeURIComponent(keyword)}&sm=tab_jum`,
+    );
+    await page.waitForLoadState('networkidle');
+    await scaledHumanSleep(2000, 4000, scale);
+
+    const links = await page.locator('.api_txt_lines.total_tit a, .total_tit a').all();
+    for (const link of links) {
+      const href = await link.getAttribute('href');
+      if (href?.includes('blog.naver.com') && !results.includes(href)) results.push(href);
+    }
+    if (results.length >= limit) break;
+    await scaledHumanSleep(3000, 6000, scale);
+  }
+
+  return [...new Set(results)].slice(0, limit);
+}
+
+function buildBlogTargets(
+  urls: string[],
+  persona: AccountPersona,
+  isOurBlog: boolean,
+): BlogTarget[] {
+  return urls.map((url) => ({
+    url,
+    isOurBlog,
+    doLike: Math.random() < (isOurBlog ? persona.likeProb : 0.4),
+    doComment: Math.random() < persona.commentProb,
+  }));
 }
 
 export interface RunSocialCrankOptions {
@@ -51,7 +123,7 @@ export interface RunSocialCrankOptions {
 
 export async function runSocialCrank(
   accountId: string,
-  payload: { ourBlogUrls: string[]; targetDate?: string },
+  payload: { ourBlogUrls?: string[]; targetDate?: string },
   options?: RunSocialCrankOptions,
 ) {
   await maybeIncrementWarmupDay(accountId);
@@ -71,6 +143,7 @@ export async function runSocialCrank(
     if (accountCtx.account_type !== 'crank') {
       throw new Error('ACCOUNT_NOT_CRANK');
     }
+    const crankWorkspace = await getAccountCrankWorkspace(accountId);
     const warmupDay = accountCtx.warmup_day ?? 0;
     const plan = await getTodayPlan(accountCtx);
     const persona = accountCtx.persona;
@@ -80,14 +153,11 @@ export async function runSocialCrank(
       our_blog_ratio: 0.25,
       other_blog_ratio: 0.75,
       min_visit_interval_days: 5,
-      keywords: persona.interests.length ? persona.interests : ['사주풀이', '꿈해몽', '신년운세'],
+      keyword_pick_count: 4,
     });
 
-    const maxVisits = Math.min(
-      config.visits_per_session,
-      plan.blogVisits,
-      maxCrankVisitsForWarmup(warmupDay),
-    );
+    const sessionCap = config.visits_per_session ?? config.daily_limit_per_account ?? 15;
+    const maxVisits = Math.min(sessionCap, plan.blogVisits, maxCrankVisitsForWarmup(warmupDay));
 
     const ourTarget = Math.max(0, Math.round(maxVisits * config.our_blog_ratio));
     const otherTarget = Math.max(0, maxVisits - ourTarget);
@@ -109,28 +179,34 @@ export async function runSocialCrank(
       await naverLogin(context, accountId, { profilePath: accountCtx.profile_path });
       const page = await context.newPage();
 
-      const ourBlogs = await selectOurBlogsToVisit(
-        accountId,
-        payload.ourBlogUrls,
-        persona,
-        ourTarget,
-        config.min_visit_interval_days,
+      const visitHistory = await loadVisitHistory(accountId);
+      const ourBlogUrls =
+        payload.ourBlogUrls?.length ? payload.ourBlogUrls : await fetchPostingBlogUrls(crankWorkspace);
+
+      const keywords = selectCrankKeywordsForWorkspace(
+        crankWorkspace,
+        config.keyword_pools,
+        config.keyword_pick_count ?? 4,
       );
-      const crankKeywords = selectCrankKeywords(config.keywords);
-      const otherBlogs = await searchRelatedBlogs(page, crankKeywords, otherTarget, scale);
-      const allTargets = shuffleArray([...ourBlogs, ...otherBlogs]).slice(0, maxVisits);
+
+      const otherCandidates = await searchNaverBlogs(page, keywords, otherTarget * 2, scale);
+      const otherUrls = filterUrlsByVisitInterval(otherCandidates, visitHistory, config.min_visit_interval_days)
+        .slice(0, otherTarget);
+      const ourUrls = filterUrlsByVisitInterval(shuffleArray(ourBlogUrls), visitHistory, config.min_visit_interval_days)
+        .slice(0, ourTarget);
+
+      const allTargets: BlogTarget[] = [
+        ...buildBlogTargets(otherUrls, persona, false),
+        ...buildBlogTargets(ourUrls, persona, true),
+      ].slice(0, maxVisits);
 
       let likesDone = 0;
       let commentsDone = 0;
+      const visitedUrls: string[] = [];
 
       for (const target of allTargets) {
-        if (target.useSearch && target.keyword) {
-          const url = await naturalVisitViaSearch(page, target.keyword, scale);
-          if (!url) continue;
-        } else {
-          await page.goto(target.url);
-          await page.waitForLoadState('networkidle');
-        }
+        await page.goto(target.url);
+        await page.waitForLoadState('networkidle');
 
         await scrollRead(page, randomBetween(60000, 180000 * (persona.visitDurationMin / 4)));
 
@@ -139,8 +215,9 @@ export async function runSocialCrank(
 
         const pageUrl = page.url();
         const pageTitle = await page.title().catch(() => '');
-        const actions = await visitBlogActions(page, { ...target, doLike, doComment }, scale, accountId, pageUrl, pageTitle);
+        const actions = await visitBlogActions(page, { ...target, doLike, doComment }, scale, crankWorkspace);
         if (actions.visited) {
+          visitedUrls.push(pageUrl);
           await logCrankActivity({
             accountId,
             type: '방문',
@@ -167,7 +244,7 @@ export async function runSocialCrank(
         await humanSleep(30000, 120000);
       }
 
-      await updateVisitHistory(accountId, ourBlogs.map((b) => b.url));
+      await updateVisitHistory(accountId, visitedUrls);
       await updateCrankCount(accountId, allTargets.length);
       await recordLastAccountOnModem(modemSession.proxyPort, accountId);
     } finally {
@@ -187,9 +264,7 @@ async function visitBlogActions(
   page: Page,
   target: { doLike: boolean; doComment: boolean; commentText?: string },
   scale: number,
-  _accountId: string,
-  _pageUrl: string,
-  _pageTitle: string,
+  crankWorkspace: Workspace,
 ): Promise<{ visited: boolean; liked: boolean; commented: boolean; commentText?: string }> {
   let liked = false;
   let commented = false;
@@ -208,7 +283,7 @@ async function visitBlogActions(
     const commentArea = page.locator('.u_cbox_write_wrap textarea');
     if (await commentArea.isVisible()) {
       try {
-        commentText = target.commentText ?? (await generateCrankComment(page));
+        commentText = target.commentText ?? (await generateCrankComment(page, crankWorkspace));
         await scaledHumanSleep(5000, 15000, scale);
         await commentArea.click();
         const humanConfig = await getHumanEngineConfig();
@@ -225,75 +300,9 @@ async function visitBlogActions(
   return { visited: true, liked, commented, commentText };
 }
 
-async function selectOurBlogsToVisit(
-  accountId: string,
-  ourBlogUrls: string[],
-  persona: AccountPersona,
-  maxCount: number,
-  minIntervalDays: number,
-) {
-  if (maxCount <= 0) return [];
-
-  const { data: account } = await supabase
-    .from('huma_accounts')
-    .select('last_visited_our_blog')
-    .eq('id', accountId)
-    .single();
-
-  const visitHistory = (account?.last_visited_our_blog as Record<string, string>) || {};
-  const cutoff = new Date(Date.now() - minIntervalDays * 24 * 60 * 60 * 1000);
-
-  return ourBlogUrls
-    .filter((url) => {
-      const lastVisit = visitHistory[url];
-      return !lastVisit || new Date(lastVisit) < cutoff;
-    })
-    .slice(0, maxCount)
-    .map((url) => ({
-      url,
-      isOurBlog: true,
-      doLike: Math.random() < persona.likeProb,
-      doComment: Math.random() < persona.commentProb,
-      commentText: undefined,
-      useSearch: false,
-      keyword: undefined as string | undefined,
-    }));
-}
-
-async function searchRelatedBlogs(page: Page, keywords: string[], count: number, scale: number) {
-  if (count <= 0) return [];
-
-  const keyword = keywords[Math.floor(Math.random() * keywords.length)];
-  const visitedUrl = await naturalVisitViaSearch(page, keyword, scale);
-
-  const urls: string[] = visitedUrl ? [visitedUrl] : [];
-
-  if (urls.length < count) {
-    await page.goto(`https://search.naver.com/search.naver?where=post&query=${encodeURIComponent(keyword)}`);
-    await page.waitForLoadState('networkidle');
-    await scaledHumanSleep(2000, 4000, scale);
-
-    const links = await page.locator('.detail_box .sub_txt a').all();
-    for (const link of links.slice(0, count + 5)) {
-      const href = await link.getAttribute('href');
-      if (href?.includes('blog.naver.com') && !urls.includes(href)) urls.push(href);
-    }
-  }
-
-  return shuffleArray(urls)
-    .slice(0, count)
-    .map((url) => ({
-      url,
-      isOurBlog: false,
-      doLike: Math.random() < 0.4,
-      doComment: false,
-      commentText: undefined,
-      useSearch: false,
-      keyword: undefined as string | undefined,
-    }));
-}
-
 async function updateVisitHistory(accountId: string, urls: string[]) {
+  if (urls.length === 0) return;
+
   const { data: account } = await supabase
     .from('huma_accounts')
     .select('last_visited_our_blog')

@@ -1,9 +1,16 @@
 import type { Page } from 'playwright';
+import type { Workspace } from '@huma/shared';
 import { askClaudeWithModel } from '../../../lib/anthropic-client.js';
 import { getSubClaudeModel } from '../../../lib/ai-engine.js';
 import { withHumanWritingMandate } from '../../../lib/ai-human-writing.js';
 
 const HAIKU_FALLBACK = 'claude-haiku-4-5-20251001';
+
+const WORKSPACE_CONTEXT: Record<Workspace, string> = {
+  yeonun: '사주·운세·명리 관심 블로거',
+  panana: '감성·AI·웹소설 관심 블로거',
+  quizoasis: '퀴즈·심리테스트·MBTI 관심 블로거',
+};
 
 async function extractBlogArticle(page: Page): Promise<{ title: string; excerpt: string }> {
   const title =
@@ -17,15 +24,20 @@ async function extractBlogArticle(page: Page): Promise<{ title: string; excerpt:
   };
 }
 
-/** v3.23 ㊱: 고정 템플릿 금지 — Haiku가 본문 읽고 실시간 생성 */
-export async function generateCrankComment(page: Page): Promise<string> {
+/** v3.28 — Haiku가 서비스 맥락에 맞는 댓글 실시간 생성 */
+export async function generateCrankComment(
+  page: Page,
+  workspace: Workspace = 'yeonun',
+): Promise<string> {
   const { title, excerpt } = await extractBlogArticle(page);
 
   if (!title && !excerpt) {
     throw new Error('블로그 댓글 생성: 제목·본문 추출 실패');
   }
 
-  const prompt = withHumanWritingMandate(`네이버 블로그 독자로서 아래 게시글에 자연스러운 댓글을 달아줘.
+  const contextHint = WORKSPACE_CONTEXT[workspace] ?? WORKSPACE_CONTEXT.yeonun;
+
+  const prompt = withHumanWritingMandate(`${contextHint}로서 아래 게시글에 자연스러운 댓글을 달아줘.
 
 제목: "${title}"
 본문 일부: "${excerpt}"

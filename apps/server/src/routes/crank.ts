@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { crankLabelOf, sortAccountsByCrankLabel } from '@huma/shared';
+import { crankLabelOf, crankServiceLabelKo, sortAccountsByCrankLabel } from '@huma/shared';
 import { authMiddleware, supabase } from '../middleware/auth.js';
 import { getSetting } from '../lib/settings.js';
 import { formatKstHm } from '../lib/dashboard-period.js';
@@ -43,7 +43,7 @@ export async function registerCrankRoutes(app: FastifyInstance) {
         .limit(20),
       supabase
         .from('huma_accounts')
-        .select('id, name, crank_label, slot_label, crank_count_today, proxy_port, is_active')
+        .select('id, name, crank_label, crank_workspace, slot_label, crank_count_today, proxy_port, is_active')
         .eq('account_type', 'crank')
         .eq('is_active', true)
     ]);
@@ -133,7 +133,9 @@ export async function registerCrankRoutes(app: FastifyInstance) {
           count:
             feed.filter((f) => f.acctKey === key && f.type === '방문').length ||
             (a.crank_count_today ?? 0),
-          sub: a.name !== key ? a.name : a.proxy_port ? `:${a.proxy_port}` : '풀',
+          sub:
+            (a.crank_workspace ? crankServiceLabelKo(a.crank_workspace as 'yeonun' | 'panana' | 'quizoasis') : null) ??
+            (a.name !== key ? a.name : a.proxy_port ? `:${a.proxy_port}` : '풀'),
         };
       }),
     ];
@@ -147,7 +149,13 @@ export async function registerCrankRoutes(app: FastifyInstance) {
       },
       accountCards,
       feed: feed.slice(0, 50),
-      keywords: Array.isArray(config.keywords) ? (config.keywords as string[]).slice(0, 5) : [],
+      keywords: (() => {
+        const pools = config.keyword_pools as Record<string, string[]> | undefined;
+        if (pools && typeof pools === 'object') {
+          return [...new Set(Object.values(pools).flat())].slice(0, 8);
+        }
+        return Array.isArray(config.keywords) ? (config.keywords as string[]).slice(0, 5) : [];
+      })(),
       hasData: feed.length > 0 || accountCount > 0,
     };
   });

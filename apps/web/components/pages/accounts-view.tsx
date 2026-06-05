@@ -3,7 +3,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { AccountType, HumaAccount, Workspace } from '@huma/shared';
-import { CRANK_POOL_WORKSPACE, crankLabelOf, isCrankPoolAccount, sortAccountsByCrankLabel } from '@huma/shared';
+import {
+  CRANK_POOL_WORKSPACE,
+  CRANK_SERVICE_ORDER,
+  crankLabelOf,
+  crankServiceLabelKo,
+  crankWorkspaceFromLabel,
+  isCrankPoolAccount,
+  sortAccountsByCrankLabel,
+} from '@huma/shared';
 import { api } from '@/lib/api';
 import { WORKSPACES } from '@/lib/constants';
 import { MAccountCard, MGrid, MStat } from '@/components/mockup/primitives';
@@ -150,6 +158,22 @@ export function AccountsView() {
   const crankPoolAccounts = useMemo(
     () => sortAccountsByCrankLabel(accounts.filter(isCrankPool)),
     [accounts],
+  );
+
+  const crankByService = useMemo(() => {
+    const crankOnly = crankPoolAccounts.filter((ac) => ac.account_type === 'crank');
+    return CRANK_SERVICE_ORDER.map((ws) => ({
+      ws,
+      title: crankServiceLabelKo(ws),
+      accounts: crankOnly.filter(
+        (ac) => (ac.crank_workspace ?? crankWorkspaceFromLabel(ac.crank_label) ?? 'yeonun') === ws,
+      ),
+    }));
+  }, [crankPoolAccounts]);
+
+  const cafeAccounts = useMemo(
+    () => crankPoolAccounts.filter((ac) => ac.account_type === 'cafe'),
+    [crankPoolAccounts],
   );
 
   const visiblePlatforms = useMemo(
@@ -530,35 +554,77 @@ export function AccountsView() {
               + 추가
             </button>
           </div>
-          {crankPoolAccounts.length ? (
-            crankPoolAccounts.map((ac) => (
-              <MAccountCard
-                key={ac.id}
-                icon="CR"
-                iconBg="var(--ok-bg)"
-                name={
-                  <>
-                    {crankLabelOf(ac)}{' '}
-                    <span className="m-type-badge m-type-crank">C-RANK</span>
-                  </>
-                }
-                url={ac.name || ac.blog_url || '방문·공감·댓글'}
-                status={statusLabel(ac)}
-                statusTone={statusTone(ac)}
-                stats={[
-                  { label: 'Health', value: ac.health_score ?? '—', tone: (ac.health_score ?? 100) >= 80 ? 'text-huma-ok' : 'text-huma-warn' },
-                  { label: 'Warmup', value: ac.warmup_day ?? 0 },
-                  { label: '오늘', value: ac.crank_count_today ?? 0 },
-                ]}
-                actions={[
-                  { label: ac.is_active ? '정지' : '재개', primary: true, onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(load) },
-                  { label: '삭제', danger: true, onClick: () => handleDeleteNaver(ac) },
-                ]}
-              />
-            ))
-          ) : (
+          {crankByService.map(({ ws, title, accounts: svcAccounts }) => (
+            <div key={ws} className="mb-3">
+              <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-huma-t3">
+                {title} ({svcAccounts.length})
+              </div>
+              {svcAccounts.length ? (
+                svcAccounts.map((ac) => (
+                  <MAccountCard
+                    key={ac.id}
+                    icon="CR"
+                    iconBg="var(--ok-bg)"
+                    name={
+                      <>
+                        {crankLabelOf(ac)}{' '}
+                        <span className="m-type-badge m-type-crank">C-RANK</span>
+                      </>
+                    }
+                    url={ac.name || ac.blog_url || '방문·공감·댓글'}
+                    status={statusLabel(ac)}
+                    statusTone={statusTone(ac)}
+                    stats={[
+                      { label: 'Health', value: ac.health_score ?? '—', tone: (ac.health_score ?? 100) >= 80 ? 'text-huma-ok' : 'text-huma-warn' },
+                      { label: 'Warmup', value: ac.warmup_day ?? 0 },
+                      { label: '오늘', value: ac.crank_count_today ?? 0 },
+                    ]}
+                    actions={[
+                      { label: ac.is_active ? '정지' : '재개', primary: true, onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(load) },
+                      { label: '삭제', danger: true, onClick: () => handleDeleteNaver(ac) },
+                    ]}
+                  />
+                ))
+              ) : (
+                <div className="m-ac mb-1 text-center text-[11px] text-huma-t3">{title} C-Rank 없음</div>
+              )}
+            </div>
+          ))}
+          {cafeAccounts.length ? (
+            <div className="mb-1">
+              <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-huma-t3">
+                카페 ({cafeAccounts.length})
+              </div>
+              {cafeAccounts.map((ac) => (
+                <MAccountCard
+                  key={ac.id}
+                  icon="CF"
+                  iconBg="var(--warn-bg)"
+                  name={
+                    <>
+                      {crankLabelOf(ac)}{' '}
+                      <span className="m-type-badge m-type-crank">CAFE</span>
+                    </>
+                  }
+                  url={ac.name || '카페 소통'}
+                  status={statusLabel(ac)}
+                  statusTone={statusTone(ac)}
+                  stats={[
+                    { label: 'Health', value: ac.health_score ?? '—' },
+                    { label: 'Warmup', value: ac.warmup_day ?? 0 },
+                    { label: '오늘', value: ac.crank_count_today ?? 0 },
+                  ]}
+                  actions={[
+                    { label: ac.is_active ? '정지' : '재개', primary: true, onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(load) },
+                    { label: '삭제', danger: true, onClick: () => handleDeleteNaver(ac) },
+                  ]}
+                />
+              ))}
+            </div>
+          ) : null}
+          {!crankPoolAccounts.length ? (
             <div className="m-ac text-center text-[11px] text-huma-t3">C-Rank 계정 없음</div>
-          )}
+          ) : null}
         </div>
 
         <div>

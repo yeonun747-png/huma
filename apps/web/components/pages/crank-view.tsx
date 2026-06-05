@@ -1,8 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { HumaAccount } from '@huma/shared';
-import { crankLabelOf, isCrankPoolAccount, sortAccountsByCrankLabel } from '@huma/shared';
+import type { HumaAccount, Workspace } from '@huma/shared';
+import {
+  CRANK_SERVICE_ORDER,
+  crankLabelOf,
+  crankServiceLabelKo,
+  crankWorkspaceFromLabel,
+  isCrankPoolAccount,
+  sortAccountsByCrankLabel,
+} from '@huma/shared';
 import { cn } from '@/lib/constants';
 import type { CrankActType, CrankFeedItem } from '@/lib/crank-mock-data';
 import { api } from '@/lib/api';
@@ -48,6 +55,7 @@ type SchedulerStatus = {
     id: string;
     name: string;
     crank_label?: string | null;
+    crank_workspace?: string | null;
     is_active: boolean;
     last_crank_at: string | null;
     next_run_at: string | null;
@@ -80,6 +88,7 @@ function actTypeClass(type: CrankActType) {
 export function CrankView() {
   const { workspace } = useWorkspace();
   const [tab, setTab] = useState<'feed' | 'ops'>('feed');
+  const [serviceFilter, setServiceFilter] = useState<'all' | Workspace>('all');
   const [acctFilter, setAcctFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -266,9 +275,16 @@ export function CrankView() {
 
   const kpi = crankFeed?.kpi ?? { visit: { current: 0, max: 200 }, like: { current: 0, max: 150 }, comment: { current: 0, max: 50 }, neighbor: { current: 0, max: 20 } };
 
+  const filteredCrankAccounts = useMemo(() => {
+    if (serviceFilter === 'all') return crankAccounts;
+    return crankAccounts.filter(
+      (a) => (a.crank_workspace ?? crankWorkspaceFromLabel(a.crank_label) ?? 'yeonun') === serviceFilter,
+    );
+  }, [crankAccounts, serviceFilter]);
+
   const accountCards = useMemo(() => {
     const feed = crankFeed?.feed ?? [];
-    const totalFromAccounts = crankAccounts.reduce((s, a) => s + (a.crank_count_today ?? 0), 0);
+    const totalFromAccounts = filteredCrankAccounts.reduce((s, a) => s + (a.crank_count_today ?? 0), 0);
     const totalFromFeed = feed.filter((f) => f.type === '방문').length;
     const total = Math.max(totalFromAccounts, totalFromFeed);
 
@@ -277,20 +293,21 @@ export function CrankView() {
         id: 'all',
         label: '전체',
         count: total,
-        sub: `${crankAccounts.length}계정`,
+        sub: `${filteredCrankAccounts.length}계정`,
       },
-      ...crankAccounts.map((a) => {
+      ...filteredCrankAccounts.map((a) => {
         const key = crankLabelOf(a);
         const fromFeed = feed.filter((f) => (f.acctKey ?? f.acct) === key).length;
+        const svc = a.crank_workspace ?? crankWorkspaceFromLabel(a.crank_label);
         return {
           id: key,
           label: key,
           count: fromFeed > 0 ? fromFeed : (a.crank_count_today ?? 0),
-          sub: a.name !== key ? a.name : a.proxy_port ? `:${a.proxy_port}` : (a.slot_label ?? 'CRANK'),
+          sub: svc ? crankServiceLabelKo(svc) : (a.name !== key ? a.name : a.proxy_port ? `:${a.proxy_port}` : 'CRANK'),
         };
       }),
     ];
-  }, [crankAccounts, crankFeed]);
+  }, [filteredCrankAccounts, crankFeed]);
 
   const feedRows = useMemo(() => {
     const source = crankFeed?.feed ?? [];
@@ -349,8 +366,41 @@ export function CrankView() {
               </>
             }
           >
+            <div className="mb-2 flex flex-wrap gap-1">
+              <button
+                type="button"
+                className={cn('rounded px-2 py-0.5 text-[11px]', serviceFilter === 'all' ? 'bg-huma-acc text-white' : 'bg-huma-bg3 text-huma-t3')}
+                onClick={() => {
+                  setServiceFilter('all');
+                  setAcctFilter('all');
+                }}
+              >
+                전체 ({crankAccounts.length})
+              </button>
+              {CRANK_SERVICE_ORDER.map((ws) => {
+                const count = crankAccounts.filter(
+                  (a) => (a.crank_workspace ?? crankWorkspaceFromLabel(a.crank_label) ?? 'yeonun') === ws,
+                ).length;
+                return (
+                  <button
+                    key={ws}
+                    type="button"
+                    className={cn(
+                      'rounded px-2 py-0.5 text-[11px]',
+                      serviceFilter === ws ? 'bg-huma-acc text-white' : 'bg-huma-bg3 text-huma-t3',
+                    )}
+                    onClick={() => {
+                      setServiceFilter(ws);
+                      setAcctFilter('all');
+                    }}
+                  >
+                    {crankServiceLabelKo(ws)} ({count})
+                  </button>
+                );
+              })}
+            </div>
             <div className="grid max-h-[280px] grid-cols-3 gap-1.5 overflow-y-auto sm:grid-cols-6 lg:grid-cols-8">
-              {crankAccounts.length === 0 && !feedLoading ? (
+              {filteredCrankAccounts.length === 0 && !feedLoading ? (
                 <p className="col-span-full py-3 text-center text-[12px] text-huma-t3">
                   등록된 CRANK 소통 계정이 없습니다.{' '}
                   <a href="/accounts" className="text-huma-acc underline">

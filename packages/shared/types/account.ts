@@ -21,6 +21,8 @@ export interface HumaAccount {
   shared_workspace?: Workspace;
   slot_label?: string;
   crank_label?: string;
+  /** v3.28 — C-Rank 소속 서비스 (키워드·포스팅 블로그 배정) */
+  crank_workspace?: Workspace;
   account_type: AccountType;
   grade: string;
   health_score: number;

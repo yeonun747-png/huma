@@ -41,6 +41,12 @@ function crankLetterLabel(index) {
   return `CRANK-${s}`;
 }
 
+function crankWorkspaceForIndex(index) {
+  if (index < 25) return 'yeonun';
+  if (index < 40) return 'panana';
+  return 'quizoasis';
+}
+
 /** B=네이버ID, C=비번, D=이름 · 3행~52행 */
 function loadAccountsFromXlsx(xlsxPath) {
   if (!existsSync(xlsxPath)) {
@@ -94,7 +100,7 @@ const lines = [
   keyHint,
   '-- Supabase SQL Editor 에서 실행',
   '',
-  'INSERT INTO huma_accounts (name, naver_id, naver_pw_enc, workspace, account_type, slot_label, crank_label, is_active)',
+  'INSERT INTO huma_accounts (name, naver_id, naver_pw_enc, workspace, account_type, slot_label, crank_label, crank_workspace, is_active)',
   'VALUES',
 ];
 
@@ -102,8 +108,9 @@ const valueRows = accounts.map((ac, idx) => {
   const enc = encrypt(ac.password);
   const slot = `C-Rank ${ac.no}`;
   const crankLabel = crankLetterLabel(idx);
+  const crankWorkspace = crankWorkspaceForIndex(idx);
   const tail = idx < accounts.length - 1 ? ',' : '';
-  return `  ('${sqlEscape(ac.name)}', '${sqlEscape(ac.naver_id)}', '${enc}', 'yeonun', 'crank', '${sqlEscape(slot)}', '${sqlEscape(crankLabel)}', true)${tail}`;
+  return `  ('${sqlEscape(ac.name)}', '${sqlEscape(ac.naver_id)}', '${enc}', 'yeonun', 'crank', '${sqlEscape(slot)}', '${sqlEscape(crankLabel)}', '${crankWorkspace}', true)${tail}`;
 });
 
 lines.push(...valueRows);
@@ -115,6 +122,7 @@ lines.push(
   '  account_type = EXCLUDED.account_type,',
   '  slot_label = EXCLUDED.slot_label,',
   '  crank_label = EXCLUDED.crank_label,',
+  '  crank_workspace = EXCLUDED.crank_workspace,',
   '  is_active = EXCLUDED.is_active,',
   '  updated_at = now();',
   '',

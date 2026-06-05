@@ -1,6 +1,7 @@
+import type { Workspace } from '@huma/shared';
 import { sortAccountsByCrankLabel } from '@huma/shared';
 import { supabase } from '../middleware/auth.js';
-import { CRANK_POOL_WORKSPACE } from './crank-pool.js';
+import { getSetting } from './settings.js';
 import {
   computeCrankSchedulePolicy,
   distributeCrankStartTimesKst,
@@ -15,7 +16,6 @@ import {
   resetAllMonthlyDataMb,
   resetDailyCrankCounters,
 } from './crank-modems.js';
-import { getSetting } from './settings.js';
 import { enqueueHumaJob, type JobRecord } from './job-scheduler.js';
 import { logOperation } from './log-emitter.js';
 import { getCrankScheduleWindow } from './human-engine-policy.js';
@@ -34,13 +34,19 @@ async function countActiveCrankPoolSize(): Promise<number> {
   return count ?? 0;
 }
 
-export async function fetchPostingBlogUrls(): Promise<string[]> {
-  const { data } = await supabase
+export async function fetchPostingBlogUrls(workspace?: Workspace): Promise<string[]> {
+  let query = supabase
     .from('huma_accounts')
     .select('blog_url')
     .eq('account_type', 'posting')
     .eq('is_active', true)
     .not('blog_url', 'is', null);
+
+  if (workspace) {
+    query = query.eq('workspace', workspace);
+  }
+
+  const { data } = await query;
 
   return (data ?? [])
     .map((r) => r.blog_url as string)
@@ -117,12 +123,25 @@ export async function runDailyCrankScheduler(): Promise<void> {
     return;
   }
 
-  const ourBlogUrls = await fetchPostingBlogUrls();
+  const { data: accountRows } = await supabase
+    .from('huma_accounts')
+    .select('id, crank_workspace')
+    .in(
+      'id',
+      accounts.map((a) => a.id),
+    );
+
+  const workspaceById = new Map(
+    (accountRows ?? []).map((r) => [r.id as string, (r.crank_workspace as Workspace | null) ?? 'yeonun']),
+  );
+
   const scheduleWindow = await getCrankScheduleWindow();
   const startTimes = distributeCrankStartTimesKst(accounts.length, 0, scheduleWindow);
 
   for (let i = 0; i < accounts.length; i++) {
     const account = accounts[i];
+    const crankWorkspace = workspaceById.get(account.id) ?? 'yeonun';
+    const ourBlogUrls = await fetchPostingBlogUrls(crankWorkspace);
     const scheduledAt = startTimes[i].toISOString();
     const sessionPayload = {
       scheduledCrank: true,
@@ -133,7 +152,7 @@ export async function runDailyCrankScheduler(): Promise<void> {
     const { data: job, error } = await supabase
       .from('huma_jobs')
       .insert({
-        workspace: CRANK_POOL_WORKSPACE,
+        workspace: crankWorkspace,
         job_type: 'social_crank',
         account_id: account.id,
         title: `${DAILY_JOB_TITLE_PREFIX} ${dateKey} · ${account.name}`,
@@ -196,7 +215,7 @@ export async function getCrankSchedulerStatus(options?: { probe?: boolean }) {
 
   const { data: crankAccounts, error: accountsError } = await supabase
     .from('huma_accounts')
-    .select('id, name, crank_label, last_crank_at, is_active')
+    .select('id, name, crank_label, crank_workspace, last_crank_at, is_active')
     .eq('account_type', 'crank')
     ;
 
@@ -222,6 +241,7 @@ export async function getCrankSchedulerStatus(options?: { probe?: boolean }) {
       id: a.id,
       name: a.name,
       crank_label: (a as { crank_label?: string | null }).crank_label ?? null,
+      crank_workspace: (a as { crank_workspace?: string | null }).crank_workspace ?? null,
       is_active: a.is_active,
       last_crank_at: last,
       next_run_at: todayJob?.scheduled_at ?? nextRunAt,
