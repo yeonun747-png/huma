@@ -8,7 +8,8 @@ dist/
 .env*.local
 apps/server/tmp/
 apps/server/profiles/
-apps/server/scripts/data/
+apps/server/scripts/data/*
+!apps/server/scripts/data/crank-50-yeonun.json
 apps/server/scripts/migrations/v3_34_crank_50_yeonun.sql
 .DS_Store
 Thumbs.db

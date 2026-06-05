@@ -3,11 +3,11 @@
  * 연운마케팅.xlsx → huma_accounts INSERT SQL (Node만 사용, Python 불필요)
  * Usage (i7, apps/server/.env 의 ENCRYPTION_KEY 필수):
  *   cd apps/server && npm install
- *   node scripts/generate-crank-import-sql.mjs ~/Downloads/연운마케팅.xlsx \
- *     > scripts/migrations/v3_34_crank_50_yeonun.sql
+ *   node scripts/generate-crank-import-sql.mjs > scripts/migrations/v3_34_crank_50_yeonun.sql
+ *   # 또는: node scripts/generate-crank-import-sql.mjs /path/to/연운마케팅.xlsx > ...
  */
 import { config } from 'dotenv';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createCipheriv, randomBytes, scryptSync } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,6 +32,13 @@ function sqlEscape(s) {
 
 /** B=네이버ID, C=비번, D=이름 · 3행~52행 */
 function loadAccountsFromXlsx(xlsxPath) {
+  if (!existsSync(xlsxPath)) {
+    throw new Error(
+      `엑셀 파일 없음: ${xlsxPath}\n` +
+        '  → Windows에서 scp로 복사하거나, 인자 없이 실행 (scripts/data/crank-50-yeonun.json 사용):\n' +
+        '     node scripts/generate-crank-import-sql.mjs > scripts/migrations/v3_34_crank_50_yeonun.sql',
+    );
+  }
   const wb = XLSX.readFile(xlsxPath, { cellDates: false });
   const ws = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
@@ -56,6 +63,12 @@ function loadAccounts() {
   const xlsxPath = process.argv[2];
   if (xlsxPath) return loadAccountsFromXlsx(xlsxPath);
   const jsonPath = join(__dirname, 'data/crank-50-yeonun.json');
+  if (!existsSync(jsonPath)) {
+    throw new Error(
+      `기본 데이터 없음: ${jsonPath}\n` +
+        '  git pull 후 재시도하거나 엑셀 경로를 인자로 전달하세요.',
+    );
+  }
   return JSON.parse(readFileSync(jsonPath, 'utf8'));
 }
 
