@@ -126,18 +126,24 @@ export function CrankView() {
     }
   }, []);
 
-  const refreshWithProbe = useCallback(async () => {
-    setSyncingProxy(true);
-    try {
-      await loadScheduler({ probe: true, background: true });
-    } finally {
-      setSyncingProxy(false);
-    }
-  }, [loadScheduler]);
+  /** 슬롯 6·7 — 프록시 관리와 동일 /api/modems?probe=1&slots=6,7 로 DB 갱신 후 스케줄러 표시 */
+  const syncCrankModems = useCallback(
+    async (opts?: { background?: boolean }) => {
+      const bg = opts?.background === true;
+      setSyncingProxy(true);
+      try {
+        await api.modems({ probe: true, slots: [6, 7], timeoutMs: 25_000 });
+      } catch {
+        /* probe 실패해도 스케줄러는 표시 */
+      }
+      await loadScheduler({ background: bg });
+    },
+    [loadScheduler],
+  );
 
   const syncProxyModems = useCallback(async () => {
-    await refreshWithProbe();
-  }, [refreshWithProbe]);
+    await syncCrankModems();
+  }, [syncCrankModems]);
 
   const loadCrankFeed = useCallback(() => {
     setFeedLoading(true);
@@ -167,10 +173,9 @@ export function CrankView() {
     void api.getSetting('social_crank').then(setConfig).catch(() => setConfig({}));
     void api.cafeTargets().then(setTargets).catch(() => setTargets([]));
     loadCrankAccounts();
-    void loadScheduler();
-    void refreshWithProbe();
+    void syncCrankModems();
     loadCrankFeed();
-  }, [loadScheduler, refreshWithProbe, loadCrankFeed, loadCrankAccounts]);
+  }, [syncCrankModems, loadCrankFeed, loadCrankAccounts]);
 
   useEffect(() => {
     load();
@@ -226,9 +231,9 @@ export function CrankView() {
             : 'err';
       const statusLabel = displayStatusLabel[ds] ?? m.status;
       const probeHint =
-        m.slot_number <= 7 && m.status === 'idle' && m.response_ms != null
+        m.slot_number <= 7 && (m.probe_ok || m.status === 'idle') && m.response_ms != null
           ? ` · SOCKS ${m.response_ms}ms`
-          : m.slot_number <= 7 && m.status === 'error'
+          : m.slot_number <= 7 && (m.status === 'error' || ds === 'error')
             ? ' · 프록시 오류'
             : '';
 
@@ -500,7 +505,7 @@ export function CrankView() {
         )}
         <p className="mt-2 font-mono text-[10.5px] text-huma-t3">
           매일 00:01 KST 큐 생성 · 08:00~22:00 분산(±15분) · 세션 60분 · 동글당 일 6세션·월 2500MB ·
-          예비 슬롯(8~10)은 스케줄 제외 · 슬롯 6·7 SOCKS는 DB 즉시 표시 후 백그라운드 probe
+          예비 슬롯(8~10)은 스케줄 제외 · 슬롯 6·7은 프록시 관리와 동일 SOCKS probe
           {syncingProxy ? ' (검사 중…)' : ''}
           {!syncingProxy && (
             <>

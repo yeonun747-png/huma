@@ -307,9 +307,10 @@ export const api = {
       modems: Array<Record<string, unknown>>;
       accounts: Array<Record<string, unknown>>;
     }>(`/api/crank/scheduler${qs({ probe: opts?.probe ? '1' : undefined })}`, {
-      sameOrigin: typeof window === 'undefined' ? false : true,
+      // probe는 프록시 관리와 동일하게 i7 직접 호출 (Next 프록시 18초 타임아웃 회피)
+      sameOrigin: opts?.probe ? false : typeof window !== 'undefined',
       cache: 'no-store',
-      timeoutMs: opts?.probe ? 20_000 : 10_000,
+      timeoutMs: opts?.probe ? 25_000 : 10_000,
     }),
   cafeTargets: () => request<Array<Record<string, unknown>>>('/api/cafe/targets'),
   crawlCafe: () => request<{ success: boolean; count: number }>('/api/cafe/crawl', { method: 'POST' }),
