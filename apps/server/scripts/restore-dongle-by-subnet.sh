@@ -97,7 +97,7 @@ bash "$DIR/setup-proxy-socks.sh" "${ROUTE_ARGS[@]}"
 mkdir -p /etc/huma
 {
   echo "# restore-dongle-by-subnet.sh $(date -Iseconds)"
-  printf '%s\n' "${CONF_LINES[@]}" | sort -t= -k1 -n
+  printf '%s\n' "${CONF_LINES[@]}" | sort -t '=' -k1,1n
 } > /etc/huma/dongle-slot-interfaces.conf
 echo ""
 echo "→ /etc/huma/dongle-slot-interfaces.conf 갱신"

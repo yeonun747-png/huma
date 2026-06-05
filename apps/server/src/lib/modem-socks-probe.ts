@@ -1,7 +1,24 @@
 import { execFile } from 'node:child_process';
+import { accessSync, constants } from 'node:fs';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
+
+function resolveCurlBin(): string {
+  if (process.env.HUMA_CURL_PATH?.trim()) return process.env.HUMA_CURL_PATH.trim();
+  if (process.platform === 'win32') return 'curl';
+  for (const candidate of ['/usr/bin/curl', '/bin/curl']) {
+    try {
+      accessSync(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      /* next */
+    }
+  }
+  return 'curl';
+}
+
+const CURL_BIN = resolveCurlBin();
 
 /** 프록시 관리 `/api/modems?probe=1` 과 동일 SOCKS 검사 시간 */
 export const MODEM_SOCKS_PROBE_TIMEOUT_MS = 8000;
@@ -17,7 +34,7 @@ async function probeModemSocksOnce(
   const maxSec = Math.max(1, Math.ceil(timeoutMs / 1000));
   try {
     const { stdout } = await execFileAsync(
-      'curl',
+      CURL_BIN,
       [
         '-s',
         '-o',
@@ -30,7 +47,10 @@ async function probeModemSocksOnce(
         `127.0.0.1:${proxyPort}`,
         'https://www.naver.com',
       ],
-      { timeout: timeoutMs + 2000 },
+      {
+        timeout: timeoutMs + 2000,
+        env: { ...process.env, PATH: process.env.PATH ?? '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' },
+      },
     );
     const code = parseInt(String(stdout).trim(), 10);
     if (code >= 200 && code < 400) {

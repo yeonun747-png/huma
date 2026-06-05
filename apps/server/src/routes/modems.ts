@@ -15,7 +15,7 @@ function parseProbeSlots(raw: string | undefined): Set<number> | null {
 
 const MODEM_PROBE_CONCURRENCY = 2;
 const MODEM_PROBE_ROUTE_MS_FULL = 45_000;
-const MODEM_PROBE_ROUTE_MS_PARTIAL = 20_000;
+const MODEM_PROBE_ROUTE_MS_PARTIAL = 35_000;
 
 async function probeModemsInRoute(
   modems: Array<Record<string, unknown> & { slot_number: number; proxy_port?: number | null }>,
