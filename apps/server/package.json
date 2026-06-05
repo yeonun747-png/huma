@@ -9,7 +9,8 @@
     "build": "node scripts/build.mjs",
     "start": "node dist/index.js",
     "start:worker": "node dist/worker-only.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "generate-crank-sql": "node scripts/generate-crank-import-sql.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.3",
@@ -40,6 +41,7 @@
     "@types/jsonwebtoken": "^9.0.6",
     "@types/node": "^20.14.12",
     "tsx": "^4.19.0",
-    "typescript": "^5.4.5"
+    "typescript": "^5.4.5",
+    "xlsx": "^0.18.5"
   }
 }

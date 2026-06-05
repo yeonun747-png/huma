@@ -1,16 +1,17 @@
 #!/usr/bin/env node
 /**
- * 연운마케팅.xlsx → huma_accounts INSERT SQL
+ * 연운마케팅.xlsx → huma_accounts INSERT SQL (Node만 사용, Python 불필요)
  * Usage (i7, apps/server/.env 의 ENCRYPTION_KEY 필수):
- *   cd apps/server
- *   node scripts/generate-crank-import-sql.mjs > scripts/migrations/v3_34_crank_50_yeonun.sql
+ *   cd apps/server && npm install
+ *   node scripts/generate-crank-import-sql.mjs ~/Downloads/연운마케팅.xlsx \
+ *     > scripts/migrations/v3_34_crank_50_yeonun.sql
  */
 import { config } from 'dotenv';
-import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createCipheriv, randomBytes, scryptSync } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import XLSX from 'xlsx';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 config({ path: join(__dirname, '..', '.env') });
@@ -29,25 +30,33 @@ function sqlEscape(s) {
   return String(s).replace(/'/g, "''");
 }
 
+/** B=네이버ID, C=비번, D=이름 · 3행~52행 */
+function loadAccountsFromXlsx(xlsxPath) {
+  const wb = XLSX.readFile(xlsxPath, { cellDates: false });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+  const accounts = [];
+  for (let i = 2; i < 52 && i < rows.length; i++) {
+    const row = rows[i];
+    if (!row || row.length < 4) continue;
+    const no = row[0];
+    const naverId = String(row[1] ?? '').trim();
+    const password = String(row[2] ?? '');
+    const name = String(row[3] ?? '').trim();
+    if (!naverId || !password || !name) continue;
+    accounts.push({ no: no || accounts.length + 1, naver_id: naverId, password, name });
+  }
+  if (accounts.length === 0) {
+    throw new Error(`엑셀에서 계정을 읽지 못했습니다: ${xlsxPath} (3행~ B/C/D 열 확인)`);
+  }
+  return accounts;
+}
+
 function loadAccounts() {
   const xlsxPath = process.argv[2];
-  if (xlsxPath) {
-    const py = [
-      'import openpyxl, json, sys',
-      'wb = openpyxl.load_workbook(sys.argv[1], read_only=True, data_only=True)',
-      'ws = wb.active',
-      'rows = []',
-      'for row in ws.iter_rows(min_row=3, max_row=52, values_only=True):',
-      '    no, naver_id, pw, name = row[0], row[1], row[2], row[3]',
-      '    if naver_id and pw and name:',
-      '        rows.append({"no": no, "naver_id": str(naver_id).strip(), "password": str(pw), "name": str(name).strip()})',
-      'wb.close()',
-      'print(json.dumps(rows, ensure_ascii=False))',
-    ].join('\n');
-    const stdout = execFileSync('python3', ['-c', py, xlsxPath], { encoding: 'utf8' });
-    return JSON.parse(stdout);
-  }
-  return JSON.parse(readFileSync(join(__dirname, 'data/crank-50-yeonun.json'), 'utf8'));
+  if (xlsxPath) return loadAccountsFromXlsx(xlsxPath);
+  const jsonPath = join(__dirname, 'data/crank-50-yeonun.json');
+  return JSON.parse(readFileSync(jsonPath, 'utf8'));
 }
 
 const accounts = loadAccounts();
