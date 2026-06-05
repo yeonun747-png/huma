@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { HumaAccount, HumaModem } from '@huma/shared';
 import {
   CRANK_DONGLE_SLOTS,
@@ -14,6 +14,20 @@ import { MPanel, MTable, MTag } from '@/components/mockup/primitives';
 import { useRegisterPageAction } from '@/components/dashboard/page-action-context';
 
 const I7_PHYSICAL_SLOTS = 7;
+const PROBE_SLOTS = [1, 2, 3, 4, 5, 6, 7] as const;
+/** 슬롯당 SOCKS+Geo (i7 SSH 기준 ~20~40초) */
+const PER_SLOT_PROBE_MS = 90_000;
+
+function mergeProbedModems(existing: HumaModem[], fromApi: HumaModem[]): HumaModem[] {
+  const bySlot = new Map(
+    (existing.length > 0 ? existing : fromApi).map((m) => [m.slot_number, m]),
+  );
+  for (const m of fromApi) {
+    const cur = bySlot.get(m.slot_number);
+    bySlot.set(m.slot_number, cur ? { ...cur, ...m } : m);
+  }
+  return [...bySlot.values()].sort((a, b) => a.slot_number - b.slot_number);
+}
 /** 목업: 289ms 지연, 200ms 이하 정상 */
 const PROBE_DELAY_MS = 220;
 
@@ -23,11 +37,16 @@ function maskPublicIp(ip: string): string {
   return ip;
 }
 
-function modemStatusTag(m: HumaModem): { label: string; tone: 'ok' | 'warn' | 'err' | 'idle' } {
+function modemStatusTag(
+  m: HumaModem,
+  opts?: { probing?: boolean },
+): { label: string; tone: 'ok' | 'warn' | 'err' | 'idle' } {
+  if (opts?.probing) return { label: '검사중', tone: 'idle' };
   if (m.status === 'error') return { label: '오류', tone: 'err' };
   if (m.status === 'reconnecting') return { label: '재연결', tone: 'warn' };
   if (m.status === 'offline') return { label: '오프라인', tone: 'idle' };
   if (m.response_ms != null && m.response_ms > PROBE_DELAY_MS) return { label: '지연', tone: 'warn' };
+  if (m.status === 'idle' && !m.public_ip && m.response_ms == null) return { label: '대기', tone: 'idle' };
   if (m.status === 'idle') return { label: '정상', tone: 'ok' };
   return { label: m.status, tone: 'idle' };
 }
@@ -89,19 +108,61 @@ function resolveModemForSlot(modems: HumaModem[], def: SlotRowDef): HumaModem {
 export function ModemsView() {
   const [modems, setModems] = useState<HumaModem[]>([]);
   const [accounts, setAccounts] = useState<HumaAccount[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [probing, setProbing] = useState(false);
+  const [probingSlot, setProbingSlot] = useState<number | null>(null);
+  const probeGenRef = useRef(0);
 
-  const load = () => {
-    Promise.all([api.modems({ probe: true }), api.accounts()])
-      .then(([m, a]) => {
-        setModems(m);
-        setAccounts(a);
-      })
-      .catch(() => {});
-  };
+  const runSlotProbes = useCallback(async (base: HumaModem[], gen: number) => {
+    setProbing(true);
+    try {
+      for (const slot of PROBE_SLOTS) {
+        if (probeGenRef.current !== gen) return;
+        setProbingSlot(slot);
+        try {
+          const probed = await api.modems({
+            probe: true,
+            slots: [slot],
+            timeoutMs: PER_SLOT_PROBE_MS,
+          });
+          if (probeGenRef.current !== gen) return;
+          setModems((prev) => mergeProbedModems(prev.length ? prev : base, probed));
+        } catch {
+          /* 다음 슬롯 계속 */
+        }
+      }
+    } finally {
+      if (probeGenRef.current === gen) {
+        setProbing(false);
+        setProbingSlot(null);
+      }
+    }
+  }, []);
+
+  const load = useCallback(async () => {
+    const gen = ++probeGenRef.current;
+    setLoadError(null);
+    setProbing(false);
+    setProbingSlot(null);
+    try {
+      const [base, acc] = await Promise.all([api.modems(), api.accounts()]);
+      if (probeGenRef.current !== gen) return;
+      setModems(base);
+      setAccounts(acc);
+      void runSlotProbes(base, gen);
+    } catch (err: unknown) {
+      if (probeGenRef.current !== gen) return;
+      const msg = err instanceof Error ? err.message : '프록시 목록 로드 실패';
+      setLoadError(msg);
+    }
+  }, [runSlotProbes]);
 
   useEffect(() => {
-    load();
-  }, []);
+    void load();
+    return () => {
+      probeGenRef.current += 1;
+    };
+  }, [load]);
 
   useRegisterPageAction('openModemForm', () => {
     alert(
@@ -122,7 +183,9 @@ export function ModemsView() {
         SLOT_SERVICE_LABEL[slot] ??
         WORKSPACES.find((w) => w.id === ws)?.short ??
         '—';
-      const { label: statusLabel, tone } = modemStatusTag(m);
+      const { label: statusLabel, tone } = modemStatusTag(m, {
+        probing: probingSlot === slot,
+      });
       const publicIp = m.public_ip?.trim();
       const displayIp = publicIp ? maskPublicIp(publicIp) : '—';
       const region = m.geo_region?.trim() || '—';
@@ -151,7 +214,7 @@ export function ModemsView() {
         </MTag>,
       ];
     });
-  }, [modems, accounts]);
+  }, [modems, accounts, probingSlot]);
 
   const extraRows = useMemo(() => {
     return modems
@@ -181,9 +244,30 @@ export function ModemsView() {
     <div className="animate-fadeIn">
       <MPanel title="RESIDENTIAL PROXY · 계정별 고정 IP">
         <p className="mb-2 font-mono text-[10.5px] text-huma-t3">
-          물리 동글 1~{I7_PHYSICAL_SLOTS} · SOCKS probe 시 LTE 공인 IP·지역 표시 · 연운(:10001~10003)
-          · 파나나(:10004) · 퀴즈(:10005) · C-Rank(:10006~10007)
+          물리 동글 1~{I7_PHYSICAL_SLOTS} · 슬롯별 SOCKS+Geo 순차 probe (슬롯당 최대 ~40초) ·
+          연운(:10001~10003) · 파나나(:10004) · 퀴즈(:10005) · C-Rank(:10006~10007)
+          {probing && probingSlot != null ? (
+            <span className="text-huma-accent"> · 동글 {probingSlot} 검사 중…</span>
+          ) : null}
+          {!probing && (
+            <>
+              {' '}
+              (
+              <button type="button" className="text-huma-accent underline" onClick={() => void load()}>
+                다시 검사
+              </button>
+              )
+            </>
+          )}
         </p>
+        {loadError && (
+          <p className="mb-2 text-xs text-huma-err">
+            {loadError}
+            <button type="button" className="ml-2 underline" onClick={() => void load()}>
+              재시도
+            </button>
+          </p>
+        )}
         <MTable head={['계정', '서비스', 'IP', '지역', '응답', '상태']} rows={rows} />
         {extraRows.length > 0 && (
           <>
@@ -211,8 +295,8 @@ export function ModemsView() {
           </div>
         )}
         <p className="mt-2 font-mono text-[10px] text-huma-t3">
-          i7: /etc/huma/dongle-slot-interfaces.conf 에 물리 번호=eth 매핑 후 sudo bash
-          setup-dongle-slots.sh · Supabase v3_25 마이그레이션(슬롯 6~7) 필요
+          i7: sudo bash apps/server/scripts/restore-dongle-by-subnet.sh · Supabase v3_33
+          (public_ip, geo_region)
         </p>
       </MPanel>
     </div>
