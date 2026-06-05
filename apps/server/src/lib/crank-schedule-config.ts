@@ -7,7 +7,8 @@ export const MAX_CRANK_SESSIONS_PER_MODEM_PER_DAY = 6;
 export const SCHEDULE_WINDOW_START_HOUR = 8;
 export const SCHEDULE_WINDOW_END_HOUR = 22;
 export const START_JITTER_MINUTES = 15;
-export const RECONNECT_WAIT_MS = 10 * 60 * 1000;
+/** 스케줄 슬롯 간격 버퍼(분). 규칙 ⑦ 10분 대기는 계정 전환 reconnect 성공 시에만 적용 */
+export const SESSION_SLOT_BUFFER_MINUTES = 1;
 
 export interface CrankSchedulePolicy {
   activeModemCount: number;
@@ -47,7 +48,7 @@ export function computeCrankSchedulePolicy(
   };
 }
 
-/** 08:00~22:00 KST — 동글 수만큼 트랙 병렬 + 세션(60분)+reconnect(10분) 간격 */
+/** 08:00~22:00 KST — 동글 수만큼 트랙 병렬 + 세션(60분) 간격 */
 export function distributeCrankStartTimesKst(
   count: number,
   dayOffset = 0,
@@ -60,7 +61,7 @@ export function distributeCrankStartTimesKst(
   const endHour = window?.end ?? SCHEDULE_WINDOW_END_HOUR;
   const windowStartMin = startHour * 60;
   const windowEndMin = endHour * 60;
-  const slotMinutes = SESSION_DURATION_MINUTES + 10;
+  const slotMinutes = SESSION_DURATION_MINUTES + SESSION_SLOT_BUFFER_MINUTES;
   const tracks = Math.max(1, Math.floor(modemCount));
 
   const times = Array.from({ length: count }, (_, i) => {

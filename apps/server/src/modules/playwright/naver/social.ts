@@ -161,13 +161,13 @@ export async function runSocialCrank(
   const ownsModem = !options?.skipModemAcquire;
 
   try {
-    if (ownsModem) {
+    if (!modemSession && ownsModem) {
       modemSession = await acquireModem(accountId);
-      if (!modemSession) throw new Error('NO_MODEM');
-      await reconnectModemIfAccountSwitched(modemSession.proxyPort, accountId);
-    } else if (!modemSession) {
-      throw new Error('NO_MODEM');
     }
+    if (!modemSession) throw new Error('NO_MODEM');
+
+    // v3.30 — 계정 전환 시 비행기모드 1회 + (성공 시) 규칙 ⑦ 10분 대기
+    await reconnectModemIfAccountSwitched(modemSession.proxyPort, accountId);
     const accountCtx = await loadAccountForBrowser(accountId, modemSession.proxyPort);
     if (accountCtx.account_type !== 'crank') {
       throw new Error('ACCOUNT_NOT_CRANK');

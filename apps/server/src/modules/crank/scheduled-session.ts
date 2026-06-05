@@ -1,9 +1,6 @@
 import { supabase } from '../../middleware/auth.js';
-import { RECONNECT_WAIT_MS } from '../../lib/crank-schedule-config.js';
 import { CRANK_SCHEDULED_LOCK_TTL_SEC } from '../../lib/modem-ports.js';
 import { recordCrankSessionOnModem } from '../../lib/crank-modems.js';
-import { sleep } from '../../lib/utils.js';
-import { reconnectModem } from '../modem/reconnect.js';
 import { acquireModem, releaseModem, type ModemSession } from '../proxy/manager.js';
 import { runSocialCrank } from '../playwright/naver/social.js';
 
@@ -13,7 +10,7 @@ export interface ScheduledCrankPayload {
   sessionMinutes?: number;
 }
 
-/** 스케줄 세션: 모뎀 할당 → reconnect 10분 → crank → last_crank_at·데이터 누적 */
+/** 스케줄 세션: 모뎀 할당 → (계정 전환 시에만 IP 1회 교체) → crank → last_crank_at·데이터 누적 */
 export async function executeScheduledSocialCrank(
   accountId: string,
   payload: ScheduledCrankPayload,
@@ -25,11 +22,6 @@ export async function executeScheduledSocialCrank(
       lockTtlSec: CRANK_SCHEDULED_LOCK_TTL_SEC,
     });
     if (!modemSession) throw new Error('NO_MODEM');
-
-    if (modemSession.modemId) {
-      await reconnectModem(modemSession.modemId);
-      await sleep(RECONNECT_WAIT_MS);
-    }
 
     await runSocialCrank(accountId, { ourBlogUrls: payload.ourBlogUrls ?? [] }, {
       modemSession,
