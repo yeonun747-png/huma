@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { AccountType, HumaAccount, Workspace } from '@huma/shared';
-import { CRANK_POOL_WORKSPACE, isCrankPoolAccount } from '@huma/shared';
+import { CRANK_POOL_WORKSPACE, crankLabelOf, isCrankPoolAccount, sortAccountsByCrankLabel } from '@huma/shared';
 import { api } from '@/lib/api';
 import { WORKSPACES } from '@/lib/constants';
 import { MAccountCard, MGrid, MStat } from '@/components/mockup/primitives';
@@ -148,7 +148,7 @@ export function AccountsView() {
   useRegisterPageAction('openAccountForm', openAccountForm);
 
   const crankPoolAccounts = useMemo(
-    () => accounts.filter(isCrankPool).sort((a, b) => a.name.localeCompare(b.name)),
+    () => sortAccountsByCrankLabel(accounts.filter(isCrankPool)),
     [accounts],
   );
 
@@ -538,11 +538,11 @@ export function AccountsView() {
                 iconBg="var(--ok-bg)"
                 name={
                   <>
-                    {ac.name}{' '}
+                    {crankLabelOf(ac)}{' '}
                     <span className="m-type-badge m-type-crank">C-RANK</span>
                   </>
                 }
-                url={ac.blog_url ?? '방문·공감·댓글'}
+                url={ac.name || ac.blog_url || '방문·공감·댓글'}
                 status={statusLabel(ac)}
                 statusTone={statusTone(ac)}
                 stats={[

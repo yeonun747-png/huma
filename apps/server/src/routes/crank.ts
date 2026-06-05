@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { crankLabelOf, sortAccountsByCrankLabel } from '@huma/shared';
 import { authMiddleware, supabase } from '../middleware/auth.js';
 import { getSetting } from '../lib/settings.js';
 import { formatKstHm } from '../lib/dashboard-period.js';
@@ -45,7 +46,6 @@ export async function registerCrankRoutes(app: FastifyInstance) {
         .select('id, name, crank_label, slot_label, crank_count_today, proxy_port, is_active')
         .eq('account_type', 'crank')
         .eq('is_active', true)
-        .order('name'),
     ]);
 
     const kpiCounts = { visit: 0, like: 0, comment: 0, neighbor: 0 };
@@ -62,7 +62,7 @@ export async function registerCrankRoutes(app: FastifyInstance) {
     }> = [];
 
     const acctKeyOf = (row: { name?: string; crank_label?: string | null } | null) =>
-      row?.crank_label?.trim() || row?.name?.trim() || 'C-Rank';
+      crankLabelOf(row ?? {});
 
     for (const log of activityLogs ?? []) {
       const meta = (log.metadata as Record<string, unknown> | null) ?? null;
@@ -115,6 +115,8 @@ export async function registerCrankRoutes(app: FastifyInstance) {
     const accountCount = crankAccounts?.length ?? 0;
     const perAccount = Number(config.daily_limit_per_account ?? 30);
 
+    const sortedCrankAccounts = sortAccountsByCrankLabel(crankAccounts ?? []);
+
     const accountCards = [
       {
         id: 'all',
@@ -122,8 +124,8 @@ export async function registerCrankRoutes(app: FastifyInstance) {
         count: kpiCounts.visit,
         sub: `${accountCount}계정`,
       },
-      ...(crankAccounts ?? []).map((a) => {
-        const key = a.crank_label?.trim() || a.name;
+      ...sortedCrankAccounts.map((a) => {
+        const key = crankLabelOf(a);
         return {
           id: key,
           label: key,

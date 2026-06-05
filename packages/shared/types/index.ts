@@ -3,6 +3,7 @@ export * from './job';
 export * from './modem';
 export * from './video';
 export * from './dongle-slot';
+export * from './crank-label';
 
 export type Workspace = import('./account').Workspace;
 

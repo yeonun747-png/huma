@@ -1,3 +1,4 @@
+import { sortAccountsByCrankLabel } from '@huma/shared';
 import { supabase } from '../middleware/auth.js';
 import { CRANK_POOL_WORKSPACE } from './crank-pool.js';
 import {
@@ -197,7 +198,7 @@ export async function getCrankSchedulerStatus(options?: { probe?: boolean }) {
     .from('huma_accounts')
     .select('id, name, crank_label, last_crank_at, is_active')
     .eq('account_type', 'crank')
-    .order('name');
+    ;
 
   if (accountsError) {
     if (/column .* does not exist/i.test(accountsError.message)) {
@@ -208,7 +209,7 @@ export async function getCrankSchedulerStatus(options?: { probe?: boolean }) {
     throw new Error(`C-Rank 계정 조회 실패: ${accountsError.message}`);
   }
 
-  const accountsWithNext = (crankAccounts ?? []).map((a) => {
+  const accountsWithNext = sortAccountsByCrankLabel(crankAccounts ?? []).map((a) => {
     const last = a.last_crank_at as string | null;
     let nextRunAt: string | null = null;
     if (last) {
@@ -220,6 +221,7 @@ export async function getCrankSchedulerStatus(options?: { probe?: boolean }) {
     return {
       id: a.id,
       name: a.name,
+      crank_label: (a as { crank_label?: string | null }).crank_label ?? null,
       is_active: a.is_active,
       last_crank_at: last,
       next_run_at: todayJob?.scheduled_at ?? nextRunAt,

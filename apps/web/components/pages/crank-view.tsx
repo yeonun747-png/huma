@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { HumaAccount } from '@huma/shared';
-import { isCrankPoolAccount } from '@huma/shared';
+import { crankLabelOf, isCrankPoolAccount, sortAccountsByCrankLabel } from '@huma/shared';
 import { cn } from '@/lib/constants';
 import type { CrankActType, CrankFeedItem } from '@/lib/crank-mock-data';
 import { api } from '@/lib/api';
@@ -47,6 +47,7 @@ type SchedulerStatus = {
   accounts: Array<{
     id: string;
     name: string;
+    crank_label?: string | null;
     is_active: boolean;
     last_crank_at: string | null;
     next_run_at: string | null;
@@ -164,7 +165,11 @@ export function CrankView() {
     void api
       .accounts()
       .then((rows) =>
-        setCrankAccounts(rows.filter((a) => isCrankPoolAccount(a) && a.account_type === 'crank' && a.is_active)),
+        setCrankAccounts(
+          sortAccountsByCrankLabel(
+            rows.filter((a) => isCrankPoolAccount(a) && a.account_type === 'crank' && a.is_active),
+          ),
+        ),
       )
       .catch(() => setCrankAccounts([]));
   }, []);
@@ -253,7 +258,7 @@ export function CrankView() {
 
   const accountRows =
     scheduler?.accounts.map((a) => [
-      a.name,
+      a.crank_label?.trim() ? `${a.crank_label} · ${a.name}` : a.name,
       formatKstShort(a.last_crank_at),
       formatKstShort(a.next_run_at),
       a.today_job_status ?? '—',
@@ -275,7 +280,7 @@ export function CrankView() {
         sub: `${crankAccounts.length}계정`,
       },
       ...crankAccounts.map((a) => {
-        const key = a.crank_label?.trim() || a.name;
+        const key = crankLabelOf(a);
         const fromFeed = feed.filter((f) => (f.acctKey ?? f.acct) === key).length;
         return {
           id: key,
