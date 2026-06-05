@@ -20,6 +20,7 @@ export interface HumaAccount {
   workspace: Workspace;
   shared_workspace?: Workspace;
   slot_label?: string;
+  crank_label?: string;
   account_type: AccountType;
   grade: string;
   health_score: number;

@@ -24,6 +24,15 @@ const DAILY_JOB_TITLE_PREFIX = 'C-Rank 스케줄';
 let lastDailyRunKey = '';
 let lastMonthlyResetKey = '';
 
+async function countActiveCrankPoolSize(): Promise<number> {
+  const { count } = await supabase
+    .from('huma_accounts')
+    .select('id', { count: 'exact', head: true })
+    .eq('account_type', 'crank')
+    .eq('is_active', true);
+  return count ?? 0;
+}
+
 export async function fetchPostingBlogUrls(): Promise<string[]> {
   const { data } = await supabase
     .from('huma_accounts')
@@ -83,7 +92,8 @@ export async function runDailyCrankScheduler(): Promise<void> {
   await resetDailyCrankCounters();
 
   const activeModems = await countActiveCrankModems();
-  const policy = computeCrankSchedulePolicy(activeModems);
+  const poolSize = await countActiveCrankPoolSize();
+  const policy = computeCrankSchedulePolicy(activeModems, poolSize);
 
   if (activeModems === 0) {
     await logOperation({
@@ -167,10 +177,11 @@ export async function getCrankSchedulerStatus(options?: { probe?: boolean }) {
     : dashboardRows;
 
   const activeModems = displayModems.filter((m) => m.display_status === 'active').length;
-  const policy = computeCrankSchedulePolicy(activeModems);
+  const poolSize = await countActiveCrankPoolSize();
+  const policy = computeCrankSchedulePolicy(activeModems, poolSize);
 
   const crankCfg = await getSetting<{ planned_crank_modems?: number }>('social_crank', {});
-  const plannedCrankModems = Math.max(activeModems, crankCfg.planned_crank_modems ?? 5);
+  const plannedCrankModems = Math.max(activeModems, crankCfg.planned_crank_modems ?? 2);
 
   const { data: todayJobs } = await supabase
     .from('huma_jobs')
@@ -184,7 +195,7 @@ export async function getCrankSchedulerStatus(options?: { probe?: boolean }) {
 
   const { data: crankAccounts, error: accountsError } = await supabase
     .from('huma_accounts')
-    .select('id, name, last_crank_at, is_active')
+    .select('id, name, crank_label, last_crank_at, is_active')
     .eq('account_type', 'crank')
     .order('name');
 

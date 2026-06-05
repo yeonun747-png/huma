@@ -260,6 +260,8 @@ export function CalendarView() {
 
             const summary = d ? wsSummary(dayJobs) : null;
 
+            const hasJobs = dayJobs.length > 0;
+
             return (
 
               <button
@@ -268,13 +270,17 @@ export function CalendarView() {
 
                 type="button"
 
-                disabled={!d}
+                disabled={!d || !hasJobs}
 
-                onClick={() => d && openDay(d)}
+                onClick={() => d && hasJobs && openDay(d)}
 
                 className={cn(
 
-                  'm-cal-day text-left transition hover:border-huma-acc',
+                  'm-cal-day text-left transition',
+
+                  hasJobs && 'hover:border-huma-acc cursor-pointer',
+
+                  !hasJobs && d && 'cursor-default opacity-70',
 
                   isToday && 'today',
 

@@ -17,17 +17,38 @@ export async function registerSystemRoutes(app: FastifyInstance) {
       workspaceQuery && allowed.includes(workspaceQuery) ? [workspaceQuery] : allowed;
     const paused = getSystemPaused();
 
-    const [{ count: pendingJobs }, { count: scheduledJobs }, { count: activeAccounts }, { count: errors }] = await Promise.all([
+    const [
+      { count: pendingJobs },
+      { count: scheduledJobs },
+      { count: runningJobs },
+      { count: activeAccounts },
+      { count: errors },
+      { data: nextScheduled },
+    ] = await Promise.all([
       supabase.from('huma_jobs').select('*', { count: 'exact', head: true }).in('workspace', workspaces).eq('status', 'pending'),
       supabase.from('huma_jobs').select('*', { count: 'exact', head: true }).in('workspace', workspaces).eq('status', 'scheduled'),
+      supabase.from('huma_jobs').select('*', { count: 'exact', head: true }).in('workspace', workspaces).eq('status', 'running'),
       supabase.from('huma_accounts').select('*', { count: 'exact', head: true }).in('workspace', workspaces).eq('is_active', true),
       supabase.from('huma_logs').select('*', { count: 'exact', head: true }).in('workspace', workspaces).eq('level', 'ERROR').gte('created_at', new Date(Date.now() - 86400000).toISOString()),
+      supabase
+        .from('huma_jobs')
+        .select('scheduled_at')
+        .in('workspace', workspaces)
+        .in('status', ['pending', 'scheduled'])
+        .not('scheduled_at', 'is', null)
+        .order('scheduled_at', { ascending: true })
+        .limit(1)
+        .maybeSingle(),
     ]);
 
     return {
       healthy: !paused,
       queueActive: !paused,
+      running: !paused,
       pendingJobs: (pendingJobs ?? 0) + (scheduledJobs ?? 0),
+      queued: (pendingJobs ?? 0) + (scheduledJobs ?? 0),
+      liveAccounts: runningJobs ?? 0,
+      nextScheduled: nextScheduled?.scheduled_at ?? null,
       activeAccounts: activeAccounts ?? 0,
       errors: errors ?? 0,
       paused,

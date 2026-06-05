@@ -28,21 +28,21 @@ export async function registerCrankRoutes(app: FastifyInstance) {
     const [{ data: activityLogs }, { data: cafePosts }, { data: crankAccounts }] = await Promise.all([
       supabase
         .from('huma_logs')
-        .select('id, message, created_at, account_id, result_url, metadata, huma_accounts(name)')
+        .select('id, message, created_at, account_id, result_url, metadata, huma_accounts(name, crank_label)')
         .gte('created_at', todayIso)
         .eq('platform', 'naver_crank')
         .order('created_at', { ascending: false })
         .limit(80),
       supabase
         .from('huma_cafe_viral_posts')
-        .select('id, post_title, post_url, reply_posted, posted_at, created_at, huma_accounts(name)')
+        .select('id, post_title, post_url, reply_posted, posted_at, created_at, huma_accounts(name, crank_label)')
         .not('reply_posted', 'is', null)
         .gte('posted_at', todayIso)
         .order('posted_at', { ascending: false })
         .limit(20),
       supabase
         .from('huma_accounts')
-        .select('id, name, crank_count_today, proxy_port, is_active')
+        .select('id, name, crank_label, slot_label, crank_count_today, proxy_port, is_active')
         .eq('account_type', 'crank')
         .eq('is_active', true)
         .order('name'),
@@ -52,6 +52,7 @@ export async function registerCrankRoutes(app: FastifyInstance) {
     const feed: Array<{
       id: string;
       acct: string;
+      acctKey: string;
       acctId: string;
       type: CrankActivityType;
       title: string;
@@ -59,6 +60,9 @@ export async function registerCrankRoutes(app: FastifyInstance) {
       time: string;
       expand?: string;
     }> = [];
+
+    const acctKeyOf = (row: { name?: string; crank_label?: string | null } | null) =>
+      row?.crank_label?.trim() || row?.name?.trim() || 'C-Rank';
 
     for (const log of activityLogs ?? []) {
       const meta = (log.metadata as Record<string, unknown> | null) ?? null;
@@ -68,13 +72,16 @@ export async function registerCrankRoutes(app: FastifyInstance) {
       else if (type === '댓글') kpiCounts.comment++;
       else kpiCounts.neighbor++;
 
-      const acctName = (log.huma_accounts as { name?: string } | null)?.name ?? 'C-Rank';
+      const acctRow = log.huma_accounts as { name?: string; crank_label?: string | null } | null;
+      const acctKey = acctKeyOf(acctRow);
+      const acctName = acctRow?.name ?? acctKey;
       const subMeta = typeof meta?.sub === 'string' ? meta.sub : '';
       const urlHint = log.result_url ? String(log.result_url).replace(/^https?:\/\//, '').slice(0, 40) : '';
       feed.push({
         id: `log-${log.id}`,
         acct: acctName,
-        acctId: log.account_id ?? acctName,
+        acctKey,
+        acctId: acctKey,
         type,
         title: log.message.slice(0, 100),
         sub: subMeta || `${acctName} · ${urlHint || (formatKstHm(log.created_at) ?? '—')}`,
@@ -84,12 +91,15 @@ export async function registerCrankRoutes(app: FastifyInstance) {
     }
 
     for (const post of cafePosts ?? []) {
-      const acct = (post.huma_accounts as { name?: string } | null)?.name ?? 'C-Rank';
+      const acctRow = post.huma_accounts as { name?: string; crank_label?: string | null } | null;
+      const acctKey = acctKeyOf(acctRow);
+      const acct = acctRow?.name ?? acctKey;
       kpiCounts.comment++;
       feed.push({
         id: `cafe-${post.id}`,
         acct,
-        acctId: acct,
+        acctKey,
+        acctId: acctKey,
         type: '댓글',
         title: post.post_title ?? '카페 댓글',
         sub: `${acct} · ${String(post.post_url ?? '').replace(/^https?:\/\//, '').slice(0, 40)}`,
@@ -112,12 +122,18 @@ export async function registerCrankRoutes(app: FastifyInstance) {
         count: kpiCounts.visit,
         sub: `${accountCount}계정`,
       },
-      ...(crankAccounts ?? []).map((a) => ({
-        id: a.name,
-        label: a.name,
-        count: feed.filter((f) => f.acct === a.name && f.type === '방문').length || (a.crank_count_today ?? 0),
-        sub: a.proxy_port ? `:${a.proxy_port}` : '풀',
-      })),
+      ...(crankAccounts ?? []).map((a) => {
+        const key = a.crank_label?.trim() || a.name;
+        return {
+          id: key,
+          label: key,
+          displayName: a.name,
+          count:
+            feed.filter((f) => f.acctKey === key && f.type === '방문').length ||
+            (a.crank_count_today ?? 0),
+          sub: a.name !== key ? a.name : a.proxy_port ? `:${a.proxy_port}` : '풀',
+        };
+      }),
     ];
 
     return {

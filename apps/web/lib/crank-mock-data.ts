@@ -3,6 +3,9 @@ export type CrankActType = '방문' | '공감' | '댓글' | '이웃';
 export type CrankFeedItem = {
   id: string;
   acct: string;
+  /** 필터·data-acct (CRANK-A 등) */
+  acctKey?: string;
+  acctId?: string;
   type: CrankActType;
   title: string;
   sub: string;

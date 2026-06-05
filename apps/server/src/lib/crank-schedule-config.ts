@@ -1,5 +1,5 @@
-/** C-Rank 스케줄러 시뮬레이션 상수 */
-export const CRANK_POOL_SIZE = 10;
+/** 레거시 기본값 — 실제 풀 크기는 DB 활성 crank 계정 수 */
+export const CRANK_POOL_SIZE_DEFAULT = 50;
 export const SESSION_DURATION_MINUTES = 60;
 export const SESSION_DATA_MB = 7.5;
 export const MODEM_MONTHLY_DATA_CAP_MB = 2500;
@@ -16,14 +16,18 @@ export interface CrankSchedulePolicy {
   maxSessionsPerModemPerDay: number;
 }
 
-/** 활성 crank 동글 수 → 활동 주기·일일 계정 수 */
-export function computeCrankSchedulePolicy(activeModemCount: number): CrankSchedulePolicy {
+/** 활성 crank 동글 수 + 풀 크기 → 활동 주기·일일 계정 수 (i7 7동글: C-Rank 2) */
+export function computeCrankSchedulePolicy(
+  activeModemCount: number,
+  poolSize = CRANK_POOL_SIZE_DEFAULT,
+): CrankSchedulePolicy {
   const n = Math.max(0, activeModemCount);
+  const pool = Math.max(1, poolSize);
   if (n <= 2) {
     return {
       activeModemCount: n,
       cycleDays: 3,
-      dailyAccountCount: Math.ceil(CRANK_POOL_SIZE / 3),
+      dailyAccountCount: Math.min(pool, Math.max(1, Math.ceil(pool / 3))),
       maxSessionsPerModemPerDay: MAX_CRANK_SESSIONS_PER_MODEM_PER_DAY,
     };
   }
@@ -31,14 +35,14 @@ export function computeCrankSchedulePolicy(activeModemCount: number): CrankSched
     return {
       activeModemCount: n,
       cycleDays: 2,
-      dailyAccountCount: Math.floor(CRANK_POOL_SIZE / 2),
+      dailyAccountCount: Math.min(pool, Math.max(1, Math.floor(pool / 2))),
       maxSessionsPerModemPerDay: MAX_CRANK_SESSIONS_PER_MODEM_PER_DAY,
     };
   }
   return {
     activeModemCount: n,
     cycleDays: 2,
-    dailyAccountCount: 5,
+    dailyAccountCount: Math.min(pool, 5),
     maxSessionsPerModemPerDay: MAX_CRANK_SESSIONS_PER_MODEM_PER_DAY,
   };
 }

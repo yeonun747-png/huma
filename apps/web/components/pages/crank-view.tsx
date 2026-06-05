@@ -275,12 +275,13 @@ export function CrankView() {
         sub: `${crankAccounts.length}계정`,
       },
       ...crankAccounts.map((a) => {
-        const fromFeed = feed.filter((f) => f.acct === a.name).length;
+        const key = a.crank_label?.trim() || a.name;
+        const fromFeed = feed.filter((f) => (f.acctKey ?? f.acct) === key).length;
         return {
-          id: a.name,
-          label: a.name,
+          id: key,
+          label: key,
           count: fromFeed > 0 ? fromFeed : (a.crank_count_today ?? 0),
-          sub: a.proxy_port ? `:${a.proxy_port}` : (a.slot_label ?? 'CRANK'),
+          sub: a.name !== key ? a.name : a.proxy_port ? `:${a.proxy_port}` : (a.slot_label ?? 'CRANK'),
         };
       }),
     ];
@@ -289,7 +290,7 @@ export function CrankView() {
   const feedRows = useMemo(() => {
     const source = crankFeed?.feed ?? [];
     return source.filter((row) => {
-      if (acctFilter !== 'all' && row.acct !== acctFilter) return false;
+      if (acctFilter !== 'all' && (row.acctKey ?? row.acct) !== acctFilter) return false;
       if (typeFilter !== 'all' && row.type !== typeFilter) return false;
       return true;
     });
@@ -343,7 +344,7 @@ export function CrankView() {
               </>
             }
           >
-            <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-6">
+            <div className="grid max-h-[280px] grid-cols-3 gap-1.5 overflow-y-auto sm:grid-cols-6 lg:grid-cols-8">
               {crankAccounts.length === 0 && !feedLoading ? (
                 <p className="col-span-full py-3 text-center text-[12px] text-huma-t3">
                   등록된 CRANK 소통 계정이 없습니다.{' '}
@@ -393,6 +394,7 @@ export function CrankView() {
                 <button
                   key={row.id}
                   type="button"
+                  data-acct={row.acctKey ?? row.acct}
                   className="m-act-row w-full text-left"
                   onClick={() => setExpandedId(expandedId === row.id ? null : row.id)}
                 >
@@ -459,7 +461,7 @@ export function CrankView() {
             <MProgressStat
               label="가동 crank 동글"
               current={scheduler.active_crank_modems}
-              max={scheduler.planned_crank_modems ?? 5}
+              max={scheduler.planned_crank_modems ?? 2}
             />
             <MProgressStat
               label={`활동 주기 (${scheduler.cycle_days}일)`}
@@ -526,7 +528,7 @@ export function CrankView() {
           <>
             <p className="mb-2 mt-3 text-xs text-huma-t2">
               오늘({scheduler.date_key}) 목표 {scheduler.daily_account_target}계정 · 가동 동글{' '}
-              {scheduler.active_crank_modems}개(목표 {scheduler.planned_crank_modems ?? 5}개) ·{' '}
+              {scheduler.active_crank_modems}개(목표 {scheduler.planned_crank_modems ?? 2}개) ·{' '}
               {scheduler.cycle_days}일 주기
             </p>
             <MTable

@@ -20,6 +20,7 @@ export function Sidebar() {
   const { admin, logout } = useAuth();
   const [badges, setBadges] = useState({ queue: 0, video: 0, watcher: 0, seo: 0, scenario: 0 });
   const [pendingJobs, setPendingJobs] = useState(0);
+  const [liveAccounts, setLiveAccounts] = useState(0);
 
   const mergeBadges = (apiBadges: { queue: number; video: number; watcher: number }) =>
     setBadges((prev) => ({ ...prev, queue: apiBadges.queue, video: apiBadges.video, watcher: apiBadges.watcher }));
@@ -27,13 +28,19 @@ export function Sidebar() {
   useEffect(() => {
     setBadges((prev) => ({ ...prev, queue: 0, video: 0, watcher: 0 }));
     setPendingJobs(0);
+    setLiveAccounts(0);
     const scope = { workspace };
+    const pullStatus = () =>
+      api.status(scope).then((s) => {
+        setPendingJobs(s.pendingJobs);
+        setLiveAccounts(s.liveAccounts ?? 0);
+      });
     api.navBadges(scope).then(mergeBadges).catch(() => {});
-    api.status(scope).then((s) => setPendingJobs(s.pendingJobs)).catch(() => {});
+    pullStatus().catch(() => {});
     const t = setInterval(() => {
       api.navBadges(scope).then(mergeBadges).catch(() => {});
-      api.status(scope).then((s) => setPendingJobs(s.pendingJobs)).catch(() => {});
-    }, 30000);
+      pullStatus().catch(() => {});
+    }, 15000);
     return () => clearInterval(t);
   }, [workspace]);
 
@@ -115,9 +122,9 @@ export function Sidebar() {
                   {badge}
                 </span>
               )}
-              {item.live && (
+              {item.live && liveAccounts > 0 && (
                 <span className="ml-auto animate-blink rounded-full bg-huma-err px-1.5 py-px font-mono text-[9px] text-white">
-                  LIVE
+                  LIVE{liveAccounts}
                 </span>
               )}
             </Link>

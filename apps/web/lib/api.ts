@@ -87,7 +87,11 @@ export const api = {
     request<{
       healthy: boolean;
       queueActive: boolean;
+      running?: boolean;
       pendingJobs: number;
+      queued?: number;
+      liveAccounts?: number;
+      nextScheduled?: string | null;
       activeAccounts: number;
       errors: number;
       paused: boolean;

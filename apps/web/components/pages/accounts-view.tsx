@@ -310,7 +310,7 @@ export function AccountsView() {
         <MStat
           label="C-Rank 소통 계정"
           value={<>{crankCafe}<span className="text-[12.5px] text-huma-t3">개</span></>}
-          sub="CRANK-A~J · 추가 가능"
+          sub="CRANK 풀 · 최대 150"
         />
         <MStat
           label="소셜미디어 계정"
