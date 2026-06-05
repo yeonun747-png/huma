@@ -5,6 +5,11 @@ import { getHumanEngineConfig, getSetting, type HumanEngineConfig } from './sett
 
 export interface AppSettings {
   claude_api?: boolean;
+  /** v3.26 — Haiku: Imagen 모델 판단·해시태그·autoDecide */
+  claude_haiku_api?: boolean;
+  /** v3.26 — Google Imagen 4 (이미지 전용) */
+  google_imagen_api?: boolean;
+  /** v3.26 — Higgsfield Cloud (영상·Kling 3.0 전용) */
   higgsfield_api?: boolean;
   slack_webhook?: boolean;
   daily_limit?: boolean;
@@ -36,6 +41,10 @@ export interface HumanEngineScheduleConfig extends HumanEngineConfig {
 }
 
 const DEFAULT_APP_SETTINGS: AppSettings = {
+  claude_api: true,
+  claude_haiku_api: true,
+  google_imagen_api: true,
+  higgsfield_api: true,
   daily_limit: true,
   night_ban: true,
   slack_webhook: true,
@@ -51,7 +60,33 @@ const DEFAULT_WATCHER: WatcherSettings = {
 const POSTING_JOB_TYPES = ['post_blog', 'cafe_new_post'];
 
 export async function getAppSettings(): Promise<AppSettings> {
-  return { ...DEFAULT_APP_SETTINGS, ...(await getSetting<AppSettings>('app_settings', {})) };
+  const raw = await getSetting<AppSettings>('app_settings', {});
+  const legacyMedia = raw.higgsfield_api ?? true;
+  return {
+    ...DEFAULT_APP_SETTINGS,
+    ...raw,
+    claude_haiku_api: raw.claude_haiku_api ?? raw.claude_api ?? true,
+    google_imagen_api: raw.google_imagen_api ?? legacyMedia,
+    higgsfield_api: raw.higgsfield_api ?? legacyMedia,
+  };
+}
+
+export async function isGoogleImagenEnabled(): Promise<boolean> {
+  const app = await getAppSettings();
+  if (app.google_imagen_api === false) return false;
+  return Boolean(process.env.GOOGLE_AI_API_KEY?.trim());
+}
+
+export async function isHiggsfieldVideoEnabled(): Promise<boolean> {
+  const app = await getAppSettings();
+  if (app.higgsfield_api === false) return false;
+  return Boolean(process.env.HIGGSFIELD_API_KEY?.trim());
+}
+
+export async function isHaikuSubEnabled(): Promise<boolean> {
+  const app = await getAppSettings();
+  if (app.claude_haiku_api === false) return false;
+  return Boolean(process.env.ANTHROPIC_API_KEY?.trim());
 }
 
 export async function getWatcherSettings(): Promise<WatcherSettings> {

@@ -155,23 +155,145 @@ export const api = {
     request(`/api/platform-accounts/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deletePlatformAccount: (id: string) =>
     request(`/api/platform-accounts/${id}`, { method: 'DELETE' }),
-  dashboardStats: () =>
+  dashboardStats: (params?: { period?: 'today' | 'week' | 'month' }) =>
     request<{
       pendingJobs: number;
       activeAccounts: number;
       errors: number;
       todayCompleted: number;
-      serviceStats: Array<{ workspace: string; todayJobs: number; pending: number; errors: number }>;
+      serviceStats: Array<{ workspace: string; todayJobs: number; pending: number; errors: number; running?: number }>;
       chart: Array<{ day: string; value: number }>;
-    }>('/api/dashboard/stats'),
+      period?: 'today' | 'week' | 'month';
+      chartLabel?: string;
+      nextPublish?: string | null;
+      integrated: {
+        todayPublish: number;
+        todayPublishSub: string;
+        queuePending: number;
+        queueSub: string;
+        errors: number;
+        errorsSub: string;
+        activeAccounts: number;
+        totalAccounts: number;
+        accountSub: string;
+      };
+      serviceStatus: Record<
+        string,
+        { icon: string; name: string; detail: string; todayJobs: number; jobsLabel: string; status: 'ok' | 'warn' | 'err' }
+      >;
+      workspacePosts: Record<
+        string,
+        Array<{
+          title: string;
+          meta: string;
+          status: 'done' | 'running' | 'idle' | 'error' | 'warn';
+          statusLabel: string;
+          urlKind: 'link' | 'generating' | 'dash' | 'watcher';
+          url?: string;
+        }>
+      >;
+      roasItems: Array<{ title: string; platform: string; views: number }>;
+      yeonunSocial: Array<{ label: string; current: number; max: number | null }>;
+      pananaStats: { todayPosts: number; activePlatforms: number; errorAccounts: number };
+    }>(`/api/dashboard/stats${qs({ period: params?.period })}`),
+  monitorSessions: () =>
+    request<{
+      live: Array<{
+        jobId: string;
+        account: string;
+        platform: string;
+        workspace: string;
+        title: string;
+        chars: number;
+        totalChars: number;
+        wpm: number;
+        typos: number;
+        eta: string;
+        preview: string;
+      }>;
+      idle: {
+        jobId: string;
+        account: string;
+        schedule: string;
+        title: string;
+        workspace: string;
+        platform: string | null;
+      } | null;
+      errors: Array<{
+        kind: 'platform' | 'job';
+        account: string;
+        platform: string;
+        workspace: string;
+        detail: string;
+        sub: string;
+      }>;
+    }>('/api/monitor/sessions'),
+  crankFeed: () =>
+    request<{
+      kpi: {
+        visit: { current: number; max: number };
+        like: { current: number; max: number };
+        comment: { current: number; max: number };
+        neighbor: { current: number; max: number };
+      };
+      accountCards: Array<{ id: string; label: string; count: number; sub: string }>;
+      feed: Array<{
+        id: string;
+        acct: string;
+        type: '방문' | '공감' | '댓글' | '이웃';
+        title: string;
+        sub: string;
+        time: string;
+        expand?: string;
+      }>;
+      keywords: string[];
+      hasData?: boolean;
+    }>('/api/crank/feed', {
+      sameOrigin: typeof window === 'undefined' ? false : true,
+      cache: 'no-store',
+    }),
+  seoKeywords: (workspace: string) =>
+    request<{
+      workspace: string;
+      badge: string;
+      configured: boolean;
+      missingEnv?: string[];
+      source: string;
+      ranks: Array<{ rank: string; word: string; vol: string; chg: string; ok: boolean | null }>;
+      pool: string[];
+      table: Array<{ id: string; kw: string; cnt: number; reflect: string; st: string; tone: 'ok' | 'warn' | 'err' }>;
+      crawledAt?: string;
+      cachedAt?: string;
+    }>(`/api/seo/keywords?workspace=${encodeURIComponent(workspace)}`),
+  crawlSeo: (workspace: string) =>
+    request(`/api/seo/crawl?workspace=${encodeURIComponent(workspace)}`, { method: 'POST' }),
+  cafeViralKpi: () =>
+    request<{
+      crawled: { value: number; sub: string };
+      today: { value: number; sub: string; tone?: 'ok' };
+      selfQa: { value: number; sub: string };
+      organic: { value: number; sub: string; tone?: 'ok' };
+    }>('/api/cafe-viral/kpi'),
   dashboardRecent: () =>
     request<Array<{ title: string; status: string; result_url?: string; workspace: string; completed_at?: string }>>(
       '/api/dashboard/recent'
     ),
   calendarJobs: (params?: { month?: string; workspace?: string }) =>
-    request<Array<{ id: string; title: string; job_type: string; status: string; scheduled_at: string; workspace: string }>>(
-      `/api/jobs/calendar${qs(params ?? {})}`
-    ),
+    request<
+      Array<{
+        id: string;
+        title: string;
+        job_type: string;
+        status: string;
+        scheduled_at: string;
+        workspace: string;
+        result_url?: string | null;
+        completed_at?: string | null;
+        content?: string | null;
+        image_urls?: string[] | null;
+        platform?: string | null;
+      }>
+    >(`/api/jobs/calendar${qs(params ?? {})}`),
   crankScheduler: (opts?: { probe?: boolean }) =>
     request<{
       date_key: string;
@@ -239,6 +361,8 @@ export const api = {
       };
       monthlyTrend: Array<{ month: string; earnings: number; pageViews: number; rpm: number }>;
     }>(`/api/publisher-stats?workspace=${encodeURIComponent(workspace)}`, { sameOrigin: true }),
-  stopAll: () => request('/api/stop-all', { method: 'POST' }),
+  stopAll: (reason: string) =>
+    request('/api/stop-all', { method: 'POST', body: JSON.stringify({ reason }) }),
+  advanceJob: (id: string) => request(`/api/jobs/${id}/advance`, { method: 'PATCH' }),
   resumeAll: () => request('/api/resume-all', { method: 'POST' }),
 };

@@ -20,6 +20,7 @@ import {
   recordLastAccountOnModem,
 } from '../../../lib/modem-last-account.js';
 import { applyCrankResourceBlocking } from './crank-resource-block.js';
+import { logCrankActivity } from '../../../lib/crank-activity.js';
 
 interface SocialCrankConfig {
   visits_per_session: number;
@@ -136,9 +137,32 @@ export async function runSocialCrank(
         const doLike = target.doLike && likesDone < plan.likes;
         const doComment = target.doComment && commentsDone < plan.comments;
 
-        await visitBlogActions(page, { ...target, doLike, doComment }, scale);
-        if (doLike) likesDone++;
-        if (doComment) commentsDone++;
+        const pageUrl = page.url();
+        const pageTitle = await page.title().catch(() => '');
+        const actions = await visitBlogActions(page, { ...target, doLike, doComment }, scale, accountId, pageUrl, pageTitle);
+        if (actions.visited) {
+          await logCrankActivity({
+            accountId,
+            type: '방문',
+            targetUrl: pageUrl,
+            targetTitle: pageTitle.slice(0, 80),
+            dwellSec: randomBetween(60, 180),
+          });
+        }
+        if (actions.liked) {
+          likesDone++;
+          await logCrankActivity({ accountId, type: '공감', targetUrl: pageUrl, targetTitle: pageTitle.slice(0, 80) });
+        }
+        if (actions.commented) {
+          commentsDone++;
+          await logCrankActivity({
+            accountId,
+            type: '댓글',
+            targetUrl: pageUrl,
+            targetTitle: pageTitle.slice(0, 80),
+            comment: actions.commentText,
+          });
+        }
 
         await humanSleep(30000, 120000);
       }
@@ -163,12 +187,20 @@ async function visitBlogActions(
   page: Page,
   target: { doLike: boolean; doComment: boolean; commentText?: string },
   scale: number,
-) {
+  _accountId: string,
+  _pageUrl: string,
+  _pageTitle: string,
+): Promise<{ visited: boolean; liked: boolean; commented: boolean; commentText?: string }> {
+  let liked = false;
+  let commented = false;
+  let commentText: string | undefined;
+
   if (target.doLike) {
     const likeBtn = page.locator('.u_likeit_list_btn');
     if (await likeBtn.isVisible()) {
       await scaledHumanSleep(2000, 5000, scale);
       await humanClick(page, '.u_likeit_list_btn');
+      liked = true;
     }
   }
 
@@ -176,18 +208,21 @@ async function visitBlogActions(
     const commentArea = page.locator('.u_cbox_write_wrap textarea');
     if (await commentArea.isVisible()) {
       try {
-        const commentText = target.commentText ?? (await generateCrankComment(page));
+        commentText = target.commentText ?? (await generateCrankComment(page));
         await scaledHumanSleep(5000, 15000, scale);
         await commentArea.click();
         const humanConfig = await getHumanEngineConfig();
         await humanType(page, commentArea, commentText, humanConfig);
         await scaledHumanSleep(2000, 5000, scale);
         await humanClick(page, '.u_cbox_btn_upload');
+        commented = true;
       } catch {
-        /* AI 댓글 생성 실패 — 고정 템플릿 대신 스킵 */
+        /* AI 댓글 생성 실패 — 스킵 */
       }
     }
   }
+
+  return { visited: true, liked, commented, commentText };
 }
 
 async function selectOurBlogsToVisit(

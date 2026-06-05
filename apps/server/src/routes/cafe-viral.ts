@@ -236,6 +236,71 @@ export async function registerCafeViralRoutes(app: FastifyInstance) {
     }
   });
 
+  app.get('/api/cafe-viral/kpi', { preHandler: authMiddleware }, async (request) => {
+    const workspaces = getWorkspaceFilter(request);
+    if (!workspaces.includes('yeonun')) {
+      return {
+        crawled: { value: 0, sub: '미답글 0건' },
+        today: { value: 0, sub: '활동 없음' },
+        selfQa: { value: 0, sub: '오늘 등록' },
+        organic: { value: 0, sub: '댓글 0 · 공감 0' },
+      };
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayIso = today.toISOString();
+
+    const [
+      { count: totalPosts },
+      { count: unreplied },
+      { count: todayPosted },
+      { count: todaySelfQa },
+      { count: todayReplies },
+    ] = await Promise.all([
+      supabase.from('huma_cafe_viral_posts').select('*', { count: 'exact', head: true }).eq('workspace', 'yeonun'),
+      supabase
+        .from('huma_cafe_viral_posts')
+        .select('*', { count: 'exact', head: true })
+        .eq('workspace', 'yeonun')
+        .eq('status', 'pending'),
+      supabase
+        .from('huma_cafe_viral_posts')
+        .select('*', { count: 'exact', head: true })
+        .eq('workspace', 'yeonun')
+        .gte('posted_at', todayIso),
+      supabase
+        .from('huma_cafe_viral_posts')
+        .select('*', { count: 'exact', head: true })
+        .eq('workspace', 'yeonun')
+        .eq('is_self_post', true)
+        .gte('created_at', todayIso),
+      supabase
+        .from('huma_cafe_viral_posts')
+        .select('*', { count: 'exact', head: true })
+        .eq('workspace', 'yeonun')
+        .not('reply_posted', 'is', null)
+        .gte('posted_at', todayIso),
+    ]);
+
+    const todayActivity = (todayPosted ?? 0) + (todayReplies ?? 0);
+
+    return {
+      crawled: { value: totalPosts ?? 0, sub: `미답글 ${unreplied ?? 0}건` },
+      today: {
+        value: todayActivity,
+        sub: `글${todaySelfQa ?? 0} 댓글${todayReplies ?? 0}`,
+        tone: todayActivity > 0 ? 'ok' : undefined,
+      },
+      selfQa: { value: todaySelfQa ?? 0, sub: '오늘 등록' },
+      organic: {
+        value: Math.max(0, (todayPosted ?? 0) - (todaySelfQa ?? 0)),
+        sub: `댓글 ${todayReplies ?? 0} · 글 ${Math.max(0, (todayPosted ?? 0) - (todaySelfQa ?? 0))}`,
+        tone: todayActivity > 0 ? 'ok' : undefined,
+      },
+    };
+  });
+
   app.get('/api/cafe-viral/activity/stats', { preHandler: authMiddleware }, async (request) => {
     const { cafe_id } = request.query as { cafe_id?: string };
     if (!cafe_id) return { error: 'cafe_id 필요' };

@@ -4,6 +4,8 @@ import { Sidebar } from '@/components/dashboard/sidebar';
 import { Topbar } from '@/components/dashboard/topbar';
 import { PageActionProvider } from '@/components/dashboard/page-action-context';
 import { HumanEngineSaveProvider } from '@/components/dashboard/human-engine-save-context';
+import { DashboardPeriodProvider } from '@/components/dashboard/dashboard-period-context';
+import { WorkspaceRouteGuard } from '@/components/dashboard/workspace-route-guard';
 import { getPageMeta } from '@/lib/page-config';
 import { usePathname } from 'next/navigation';
 
@@ -28,7 +30,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <PageActionProvider>
       <HumanEngineSaveProvider>
-        <AppShellInner>{children}</AppShellInner>
+        <DashboardPeriodProvider>
+          <WorkspaceRouteGuard>
+            <AppShellInner>{children}</AppShellInner>
+          </WorkspaceRouteGuard>
+        </DashboardPeriodProvider>
       </HumanEngineSaveProvider>
     </PageActionProvider>
   );

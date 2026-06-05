@@ -21,6 +21,7 @@ import { uploadQuizOasisInstagramVariants } from '../social/quizoasis-reels.js';
 
 import { buildBlogVideoAppend } from '../queue/jobs/content-orchestrator.js';
 import { createPausedSocialReplyJob } from '../../lib/social-reply-chain.js';
+import { isGoogleImagenEnabled, isHiggsfieldVideoEnabled } from '../../lib/human-engine-policy.js';
 
 import { copyFile, mkdir } from 'fs/promises';
 
@@ -187,15 +188,19 @@ export async function runVideoPipeline(videoJobId: string) {
     let imageUrl = job.generated_image_url as string | undefined;
 
     if (!imageUrl) {
+      if (!(await isGoogleImagenEnabled())) {
+        throw new Error('Google Imagen 4 API 비활성 — 이미지 생성 단계 중단');
+      }
 
       await updateStep(videoJobId, 'image_generating');
 
+      const rawImageModel = job.image_model as string | undefined;
       imageUrl = await generateImage({
-
         prompt: job.image_prompt,
-
-        model: job.image_model as ImageModel,
-
+        model:
+          rawImageModel && rawImageModel !== 'auto'
+            ? (rawImageModel as ImageModel)
+            : undefined,
       });
 
       await updateVideoJob(videoJobId, { generated_image_url: imageUrl });
@@ -204,18 +209,17 @@ export async function runVideoPipeline(videoJobId: string) {
 
 
 
+    if (!(await isHiggsfieldVideoEnabled())) {
+      throw new Error('Higgsfield Cloud API 비활성 — 영상 생성 단계 중단');
+    }
+
     await updateStep(videoJobId, 'video_generating');
 
     const videoUrl = await generateVideo({
-
       imageUrl,
-
       prompt: job.video_prompt,
-
       model: job.video_model as VideoModel,
-
-      durationSec: job.duration_sec,
-
+      durationSec: Number(job.duration_sec) > 0 ? Number(job.duration_sec) : 15,
     });
 
     await updateVideoJob(videoJobId, { source_video_url: videoUrl });

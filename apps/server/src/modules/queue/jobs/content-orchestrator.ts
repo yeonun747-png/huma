@@ -12,6 +12,7 @@ import {
 } from '../../claude/auto-decide.js';
 import { generateImage, type ImageModel } from '../../higgsfield/image.js';
 import { uniquifyImageFromUrl } from '../../image/uniquify.js';
+import { getPipelineModelSettings } from '../../../lib/pipeline-settings.js';
 
 export type ContentType = 'A' | 'B';
 
@@ -282,6 +283,8 @@ async function runTypeB(
     retry_count: 0,
   });
 
+  const pipelineModels = await getPipelineModelSettings(workspace);
+
   const { data: videoRow, error: videoErr } = await supabase
     .from('huma_video_queue')
     .insert({
@@ -293,7 +296,9 @@ async function runTypeB(
       generated_image_url: imageUrl,
       image_prompt: generated.image_prompt,
       video_prompt: generated.video_prompt,
-      video_model: videoModel,
+      ...(pipelineModels.imageModel ? { image_model: pipelineModels.imageModel } : {}),
+      video_model: pipelineModels.videoModel,
+      duration_sec: pipelineModels.durationSec,
       ...(generated.tts_script?.trim()
         ? { tts_script: generated.tts_script.trim() }
         : {}),

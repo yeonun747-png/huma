@@ -1,158 +1,459 @@
 'use client';
 
+
+
 import { useCallback, useEffect, useMemo, useState } from 'react';
+
 import { useWorkspace } from '@/components/dashboard/workspace-context';
-import { useRegisterPageAction } from '@/components/dashboard/page-action-context';
+
 import { JobScheduleForm, formatScheduledAt, type JobScheduleFormValues } from '@/components/queue/job-schedule-form';
+
 import { MPanel } from '@/components/mockup/primitives';
+
 import { api } from '@/lib/api';
-import { cn } from '@/lib/constants';
+
+import { cn, WS_LABEL } from '@/lib/constants';
+
+import { PostViewerModal } from '@/components/viewer/post-viewer-modal';
+
+
 
 const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
-type CalJob = { id: string; title: string; job_type: string; status: string; scheduled_at: string };
+
+
+type CalJob = {
+  id: string;
+  title: string;
+  job_type: string;
+  status: string;
+  scheduled_at: string;
+  workspace: string;
+  result_url?: string | null;
+  completed_at?: string | null;
+  content?: string | null;
+  image_urls?: string[] | null;
+  platform?: string | null;
+};
+
+
 
 export function CalendarView() {
+
   const { workspace } = useWorkspace();
+
   const [viewDate, setViewDate] = useState(() => new Date());
+
   const [jobs, setJobs] = useState<CalJob[]>([]);
+
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
+
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
   const [showForm, setShowForm] = useState(false);
 
+  const [viewer, setViewer] = useState<{
+    title: string;
+    workspace: string;
+    isLive?: boolean;
+    content?: string | null;
+    resultUrl?: string | null;
+    completedAt?: string | null;
+    imageUrl?: string | null;
+  } | null>(null);
+
+
+
   const year = viewDate.getFullYear();
+
   const month = viewDate.getMonth();
+
   const today = new Date();
+
   const firstDay = new Date(year, month, 1).getDay();
+
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
+
+
   const load = useCallback(() => {
+
     const monthStr = `${year}-${String(month + 1).padStart(2, '0')}`;
+
     api.calendarJobs({ month: monthStr, workspace }).then(setJobs).catch(() => setJobs([]));
+
   }, [workspace, year, month]);
 
-  useEffect(() => { load(); }, [load]);
 
-  useRegisterPageAction('openScheduleForm', () => {
-    setSelectedDay(today.getMonth() === month && today.getFullYear() === year ? today.getDate() : 1);
-    setShowForm(true);
-  });
+
+  useEffect(() => {
+
+    load();
+
+  }, [load]);
+
+
 
   const jobsByDay = useMemo(() => {
+
     const map: Record<number, CalJob[]> = {};
+
     for (const job of jobs) {
+
       const d = new Date(job.scheduled_at).getDate();
+
       (map[d] ??= []).push(job);
+
     }
+
     return map;
+
   }, [jobs]);
 
-  const selectedJobs = selectedDay ? jobsByDay[selectedDay] ?? [] : [];
 
-  const defaultScheduleDate = selectedDay
-    ? new Date(year, month, selectedDay, 10, 0).toISOString()
-    : undefined;
 
-  const handleSchedule = async (values: JobScheduleFormValues) => {
-    await api.createJob({
-      workspace,
-      job_type: values.job_type,
-      title: values.title,
-      content: values.content || '',
-      scheduled_at: new Date(values.scheduled_at).toISOString(),
-      status: 'scheduled',
-    });
+  const selectedJobs = selectedDay ? (jobsByDay[selectedDay] ?? []) : [];
+
+
+
+  const openDay = (d: number) => {
+
+    setSelectedDay(d);
+
+    setDrawerOpen(true);
+
     setShowForm(false);
-    load();
+
   };
 
+
+
+  const defaultScheduleDate = selectedDay
+
+    ? new Date(year, month, selectedDay, 10, 0).toISOString()
+
+    : undefined;
+
+
+
+  const handleSchedule = async (values: JobScheduleFormValues) => {
+
+    await api.createJob({
+
+      workspace,
+
+      job_type: values.job_type,
+
+      title: values.title,
+
+      content: values.content || '',
+
+      scheduled_at: new Date(values.scheduled_at).toISOString(),
+
+      status: 'scheduled',
+
+    });
+
+    setShowForm(false);
+
+    load();
+
+  };
+
+
+
   const cells: (number | null)[] = [];
+
   for (let i = 0; i < firstDay; i++) cells.push(null);
+
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
 
+
+
+  const wsSummary = (dayJobs: CalJob[]) => {
+
+    const counts: Record<string, number> = {};
+
+    for (const j of dayJobs) {
+
+      const w = j.job_type.includes('video') ? workspace : workspace;
+
+      counts[w] = (counts[w] ?? 0) + 1;
+
+    }
+
+    const n = dayJobs.length;
+
+    if (!n) return null;
+
+    return `${WS_LABEL[workspace] ?? workspace} ${n}건`;
+
+  };
+
+
+
   return (
-    <div className="animate-fadeIn space-y-3">
+
+    <div className="animate-fadeIn">
+
+      <PostViewerModal
+        open={Boolean(viewer)}
+        title={viewer?.title ?? ''}
+        workspace={viewer?.workspace ?? workspace}
+        isLive={viewer?.isLive}
+        content={viewer?.content}
+        resultUrl={viewer?.resultUrl}
+        completedAt={viewer?.completedAt}
+        imageUrl={viewer?.imageUrl}
+        onClose={() => setViewer(null)}
+      />
+
       <MPanel
-        title={`${year}년 ${month + 1}월 · ${workspace}`}
+
+        title={`${year}년 ${month + 1}월 · ${WS_LABEL[workspace] ?? workspace}`}
+
         action={
+
           <div className="flex gap-1">
-            <button type="button" className="btn-ghost px-2 py-0.5 text-[10px]" onClick={() => setViewDate(new Date(year, month - 1, 1))}>◀</button>
-            <button type="button" className="btn-ghost px-2 py-0.5 text-[10px]" onClick={() => setViewDate(new Date())}>오늘</button>
-            <button type="button" className="btn-ghost px-2 py-0.5 text-[10px]" onClick={() => setViewDate(new Date(year, month + 1, 1))}>▶</button>
+
+            <button type="button" className="btn-ghost px-2 py-0.5 text-[10px]" onClick={() => setViewDate(new Date(year, month - 1, 1))}>
+
+              ◀
+
+            </button>
+
+            <button type="button" className="btn-ghost px-2 py-0.5 text-[10px]" onClick={() => setViewDate(new Date())}>
+
+              오늘
+
+            </button>
+
+            <button type="button" className="btn-ghost px-2 py-0.5 text-[10px]" onClick={() => setViewDate(new Date(year, month + 1, 1))}>
+
+              ▶
+
+            </button>
+
           </div>
+
         }
+
       >
+
         <div className="m-cal-grid">
+
           {DAYS.map((d) => (
-            <div key={d} className="m-cal-head">{d}</div>
+
+            <div key={d} className="m-cal-head">
+
+              {d}
+
+            </div>
+
           ))}
+
           {cells.map((d, i) => {
+
             const isToday = d === today.getDate() && month === today.getMonth() && year === today.getFullYear();
-            const isSelected = selectedDay === d;
+
+            const dayJobs = d ? (jobsByDay[d] ?? []) : [];
+
+            const summary = d ? wsSummary(dayJobs) : null;
+
             return (
+
               <button
+
                 key={i}
+
                 type="button"
+
                 disabled={!d}
-                onClick={() => { if (d) { setSelectedDay(d); setShowForm(false); } }}
+
+                onClick={() => d && openDay(d)}
+
                 className={cn(
+
                   'm-cal-day text-left transition hover:border-huma-acc',
+
                   isToday && 'today',
-                  isSelected && 'ring-1 ring-huma-acc',
-                  !d && 'invisible pointer-events-none'
+
+                  selectedDay === d && drawerOpen && 'ring-1 ring-huma-acc',
+
+                  !d && 'invisible pointer-events-none',
+
                 )}
+
               >
+
                 {d && (
+
                   <>
+
                     <div className="m-cal-num">{d}</div>
-                    {(jobsByDay[d] ?? []).slice(0, 3).map((j) => (
-                      <div key={j.id} className="m-cal-ev bg-[var(--glow)] text-huma-acc" title={j.title}>
-                        {new Date(j.scheduled_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} {j.title}
+
+                    {summary && (
+
+                      <div className="m-cal-ev bg-[var(--glow)] text-huma-acc" title={summary}>
+
+                        {summary} ↗
+
                       </div>
-                    ))}
-                    {(jobsByDay[d]?.length ?? 0) > 3 && (
-                      <div className="text-[9px] text-huma-t3">+{(jobsByDay[d]?.length ?? 0) - 3}건</div>
+
                     )}
+
+                    {dayJobs.slice(0, 2).map((j) => (
+
+                      <div key={j.id} className="truncate font-mono text-[9px] text-huma-t3" title={j.title}>
+
+                        {new Date(j.scheduled_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}{' '}
+
+                        {j.title}
+
+                      </div>
+
+                    ))}
+
                   </>
+
                 )}
+
               </button>
+
             );
+
           })}
+
         </div>
+
       </MPanel>
 
-      {selectedDay && (
-        <MPanel
-          title={`${month + 1}월 ${selectedDay}일 예약`}
-          action={
-            <button type="button" className="btn-primary px-2 py-0.5 text-[10px]" onClick={() => setShowForm(true)}>+ 이 날짜에 예약</button>
-          }
-        >
-          {selectedJobs.length === 0 ? (
-            <p className="text-xs text-huma-t3">예약된 작업이 없습니다.</p>
-          ) : (
-            <ul className="space-y-1.5">
-              {selectedJobs.map((j) => (
-                <li key={j.id} className="flex items-center justify-between rounded border border-huma-bdr2 bg-huma-bg3 px-3 py-2 text-xs">
-                  <div>
-                    <div className="font-medium text-huma-t">{j.title}</div>
-                    <div className="font-mono text-[10.5px] text-huma-t3">{j.job_type} · {formatScheduledAt(j.scheduled_at)}</div>
-                  </div>
-                  <span className={cn('text-[10px]', j.status === 'scheduled' ? 'text-huma-acc' : 'text-huma-t3')}>{j.status}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </MPanel>
+
+
+      {drawerOpen && selectedDay && (
+
+        <>
+
+          <button
+
+            type="button"
+
+            className="cal-drawer-overlay open"
+
+            aria-label="드로어 닫기"
+
+            onClick={() => setDrawerOpen(false)}
+
+          />
+
+          <aside className="cal-drawer open">
+
+            <div className="cal-drawer-head">
+
+              <div>
+
+                <div className="font-display text-[16px] tracking-wide text-huma-acc">발행 예약 조감</div>
+
+                <div className="font-mono text-[11px] text-huma-t3">
+
+                  {WS_LABEL[workspace] ?? workspace} · {year}년 {month + 1}월 {selectedDay}일
+
+                </div>
+
+              </div>
+
+              <button type="button" className="btn-ghost btn-sm" onClick={() => setDrawerOpen(false)}>
+
+                ✕
+
+              </button>
+
+            </div>
+
+            <div className="cal-drawer-body">
+
+              <div className="mb-3 flex gap-2">
+
+                <button type="button" className="btn-primary btn-sm" onClick={() => setShowForm(true)}>
+
+                  + 이 날짜에 예약
+
+                </button>
+
+              </div>
+
+              {selectedJobs.length === 0 ? (
+
+                <p className="text-xs text-huma-t3">예약된 작업이 없습니다.</p>
+
+              ) : (
+
+                <ul className="space-y-2">
+
+                  {selectedJobs.map((j) => (
+
+                    <li key={j.id}>
+                      <button
+                        type="button"
+                        className="w-full rounded border border-huma-bdr2 bg-huma-bg3 px-3 py-2.5 text-left transition hover:border-huma-acc"
+                        onClick={() =>
+                          setViewer({
+                            title: j.title,
+                            workspace: j.workspace ?? workspace,
+                            isLive: j.status === 'running',
+                            content: j.content,
+                            resultUrl: j.result_url,
+                            completedAt: j.completed_at ?? j.scheduled_at,
+                            imageUrl: j.image_urls?.[0] ?? null,
+                          })
+                        }
+                      >
+                        <div className="text-[13px] font-medium text-huma-t">{j.title}</div>
+                        <div className="mt-1 font-mono text-[10.5px] text-huma-t3">
+                          {j.job_type} · {formatScheduledAt(j.scheduled_at)} · {j.status}
+                          {j.result_url ? ' · 발행 URL 있음' : ''}
+                        </div>
+                      </button>
+                    </li>
+
+                  ))}
+
+                </ul>
+
+              )}
+
+              {showForm && (
+
+                <div className="mt-4 border-t border-huma-bdr pt-4">
+
+                  <JobScheduleForm
+
+                    workspace={workspace}
+
+                    defaultDate={defaultScheduleDate}
+
+                    onSubmit={handleSchedule}
+
+                    onCancel={() => setShowForm(false)}
+
+                  />
+
+                </div>
+
+              )}
+
+            </div>
+
+          </aside>
+
+        </>
+
       )}
 
-      {showForm && (
-        <JobScheduleForm
-          workspace={workspace}
-          defaultDate={defaultScheduleDate}
-          onSubmit={handleSchedule}
-          onCancel={() => setShowForm(false)}
-        />
-      )}
     </div>
+
   );
+
 }
+
+

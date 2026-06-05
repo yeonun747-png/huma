@@ -1,6 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { HumaAccount } from '@huma/shared';
+import { isCrankPoolAccount } from '@huma/shared';
+import { cn } from '@/lib/constants';
+import type { CrankActType, CrankFeedItem } from '@/lib/crank-mock-data';
 import { api } from '@/lib/api';
 import { useWorkspace } from '@/components/dashboard/workspace-context';
 import { EmptyPanel } from '@/components/ui/empty-panel';
@@ -65,14 +69,35 @@ function formatKstShort(iso: string | null): string {
   }
 }
 
+function actTypeClass(type: CrankActType) {
+  if (type === '방문') return 'm-act-visit';
+  if (type === '공감') return 'm-act-like';
+  if (type === '댓글') return 'm-act-comment';
+  return 'm-act-follow';
+}
+
 export function CrankView() {
   const { workspace } = useWorkspace();
+  const [tab, setTab] = useState<'feed' | 'ops'>('feed');
+  const [acctFilter, setAcctFilter] = useState('all');
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [config, setConfig] = useState<Record<string, unknown>>({});
   const [targets, setTargets] = useState<Array<Record<string, unknown>>>([]);
   const [scheduler, setScheduler] = useState<SchedulerStatus | null>(null);
   const [schedulerError, setSchedulerError] = useState<string | null>(null);
   const [schedulerLoading, setSchedulerLoading] = useState(true);
   const [syncingProxy, setSyncingProxy] = useState(false);
+  const [crankFeed, setCrankFeed] = useState<{
+    kpi: { visit: { current: number; max: number }; like: { current: number; max: number }; comment: { current: number; max: number }; neighbor: { current: number; max: number } };
+    accountCards: Array<{ id: string; label: string; count: number; sub: string }>;
+    feed: CrankFeedItem[];
+    keywords: string[];
+    hasData?: boolean;
+  } | null>(null);
+  const [feedLoading, setFeedLoading] = useState(true);
+  const [feedError, setFeedError] = useState<string | null>(null);
+  const [crankAccounts, setCrankAccounts] = useState<HumaAccount[]>([]);
   const schedulerLoadRef = useRef(0);
   const schedulerInitialRef = useRef(true);
 
@@ -114,12 +139,38 @@ export function CrankView() {
     await refreshWithProbe();
   }, [refreshWithProbe]);
 
+  const loadCrankFeed = useCallback(() => {
+    setFeedLoading(true);
+    void api
+      .crankFeed()
+      .then((data) => {
+        setCrankFeed(data);
+        setFeedError(null);
+      })
+      .catch((e: Error) => {
+        setCrankFeed(null);
+        setFeedError(e.message);
+      })
+      .finally(() => setFeedLoading(false));
+  }, []);
+
+  const loadCrankAccounts = useCallback(() => {
+    void api
+      .accounts()
+      .then((rows) =>
+        setCrankAccounts(rows.filter((a) => isCrankPoolAccount(a) && a.account_type === 'crank' && a.is_active)),
+      )
+      .catch(() => setCrankAccounts([]));
+  }, []);
+
   const load = useCallback(() => {
     void api.getSetting('social_crank').then(setConfig).catch(() => setConfig({}));
     void api.cafeTargets().then(setTargets).catch(() => setTargets([]));
+    loadCrankAccounts();
     void loadScheduler();
     void refreshWithProbe();
-  }, [loadScheduler, refreshWithProbe]);
+    loadCrankFeed();
+  }, [loadScheduler, refreshWithProbe, loadCrankFeed, loadCrankAccounts]);
 
   useEffect(() => {
     load();
@@ -129,6 +180,12 @@ export function CrankView() {
     }, 60_000);
     return () => clearInterval(id);
   }, [load, loadScheduler, schedulerError]);
+
+  useEffect(() => {
+    if (tab !== 'feed') return;
+    const id = setInterval(() => loadCrankFeed(), 30_000);
+    return () => clearInterval(id);
+  }, [tab, loadCrankFeed]);
 
   useRegisterPageAction('startCrank', async () => {
     await api.createJob({
@@ -140,11 +197,7 @@ export function CrankView() {
     load();
   });
 
-  const daily = Number(config.daily_limit_per_account ?? 30);
   const visitLimit = Number(config.daily_visit_limit ?? 200);
-  const likeLimit = Number(config.daily_like_limit ?? 150);
-  const commentLimit = Number(config.daily_comment_limit ?? 50);
-  const neighborLimit = Number(config.daily_neighbor_limit ?? 20);
 
   const saveCfg = async (patch: Record<string, unknown>) => {
     const next = { ...config, ...patch };
@@ -201,8 +254,200 @@ export function CrankView() {
       a.today_job_status ?? '—',
     ]) ?? [];
 
+  const kpi = crankFeed?.kpi ?? { visit: { current: 0, max: 200 }, like: { current: 0, max: 150 }, comment: { current: 0, max: 50 }, neighbor: { current: 0, max: 20 } };
+
+  const accountCards = useMemo(() => {
+    const feed = crankFeed?.feed ?? [];
+    const totalFromAccounts = crankAccounts.reduce((s, a) => s + (a.crank_count_today ?? 0), 0);
+    const totalFromFeed = feed.filter((f) => f.type === '방문').length;
+    const total = Math.max(totalFromAccounts, totalFromFeed);
+
+    return [
+      {
+        id: 'all',
+        label: '전체',
+        count: total,
+        sub: `${crankAccounts.length}계정`,
+      },
+      ...crankAccounts.map((a) => {
+        const fromFeed = feed.filter((f) => f.acct === a.name).length;
+        return {
+          id: a.name,
+          label: a.name,
+          count: fromFeed > 0 ? fromFeed : (a.crank_count_today ?? 0),
+          sub: a.proxy_port ? `:${a.proxy_port}` : (a.slot_label ?? 'CRANK'),
+        };
+      }),
+    ];
+  }, [crankAccounts, crankFeed]);
+
+  const feedRows = useMemo(() => {
+    const source = crankFeed?.feed ?? [];
+    return source.filter((row) => {
+      if (acctFilter !== 'all' && row.acct !== acctFilter) return false;
+      if (typeFilter !== 'all' && row.type !== typeFilter) return false;
+      return true;
+    });
+  }, [acctFilter, typeFilter, crankFeed]);
+
   return (
     <div className="animate-fadeIn">
+      <div className="mb-3 flex gap-1 rounded-md bg-huma-bg3 p-0.5">
+        {([
+          ['feed', '피드'],
+          ['ops', '운영'],
+        ] as const).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setTab(id)}
+            className={cn(
+              'flex-1 rounded px-3 py-1.5 text-[12.5px] font-medium transition',
+              tab === id ? 'bg-huma-acc font-bold text-white' : 'text-huma-t3 hover:text-huma-t2',
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'feed' && (
+        <>
+          {feedError && (
+            <p className="mb-2 rounded border border-huma-err bg-[var(--err-bg)] px-3 py-2 text-[12px] text-huma-err">
+              피드 API 오류: {feedError}
+            </p>
+          )}
+          {feedLoading && !crankFeed && (
+            <EmptyPanel message="C-Rank 활동 데이터 로딩 중…" />
+          )}
+          <MGrid cols={4}>
+            <MProgressStat label="블로그 방문" current={kpi.visit.current} max={kpi.visit.max} />
+            <MProgressStat label="공감" current={kpi.like.current} max={kpi.like.max} />
+            <MProgressStat label="댓글" current={kpi.comment.current} max={kpi.comment.max} />
+            <MProgressStat label="이웃 신청" current={kpi.neighbor.current} max={kpi.neighbor.max} />
+          </MGrid>
+
+          <MPanel
+            title={
+              <>
+                C-Rank 계정별 오늘 활동
+                <span className="ml-2 font-mono text-[10px] font-normal normal-case tracking-normal text-huma-t3">
+                  클릭 → 해당 계정 피드만 필터
+                </span>
+              </>
+            }
+          >
+            <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-6">
+              {crankAccounts.length === 0 && !feedLoading ? (
+                <p className="col-span-full py-3 text-center text-[12px] text-huma-t3">
+                  등록된 CRANK 소통 계정이 없습니다.{' '}
+                  <a href="/accounts" className="text-huma-acc underline">
+                    계정 관리
+                  </a>
+                  에서 account_type=crank 계정을 추가하세요.
+                </p>
+              ) : null}
+              {accountCards.map((card) => (
+                <button
+                  key={card.id}
+                  type="button"
+                  onClick={() => setAcctFilter(card.id)}
+                  className={cn('m-acct-card', acctFilter === card.id && 'on')}
+                >
+                  <div className="m-ac-id">{card.label}</div>
+                  <div className="m-ac-cnt">{card.count}</div>
+                  <div className="m-ac-svc">{card.sub}</div>
+                </button>
+              ))}
+            </div>
+          </MPanel>
+
+          <MPanel
+            title={
+              <>
+                활동 피드
+                <select
+                  className="ml-auto rounded border border-huma-bdr bg-huma-bg3 px-1.5 py-0.5 font-mono text-[11px] text-huma-t2"
+                  value={typeFilter}
+                  onChange={(e) => setTypeFilter(e.target.value)}
+                >
+                  <option value="all">전체 유형</option>
+                  <option value="방문">방문</option>
+                  <option value="공감">공감</option>
+                  <option value="댓글">댓글</option>
+                  <option value="이웃">이웃신청</option>
+                </select>
+              </>
+            }
+          >
+            {feedRows.length === 0 ? (
+              <EmptyPanel message="오늘 C-Rank 활동 기록이 없습니다. 스케줄러 또는 수동 실행 후 표시됩니다." />
+            ) : (
+              feedRows.map((row) => (
+                <button
+                  key={row.id}
+                  type="button"
+                  className="m-act-row w-full text-left"
+                  onClick={() => setExpandedId(expandedId === row.id ? null : row.id)}
+                >
+                  <span className={cn('m-act-type', actTypeClass(row.type))}>{row.type}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="m-act-title">{row.title}</div>
+                    <div className="m-act-sub">{row.sub}</div>
+                    {row.expand && expandedId === row.id && <div className="m-act-expand open">{row.expand}</div>}
+                  </div>
+                  <span className="m-act-time">{row.time}</span>
+                </button>
+              ))
+            )}
+          </MPanel>
+
+          <MPanel title="소통 자동화 설정">
+            <MToggle
+              label="타 블로그 방문·공감"
+              sub={`일 ${visitLimit}건 · 가우시안 딜레이`}
+              value={Boolean(config.enabled ?? true)}
+              onChange={(v) => saveCfg({ enabled: v })}
+            />
+            <MToggle
+              label="AI 자동 댓글 (Claude Haiku)"
+              sub="게시글 본문 읽고 자연어 동적 생성"
+              value={Boolean(config.auto_comment ?? true)}
+              onChange={(v) => saveCfg({ auto_comment: v })}
+            />
+            <MToggle
+              label="이웃 자동 신청"
+              sub="사주·운세 블로그 타겟"
+              value={Boolean(config.auto_neighbor ?? true)}
+              onChange={(v) => saveCfg({ auto_neighbor: v })}
+            />
+            <MToggle
+              label="카페 소통"
+              sub="점사모 카페 댓글·공감"
+              value={Boolean(config.cafe_enabled ?? false)}
+              onChange={(v) => saveCfg({ cafe_enabled: v })}
+            />
+            <button
+              type="button"
+              className="btn-ghost btn-sm mt-2"
+              onClick={() =>
+                api.createJob({
+                  workspace,
+                  job_type: 'social_crank',
+                  title: 'C-Rank 소통 (수동)',
+                  status: 'pending',
+                }).then(load)
+              }
+            >
+              ▶ 수동 1회 실행
+            </button>
+          </MPanel>
+        </>
+      )}
+
+      {tab === 'ops' && (
+        <>
       <MPanel title="C-Rank 스케줄러 · social_crank">
         {scheduler ? (
           <MGrid cols={4}>
@@ -291,64 +536,31 @@ export function CrankView() {
         )}
       </MPanel>
 
-      <MGrid cols={4}>
-        <MProgressStat label="오늘 방문" current={0} max={visitLimit} />
-        <MProgressStat label="공감" current={0} max={likeLimit} />
-        <MProgressStat label="댓글" current={0} max={commentLimit} />
-        <MProgressStat label="이웃 신청" current={0} max={neighborLimit} />
-      </MGrid>
-      <MGrid cols={2}>
-        <MPanel title="소통 대상 목록">
-          {targets.length === 0 ? (
-            <EmptyPanel message="소통 대상이 없습니다. 카페 크롤링을 실행하세요." />
-          ) : (
-            targets.map((t, i) => (
-              <MCrankRow
-                key={String(t.id ?? i)}
-                icon={String(t.cafe_id ?? '') === 'jeomsamo' ? '🏛' : '📝'}
-                title={String(t.post_title ?? t.post_url ?? '대상')}
-                sub={String(t.post_url ?? '')}
-                status={t.is_replied ? '완료' : '대기'}
-                statusTone={t.is_replied ? 'ok' : 'idle'}
-              />
-            ))
-          )}
-          <button
-            type="button"
-            className="btn-ghost mt-2 w-full py-2 text-xs"
-            onClick={() => api.crawlCafe().then(load)}
-          >
-            점사모 신규글 크롤링
-          </button>
-        </MPanel>
-        <MPanel title="소통 자동화 설정">
-          <MToggle
-            label="타 블로그 방문·공감"
-            sub={`일 ${visitLimit}건 · 가우시안 딜레이`}
-            value={Boolean(config.enabled ?? true)}
-            onChange={(v) => saveCfg({ enabled: v })}
-          />
-          <MToggle
-            label="AI 자동 댓글"
-            sub="Claude API · 자연어 변형"
-            value={Boolean(config.auto_comment ?? true)}
-            onChange={(v) => saveCfg({ auto_comment: v })}
-          />
-          <MToggle
-            label="이웃 자동 신청"
-            sub="사주·운세 블로그 타겟"
-            value={Boolean(config.auto_neighbor ?? true)}
-            onChange={(v) => saveCfg({ auto_neighbor: v })}
-          />
-          <MToggle
-            label="카페 소통"
-            sub="점사모 카페 댓글·공감"
-            value={Boolean(config.cafe_enabled ?? false)}
-            onChange={(v) => saveCfg({ cafe_enabled: v })}
-          />
-          <div className="mt-2 font-mono text-[10.5px] text-huma-t3">일일 한도: {daily}건/계정</div>
-        </MPanel>
-      </MGrid>
+      <MPanel title="소통 대상 목록">
+        {targets.length === 0 ? (
+          <EmptyPanel message="소통 대상이 없습니다. 카페 크롤링을 실행하세요." />
+        ) : (
+          targets.map((t, i) => (
+            <MCrankRow
+              key={String(t.id ?? i)}
+              icon={String(t.cafe_id ?? '') === 'jeomsamo' ? '🏛' : '📝'}
+              title={String(t.post_title ?? t.post_url ?? '대상')}
+              sub={String(t.post_url ?? '')}
+              status={t.is_replied ? '완료' : '대기'}
+              statusTone={t.is_replied ? 'ok' : 'idle'}
+            />
+          ))
+        )}
+        <button
+          type="button"
+          className="btn-ghost mt-2 w-full py-2 text-xs"
+          onClick={() => api.crawlCafe().then(load)}
+        >
+          점사모 신규글 크롤링
+        </button>
+      </MPanel>
+        </>
+      )}
     </div>
   );
 }

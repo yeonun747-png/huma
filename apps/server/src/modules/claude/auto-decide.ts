@@ -2,6 +2,7 @@ import { askClaudeWithModel } from '../../lib/anthropic-client.js';
 import { getSetting } from '../../lib/settings.js';
 import { getSubClaudeModel } from '../../lib/ai-engine.js';
 import { getHiggsfieldCredits } from '../higgsfield/client.js';
+import { isHaikuSubEnabled, isHiggsfieldVideoEnabled } from '../../lib/human-engine-policy.js';
 import type { ContentType } from '@huma/shared';
 
 export type PlatformScheduleKey = 'naver_blog' | 'tiktok' | 'instagram' | 'threads' | 'x';
@@ -94,9 +95,8 @@ export async function buildScheduleFromSettings(): Promise<PlatformSchedule> {
 
 function fallbackAutoDecide(workspace: string, remainingCredits: number): AutoDecideResult {
   const content_type: ContentType = remainingCredits >= 50 && workspace !== 'quizoasis' ? 'B' : 'A';
-  let video_model = 'kling-3.0';
-  if (remainingCredits >= 400) video_model = 'veo-3.1-fast';
-  else if (workspace === 'yeonun' || workspace === 'panana') video_model = 'seedance-2.0';
+  const video_model =
+    workspace === 'yeonun' || workspace === 'panana' ? 'seedance-2.0' : 'kling-3.0';
 
   return {
     content_type,
@@ -112,10 +112,10 @@ function enforceCreditRules(decision: AutoDecideResult, remainingCredits: number
   return decision;
 }
 
-function normalizeVideoModel(raw: string, workspace: string, credits: number): string {
-  const allowed = ['seedance-2.0', 'kling-3.0', 'veo-3.1-fast', 'veo-3.1-lite'];
+/** v3.26 §7-3 · ㉞ — 기본 영상 모델은 Kling 3.0 또는 Seedance 2.0 (15초) */
+function normalizeVideoModel(raw: string, workspace: string, _credits: number): string {
+  const allowed = ['seedance-2.0', 'kling-3.0'];
   if (allowed.includes(raw)) return raw;
-  if (credits >= 400) return 'veo-3.1-fast';
   if (workspace === 'yeonun' || workspace === 'panana') return 'seedance-2.0';
   return 'kling-3.0';
 }
@@ -126,11 +126,14 @@ export async function autoDecide(params: {
   workspace: string;
   remainingCredits: number;
 }): Promise<AutoDecideResult> {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  const higgsfieldOn = await isHiggsfieldVideoEnabled();
+  const effectiveCredits = higgsfieldOn ? params.remainingCredits : 0;
+
+  if (!(await isHaikuSubEnabled()) || !process.env.ANTHROPIC_API_KEY) {
     const fallback = await buildScheduleFromSettings();
     return enforceCreditRules(
-      { ...fallbackAutoDecide(params.workspace, params.remainingCredits), schedule: fallback },
-      params.remainingCredits,
+      { ...fallbackAutoDecide(params.workspace, effectiveCredits), schedule: fallback },
+      effectiveCredits,
     );
   }
 
@@ -142,7 +145,7 @@ export async function autoDecide(params: {
       prompt: `콘텐츠 제목: ${params.title}
 내용 요약: ${params.urlSummary.slice(0, 300)}
 서비스: ${params.workspace}
-잔여 Higgsfield 크레딧: ${params.remainingCredits}
+잔여 Higgsfield 크레딧: ${effectiveCredits}
 
 아래 기준으로 JSON 결정 (JSON만, 설명 없이):
 
@@ -150,10 +153,9 @@ content_type 결정 기준:
   B (영상 포함): 감성·스토리·서비스소개·캐릭터·신규출시 → Higgsfield Cloud 크레딧 50개 이상 (Kling 15초=24크레딧)
   A (이미지만):  정보성·공지·이벤트안내·크레딧 50개 미만 (이미지는 Google Imagen, Higgsfield 크레딧 불필요)
 
-video_model 결정 기준:
-  "seedance-2.0": 연운·파나나 감성 콘텐츠 (고품질 우선)
-  "kling-3.0":    퀴즈오아시스 or 크레딧 200개 미만 (비용 우선, 15초 24크레딧)
-  "veo-3.1-fast": 특별 프로모션·핵심 콘텐츠 (크레딧 400개 이상)
+video_model 결정 기준 (둘 중 하나만):
+  "seedance-2.0": 연운·파나나 감성 콘텐츠 ($1.25/15초)
+  "kling-3.0":    퀴즈오아시스 또는 비용 우선 ($1.20/15초, 24크레딧)
 
 schedule (오늘 기준 최적 시간, 플랫폼별 분산):
   naver_blog: ${JSON.stringify(optimal.naver_blog?.windows ?? [])}
@@ -183,16 +185,16 @@ schedule (오늘 기준 최적 시간, 플랫폼별 분산):
 
     const decision: AutoDecideResult = {
       content_type: parsed.content_type === 'A' ? 'A' : 'B',
-      video_model: normalizeVideoModel(parsed.video_model ?? 'kling-3.0', params.workspace, params.remainingCredits),
+      video_model: normalizeVideoModel(parsed.video_model ?? 'kling-3.0', params.workspace, effectiveCredits),
       schedule,
     };
 
-    return enforceCreditRules(decision, params.remainingCredits);
+    return enforceCreditRules(decision, effectiveCredits);
   } catch {
     const fallback = await buildScheduleFromSettings();
     return enforceCreditRules(
-      { ...fallbackAutoDecide(params.workspace, params.remainingCredits), schedule: fallback },
-      params.remainingCredits,
+      { ...fallbackAutoDecide(params.workspace, effectiveCredits), schedule: fallback },
+      effectiveCredits,
     );
   }
 }

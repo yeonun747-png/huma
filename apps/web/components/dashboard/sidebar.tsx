@@ -52,7 +52,7 @@ export function Sidebar() {
       <div className="border-b border-huma-bdr px-4 py-4">
         <div className="font-display text-[25px] tracking-[0.25em] text-huma-acc">HUMA</div>
         <div className="mt-0.5 font-mono text-[9.5px] uppercase tracking-[0.2em] text-huma-t3">
-          Studio v3.26 · Human Automation
+          Studio v3.27 · Human Automation
         </div>
       </div>
 
@@ -78,7 +78,8 @@ export function Sidebar() {
                   title={`${unit.short} 긴급정지`}
                   onClick={(e) => {
                     e.stopPropagation();
-                    api.stopAll();
+                    const reason = window.prompt(`${unit.short} 서비스를 즉시 정지합니다.\n정지 이유를 입력하세요:`);
+                    if (reason?.trim()) void api.stopAll(reason.trim());
                   }}
                 >
                   ■

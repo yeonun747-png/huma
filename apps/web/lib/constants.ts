@@ -39,6 +39,7 @@ export const NAV_ITEMS = [
   { href: '/oplog', label: 'Operation Log', icon: '📋', group: 'common' },
   { href: '/accounts', label: '계정 관리', icon: '◉', group: 'common' },
   { href: '/video-pipeline', label: '영상 파이프라인', icon: '▷', badgeKey: 'video', group: 'common' },
+  { href: '/seo-keywords', label: 'SEO 키워드', icon: '🔍', badgeKey: 'seo', group: 'common' },
   { href: '/watcher', label: 'Layer4 Watcher', icon: '⚠', badgeKey: 'watcher', badgeErr: true, group: 'common' },
   { href: '/human-engine', label: '휴먼 엔진 설정', icon: '⚙', group: 'common' },
   { href: '/crank', label: 'C-Rank 소통 관리', icon: '🔗', group: 'common' },
@@ -47,17 +48,9 @@ export const NAV_ITEMS = [
 ];
 
 export const SPEC_NAV_ITEMS: Record<string, { href: string; label: string; icon: string; badgeKey?: string }[]> = {
-  yeonun: [
-    { href: '/cafe-viral', label: '카페 바이럴', icon: '🎯' },
-    { href: '/seo-keywords', label: 'SEO 키워드', icon: '🔍', badgeKey: 'seo' },
-  ],
-  quizoasis: [
-    { href: '/adsense', label: '애드센스 수익', icon: '💰' },
-  ],
-  panana: [
-    { href: '/scenario', label: '영상 시나리오', icon: '📝', badgeKey: 'scenario' },
-    { href: '/social', label: '소셜 분석·DM 자동화', icon: '📊' },
-  ],
+  yeonun: [{ href: '/cafe-viral', label: '점사모 카페 관리', icon: '🏛' }],
+  quizoasis: [{ href: '/adsense', label: '애드센스 수익', icon: '💰' }],
+  panana: [],
 };
 
 export const WS_LABEL: Record<string, string> = {

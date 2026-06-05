@@ -35,7 +35,9 @@ export const VIDEO_MODELS = [
 export type ImageModelId = (typeof IMAGE_MODELS)[number]['id'];
 export type VideoModelId = (typeof VIDEO_MODELS)[number]['id'];
 
+/** 레거시 Higgsfield UI ID — v3.26 실제 생성은 Imagen 4 */
 export const DEFAULT_IMAGE_MODEL: ImageModelId = 'gpt-image-2';
+export const DEFAULT_IMAGEN_MODEL = 'imagen-4.0-fast-generate-001';
 export const DEFAULT_VIDEO_MODEL: VideoModelId = 'kling-3.0';
 
 /** v3.26+ 영상 파이프라인 — Google Imagen 4 (Haiku가 Fast/Standard 자동 선택) */
@@ -53,47 +55,86 @@ export const IMAGEN_PIPELINE_OPTIONS: ReadonlyArray<{ id: ImagenPipelineChoice; 
   { id: 'imagen-4.0-generate-001', label: '✨ Imagen 4 Standard — $0.04/장 · 텍스트·배너 고화질' },
 ];
 
-/** v3.26 목업 — 파이프라인 영상 모델 (5종) */
+export type PipelineVideoAudioFamily = 'kling' | 'seedance' | 'builtin';
+
+/** v3.26 목업 ② — Kling 3.0 / Seedance 2.0 Standard 만 */
 export const PIPELINE_VIDEO_OPTIONS = [
   {
     selectValue: 'kling-3.0',
     id: 'kling-3.0' as VideoModelId,
+    displayName: 'Kling 3.0',
     label: '🎥 Kling 3.0 — $1.20/15초 (24크레딧) · 시네마틱+내장오디오',
     videoUsd: 1.2,
     durationLabel: '15초',
-  },
-  {
-    selectValue: 'seedance-2.0-fast',
-    id: 'seedance-2.0' as VideoModelId,
-    label: '⚡ Seedance 2.0 Fast — $0.85/5s · 빠른 생성',
-    videoUsd: 0.85,
-    durationLabel: '5s',
+    credits: 24,
+    audioFamily: 'kling' as PipelineVideoAudioFamily,
   },
   {
     selectValue: 'seedance-2.0',
     id: 'seedance-2.0' as VideoModelId,
-    label: '🌟 Seedance 2.0 — $1.25/5s · 최고화질',
+    displayName: 'Seedance 2.0 Standard',
+    label: '🌟 Seedance 2.0 Standard — $1.25/15초 (25크레딧) · 최고화질+오디오',
     videoUsd: 1.25,
-    durationLabel: '5s',
-  },
-  {
-    selectValue: 'veo-3.1-fast',
-    id: 'veo-3.1-lite' as VideoModelId,
-    label: '🚀 Veo 3.1 Fast — $1.10/8s · Google',
-    videoUsd: 1.1,
-    durationLabel: '8s',
-  },
-  {
-    selectValue: 'higgsfield-dop',
-    id: 'higgsfield-dop' as VideoModelId,
-    label: '🎞 Higgsfield DOP — VFX·카메라 정밀 제어',
-    videoUsd: 1.2,
-    durationLabel: '15s',
+    durationLabel: '15초',
+    credits: 25,
+    audioFamily: 'seedance' as PipelineVideoAudioFamily,
   },
 ] as const;
 
+export const PIPELINE_VIDEO_HINT =
+  '✓ 두 모델 모두 Higgsfield Cloud API · 15초 기준 $1.20~$1.25 · 내장 오디오 자동 생성';
+
+export function getPipelineVideoOption(selectValue: string) {
+  return (
+    PIPELINE_VIDEO_OPTIONS.find((o) => o.selectValue === selectValue) ??
+    PIPELINE_VIDEO_OPTIONS[0]
+  );
+}
+
+/** 진행 중 파이프라인 ② — 드롭다운 모델명과 동기 */
+export function getPipelineVideoStepTitles(selectValue: string) {
+  const name = getPipelineVideoOption(selectValue).displayName;
+  return {
+    titleDone: '영상 생성 완료',
+    titleActive: `${name} 영상 생성 중…`,
+    titleIdle: `${name} 영상 (내장 오디오)`,
+  };
+}
+
+/** ② 영상 모델 선택 → ③ 오디오 패널 문구 (목업 연동) */
+export function getPipelineAudioCopy(selectValue: string) {
+  const opt = getPipelineVideoOption(selectValue);
+  if (opt.audioFamily === 'seedance') {
+    return {
+      title: 'Seedance 2.0 내장 오디오 자동 생성',
+      sub: 'BGM · 효과음 · 주변음 — 영상과 동기화, 별도 TTS 불필요',
+      hint: '✓ Seedance 2.0 · 15초 기준 내장 오디오 · Higgsfield Cloud API',
+      emoji: '🎵',
+      runningLabel: 'Seedance 2.0 내장 오디오',
+    };
+  }
+  if (opt.audioFamily === 'kling') {
+    return {
+      title: 'Kling 3.0 내장 오디오 자동 생성',
+      sub: 'BGM · 효과음 · 주변음 — 영상과 동기화, 별도 설정 불필요',
+      hint: '✓ Kling 3.0 · 15초 · 24크레딧 · 시네마틱+내장오디오',
+      emoji: '🎵',
+      runningLabel: 'Kling 3.0 내장 오디오',
+    };
+  }
+  return {
+    title: `${pipelineVideoFromSelect(selectValue)} 내장 오디오 자동 생성`,
+    sub: 'BGM · 효과음 — 영상 모델과 동기화',
+    hint: '✓ TTS 불필요 — Higgsfield Cloud 내장 오디오',
+    emoji: '🎵',
+    runningLabel: '내장 오디오',
+  };
+}
+
 export function normalizePipelineVideoSelect(raw?: string | null): string {
-  const v = raw ?? DEFAULT_VIDEO_MODEL;
+  if (raw === 'seedance-2.0' || raw === 'seedance-2.0-fast') return 'seedance-2.0';
+  const v = raw ? (LEGACY_VIDEO[raw] ?? raw) : DEFAULT_VIDEO_MODEL;
+  if (v === 'seedance-2.0') return 'seedance-2.0';
   const hit = PIPELINE_VIDEO_OPTIONS.find((o) => o.selectValue === v || o.id === v);
   return hit?.selectValue ?? 'kling-3.0';
 }
@@ -116,6 +157,29 @@ export function pipelineImageCost(choice: ImagenPipelineChoice) {
     return { label: 'Imagen 4 Fast', display: '$0.02', minUsd: 0.02, maxUsd: 0.02 };
   }
   return { label: 'Imagen 4 Standard', display: '$0.04', minUsd: 0.04, maxUsd: 0.04 };
+}
+
+/** 진행 중 파이프라인 ① — ① 이미지 모델 선택과 동기 */
+export function getPipelineImageStepTitles(choice: ImagenPipelineChoice) {
+  const cost = pipelineImageCost(choice);
+  const displayName =
+    choice === 'auto' ? PIPELINE_IMAGE_STEP_LABEL : cost.label;
+  return {
+    titleDone: '이미지 생성 완료',
+    titleActive: `${displayName} 생성 중…`,
+    titleIdle: displayName,
+    cost,
+  };
+}
+
+export function resolvePipelineImageChoice(
+  formChoice: ImagenPipelineChoice,
+  haikuAuto: boolean,
+  jobImageModel?: string | null,
+): ImagenPipelineChoice {
+  if (jobImageModel) return normalizeImagenPipelineChoice(jobImageModel);
+  if (haikuAuto) return 'auto';
+  return formChoice;
 }
 
 export function pipelineVideoCost(modelId: string) {

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { AccountType, HumaAccount, Workspace } from '@huma/shared';
 import { CRANK_POOL_WORKSPACE, isCrankPoolAccount } from '@huma/shared';
 import { api } from '@/lib/api';
@@ -103,6 +104,7 @@ function emptyForm(registerUnit: BusinessUnit) {
 }
 
 export function AccountsView() {
+  const router = useRouter();
   const { admin, loading: authLoading } = useAuth();
   const { workspace: sidebarWorkspace } = useWorkspace();
   const superAdmin = isSuperAdmin(admin);
@@ -120,7 +122,6 @@ export function AccountsView() {
   const [editSaving, setEditSaving] = useState(false);
 
   const postingColumns = useMemo(() => visiblePostingColumns(admin), [admin]);
-  const listGridCols = (Math.min(3, postingColumns.length) || 1) as 1 | 2 | 3;
 
   const load = useCallback(() => {
     Promise.all([api.accounts(), api.platformAccounts()])
@@ -135,14 +136,16 @@ export function AccountsView() {
     load();
   }, [load]);
 
-  useRegisterPageAction('openAccountForm', () => {
+  const openAccountForm = () => {
     setShowForm((v) => !v);
     setError('');
     const unit = registerUnits.includes(sidebarWorkspace as BusinessUnit)
       ? (sidebarWorkspace as BusinessUnit)
       : defaultUnit;
     setForm(emptyForm(unit));
-  });
+  };
+
+  useRegisterPageAction('openAccountForm', openAccountForm);
 
   const crankPoolAccounts = useMemo(
     () => accounts.filter(isCrankPool).sort((a, b) => a.name.localeCompare(b.name)),
@@ -292,10 +295,28 @@ export function AccountsView() {
 
   return (
     <div className="accounts-view animate-fadeIn">
+      <div className="mb-3 flex items-center justify-end">
+        <button type="button" className="btn-primary btn-sm" onClick={openAccountForm}>
+          + 계정 추가
+        </button>
+      </div>
+
       <MGrid cols={3} className="accounts-stats-row">
-        <MStat label="포스팅 (지수5)" value={<>{posting}<span className="text-[11px] text-huma-t3">개</span></>} sub="블로그 발행" />
-        <MStat label="C-Rank+Cafe" value={<>{crankCafe}<span className="text-[11px] text-huma-t3">개</span></>} sub="10~150 · 소통·카페" />
-        <MStat label="소셜미디어 (API)" value={<>{visiblePlatforms.length}<span className="text-[11px] text-huma-t3">개</span></>} sub="TikTok·IG·Pinterest 등" />
+        <MStat
+          label="포스팅 계정 (지수5)"
+          value={<>{posting}<span className="text-[12.5px] text-huma-t3">개</span></>}
+          sub="연운·퀴즈·파나나"
+        />
+        <MStat
+          label="C-Rank 소통 계정"
+          value={<>{crankCafe}<span className="text-[12.5px] text-huma-t3">개</span></>}
+          sub="CRANK-A~J · 추가 가능"
+        />
+        <MStat
+          label="소셜미디어 계정"
+          value={<>{visiblePlatforms.length}<span className="text-[12.5px] text-huma-t3">개</span></>}
+          sub="TikTok·IG·Threads·X·YT쇼츠"
+        />
       </MGrid>
 
       {showForm && (
@@ -458,127 +479,125 @@ export function AccountsView() {
         </div>
       )}
 
-      <div className="mb-3">
-        <div className="m-ws-col-title">C-Rank+Cafe · 공용 풀</div>
-        {crankPoolAccounts.length ? (
-          crankPoolAccounts.map((ac) => (
-            <MAccountCard
-              key={ac.id}
-              icon="🔗"
-              iconBg="var(--warn-bg)"
-              name={
-                <>
-                  {ac.name}{' '}
-                  <span className="ml-1 rounded bg-huma-bg2 px-1.5 py-px font-mono text-[9px] uppercase text-huma-acc">
-                    {TYPE_LABEL[ac.account_type]}
-                  </span>
-                  <span className="ml-1 font-mono text-[9px] text-huma-t3">공용</span>
-                </>
-              }
-              url={ac.blog_url ?? `${ac.naver_id} · 워밍업 ${ac.warmup_day ?? 0}일`}
-              status={statusLabel(ac)}
-              statusTone={statusTone(ac)}
-              stats={[
-                { label: 'Health', value: ac.health_score ?? '—', tone: (ac.health_score ?? 100) >= 80 ? 'text-huma-ok' : 'text-huma-warn' },
-                { label: 'Warmup', value: ac.warmup_day ?? 0 },
-                { label: '오늘 소통', value: ac.crank_count_today ?? 0 },
-              ]}
-              actions={[
-                { label: ac.is_active ? '정지' : '재개', primary: true, onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(load) },
-                { label: '로그', onClick: () => api.accountLogs(ac.id).then((logs) => console.log(logs)) },
-                { label: '삭제', danger: true, onClick: () => handleDeleteNaver(ac) },
-              ]}
-            />
-          ))
-        ) : (
-          <div className="m-ac text-center text-[11px] text-huma-t3">공용 C-Rank+Cafe 계정 없음</div>
-        )}
-      </div>
-
-      <MGrid cols={listGridCols} className="accounts-posting-cols">
-        {postingColumns.map((col) => {
-          const colAccounts = accountsInWorkspace(col.ws);
-          const colPlatforms = platformsInWorkspace(col.ws);
-
-          return (
-            <div key={col.ws}>
-              <div className="m-ws-col-title" title={col.sub}>
-                <span className="col-title-main">{col.title}</span>
-                <span className="col-title-sub">{col.sub}</span>
+      <MGrid cols={3} className="accounts-posting-cols">
+        <div>
+          {postingColumns.map((col, idx) => {
+            const colAccounts = accountsInWorkspace(col.ws);
+            return (
+              <div key={col.ws}>
+                <div className="m-ws-col-title">
+                  {idx === 0 ? '포스팅 계정 — 연운' : `포스팅 계정 — ${col.title}`}
+                </div>
+                {colAccounts.length ? (
+                  colAccounts.map((ac) => (
+                    <MAccountCard
+                      key={ac.id}
+                      icon="📝"
+                      iconBg="var(--ok-bg)"
+                      name={
+                        <>
+                          {ac.name}{' '}
+                          <span className="m-type-badge m-type-posting">POSTING</span>
+                        </>
+                      }
+                      url={ac.blog_url ?? `${ac.naver_id} · 지수${ac.blog_index ?? 5}`}
+                      status={statusLabel(ac)}
+                      statusTone={!ac.blog_url ? 'warn' : statusTone(ac)}
+                      stats={[
+                        { label: 'Health', value: ac.health_score ?? '—', tone: (ac.health_score ?? 100) >= 80 ? 'text-huma-ok' : 'text-huma-warn' },
+                        { label: 'Index', value: ac.blog_index ?? '—' },
+                        { label: 'WPM', value: ac.wpm ?? '—' },
+                      ]}
+                      actions={[
+                        { label: '편집', primary: true, onClick: () => handleStartEditPosting(ac) },
+                        { label: '▶ 모니터', onClick: () => router.push('/monitor') },
+                        { label: ac.is_active ? '정지' : '재개', onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(load) },
+                      ]}
+                    />
+                  ))
+                ) : (
+                  <div className="m-ac text-center text-[11px] text-huma-t3">포스팅 계정 없음</div>
+                )}
               </div>
+            );
+          })}
+        </div>
 
-              {colAccounts.length ? (
-                colAccounts.map((ac) => (
-                  <MAccountCard
-                    key={ac.id}
-                    icon="📝"
-                    iconBg="var(--ok-bg)"
-                    name={
-                      <>
-                        {ac.name}{' '}
-                        <span className="ml-1 rounded bg-huma-bg2 px-1.5 py-px font-mono text-[9px] uppercase text-huma-acc">
-                          {TYPE_LABEL[ac.account_type]}
-                        </span>
-                        {ac.proxy_port && (
-                          <span className="ml-1 font-mono text-[9px] text-huma-t3">:{ac.proxy_port}</span>
-                        )}
-                      </>
-                    }
-                    url={
-                      ac.blog_url ??
-                      `${ac.naver_id} · 지수${ac.blog_index ?? 5}${!ac.blog_url ? ' · URL 미등록' : ''}`
-                    }
-                    status={statusLabel(ac)}
-                    statusTone={!ac.blog_url ? 'warn' : statusTone(ac)}
-                    stats={[
-                      { label: 'Health', value: ac.health_score ?? '—', tone: (ac.health_score ?? 100) >= 80 ? 'text-huma-ok' : 'text-huma-warn' },
-                      { label: 'Index', value: ac.blog_index ?? '—' },
-                      { label: 'WPM', value: ac.wpm ?? '—' },
-                    ]}
-                    actions={[
-                      { label: '수정', onClick: () => handleStartEditPosting(ac) },
-                      { label: ac.is_active ? '정지' : '재개', primary: true, onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(load) },
-                      { label: '로그', onClick: () => api.accountLogs(ac.id).then((logs) => console.log(logs)) },
-                      { label: '삭제', danger: true, onClick: () => handleDeleteNaver(ac) },
-                    ]}
-                  />
-                ))
-              ) : (
-                <div className="m-ac text-center text-[11px] text-huma-t3">포스팅 계정 없음</div>
-              )}
+        <div>
+          <div className="mb-2 flex items-center justify-between">
+            <div className="m-ws-col-title mb-0">C-Rank 소통 계정 ({crankCafe}개)</div>
+            <button type="button" className="btn-ghost btn-sm text-[10px]" onClick={openAccountForm}>
+              + 추가
+            </button>
+          </div>
+          {crankPoolAccounts.length ? (
+            crankPoolAccounts.map((ac) => (
+              <MAccountCard
+                key={ac.id}
+                icon="CR"
+                iconBg="var(--ok-bg)"
+                name={
+                  <>
+                    {ac.name}{' '}
+                    <span className="m-type-badge m-type-crank">C-RANK</span>
+                  </>
+                }
+                url={ac.blog_url ?? '방문·공감·댓글'}
+                status={statusLabel(ac)}
+                statusTone={statusTone(ac)}
+                stats={[
+                  { label: 'Health', value: ac.health_score ?? '—', tone: (ac.health_score ?? 100) >= 80 ? 'text-huma-ok' : 'text-huma-warn' },
+                  { label: 'Warmup', value: ac.warmup_day ?? 0 },
+                  { label: '오늘', value: ac.crank_count_today ?? 0 },
+                ]}
+                actions={[
+                  { label: ac.is_active ? '정지' : '재개', primary: true, onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(load) },
+                  { label: '삭제', danger: true, onClick: () => handleDeleteNaver(ac) },
+                ]}
+              />
+            ))
+          ) : (
+            <div className="m-ac text-center text-[11px] text-huma-t3">C-Rank 계정 없음</div>
+          )}
+        </div>
 
-              {colPlatforms.map((p) => {
-                const platform = String(p.platform ?? '');
-                const active = p.is_active !== false;
-                return (
-                  <MAccountCard
-                    key={String(p.id)}
-                    icon={platformIcon(platform)}
-                    iconBg={platform === 'tiktok' ? '#1a0020' : 'var(--blue-bg)'}
-                    name={
-                      <>
-                        {String(p.username ?? platform)}
-                        <span className="ml-1 rounded bg-huma-bg2 px-1.5 py-px font-mono text-[9px] uppercase text-huma-acc">SOCIAL</span>
-                      </>
-                    }
-                    url={`${socialPlatforms.find((sp) => sp.value === platform)?.label ?? platform} · API`}
-                    status={active ? '활성' : '세션오류'}
-                    statusTone={active ? 'ok' : 'err'}
-                    stats={[
-                      { label: '플랫폼', value: platform },
-                      { label: '오늘 발행', value: String(p.post_count_today ?? 0) },
-                      { label: 'API', value: active ? '✓' : '✗', tone: active ? 'text-huma-ok' : 'text-huma-err' },
-                    ]}
-                    actions={[
-                      { label: active ? '정지' : '재개', primary: true, onClick: () => api.updatePlatformAccount(String(p.id), { is_active: !active }).then(load) },
-                      { label: '삭제', danger: true, onClick: () => handleDeletePlatform(p) },
-                    ]}
-                  />
-                );
-              })}
-            </div>
-          );
-        })}
+        <div>
+          {postingColumns.map((col, idx) => {
+            const colPlatforms = platformsInWorkspace(col.ws);
+            if (!colPlatforms.length) return null;
+            return (
+              <div key={`social-${col.ws}`}>
+                <div className="m-ws-col-title">
+                  소셜미디어 계정 — {col.title}
+                </div>
+                {colPlatforms.map((p) => {
+                  const platform = String(p.platform ?? '');
+                  const active = p.is_active !== false;
+                  return (
+                    <MAccountCard
+                      key={String(p.id)}
+                      icon={platformIcon(platform)}
+                      iconBg={platform === 'tiktok' ? 'rgba(255,0,80,.1)' : 'var(--blue-bg)'}
+                      name={String(p.username ?? platform)}
+                      url={`${SOCIAL_PLATFORMS_QUIZOASIS.find((sp) => sp.value === platform)?.label ?? platform} · ${col.title}`}
+                      status={active ? '활성' : '세션오류'}
+                      statusTone={active ? 'ok' : 'err'}
+                      stats={[
+                        { label: '팔로워', value: String(p.follower_count ?? '—') },
+                        { label: '도달', value: String(p.reach_count ?? '—') },
+                        { label: 'API', value: active ? '✓' : '✗', tone: active ? 'text-huma-ok' : 'text-huma-err' },
+                      ]}
+                      actions={[
+                        { label: active ? '정지' : '재연결', primary: !active, danger: !active, onClick: () => api.updatePlatformAccount(String(p.id), { is_active: !active }).then(load) },
+                        { label: '삭제', danger: true, onClick: () => handleDeletePlatform(p) },
+                      ]}
+                    />
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
       </MGrid>
     </div>
   );

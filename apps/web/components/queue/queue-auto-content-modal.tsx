@@ -1,8 +1,10 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import type { HumaJob } from '@huma/shared';
 import { buildScheduledAt } from '@/lib/queue-repeat';
+import type { QueuePrefill } from '@/lib/queue-prefill';
 import { formatScheduleLabel } from './job-schedule-form';
 
 export interface AutoContentFormValues {
@@ -18,6 +20,7 @@ export interface AutoContentFormValues {
 interface QueueAutoContentModalProps {
   open: boolean;
   editJob?: HumaJob | null;
+  prefill?: QueuePrefill | null;
   onClose: () => void;
   onSubmit: (values: AutoContentFormValues) => Promise<void>;
 }
@@ -55,7 +58,7 @@ function jobToForm(job: HumaJob): AutoContentFormValues {
   };
 }
 
-export function QueueAutoContentModal({ open, editJob, onClose, onSubmit }: QueueAutoContentModalProps) {
+export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmit }: QueueAutoContentModalProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const isEdit = Boolean(editJob);
   const editable = !editJob || ['pending', 'scheduled', 'paused'].includes(editJob.status);
@@ -71,13 +74,20 @@ export function QueueAutoContentModal({ open, editJob, onClose, onSubmit }: Queu
     if (editJob) {
       setForm(jobToForm(editJob));
       setScreenshotName(editJob.image_urls?.[0] ? '기존 캡처' : '');
+    } else if (prefill) {
+      setForm({
+        ...EMPTY_FORM,
+        title: prefill.title,
+        source_url: prefill.source_url,
+      });
+      setScreenshotName('');
     } else {
       setForm(EMPTY_FORM);
       setScreenshotName('');
     }
     setPreviewOpen(false);
     setError('');
-  }, [open, editJob]);
+  }, [open, editJob, prefill]);
 
   useEffect(() => {
     if (!previewOpen) return;
@@ -277,16 +287,41 @@ export function QueueAutoContentModal({ open, editJob, onClose, onSubmit }: Queu
           />
         </div>
 
-        <div className="m-modal-field">
-          <label className={`flex items-center gap-2 text-xs text-huma-t2 ${editable ? 'cursor-pointer' : 'opacity-60'}`}>
+        <div className="rounded-md border border-huma-bdr bg-huma-bg3 px-3 py-2.5">
+          <label className={`flex cursor-pointer items-start gap-2 ${!editable && 'opacity-60'}`}>
             <input
               type="checkbox"
+              className="mt-0.5 shrink-0 accent-huma-acc"
               checked={form.auto_schedule}
               disabled={!editable}
               onChange={(e) => setForm((f) => ({ ...f, auto_schedule: e.target.checked }))}
             />
-            플랫폼별 최적 시간 자동 배분 (Haiku + optimal_schedule)
+            <div>
+              <div className="text-[13px] font-medium text-huma-t">플랫폼별 최적 시간 자동 배분</div>
+              <div className="mt-0.5 font-mono text-[10.5px] text-huma-t3">
+                Haiku + <span className="text-huma-acc">optimal_schedule</span> — 플랫폼·요일·시간대별 조회 패턴 분석
+              </div>
+            </div>
           </label>
+          {form.auto_schedule && (
+            <div className="mt-2 flex flex-wrap gap-2 rounded bg-huma-bg2 px-2 py-1.5 font-mono text-[10.5px] text-huma-t3">
+              <span>네이버 블로그 <span className="text-huma-ok">→ 오전 10:00</span></span>
+              <span>Instagram <span className="text-huma-ok">→ 오후 7:30</span></span>
+              <span>TikTok <span className="text-huma-ok">→ 오후 9:00</span></span>
+              <span>X/Threads <span className="text-huma-ok">→ 오전 8:00</span></span>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 rounded-md border border-huma-bdr2 bg-huma-bg3 px-3 py-2 font-mono text-[11px] text-huma-t3">
+          <span>🎛</span>
+          <span>
+            이미지·영상 모델은{' '}
+            <Link href="/video-pipeline" className="font-semibold text-huma-acc hover:underline" onClick={onClose}>
+              영상 파이프라인 → 모델 설정
+            </Link>
+            에서 전역 설정 → 전체 작업에 자동 적용
+          </span>
         </div>
 
         {!form.auto_schedule && (

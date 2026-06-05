@@ -44,7 +44,15 @@ export function MTag({ children, tone = 'idle' }: { children: ReactNode; tone?: 
   return <span className={cn('m-tag', `m-tag-${tone}`)}>{children}</span>;
 }
 
-export function MTable({ head, rows }: { head: string[]; rows: ReactNode[][] }) {
+export function MTable({
+  head,
+  rows,
+  rowClassName,
+}: {
+  head: string[];
+  rows: ReactNode[][];
+  rowClassName?: (index: number) => string | undefined;
+}) {
   return (
     <table className="m-tbl">
       <thead>
@@ -52,7 +60,7 @@ export function MTable({ head, rows }: { head: string[]; rows: ReactNode[][] }) 
       </thead>
       <tbody>
         {rows.map((row, i) => (
-          <tr key={i}>{row.map((cell, j) => <td key={j}>{cell}</td>)}</tr>
+          <tr key={i} className={rowClassName?.(i)}>{row.map((cell, j) => <td key={j}>{cell}</td>)}</tr>
         ))}
       </tbody>
     </table>
@@ -114,8 +122,9 @@ export function MQueueItem({
   sub,
   tag,
   tagTone,
+  workspaceBorder,
   onClick,
-  onRun,
+  onAdvance,
   onStop,
   onDelete,
 }: {
@@ -124,14 +133,18 @@ export function MQueueItem({
   sub: string;
   tag: string;
   tagTone: 'live' | 'warn' | 'idle';
+  workspaceBorder?: 'yeonun' | 'quizoasis' | 'panana';
   onClick?: () => void;
-  onRun?: () => void;
+  onAdvance?: () => void;
   onStop?: () => void;
   onDelete?: () => void;
 }) {
   return (
     <div
-      className={onClick ? 'm-qi m-qi-clickable' : 'm-qi'}
+      className={cn(
+        onClick ? 'm-qi m-qi-clickable' : 'm-qi',
+        workspaceBorder && `m-qi-ws-${workspaceBorder}`,
+      )}
       onClick={onClick}
       onKeyDown={
         onClick
@@ -153,21 +166,23 @@ export function MQueueItem({
       </div>
       <div className="m-qi-r">
         <MTag tone={tagTone}>{tag}</MTag>
-        <button
-          type="button"
-          className="m-q-btn run"
-          title="지금 실행"
-          onClick={(e) => {
-            e.stopPropagation();
-            onRun?.();
-          }}
-        >
-          ▶
-        </button>
+        {onAdvance ? (
+          <button
+            type="button"
+            className="m-q-btn run"
+            title="스케줄 앞당기기"
+            onClick={(e) => {
+              e.stopPropagation();
+              onAdvance();
+            }}
+          >
+            ⏫
+          </button>
+        ) : null}
         <button
           type="button"
           className="m-q-btn stop"
-          title="일시정지"
+          title={onStop ? '일시정지/재개' : '제거'}
           onClick={(e) => {
             e.stopPropagation();
             onStop?.();

@@ -1,11 +1,139 @@
 import type { FastifyInstance } from 'fastify';
-import { authMiddleware } from '../middleware/auth.js';
+import { authMiddleware, supabase } from '../middleware/auth.js';
+import { getSetting } from '../lib/settings.js';
+import { formatKstHm } from '../lib/dashboard-period.js';
+import type { CrankActivityType } from '../lib/crank-activity.js';
 import {
   getCrankSchedulerStatus,
   runDailyCrankScheduler,
 } from '../lib/crank-scheduler.js';
 
+function parseCrankAction(meta: Record<string, unknown> | null, message: string): CrankActivityType {
+  const fromMeta = meta?.crank_action;
+  if (fromMeta === '방문' || fromMeta === '공감' || fromMeta === '댓글' || fromMeta === '이웃') {
+    return fromMeta;
+  }
+  if (message.includes('댓글') || message.includes('답글') || message.includes('카페')) return '댓글';
+  if (message.includes('공감')) return '공감';
+  if (message.includes('이웃')) return '이웃';
+  return '방문';
+}
+
 export async function registerCrankRoutes(app: FastifyInstance) {
+  app.get('/api/crank/feed', { preHandler: authMiddleware }, async () => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayIso = today.toISOString();
+
+    const [{ data: activityLogs }, { data: cafePosts }, { data: crankAccounts }] = await Promise.all([
+      supabase
+        .from('huma_logs')
+        .select('id, message, created_at, account_id, result_url, metadata, huma_accounts(name)')
+        .gte('created_at', todayIso)
+        .eq('platform', 'naver_crank')
+        .order('created_at', { ascending: false })
+        .limit(80),
+      supabase
+        .from('huma_cafe_viral_posts')
+        .select('id, post_title, post_url, reply_posted, posted_at, created_at, huma_accounts(name)')
+        .not('reply_posted', 'is', null)
+        .gte('posted_at', todayIso)
+        .order('posted_at', { ascending: false })
+        .limit(20),
+      supabase
+        .from('huma_accounts')
+        .select('id, name, crank_count_today, proxy_port, is_active')
+        .eq('account_type', 'crank')
+        .eq('is_active', true)
+        .order('name'),
+    ]);
+
+    const kpiCounts = { visit: 0, like: 0, comment: 0, neighbor: 0 };
+    const feed: Array<{
+      id: string;
+      acct: string;
+      acctId: string;
+      type: CrankActivityType;
+      title: string;
+      sub: string;
+      time: string;
+      expand?: string;
+    }> = [];
+
+    for (const log of activityLogs ?? []) {
+      const meta = (log.metadata as Record<string, unknown> | null) ?? null;
+      const type = parseCrankAction(meta, log.message);
+      if (type === '방문') kpiCounts.visit++;
+      else if (type === '공감') kpiCounts.like++;
+      else if (type === '댓글') kpiCounts.comment++;
+      else kpiCounts.neighbor++;
+
+      const acctName = (log.huma_accounts as { name?: string } | null)?.name ?? 'C-Rank';
+      const subMeta = typeof meta?.sub === 'string' ? meta.sub : '';
+      const urlHint = log.result_url ? String(log.result_url).replace(/^https?:\/\//, '').slice(0, 40) : '';
+      feed.push({
+        id: `log-${log.id}`,
+        acct: acctName,
+        acctId: log.account_id ?? acctName,
+        type,
+        title: log.message.slice(0, 100),
+        sub: subMeta || `${acctName} · ${urlHint || (formatKstHm(log.created_at) ?? '—')}`,
+        time: formatKstHm(log.created_at) ?? '—',
+        expand: typeof meta?.comment === 'string' ? meta.comment : undefined,
+      });
+    }
+
+    for (const post of cafePosts ?? []) {
+      const acct = (post.huma_accounts as { name?: string } | null)?.name ?? 'C-Rank';
+      kpiCounts.comment++;
+      feed.push({
+        id: `cafe-${post.id}`,
+        acct,
+        acctId: acct,
+        type: '댓글',
+        title: post.post_title ?? '카페 댓글',
+        sub: `${acct} · ${String(post.post_url ?? '').replace(/^https?:\/\//, '').slice(0, 40)}`,
+        time: formatKstHm(post.posted_at ?? post.created_at) ?? '—',
+        expand: post.reply_posted ? String(post.reply_posted) : undefined,
+      });
+    }
+
+    feed.sort((a, b) => b.time.localeCompare(a.time));
+
+    const config = await getSetting<Record<string, unknown>>('social_crank', {});
+    const visitMax = Number(config.daily_visit_limit ?? 200);
+    const accountCount = crankAccounts?.length ?? 0;
+    const perAccount = Number(config.daily_limit_per_account ?? 30);
+
+    const accountCards = [
+      {
+        id: 'all',
+        label: '전체',
+        count: kpiCounts.visit,
+        sub: `${accountCount}계정`,
+      },
+      ...(crankAccounts ?? []).map((a) => ({
+        id: a.name,
+        label: a.name,
+        count: feed.filter((f) => f.acct === a.name && f.type === '방문').length || (a.crank_count_today ?? 0),
+        sub: a.proxy_port ? `:${a.proxy_port}` : '풀',
+      })),
+    ];
+
+    return {
+      kpi: {
+        visit: { current: kpiCounts.visit, max: visitMax },
+        like: { current: kpiCounts.like, max: Math.round(visitMax * 0.75) },
+        comment: { current: kpiCounts.comment, max: Math.max(accountCount * 2, perAccount) },
+        neighbor: { current: kpiCounts.neighbor, max: 20 },
+      },
+      accountCards,
+      feed: feed.slice(0, 50),
+      keywords: Array.isArray(config.keywords) ? (config.keywords as string[]).slice(0, 5) : [],
+      hasData: feed.length > 0 || accountCount > 0,
+    };
+  });
+
   app.get('/api/crank/scheduler', { preHandler: authMiddleware }, async (request, reply) => {
     try {
       const query = request.query as { probe?: string };

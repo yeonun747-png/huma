@@ -1,17 +1,129 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { EmptyPanel } from '@/components/ui/empty-panel';
-import { MGrid, MPanel, MStat, MTable } from '@/components/mockup/primitives';
+import { useWorkspace } from '@/components/dashboard/workspace-context';
+import { MGrid, MPanel, MStat, MTable, MTag } from '@/components/mockup/primitives';
 import { useRegisterPageAction } from '@/components/dashboard/page-action-context';
+import { SEO_WORKSPACE_URL } from '@/lib/seo-mock-data';
+import { dispatchQueuePrefill } from '@/lib/queue-prefill';
+import type { Workspace } from '@huma/shared';
+
+type SeoData = Awaited<ReturnType<typeof api.seoKeywords>>;
 
 export function SeoKeywordsView() {
-  useRegisterPageAction('refreshSeo', async () => {});
+  const { workspace } = useWorkspace();
+  const router = useRouter();
+  const [data, setData] = useState<SeoData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    api
+      .seoKeywords(workspace)
+      .then(setData)
+      .catch((e: Error) => {
+        setData(null);
+        setError(e.message);
+      })
+      .finally(() => setLoading(false));
+  }, [workspace]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  useRegisterPageAction('refreshSeo', async () => {
+    await api.crawlSeo(workspace);
+    load();
+  });
+
+  const addKwToQueue = (kw: string) => {
+    dispatchQueuePrefill({
+      title: `${kw} — 완전 가이드`,
+      source_url: SEO_WORKSPACE_URL[workspace as Workspace] ?? SEO_WORKSPACE_URL.yeonun,
+    });
+    router.push('/queue');
+  };
+
+  if (loading && !data) {
+    return <EmptyPanel message="SEO 키워드 데이터 로딩 중…" />;
+  }
+
+  if (error && !data) {
+    return <EmptyPanel message={`SEO API 오류: ${error}`} />;
+  }
+
+  const d = data!;
+
   return (
     <div className="animate-fadeIn">
-      <MPanel title="SEO 키워드">
-        <EmptyPanel message="키워드 추적 데이터가 없습니다. 연동 후 표시됩니다." />
+      <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-huma-bdr bg-huma-bg2 px-3 py-2 text-[12px] text-huma-t2">
+        <span>
+          HUMA 블로그 포스팅 생성 시 이 키워드 풀을 참조합니다.{' '}
+          <strong className="text-huma-acc">키워드 태그 클릭 → 큐 추가 모달 자동 입력</strong>
+        </span>
+        <span className="ml-auto whitespace-nowrap rounded border border-huma-bdr bg-[var(--glow)] px-2 py-0.5 font-mono text-[10.5px] text-huma-acc">
+          {d.badge}
+        </span>
+        <span className="w-full font-mono text-[10px] text-huma-t3">
+          소스: {d.source === 'search_console' ? 'Google Search Console' : 'huma_jobs 집계'}
+          {!d.configured && ` · GSC: ${(d.missingEnv ?? []).join(', ')}`}
+        </span>
+      </div>
+
+      <MGrid cols={2}>
+        <MPanel title="검색 순위 추적">
+          {d.ranks.length === 0 ? (
+            <EmptyPanel message="순위 없음 — ↻ SEO 갱신" />
+          ) : (
+            <div className="space-y-2">
+              {d.ranks.map((r) => (
+                <div key={r.word} className="flex items-center gap-2 border-b border-huma-bdr2 py-2 last:border-0">
+                  <span className="w-10 font-mono text-[12px] font-bold text-huma-acc">{r.rank}</span>
+                  <span className="flex-1 text-[14px] text-huma-t">{r.word}</span>
+                  <span className="font-mono text-[11.5px] text-huma-t3">{r.vol}</span>
+                  <span
+                    className={`w-10 text-right font-mono text-[12px] ${r.ok === true ? 'text-huma-ok' : r.ok === false ? 'text-huma-err' : 'text-huma-t3'}`}
+                  >
+                    {r.chg}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </MPanel>
+
+        <MPanel title="키워드 풀">
+          <div className="flex flex-wrap gap-1">
+            {d.pool.map((kw) => (
+              <button key={kw} type="button" className="m-kw-tag" title="이 키워드로 큐 추가" onClick={() => addKwToQueue(kw)}>
+                {kw}
+              </button>
+            ))}
+          </div>
+        </MPanel>
+      </MGrid>
+
+      <MPanel title="콘텐츠 ↔ 키워드 연결 맵">
+        {d.table.length === 0 ? (
+          <EmptyPanel message="발행 콘텐츠 없음" />
+        ) : (
+          <MTable
+            head={['상품·콘텐츠 ID', '주력 키워드', '발행수', '→ SEO 반영', '상태']}
+            rows={d.table.map((r) => [
+              <span key="id" className="font-mono text-[12px]">{r.id}</span>,
+              r.kw,
+              <span key="c" className="font-mono">{r.cnt}</span>,
+              <span key="ref" className="text-[11.5px] text-huma-t3">{r.reflect}</span>,
+              <MTag key="st" tone={r.tone}>{r.st}</MTag>,
+            ])}
+          />
+        )}
       </MPanel>
     </div>
   );

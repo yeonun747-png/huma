@@ -3,6 +3,7 @@ import { join } from 'path';
 import { createClient } from '@supabase/supabase-js';
 import { askClaudeWithModel } from '../../lib/anthropic-client.js';
 import { getSubClaudeModel } from '../../lib/ai-engine.js';
+import { isGoogleImagenEnabled, isHaikuSubEnabled } from '../../lib/human-engine-policy.js';
 
 /** v3.26 §7-2 — Google Imagen 4 (이미지 전용) */
 export type ImagenModel =
@@ -28,7 +29,7 @@ export async function selectImagenModel(prompt: string): Promise<ImagenModel> {
   const override = process.env.IMAGEN_MODEL?.trim() as ImagenModel | undefined;
   if (override === FAST || override === STANDARD) return override;
 
-  if (!process.env.ANTHROPIC_API_KEY) return FAST;
+  if (!(await isHaikuSubEnabled())) return FAST;
 
   try {
     const raw = await askClaudeWithModel({
@@ -48,9 +49,11 @@ export async function selectImagenModel(prompt: string): Promise<ImagenModel> {
 }
 
 function resolveModel(model: string | undefined, prompt: string): Promise<ImagenModel> {
-  if (model === FAST || model === STANDARD) return Promise.resolve(model);
-  if (model && LEGACY_TO_IMAGEN[model]) return Promise.resolve(LEGACY_TO_IMAGEN[model]);
-  if (model?.startsWith('imagen-')) return Promise.resolve(model as ImagenModel);
+  const trimmed = model?.trim();
+  if (!trimmed || trimmed === 'auto') return selectImagenModel(prompt);
+  if (trimmed === FAST || trimmed === STANDARD) return Promise.resolve(trimmed);
+  if (LEGACY_TO_IMAGEN[trimmed]) return Promise.resolve(LEGACY_TO_IMAGEN[trimmed]);
+  if (trimmed.startsWith('imagen-')) return Promise.resolve(trimmed as ImagenModel);
   return selectImagenModel(prompt);
 }
 
@@ -82,6 +85,9 @@ export async function generateImage(params: {
   model?: string;
   aspectRatio?: string;
 }): Promise<string> {
+  if (!(await isGoogleImagenEnabled())) {
+    throw new Error('Google Imagen 4 API 비활성 (환경 설정 또는 GOOGLE_AI_API_KEY 확인)');
+  }
   const apiKey = process.env.GOOGLE_AI_API_KEY?.trim();
   if (!apiKey) throw new Error('GOOGLE_AI_API_KEY 없음 (Imagen 4 이미지 생성)');
 

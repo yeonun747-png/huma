@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { authMiddleware, getWorkspaceFilter, supabase } from '../middleware/auth.js';
+import { logOperation } from '../lib/log-emitter.js';
 import { getSystemPaused, setSystemPaused } from '../modules/queue/worker.js';
 
 export async function registerSystemRoutes(app: FastifyInstance) {
@@ -33,13 +34,21 @@ export async function registerSystemRoutes(app: FastifyInstance) {
     };
   });
 
-  app.post('/api/stop-all', { preHandler: authMiddleware }, async () => {
+  app.post('/api/stop-all', { preHandler: authMiddleware }, async (request) => {
+    const body = (request.body ?? {}) as { reason?: string };
+    const reason = String(body.reason ?? '').trim() || '운영자 전체 정지';
     setSystemPaused(true);
-    return { success: true, message: '전체 작업 중지됨' };
+    await logOperation({
+      level: 'INFO',
+      message: `HUMA 전체 정지 — ${reason}`,
+      metadata: { stop_reason: reason },
+    });
+    return { success: true, message: '전체 작업 중지됨', reason };
   });
 
   app.post('/api/resume-all', { preHandler: authMiddleware }, async () => {
     setSystemPaused(false);
+    await logOperation({ level: 'INFO', message: 'HUMA 전체 재개' });
     return { success: true, message: '작업 재개됨' };
   });
 }

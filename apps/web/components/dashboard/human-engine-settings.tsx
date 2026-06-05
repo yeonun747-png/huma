@@ -1,14 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/constants';
-import {
-  DEFAULT_VIDEO_MODEL,
-  HUMAN_ENGINE_IMAGE_LABEL,
-  normalizeVideoModel,
-} from '@/lib/higgsfield-models';
-import { useHumanEngineSave } from '@/components/dashboard/human-engine-save-context';
+import { DEFAULT_VIDEO_MODEL, HUMAN_ENGINE_IMAGE_LABEL } from '@/lib/higgsfield-models';
 
 type Range = [number, number];
 
@@ -45,7 +40,6 @@ interface ImageEngineConfig {
 }
 
 interface MediaConfig {
-  default_video_model: string;
   whisper_subtitle_sync: boolean;
 }
 
@@ -91,7 +85,6 @@ const DEFAULT_IMAGE: ImageEngineConfig = {
 };
 
 const DEFAULT_MEDIA: MediaConfig = {
-  default_video_model: DEFAULT_VIDEO_MODEL,
   whisper_subtitle_sync: true,
 };
 
@@ -193,7 +186,8 @@ export function HumanEngineSettings() {
   const [human, setHuman] = useState<HumanEngineConfig>(DEFAULT_HUMAN);
   const [image, setImage] = useState<ImageEngineConfig>(DEFAULT_IMAGE);
   const [media, setMedia] = useState<MediaConfig>(DEFAULT_MEDIA);
-  const saveCtx = useHumanEngineSave();
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hydrated = useRef(false);
 
   useEffect(() => {
     Promise.all([
@@ -210,51 +204,68 @@ export function HumanEngineSettings() {
       setImage({ ...DEFAULT_IMAGE, ...(img as object), block_duplicate: (img as ImageEngineConfig).block_duplicate ?? true });
       const hg = higgs as Record<string, unknown>;
       setMedia({
-        default_video_model: normalizeVideoModel(String(hg.default_video_model ?? DEFAULT_VIDEO_MODEL)),
         whisper_subtitle_sync: Boolean(hg.whisper_subtitle_sync ?? true),
       });
+      hydrated.current = true;
     });
   }, []);
 
   const chartBars = useMemo(() => wpmBars(human.wpm_mean, human.wpm_sigma), [human.wpm_mean, human.wpm_sigma]);
 
-  const persist = useCallback(async () => {
-    await Promise.all([
-      api.updateSetting('human_engine', human),
-      api.updateSetting('image_engine', image),
-      api.updateSetting('higgsfield', {
-        default_video_model: normalizeVideoModel(media.default_video_model),
-        aspect_ratio: '9:16',
-        default_video_resolution: FIXED_VIDEO_RESOLUTION,
-        whisper_subtitle_sync: media.whisper_subtitle_sync,
-      }),
-      api.updateSetting('watcher', {
-        auto_pause: human.fingerprint.auto_pause_on_detect,
-        cooldown_429_min: human.fingerprint.cooldown_429_hours * 60,
-        captcha_slack: human.fingerprint.captcha_slack,
-      }),
-    ]);
-  }, [human, image, media]);
+  const persistAll = useCallback(
+    async (h: HumanEngineConfig, img: ImageEngineConfig, med: MediaConfig) => {
+      await Promise.all([
+        api.updateSetting('human_engine', h),
+        api.updateSetting('image_engine', img),
+        api.updateSetting('higgsfield', {
+          default_image_model: 'imagen-4.0-fast-generate-001',
+          default_video_model: DEFAULT_VIDEO_MODEL,
+          aspect_ratio: '9:16',
+          default_video_resolution: FIXED_VIDEO_RESOLUTION,
+          video_duration_sec: 15,
+          whisper_subtitle_sync: med.whisper_subtitle_sync,
+        }),
+        api.updateSetting('watcher', {
+          auto_pause: h.fingerprint.auto_pause_on_detect,
+          cooldown_429_min: h.fingerprint.cooldown_429_hours * 60,
+          captcha_slack: h.fingerprint.captcha_slack,
+        }),
+      ]);
+    },
+    [],
+  );
 
-  useEffect(() => {
-    if (!saveCtx) return;
-    return saveCtx.register(persist);
-  }, [saveCtx, persist]);
+  const scheduleSave = useCallback(() => {
+    if (!hydrated.current) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      void persistAll(human, image, media);
+    }, 500);
+  }, [human, image, media, persistAll]);
+
+  const saveNow = useCallback(
+    (h: HumanEngineConfig, img: ImageEngineConfig, med: MediaConfig) => {
+      if (!hydrated.current) return;
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      void persistAll(h, img, med);
+    },
+    [persistAll],
+  );
 
   return (
     <div className="animate-fadeIn">
       <div className="he-g2">
         <div className="panel he-panel">
           <div className="he-panel-t">■ 타이핑 엔진 (가우시안 분포)</div>
-          <HeSliderRow label="평균 속도 (WPM)" value={human.wpm_mean} min={30} max={90} onChange={(v) => setHuman((h) => ({ ...h, wpm_mean: v }))} />
-          <HeSliderRow label="속도 편차 (σ)" value={human.wpm_sigma} min={2} max={30} onChange={(v) => setHuman((h) => ({ ...h, wpm_sigma: v }))} />
+          <HeSliderRow label="평균 속도 (WPM)" value={human.wpm_mean} min={30} max={90} onChange={(v) => { setHuman((h) => ({ ...h, wpm_mean: v })); scheduleSave(); }} />
+          <HeSliderRow label="속도 편차 (σ)" value={human.wpm_sigma} min={2} max={30} onChange={(v) => { setHuman((h) => ({ ...h, wpm_sigma: v })); scheduleSave(); }} />
           <HeSliderRow
             label="오타 발생률"
             value={Math.round(human.typo_rate * 100)}
             min={1}
             max={10}
             suffix="%"
-            onChange={(v) => setHuman((h) => ({ ...h, typo_rate: v / 100 }))}
+            onChange={(v) => { setHuman((h) => ({ ...h, typo_rate: v / 100 })); scheduleSave(); }}
           />
           <HeStaticRow label="백스페이스 딜레이" value="200~800ms" />
           <HeStaticRow label="문단 간 사고 정지" value="2~8초" />
@@ -301,10 +312,10 @@ export function HumanEngineSettings() {
       <div className="he-g2">
         <div className="panel he-panel">
           <div className="he-panel-t">○ 감지 방어 · 핑거프린트</div>
-          <HeToggle label="Canvas 해시 스푸핑" value={human.fingerprint.canvas_spoof} onChange={(v) => setHuman((h) => ({ ...h, fingerprint: { ...h.fingerprint, canvas_spoof: v } }))} />
-          <HeToggle label="WebGL 렌더러 변조" value={human.fingerprint.webgl_spoof} onChange={(v) => setHuman((h) => ({ ...h, fingerprint: { ...h.fingerprint, webgl_spoof: v } }))} />
-          <HeToggle label="AudioContext 노이즈" value={human.fingerprint.audio_noise} onChange={(v) => setHuman((h) => ({ ...h, fingerprint: { ...h.fingerprint, audio_noise: v } }))} />
-          <HeToggle label="마우스 베지어 이동" value={human.fingerprint.mouse_bezier} onChange={(v) => setHuman((h) => ({ ...h, fingerprint: { ...h.fingerprint, mouse_bezier: v } }))} />
+          <HeToggle label="Canvas 해시 스푸핑" value={human.fingerprint.canvas_spoof} onChange={(v) => { setHuman((h) => { const next = { ...h, fingerprint: { ...h.fingerprint, canvas_spoof: v } }; saveNow(next, image, media); return next; }); }} />
+          <HeToggle label="WebGL 렌더러 변조" value={human.fingerprint.webgl_spoof} onChange={(v) => { setHuman((h) => { const next = { ...h, fingerprint: { ...h.fingerprint, webgl_spoof: v } }; saveNow(next, image, media); return next; }); }} />
+          <HeToggle label="AudioContext 노이즈" value={human.fingerprint.audio_noise} onChange={(v) => { setHuman((h) => { const next = { ...h, fingerprint: { ...h.fingerprint, audio_noise: v } }; saveNow(next, image, media); return next; }); }} />
+          <HeToggle label="마우스 베지어 이동" value={human.fingerprint.mouse_bezier} onChange={(v) => { setHuman((h) => { const next = { ...h, fingerprint: { ...h.fingerprint, mouse_bezier: v } }; saveNow(next, image, media); return next; }); }} />
           <div className="he-tw">
             <span className="he-tw-label">클릭 좌표 오차</span>
             <div className="flex items-center gap-2">
@@ -313,19 +324,20 @@ export function HumanEngineSettings() {
                 min={0}
                 max={10}
                 value={human.fingerprint.click_jitter_px}
-                onChange={(e) =>
+                onChange={(e) => {
                   setHuman((h) => ({
                     ...h,
                     fingerprint: { ...h.fingerprint, click_jitter_px: parseFloat(e.target.value) },
-                  }))
-                }
+                  }));
+                  scheduleSave();
+                }}
                 className="he-range-sm"
               />
               <span className="he-jitter-val">±{human.fingerprint.click_jitter_px}px</span>
             </div>
           </div>
-          <HeToggle label="탐지 시 자동 일시정지" value={human.fingerprint.auto_pause_on_detect} onChange={(v) => setHuman((h) => ({ ...h, fingerprint: { ...h.fingerprint, auto_pause_on_detect: v } }))} />
-          <HeToggle label="캡차 감지 → Slack 알림" value={human.fingerprint.captcha_slack} onChange={(v) => setHuman((h) => ({ ...h, fingerprint: { ...h.fingerprint, captcha_slack: v } }))} />
+          <HeToggle label="탐지 시 자동 일시정지" value={human.fingerprint.auto_pause_on_detect} onChange={(v) => { setHuman((h) => { const next = { ...h, fingerprint: { ...h.fingerprint, auto_pause_on_detect: v } }; saveNow(next, image, media); return next; }); }} />
+          <HeToggle label="캡차 감지 → Slack 알림" value={human.fingerprint.captcha_slack} onChange={(v) => { setHuman((h) => { const next = { ...h, fingerprint: { ...h.fingerprint, captcha_slack: v } }; saveNow(next, image, media); return next; }); }} />
           <div className="he-tw">
             <span className="he-tw-label">429 이후 쿨다운</span>
             <span className="he-meta-val">{human.fingerprint.cooldown_429_hours}시간</span>
@@ -341,19 +353,19 @@ export function HumanEngineSettings() {
             max={5}
             step={0.1}
             suffix="%"
-            onChange={(v) => setImage((img) => ({ ...img, noise_pct: v }))}
+            onChange={(v) => { setImage((img) => ({ ...img, noise_pct: v })); scheduleSave(); }}
           />
-          <HeToggle label="EXIF 기기 정보 랜덤화" value={image.exif_randomize} onChange={(v) => setImage((img) => ({ ...img, exif_randomize: v }))} />
-          <HeToggle label="EXIF GPS 랜덤 주입" value={image.gps_randomize} onChange={(v) => setImage((img) => ({ ...img, gps_randomize: v }))} />
+          <HeToggle label="EXIF 기기 정보 랜덤화" value={image.exif_randomize} onChange={(v) => { setImage((img) => { const next = { ...img, exif_randomize: v }; saveNow(human, next, media); return next; }); }} />
+          <HeToggle label="EXIF GPS 랜덤 주입" value={image.gps_randomize} onChange={(v) => { setImage((img) => { const next = { ...img, gps_randomize: v }; saveNow(human, next, media); return next; }); }} />
           <HeStaticRow label="JPEG 품질 범위" value="90~96%" />
-          <HeToggle label="중복 이미지 차단" value={image.block_duplicate} onChange={(v) => setImage((img) => ({ ...img, block_duplicate: v }))} />
+          <HeToggle label="중복 이미지 차단" value={image.block_duplicate} onChange={(v) => { setImage((img) => { const next = { ...img, block_duplicate: v }; saveNow(human, next, media); return next; }); }} />
           <HeStaticRow label="기본 이미지 모델" value={HUMAN_ENGINE_IMAGE_LABEL} />
           <div className="he-chart-caption">v3.26 · Imagen 4 + Kling 3.0 내장 오디오 (TTS 기본 미사용)</div>
           <HeStaticRow label="영상 해상도" value={`${FIXED_VIDEO_DIMENSIONS} · ${FIXED_VIDEO_RESOLUTION} 고정`} />
           <HeToggle
             label="자막 자동 싱크 (Whisper)"
             value={media.whisper_subtitle_sync}
-            onChange={(v) => setMedia((m) => ({ ...m, whisper_subtitle_sync: v }))}
+            onChange={(v) => { setMedia((m) => { const next = { ...m, whisper_subtitle_sync: v }; saveNow(human, image, next); return next; }); }}
           />
         </div>
       </div>

@@ -1,103 +1,339 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
 import { getAccessibleWorkspaces } from '@/lib/constants';
 import { useAuth } from '@/lib/auth-context';
 import { useWorkspace } from '@/components/dashboard/workspace-context';
-import { EmptyPanel } from '@/components/ui/empty-panel';
+import { useDashboardPeriod } from '@/components/dashboard/dashboard-period-context';
+import { roasBarWidth, type PostRow } from '@/lib/dashboard-mock-data';
 import { MGrid, MPanel, MStat, MTable, MTag, MUrlLink } from '@/components/mockup/primitives';
+import type { Workspace } from '@huma/shared';
 
-const WS_META: Record<string, { icon: string; name: string }> = {
-  yeonun: { icon: '🔮', name: '연운 緣運' },
-  quizoasis: { icon: '🧠', name: '퀴즈오아시스' },
-  panana: { icon: '🎬', name: '파나나' },
-};
+type DashboardApi = Awaited<ReturnType<typeof api.dashboardStats>>;
+
+function tagTone(status: PostRow['status']) {
+  if (status === 'done') return 'ok' as const;
+  if (status === 'error') return 'err' as const;
+  if (status === 'running' || status === 'warn') return 'warn' as const;
+  return 'idle' as const;
+}
+
+function PostUrlCell({ row }: { row: PostRow }) {
+  if (row.urlKind === 'link' && row.url) {
+    return <MUrlLink href={row.url}>{row.url.replace(/^https?:\/\//, '').slice(0, 36)} ↗</MUrlLink>;
+  }
+  if (row.urlKind === 'generating') {
+    return <span className="font-mono text-[11.5px] text-huma-t4">생성중...</span>;
+  }
+  if (row.urlKind === 'watcher') {
+    return (
+      <Link
+        href="/watcher"
+        className="rounded border border-huma-err bg-transparent px-1.5 py-0.5 font-mono text-[10.5px] text-huma-err hover:bg-[var(--err-bg)]"
+      >
+        Layer4 감지 → 확인 ↗
+      </Link>
+    );
+  }
+  return <span className="font-mono text-[11px] text-huma-t4">—</span>;
+}
+
+function PostsTable({ rows, metaHead }: { rows: PostRow[]; metaHead: string }) {
+  if (!rows.length) {
+    return <p className="py-4 text-center text-[12px] text-huma-t3">발행 기록이 없습니다.</p>;
+  }
+  return (
+    <MTable
+      head={['제목', metaHead, '상태', 'URL']}
+      rows={rows.map((r) => [
+        r.title,
+        r.meta,
+        <MTag key="s" tone={tagTone(r.status)}>{r.statusLabel}</MTag>,
+        <PostUrlCell key="u" row={r} />,
+      ])}
+      rowClassName={(i) => (rows[i]?.status === 'error' ? 'm-tbl-err-row' : undefined)}
+    />
+  );
+}
 
 export function DashboardHome() {
   const { admin } = useAuth();
   const { workspace } = useWorkspace();
+  const { period } = useDashboardPeriod();
   const accessible = getAccessibleWorkspaces(admin);
-  const [stats, setStats] = useState({ pendingJobs: 0, activeAccounts: 0, errors: 0, todayCompleted: 0 });
-  const [serviceStats, setServiceStats] = useState<Array<{ workspace: string; todayJobs: number; pending: number; errors: number }>>([]);
-  const [chart, setChart] = useState<{ day: string; value: number }[]>([]);
-  const [recent, setRecent] = useState<Array<{ title: string; status: string; result_url?: string; workspace: string }>>([]);
+  const [stats, setStats] = useState<DashboardApi | null>(null);
+  const [quizAdsense, setQuizAdsense] = useState<Awaited<ReturnType<typeof api.adsenseStats>> | null>(null);
+  const [quizSeo, setQuizSeo] = useState<Awaited<ReturnType<typeof api.seoKeywords>> | null>(null);
+  const [crankKeywords, setCrankKeywords] = useState<string[]>([]);
+
+  const load = useCallback(() => {
+    void api.dashboardStats({ period }).then(setStats).catch(() => setStats(null));
+    if (workspace === 'quizoasis') {
+      void api.adsenseStats('quizoasis').then(setQuizAdsense).catch(() => setQuizAdsense(null));
+      void api.seoKeywords('quizoasis').then(setQuizSeo).catch(() => setQuizSeo(null));
+    }
+    if (workspace === 'yeonun') {
+      void api.crankFeed().then((f) => setCrankKeywords(f.keywords)).catch(() => setCrankKeywords([]));
+    }
+  }, [period, workspace]);
 
   useEffect(() => {
-    api.dashboardStats().then((d) => {
-      setServiceStats(d.serviceStats);
-      setChart(d.chart);
-      setStats({ pendingJobs: d.pendingJobs, activeAccounts: d.activeAccounts, errors: d.errors, todayCompleted: d.todayCompleted });
-    }).catch(() => {});
-    api.dashboardRecent().then(setRecent).catch(() => setRecent([]));
-  }, []);
+    load();
+    const id = setInterval(load, 60_000);
+    return () => clearInterval(id);
+  }, [load]);
+
+  const WS_ICONS: Record<Workspace, string> = { yeonun: '🔮', quizoasis: '🧠', panana: '🎬' };
 
   const serviceCards = accessible.map((ws) => {
-    const stat = serviceStats.find((s) => s.workspace === ws.id);
-    const meta = WS_META[ws.id];
-    const status = (stat?.errors ?? 0) > 0 ? 'err' : (stat?.pending ?? 0) > 5 ? 'warn' : 'ok';
-    return { ...ws, meta, stat, status };
+    const apiStatus = stats?.serviceStatus?.[ws.id];
+    return {
+      ...ws,
+      mock: apiStatus ?? {
+        icon: WS_ICONS[ws.id as Workspace],
+        name: ws.label,
+        detail: stats === null ? '로딩 중…' : '오늘 활동 없음',
+        todayJobs: 0,
+        jobsLabel: '오늘 발행',
+        status: 'ok' as const,
+      },
+    };
   });
 
-  const maxChart = Math.max(...chart.map((c) => c.value), 1);
-  const workspaceRecent = recent.filter((r) => r.workspace === workspace);
+  const periodStats = stats?.integrated ?? {
+    todayPublish: 0,
+    todayPublishSub: '—',
+    queuePending: 0,
+    queueSub: '—',
+    errors: 0,
+    errorsSub: '—',
+    activeAccounts: 0,
+    totalAccounts: 0,
+    accountSub: '—',
+  };
+  const chartValues = stats?.chart?.map((c) => c.value) ?? [0, 0, 0, 0, 0, 0, 0];
+  const labels = stats?.chart?.map((c) => c.day) ?? ['—', '—', '—', '—', '—', '—', '—'];
+  const chartLabel = stats?.chartLabel ?? '데이터 로딩';
+
+  const maxChart = Math.max(...chartValues, 1);
+  const roasSource = stats?.roasItems ?? [];
+  const maxRoas = roasSource[0]?.views ?? 1;
+
+  const roasRows = useMemo(
+    () =>
+      roasSource.map((item) => [
+        item.title,
+        item.platform,
+        <span key="v" className="font-mono">{item.views.toLocaleString()}</span>,
+        <span key="b" className="m-roas-bar" style={{ width: `${roasBarWidth(item.views, maxRoas)}px` }} />,
+      ]),
+    [roasSource, maxRoas],
+  );
+
+  const yeonunPosts = (stats?.workspacePosts?.yeonun as PostRow[] | undefined) ?? [];
+  const yeonunSocial = stats?.yeonunSocial ?? [];
+  const quizPosts = (stats?.workspacePosts?.quizoasis as PostRow[] | undefined) ?? [];
+  const pananaPosts = (stats?.workspacePosts?.panana as PostRow[] | undefined) ?? [];
+
+  const quizStats = quizAdsense?.configured
+    ? [
+        { label: '오늘 수익', value: `$${quizAdsense.todayEarnings.toFixed(1)}`, sub: `어제 $${quizAdsense.yesterdayEarnings.toFixed(1)}`, tone: 'ok' as const },
+        { label: '월 누계', value: `$${Math.round(quizAdsense.monthEarnings)}`, sub: `RPM $${quizAdsense.rpm.toFixed(2)}` },
+        { label: '일 PV', value: quizAdsense.monthPageViews > 1000 ? `${(quizAdsense.monthPageViews / 30 / 1000).toFixed(1)}K` : String(quizAdsense.monthPageViews), sub: '월 평균' },
+        { label: 'RPM', value: `$${quizAdsense.rpm.toFixed(2)}`, sub: `CPC $${quizAdsense.cpc.toFixed(2)}` },
+      ]
+    : [
+        { label: '오늘 수익', value: '—', sub: 'AdSense 미설정' },
+        { label: '월 누계', value: '—', sub: '—' },
+        { label: '일 PV', value: '—', sub: '—' },
+        { label: 'RPM', value: '—', sub: '—' },
+      ];
+
+  const pananaStats = stats?.pananaStats
+    ? [
+        { label: '오늘 발행', value: String(stats.pananaStats.todayPosts), sub: `${stats.pananaStats.activePlatforms}채널` },
+        { label: '활성 채널', value: String(stats.pananaStats.activePlatforms), sub: 'platform_accounts' },
+        {
+          label: '오류 계정',
+          value: String(stats.pananaStats.errorAccounts),
+          sub: stats.pananaStats.errorAccounts > 0 ? '세션 확인 필요' : '정상',
+          tone: stats.pananaStats.errorAccounts > 0 ? ('err' as const) : undefined,
+        },
+        { label: '영상 파이프라인', value: '—', sub: '영상 메뉴 참조' },
+      ]
+    : [
+        { label: '오늘 발행', value: '0', sub: '—' },
+        { label: '활성 채널', value: '0', sub: '—' },
+        { label: '오류 계정', value: '0', sub: '—' },
+        { label: '영상 파이프라인', value: '—', sub: '—' },
+      ];
+
+  const accountStats = periodStats;
+  const quizKeywords = quizSeo?.ranks ?? [];
 
   return (
     <div className="animate-fadeIn">
       <div className="m-status-bar">
-        {serviceCards.map((svc) => (
-          <div key={svc.id} className={`m-status-card st-${svc.status === 'ok' ? 'ok' : svc.status === 'warn' ? 'warn' : 'err'}`}>
-            <span className="text-lg">{svc.meta?.icon}</span>
-            <div className="min-w-0 flex-1">
-              <div className="m-st-name">{svc.meta?.name}</div>
-              <div className="m-st-detail">대기 {svc.stat?.pending ?? 0} · 오류 {svc.stat?.errors ?? 0}</div>
+        {serviceCards.map((svc) => {
+          const m = svc.mock;
+          return (
+            <div key={svc.id} className={`m-status-card st-${m.status}`}>
+              <span className="text-lg">{m.icon}</span>
+              <div className="min-w-0 flex-1">
+                <div className="m-st-name">{m.name}</div>
+                <div className={`m-st-detail ${m.status === 'err' ? 'text-huma-err' : ''}`}>{m.detail}</div>
+              </div>
+              <div className="flex flex-col items-end">
+                <div className={`m-st-jobs ${m.status === 'err' ? 'err' : ''}`}>{m.todayJobs}</div>
+                <div className="m-st-jobs-l">{m.jobsLabel}</div>
+                <button
+                  type="button"
+                  className="m-svc-stop"
+                  onClick={() => {
+                    const reason = window.prompt(`${m.name} 서비스를 정지합니다.\n정지 이유를 입력하세요:`);
+                    if (reason?.trim()) void api.stopAll(reason.trim());
+                  }}
+                >
+                  ■ 정지
+                </button>
+              </div>
             </div>
-            <div className="flex flex-col items-end">
-              <div className={`m-st-jobs ${svc.status === 'err' ? 'err' : ''}`}>{svc.stat?.todayJobs ?? 0}</div>
-              <div className="m-st-jobs-l">{svc.status === 'err' ? '오류 발생' : '오늘 발행'}</div>
-              <button type="button" className="m-svc-stop" onClick={() => api.stopAll()}>■ 정지</button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <MGrid cols={4}>
-        <MStat label="오늘 총 발행" value={stats.todayCompleted} sub="API 집계" />
-        <MStat label="큐 대기" value={stats.pendingJobs} sub="활성" />
-        <MStat label="오류" value={stats.errors} tone={stats.errors > 0 ? 'err' : undefined} sub="Layer4·실패 작업" />
-        <MStat label="활성 계정" value={stats.activeAccounts} sub="등록된 posting 계정" />
+        <MStat label="오늘 총 발행" value={periodStats.todayPublish} sub={periodStats.todayPublishSub} tone="ok" />
+        <MStat label="큐 대기" value={periodStats.queuePending} sub={periodStats.queueSub} />
+        <MStat label="오류" value={periodStats.errors} tone="err" sub={periodStats.errorsSub} />
+        <Link href="/accounts" className="block transition hover:opacity-90">
+          <MStat
+            label="활성 계정"
+            value={
+              <>
+                {accountStats.activeAccounts}
+                <span className="text-[13.5px] text-huma-t3">/{accountStats.totalAccounts}</span>
+              </>
+            }
+            sub={accountStats.accountSub}
+            tone={accountStats.accountSub.includes('⚠') ? 'err' : undefined}
+          />
+        </Link>
       </MGrid>
 
       <MGrid cols={2}>
-        <MPanel title={<><span>7일 발행수 추이</span><span className="ml-auto text-[10.5px] normal-case tracking-normal text-huma-acc">오늘 기준</span></>}>
-          {chart.length === 0 ? (
-            <EmptyPanel message="발행 이력이 없습니다" />
-          ) : (
-            <div className="m-bar-chart">
-              {chart.map((c) => (
-                <div key={c.day} className="m-bar-col">
-                  <div className="m-bar-fill" style={{ height: `${Math.max(4, (c.value / maxChart) * 100)}%` }} title={`${c.value}`} />
-                  <div className="m-bar-label">{c.day}</div>
-                </div>
-              ))}
-            </div>
-          )}
+        <MPanel
+          title={
+            <>
+              <span>7일 발행수 추이</span>
+              <span className="ml-auto text-[10.5px] font-normal normal-case tracking-normal text-huma-acc">
+                {chartLabel}
+              </span>
+            </>
+          }
+        >
+          <div className="m-bar-chart">
+            {chartValues.map((value, i) => (
+              <div key={`${labels[i]}-${i}`} className="m-bar-col">
+                <div className="m-bar-val">{value}</div>
+                <div
+                  className="m-bar-fill"
+                  style={{ height: `${Math.max(3, (value / maxChart) * 100)}%` }}
+                  title={String(value)}
+                />
+                <div className="m-bar-label">{labels[i]}</div>
+              </div>
+            ))}
+          </div>
         </MPanel>
-        <MPanel title="최근 완료 작업">
-          {workspaceRecent.length === 0 ? (
-            <EmptyPanel message="완료된 작업이 없습니다" />
+
+        <MPanel title="콘텐츠 효율 (ROAS) · 상위 5">
+          {roasRows.length === 0 ? (
+            <p className="py-4 text-center text-[12px] text-huma-t3">완료된 발행이 없습니다.</p>
           ) : (
-            <MTable
-              head={['제목', '상태', 'URL']}
-              rows={workspaceRecent.slice(0, 5).map((r) => [
-                r.title,
-                <MTag key="s" tone={r.status === 'completed' ? 'ok' : r.status === 'failed' ? 'err' : 'warn'}>{r.status === 'completed' ? '완료' : r.status}</MTag>,
-                r.result_url ? <MUrlLink href={r.result_url}>링크 ↗</MUrlLink> : '—',
-              ])}
-            />
+            <MTable head={['콘텐츠 유형', '플랫폼', '조회', '효율']} rows={roasRows} />
           )}
         </MPanel>
       </MGrid>
+
+      {workspace === 'yeonun' && (
+        <>
+          <MPanel title="오늘 발행 현황">
+            <PostsTable rows={yeonunPosts} metaHead="캐릭터" />
+          </MPanel>
+          <MPanel title="Bot Social Activity · 연운">
+            {yeonunSocial.length === 0 ? (
+              <p className="py-4 text-center text-[12px] text-huma-t3">C-Rank 활동 데이터 없음</p>
+            ) : (
+              yeonunSocial.map((row) => (
+                <div key={row.label} className="m-soc-row">
+                  <span className="m-soc-l">{row.label}</span>
+                  <span className="m-soc-v">
+                    {row.current}
+                    {row.max != null && <span className="text-[11.5px] text-huma-t3">/{row.max}</span>}
+                    {row.max == null && '건'}
+                  </span>
+                </div>
+              ))
+            )}
+            {crankKeywords.length > 0 && (
+              <div className="mt-3 font-mono text-[10.5px] text-huma-t3">
+                최근 댓글 키워드: {crankKeywords.join(', ')}
+              </div>
+            )}
+          </MPanel>
+        </>
+      )}
+
+      {workspace === 'quizoasis' && (
+        <>
+          <MGrid cols={4}>
+            {quizStats.map((s) => (
+              <MStat key={s.label} label={s.label} value={s.value} sub={s.sub} tone={s.tone} />
+            ))}
+          </MGrid>
+          <MGrid cols={2}>
+            <MPanel title="TOP 키워드">
+              {quizKeywords.length === 0 ? (
+                <p className="py-4 text-center text-[12px] text-huma-t3">
+                  Search Console / SEO API 데이터 없음 — SEO 메뉴에서 갱신
+                </p>
+              ) : (
+                quizKeywords.map((k) => (
+                  <div key={k.word} className="flex items-center gap-2 border-b border-huma-bdr2 py-2 last:border-0">
+                    <span className="w-10 font-mono text-[12px] font-bold text-huma-acc">{k.rank}</span>
+                    <span className="flex-1 text-[14px]">{k.word}</span>
+                    <span className="font-mono text-[11.5px] text-huma-t3">{k.vol}</span>
+                    <span
+                      className={`w-10 text-right font-mono text-[12px] ${k.ok === true ? 'text-huma-ok' : k.ok === false ? 'text-huma-err' : 'text-huma-t3'}`}
+                    >
+                      {k.chg}
+                    </span>
+                  </div>
+                ))
+              )}
+            </MPanel>
+            <MPanel title="오늘 발행">
+              <PostsTable rows={quizPosts} metaHead="언어" />
+            </MPanel>
+          </MGrid>
+        </>
+      )}
+
+      {workspace === 'panana' && (
+        <>
+          <MGrid cols={4}>
+            {pananaStats.map((s) => (
+              <MStat key={s.label} label={s.label} value={s.value} sub={s.sub} tone={s.tone} />
+            ))}
+          </MGrid>
+          <MPanel title="오늘 발행">
+            <PostsTable rows={pananaPosts} metaHead="플랫폼" />
+          </MPanel>
+        </>
+      )}
     </div>
   );
 }

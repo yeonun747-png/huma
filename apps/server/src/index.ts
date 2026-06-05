@@ -38,6 +38,8 @@ import { recoverScheduledJobs } from './lib/job-scheduler.js';
 import { startCrankScheduler } from './lib/crank-scheduler.js';
 import { startCafeActivityScheduler } from './lib/cafe-activity-scheduler.js';
 import { registerCrankRoutes } from './routes/crank.js';
+import { registerMonitorRoutes } from './routes/monitor.js';
+import { registerSeoRoutes } from './routes/seo.js';
 
 
 
@@ -84,6 +86,8 @@ async function main() {
   await registerDashboardRoutes(app);
   await registerAdSenseRoutes(app);
   await registerCrankRoutes(app);
+  await registerMonitorRoutes(app);
+  await registerSeoRoutes(app);
 
   await app.listen({ port: PORT, host: '0.0.0.0' });
 

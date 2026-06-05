@@ -31,6 +31,7 @@ export function VideoPipelineList() {
             image_prompt: 'mystical fortune teller, cinematic',
             video_prompt: 'slow camera zoom, ethereal glow',
             video_model: normalizeVideoModel(String(hg.default_video_model ?? DEFAULT_VIDEO_MODEL)),
+            duration_sec: Number(hg.video_duration_sec) > 0 ? Number(hg.video_duration_sec) : 15,
             upload_platforms: ['tiktok', 'instagram', 'youtube'],
           });
           api.videoQueue().then(setItems);
