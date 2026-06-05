@@ -3,35 +3,35 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "main": "./types/index.ts",
-  "types": "./types/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit -p tsconfig.json"
   },
   "exports": {
     ".": {
-      "types": "./types/index.ts",
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./types/index.ts"
     },
     "./account": {
-      "types": "./types/account.ts",
+      "types": "./dist/account.d.ts",
       "import": "./dist/account.js",
       "default": "./types/account.ts"
     },
     "./job": {
-      "types": "./types/job.ts",
+      "types": "./dist/job.d.ts",
       "import": "./dist/job.js",
       "default": "./types/job.ts"
     },
     "./modem": {
-      "types": "./types/modem.ts",
+      "types": "./dist/modem.d.ts",
       "import": "./dist/modem.js",
       "default": "./types/modem.ts"
     },
     "./video": {
-      "types": "./types/video.ts",
+      "types": "./dist/video.d.ts",
       "import": "./dist/video.js",
       "default": "./types/video.ts"
     }
