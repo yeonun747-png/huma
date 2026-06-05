@@ -8,6 +8,8 @@ dist/
 .env*.local
 apps/server/tmp/
 apps/server/profiles/
+apps/server/scripts/data/
+apps/server/scripts/migrations/v3_34_crank_50_yeonun.sql
 .DS_Store
 Thumbs.db
 *.tsbuildinfo
