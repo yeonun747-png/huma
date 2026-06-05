@@ -16,10 +16,24 @@ export const START_JITTER_MINUTES = 15;
  */
 export const SESSION_SLOT_MINUTES = SESSION_DURATION_MINUTES;
 
+/** 병렬 트랙(슬롯6·7) 시작 시차 — 규칙⑦ 자연 간격 2~5분 */
+export const PARALLEL_TRACK_STAGGER_MINUTES_MIN = 2;
+export const PARALLEL_TRACK_STAGGER_MINUTES_MAX = 5;
+
 export interface CrankScheduleSlot {
   at: Date;
   /** 0=슬롯6(:10006), 1=슬롯7(:10007) */
   track: number;
+}
+
+/** track>0 일 때 wave마다 2~5분씩 누적 시차 (동일 분 표시 방지) */
+function parallelTrackStaggerMinutes(track: number, wave: number): number {
+  if (track <= 0) return 0;
+  const span = PARALLEL_TRACK_STAGGER_MINUTES_MAX - PARALLEL_TRACK_STAGGER_MINUTES_MIN + 1;
+  const step =
+    PARALLEL_TRACK_STAGGER_MINUTES_MIN +
+    ((wave * 17 + track * 7) % span);
+  return track * step;
 }
 
 export interface CrankSchedulePolicy {
@@ -76,9 +90,10 @@ function clampScheduleMinute(
 
 /**
  * v3.33 — 08:00~22:00 KST
- * - 트랙 고정: track0=슬롯6, track1=슬롯7 (preferredProxyPort)
- * - 같은 트랙 wave 간격: 60분 (세션 길이)
- * - 병렬 트랙: 동일 wave 동시 시작 (슬롯6·7 병렬)
+ * - 계정 i → track i%N, wave floor(i/N)
+ * - 같은 트랙 wave 간격: 60분
+ * - 병렬 트랙: track1 = track0 + 2~5분 (UI·큐에서 동일 시각 방지)
+ * - 반환 순서 = accounts[i] 매핑 순서 (sort 금지)
  */
 export function distributeCrankScheduleSlotsKst(
   count: number,
@@ -96,50 +111,44 @@ export function distributeCrankScheduleSlotsKst(
   const tracks = Math.max(1, Math.floor(modemCount));
   const waveCount = Math.ceil(count / tracks);
 
-  const slots: CrankScheduleSlot[] = [];
+  const waveStartMinByWave: number[] = [];
 
   for (let wave = 0; wave < waveCount; wave++) {
     const jitter0 = (Math.random() * 2 - 1) * START_JITTER_MINUTES;
-    let waveStartMin = clampScheduleMinute(
+    const maxStagger = (tracks - 1) * PARALLEL_TRACK_STAGGER_MINUTES_MAX;
+    waveStartMinByWave[wave] = clampScheduleMinute(
       windowStartMin + wave * slotMinutes + jitter0,
       windowStartMin,
-      windowEndMin - 10,
+      windowEndMin - 10 - maxStagger,
     );
-
-    if (waveStartMin > windowEndMin - 20) {
-      const span = windowEndMin - windowStartMin;
-      for (let track = 0; track < tracks; track++) {
-        const idx = wave * tracks + track;
-        if (idx >= count) break;
-        const baseMinutes = clampScheduleMinute(
-          windowStartMin + (span * (idx + 1)) / (count + 1),
-          windowStartMin,
-          windowEndMin,
-        );
-        const hour = Math.floor(baseMinutes / 60);
-        const minute = baseMinutes % 60;
-        slots.push({
-          track: track % tracks,
-          at: kstWallClockToUtcDate(hour, minute, dayOffset),
-        });
-      }
-      continue;
-    }
-
-    for (let track = 0; track < tracks; track++) {
-      const idx = wave * tracks + track;
-      if (idx >= count) break;
-      const totalMin = waveStartMin;
-      const hour = Math.floor(totalMin / 60);
-      const minute = totalMin % 60;
-      slots.push({
-        track,
-        at: kstWallClockToUtcDate(hour, minute, dayOffset),
-      });
-    }
   }
 
-  return slots.sort((a, b) => a.at.getTime() - b.at.getTime());
+  const useFallbackSpread = waveStartMinByWave.some((m) => m > windowEndMin - 20);
+
+  return Array.from({ length: count }, (_, i) => {
+    const track = i % tracks;
+    const wave = Math.floor(i / tracks);
+    let totalMin: number;
+
+    if (useFallbackSpread) {
+      const span = windowEndMin - windowStartMin;
+      totalMin =
+        windowStartMin +
+        (span * (i + 1)) / (count + 1) +
+        parallelTrackStaggerMinutes(track, wave);
+    } else {
+      totalMin = waveStartMinByWave[wave]! + parallelTrackStaggerMinutes(track, wave);
+    }
+
+    totalMin = clampScheduleMinute(totalMin, windowStartMin, windowEndMin);
+    const hour = Math.floor(totalMin / 60);
+    const minute = totalMin % 60;
+
+    return {
+      track,
+      at: kstWallClockToUtcDate(hour, minute, dayOffset),
+    };
+  });
 }
 
 /** @deprecated distributeCrankScheduleSlotsKst 사용 */

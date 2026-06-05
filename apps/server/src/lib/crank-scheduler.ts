@@ -10,6 +10,7 @@ import {
   getKstYmd,
   proxyPortForCrankTrack,
 } from './crank-schedule-config.js';
+import { selectCrankAccountsForDailySchedule } from './crank-schedule-accounts.js';
 import {
   applyLiveProbeToCrankDisplay,
   countActiveCrankModems,
@@ -57,27 +58,22 @@ export async function fetchPostingBlogUrls(workspace?: Workspace): Promise<strin
 export async function selectCrankAccountsForToday(
   cycleDays: number,
   dailyAccountCount: number,
-): Promise<Array<{ id: string; name: string; last_crank_at: string | null }>> {
-  const cutoff = new Date();
-  cutoff.setUTCDate(cutoff.getUTCDate() - cycleDays);
-
-  const { data: accounts } = await supabase
-    .from('huma_accounts')
-    .select('id, name, last_crank_at')
-    .eq('account_type', 'crank')
-    .eq('is_active', true)
-    .order('last_crank_at', { ascending: true, nullsFirst: true });
-
-  const eligible = (accounts ?? []).filter((a) => {
-    if (!a.last_crank_at) return true;
-    return new Date(a.last_crank_at) < cutoff;
-  });
-
-  return eligible.slice(0, dailyAccountCount) as Array<{
+): Promise<
+  Array<{
     id: string;
     name: string;
     last_crank_at: string | null;
-  }>;
+    crank_workspace: Workspace;
+    crank_label: string | null;
+  }>
+> {
+  const { data: accounts } = await supabase
+    .from('huma_accounts')
+    .select('id, name, last_crank_at, crank_workspace, crank_label')
+    .eq('account_type', 'crank')
+    .eq('is_active', true);
+
+  return selectCrankAccountsForDailySchedule(accounts ?? [], cycleDays, dailyAccountCount);
 }
 
 async function hasDailyScheduleJobs(dateKey: string): Promise<boolean> {
@@ -124,18 +120,6 @@ export async function runDailyCrankScheduler(): Promise<void> {
     return;
   }
 
-  const { data: accountRows } = await supabase
-    .from('huma_accounts')
-    .select('id, crank_workspace')
-    .in(
-      'id',
-      accounts.map((a) => a.id),
-    );
-
-  const workspaceById = new Map(
-    (accountRows ?? []).map((r) => [r.id as string, (r.crank_workspace as Workspace | null) ?? 'yeonun']),
-  );
-
   const scheduleWindow = await getCrankScheduleWindow();
   const scheduleSlots = distributeCrankScheduleSlotsKst(
     accounts.length,
@@ -144,10 +128,13 @@ export async function runDailyCrankScheduler(): Promise<void> {
     policy.activeModemCount,
   );
 
+  const serviceCounts = { yeonun: 0, panana: 0, quizoasis: 0 };
+
   for (let i = 0; i < accounts.length; i++) {
     const account = accounts[i];
     const slot = scheduleSlots[i];
-    const crankWorkspace = workspaceById.get(account.id) ?? 'yeonun';
+    const crankWorkspace = account.crank_workspace ?? 'yeonun';
+    serviceCounts[crankWorkspace]++;
     const ourBlogUrls = await fetchPostingBlogUrls(crankWorkspace);
     const scheduledAt = slot.at.toISOString();
     const crankTrack = slot.track;
@@ -188,7 +175,7 @@ export async function runDailyCrankScheduler(): Promise<void> {
 
   await logOperation({
     level: 'info',
-    message: `[crank-scheduler] ${dateKey}: 동글 ${activeModems} · 주기 ${policy.cycleDays}일 · 계정 ${accounts.length}건 큐 등록`,
+    message: `[crank-scheduler] ${dateKey}: 동글 ${activeModems} · 주기 ${policy.cycleDays}일 · 계정 ${accounts.length}건 (연운 ${serviceCounts.yeonun}·파나나 ${serviceCounts.panana}·퀴즈 ${serviceCounts.quizoasis}) 큐 등록`,
   });
 }
 

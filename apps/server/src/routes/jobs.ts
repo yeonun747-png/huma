@@ -32,10 +32,11 @@ async function assertJobWorkspaceAccess(
 export async function registerJobRoutes(app: FastifyInstance) {
   app.get('/api/jobs', { preHandler: authMiddleware }, async (request) => {
     const allowedWorkspaces = getWorkspaceFilter(request);
-    const { status, workspace, platform, limit = '50' } = request.query as {
+    const { status, workspace, platform, job_type, limit = '50' } = request.query as {
       status?: string;
       workspace?: string;
       platform?: string;
+      job_type?: string;
       limit?: string;
     };
 
@@ -49,6 +50,7 @@ export async function registerJobRoutes(app: FastifyInstance) {
     if (status) query = query.eq('status', status);
     if (workspace && allowedWorkspaces.includes(workspace)) query = query.eq('workspace', workspace);
     if (platform) query = query.eq('platform', platform);
+    if (job_type) query = query.eq('job_type', job_type);
 
     const { data, error } = await query;
     if (error) return [];

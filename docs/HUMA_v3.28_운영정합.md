@@ -55,13 +55,15 @@ git pull && cd apps/server && npm run build && pm2 restart huma-server
 | reconnect 실패 | **WARN** 로그 후 이전 IP 유지 진행 (C-Rank) |
 | **Layer4 복구** | **12~30분** (규칙 ⑧·watcher 별도, 변경 없음) |
 
-### 스케줄 (동글 2개 · slot6·7)
+### 스케줄 (동글 2개 · slot6·7 · **전체 50계정 풀**)
 
-| 구분 | 간격 |
+| 구분 | 동작 |
 |------|------|
-| **슬롯6·7 병렬** | 동일 wave **동시** 시작 (서로 다른 동글) |
+| **일일 선정** | 연운25·파나나15·퀴즈10 **비율**로 선정 후 **교차 배치** (서비스별 큐 분리 아님) |
+| **슬롯6·7 병렬** | track1 = track0 **+2~5분** |
 | **같은 동글 연속** | **60분** (세션 길이) |
 | **트랙 고정** | track0→`:10006`, track1→`:10007` |
+| **큐 UI** | 일반 admin: **자기 workspace**만 · **super admin**: 전체 social_crank |
 
 - Redis `modem_last_account:{port}` — 마지막 사용 계정 추적
 - ~~`HUMA_CRANK_RECONNECT_WAIT_MS`~~ v3.33에서 **미사용** (10분 고정 대기 제거)

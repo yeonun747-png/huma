@@ -19,6 +19,8 @@ import {
   isPausableQueueJob,
   isStaleOrFailedQueueJob,
 } from '@/lib/queue-job-eligibility';
+import { useAuth } from '@/lib/auth-context';
+import { isSuperAdmin } from '@/lib/admin-scope';
 import type { QueuePrefill } from '@/lib/queue-prefill';
 
 function jobIcon(type: string) {
@@ -89,6 +91,8 @@ function jobSub(job: HumaJob): string {
 
 export function QueueManager() {
   const { workspace } = useWorkspace();
+  const { admin } = useAuth();
+  const superAdmin = isSuperAdmin(admin);
   const [jobs, setJobs] = useState<HumaJob[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editingJob, setEditingJob] = useState<HumaJob | null>(null);
@@ -107,9 +111,31 @@ export function QueueManager() {
     hashtags?: string[] | null;
   } | null>(null);
 
-  const load = useCallback(() => {
-    api.jobs({ workspace, limit: '200' }).then(setJobs).catch(() => setJobs([]));
-  }, [workspace]);
+  const load = useCallback(async () => {
+    try {
+      const scoped = await api.jobs({ workspace, limit: '200' });
+      if (!superAdmin) {
+        setJobs(
+          scoped.sort((a, b) =>
+            String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')),
+          ),
+        );
+        return;
+      }
+      /** super admin: C-Rank는 동글 2개 공유 — 연운·파나나·퀴즈 스케줄 전체 병합 표시 */
+      const crankAll = await api.jobs({ job_type: 'social_crank', limit: '120' });
+      const byId = new Map<string, HumaJob>();
+      for (const j of scoped) byId.set(j.id, j);
+      for (const j of crankAll) byId.set(j.id, j);
+      setJobs(
+        [...byId.values()].sort((a, b) =>
+          String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')),
+        ),
+      );
+    } catch {
+      setJobs([]);
+    }
+  }, [workspace, superAdmin]);
 
   useEffect(() => {
     load();

@@ -102,8 +102,13 @@ export const api = {
       admin: { name: string; email: string; workspaces: string[]; isSuper?: boolean };
     }>('/api/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
   me: () => request<{ adminId: string; email: string; workspaces: string[]; isSuper: boolean }>('/api/auth/me'),
-  jobs: (params?: { status?: string; workspace?: string; platform?: string; limit?: string }) =>
-    request<HumaJob[]>(`/api/jobs${qs(params ?? {})}`),
+  jobs: (params?: {
+    status?: string;
+    workspace?: string;
+    platform?: string;
+    job_type?: string;
+    limit?: string;
+  }) => request<HumaJob[]>(`/api/jobs${qs(params ?? {})}`),
   createJob: (body: Partial<HumaJob>) =>
     request<HumaJob>('/api/jobs', { method: 'POST', body: JSON.stringify(body) }),
   createAutoContentJob: (body: {
