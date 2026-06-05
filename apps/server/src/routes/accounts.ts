@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { authMiddleware, getWorkspaceFilter, supabase } from '../middleware/auth.js';
 import { encrypt } from '../lib/crypto.js';
 import { mapAccountDbError } from '../lib/account-errors.js';
+import { deleteAccountById } from '../lib/delete-account.js';
 import {
   normalizeBlogUrl,
   POSTING_BLOG_URL_REQUIRED_MSG,
@@ -125,7 +126,10 @@ export async function registerAccountRoutes(app: FastifyInstance) {
     if (!assertAccountMutateAccess(existing, allowedWorkspaces)) {
       return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
     }
-    await supabase.from('huma_accounts').delete().eq('id', id);
+    const deleted = await deleteAccountById(id);
+    if (!deleted.ok) {
+      return reply.code(400).send({ error: mapAccountDbError(deleted.error) });
+    }
     return { success: true };
   });
 
