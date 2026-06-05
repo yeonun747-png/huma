@@ -20,8 +20,11 @@ function resolveCurlBin(): string {
 
 export const CURL_BIN = resolveCurlBin();
 
-/** LTE 동글 SOCKS — 8초는 간헐 타임아웃(exit 28) 빈번 */
-export const MODEM_SOCKS_PROBE_TIMEOUT_MS = 18_000;
+/** LTE 동글 SOCKS naver probe — i7 SSH 기준 30초+ 성공도 흔함 */
+export const MODEM_SOCKS_PROBE_TIMEOUT_MS = (() => {
+  const raw = Number(process.env.HUMA_MODEM_SOCKS_PROBE_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw >= 10_000 ? raw : 45_000;
+})();
 
 const PROBE_FAIL = { ok: false, ms: null } as const;
 
@@ -49,8 +52,8 @@ async function probeModemSocksOnce(
   timeoutMs: number,
 ): Promise<{ ok: boolean; ms: number | null }> {
   const start = Date.now();
-  const maxSec = Math.max(5, Math.ceil(timeoutMs / 1000));
-  const connectSec = Math.min(12, Math.max(5, Math.floor(timeoutMs / 2000)));
+  const maxSec = Math.max(10, Math.ceil(timeoutMs / 1000));
+  const connectSec = Math.min(20, Math.max(10, Math.floor(timeoutMs / 3000)));
   try {
     const { stdout } = await execFileAsync(
       CURL_BIN,
@@ -70,7 +73,7 @@ async function probeModemSocksOnce(
         'https://www.naver.com',
       ],
       {
-        timeout: timeoutMs + 5000,
+        timeout: timeoutMs + 8000,
         env: curlSubprocessEnv(),
       },
     );
@@ -88,7 +91,7 @@ export async function probeModemSocks(
   proxyPort: number,
   timeoutMs = MODEM_SOCKS_PROBE_TIMEOUT_MS,
 ): Promise<{ ok: boolean; ms: number | null }> {
-  const hardMs = timeoutMs + 1500;
+  const hardMs = timeoutMs + 3000;
   const once = () =>
     Promise.race([
       probeModemSocksOnce(proxyPort, timeoutMs),

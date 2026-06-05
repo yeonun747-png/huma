@@ -15,8 +15,8 @@ import { useRegisterPageAction } from '@/components/dashboard/page-action-contex
 
 const I7_PHYSICAL_SLOTS = 7;
 const PROBE_SLOTS = [1, 2, 3, 4, 5, 6, 7] as const;
-/** 슬롯당 SOCKS+Geo (i7 SSH 기준 ~20~40초) */
-const PER_SLOT_PROBE_MS = 90_000;
+/** 슬롯당 SOCKS(~45s)+공인IP+Geo (i7 SSH 기준 ~40~90초) */
+const PER_SLOT_PROBE_MS = 150_000;
 
 function mergeProbedModems(existing: HumaModem[], fromApi: HumaModem[]): HumaModem[] {
   const bySlot = new Map(
@@ -182,7 +182,7 @@ export function ModemsView() {
       const displayIp = publicIp || '—';
       const region = m.geo_region?.trim() || '—';
       const msTone =
-        m.status === 'error' ? 'err' : m.response_ms != null && m.response_ms > 25_000 ? 'warn' : 'ok';
+        m.status === 'error' ? 'err' : m.response_ms != null && m.response_ms > 50_000 ? 'warn' : 'ok';
       const accountLabel = def.label ?? `동글 ${slot}`;
       const accountTitle =
         ac?.name && ac.name !== accountLabel ? `${accountLabel} · 계정 ${ac.name}` : accountLabel;
@@ -244,7 +244,7 @@ export function ModemsView() {
     <div className="animate-fadeIn">
       <MPanel title="RESIDENTIAL PROXY · 계정별 고정 IP">
         <p className="mb-2 font-mono text-[10.5px] text-huma-t3">
-          물리 동글 1~{I7_PHYSICAL_SLOTS} · 슬롯별 SOCKS+Geo 순차 probe (슬롯당 최대 ~40초) ·
+          물리 동글 1~{I7_PHYSICAL_SLOTS} · 슬롯별 SOCKS+공인IP+지역 순차 probe (슬롯당 최대 ~90초) ·
           연운(:10001~10003) · 파나나(:10004) · 퀴즈(:10005) · C-Rank(:10006~10007)
           {probing && probingSlot != null ? (
             <span className="text-huma-accent"> · 동글 {probingSlot} 검사 중…</span>
@@ -295,9 +295,9 @@ export function ModemsView() {
           </div>
         )}
         <p className="mt-2 font-mono text-[10px] text-huma-t3">
-          응답 ms = SOCKS probe 소요(보통 15~20초·LTE 특성) · <strong>오류</strong> = SOCKS 연결 실패(느려서
-          아님) · IP — = probe 실패 · 지역은 ip-api 기준이며 KT LTE는 실제 지방이어도 서울로 나오는 경우
-          많음 · UI 오류만으로 포스팅 큐가 막히지는 않으나 SOCKS 불가 시 작업 실행 중 실패할 수 있음
+          응답 ms = SOCKS naver probe 소요(보통 30~45초·LTE) · <strong>오류</strong> = SOCKS 연결 실패(느려서
+          아님, 타임아웃 45초) · IP — = probe 실패 · 지역 = 표시된 공인 IP 기준(ip-api·ipwho.is, LTE Geo는
+          참고용) · UI 오류만으로 포스팅 큐가 막히지는 않으나 SOCKS 불가 시 작업 실행 중 실패할 수 있음
         </p>
         <p className="mt-1 font-mono text-[10px] text-huma-t3">
           i7: sudo bash apps/server/scripts/restore-dongle-by-subnet.sh
