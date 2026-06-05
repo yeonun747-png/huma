@@ -65,6 +65,8 @@ export async function applyModemProxyProbe(
     if (geoRegion) patch.geo_region = geoRegion;
   } else if (modem.status !== 'reconnecting') {
     patch.status = 'error';
+    patch.public_ip = null;
+    patch.geo_region = null;
     nextStatus = 'error';
   }
 

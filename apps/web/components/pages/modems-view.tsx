@@ -28,15 +28,6 @@ function mergeProbedModems(existing: HumaModem[], fromApi: HumaModem[]): HumaMod
   }
   return [...bySlot.values()].sort((a, b) => a.slot_number - b.slot_number);
 }
-/** 목업: 289ms 지연, 200ms 이하 정상 */
-const PROBE_DELAY_MS = 220;
-
-function maskPublicIp(ip: string): string {
-  const parts = ip.split('.');
-  if (parts.length === 4) return `${parts[0]}.${parts[1]}.x.x`;
-  return ip;
-}
-
 function modemStatusTag(
   m: HumaModem,
   opts?: { probing?: boolean },
@@ -45,8 +36,9 @@ function modemStatusTag(
   if (m.status === 'error') return { label: '오류', tone: 'err' };
   if (m.status === 'reconnecting') return { label: '재연결', tone: 'warn' };
   if (m.status === 'offline') return { label: '오프라인', tone: 'idle' };
-  if (m.response_ms != null && m.response_ms > PROBE_DELAY_MS) return { label: '지연', tone: 'warn' };
+  if (m.status === 'busy') return { label: '사용중', tone: 'warn' };
   if (m.status === 'idle' && !m.public_ip && m.response_ms == null) return { label: '대기', tone: 'idle' };
+  if (m.status === 'idle' && m.public_ip) return { label: '정상', tone: 'ok' };
   if (m.status === 'idle') return { label: '정상', tone: 'ok' };
   return { label: m.status, tone: 'idle' };
 }
@@ -187,20 +179,28 @@ export function ModemsView() {
         probing: probingSlot === slot,
       });
       const publicIp = m.public_ip?.trim();
-      const displayIp = publicIp ? maskPublicIp(publicIp) : '—';
+      const displayIp = publicIp || '—';
       const region = m.geo_region?.trim() || '—';
-      const msTone = tone === 'ok' ? 'ok' : tone === 'warn' ? 'warn' : 'err';
+      const msTone =
+        m.status === 'error' ? 'err' : m.response_ms != null && m.response_ms > 25_000 ? 'warn' : 'ok';
+      const accountLabel = def.label ?? `동글 ${slot}`;
+      const accountTitle =
+        ac?.name && ac.name !== accountLabel ? `${accountLabel} · 계정 ${ac.name}` : accountLabel;
 
       return [
-        ac?.name ?? def.label ?? `동글 ${slot}`,
+        <span key="acct" title={accountTitle}>
+          {accountLabel}
+        </span>,
         service,
         <span
           key="ip"
           className="font-mono"
           title={
             publicIp
-              ? `${publicIp} · 동글 ${slot} · SOCKS :${m.proxy_port}`
-              : `동글 ${slot} · SOCKS :${m.proxy_port} · probe 대기`
+              ? `공인 ${publicIp} · SOCKS :${m.proxy_port}`
+              : m.status === 'error'
+                ? `SOCKS 실패 · :${m.proxy_port}`
+                : `동글 ${slot} · :${m.proxy_port} · probe 대기`
           }
         >
           {displayIp}
@@ -227,7 +227,7 @@ export function ModemsView() {
           `슬롯 ${m.slot_number}`,
           m.modem_role ?? '—',
           <span key="ip" className="font-mono" title={publicIp ?? `SOCKS :${m.proxy_port}`}>
-            {publicIp ? maskPublicIp(publicIp) : '—'}
+            {publicIp || '—'}
           </span>,
           m.geo_region?.trim() || '—',
           <span key="ms" className="font-mono">
@@ -295,8 +295,12 @@ export function ModemsView() {
           </div>
         )}
         <p className="mt-2 font-mono text-[10px] text-huma-t3">
-          i7: sudo bash apps/server/scripts/restore-dongle-by-subnet.sh · Supabase v3_33
-          (public_ip, geo_region)
+          응답 ms = SOCKS probe 소요(보통 15~20초·LTE 특성) · <strong>오류</strong> = SOCKS 연결 실패(느려서
+          아님) · IP — = probe 실패 · 지역은 ip-api 기준이며 KT LTE는 실제 지방이어도 서울로 나오는 경우
+          많음 · UI 오류만으로 포스팅 큐가 막히지는 않으나 SOCKS 불가 시 작업 실행 중 실패할 수 있음
+        </p>
+        <p className="mt-1 font-mono text-[10px] text-huma-t3">
+          i7: sudo bash apps/server/scripts/restore-dongle-by-subnet.sh
         </p>
       </MPanel>
     </div>
