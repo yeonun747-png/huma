@@ -62,4 +62,45 @@ export async function smartType(
   }
 }
 
+/** v3.36 §8-1-2 — 복붙 30% / 직접 타이핑 70%, 단락 위치 매번 랜덤 */
+export async function typePostContent(
+  page: Page,
+  element: Locator,
+  content: string,
+  humanConfig: HumanEngineConfig,
+) {
+  const paragraphs = content.split('\n\n').filter(Boolean);
+  const total = paragraphs.length;
+  if (total === 0) return;
+
+  const pasteCount = Math.floor(total * 0.3);
+  const pasteIndices = new Set<number>();
+  while (pasteIndices.size < pasteCount) {
+    pasteIndices.add(Math.floor(Math.random() * total));
+  }
+
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
+
+  for (let i = 0; i < total; i++) {
+    const para = paragraphs[i]!;
+
+    if (pasteIndices.has(i)) {
+      await element.click();
+      await page.evaluate(async (text) => {
+        await navigator.clipboard.writeText(text);
+      }, para);
+      await page.keyboard.press('Control+V');
+      await humanSleep(300, 800);
+    } else {
+      await humanType(page, element, para, humanConfig);
+    }
+
+    if (i < total - 1) {
+      await page.keyboard.press('Enter');
+      await page.keyboard.press('Enter');
+      await humanSleep(humanConfig.paragraph_pause_ms[0], humanConfig.paragraph_pause_ms[1]);
+    }
+  }
+}
+
 export { gaussianRandom, wpmToDelay };

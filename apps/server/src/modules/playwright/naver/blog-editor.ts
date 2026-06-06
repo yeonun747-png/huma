@@ -2,7 +2,7 @@ import type { Page } from 'playwright';
 
 import { humanType, humanSleep } from '../../human-engine/typing.js';
 
-import { scrollReview, smartType, scaledHumanSleep } from '../../human-engine/timing.js';
+import { scrollReview, typePostContent, scaledHumanSleep } from '../../human-engine/timing.js';
 
 import { randomBetween } from '../../../lib/utils.js';
 
@@ -77,14 +77,10 @@ export async function postNaverBlog(params: {
 
 
 
-  await smartType(params.page, editor, params.content, config);
-
-
+  await typePostContent(params.page, editor, params.content, config);
 
   if (params.linkUrl) {
-
-    await smartType(params.page, editor, `\n\n${params.linkUrl}`, config);
-
+    await humanType(params.page, editor, `\n\n${params.linkUrl}`, config);
   }
 
 

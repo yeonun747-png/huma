@@ -1,6 +1,7 @@
 import { askClaudeWithModel } from '../../lib/anthropic-client.js';
 import { getMainClaudeModel, getSubClaudeModel } from '../../lib/ai-engine.js';
 import { withHumanWritingMandate, withHumanWritingSystem } from '../../lib/ai-human-writing.js';
+import { buildYeonunContextWithPrompt } from '../content/yeonun-context.js';
 
 export interface ContentGenerationInput {
   title: string;
@@ -185,9 +186,17 @@ JSON만 (코드블록 없이):
   }
 }
 
+async function resolveSourceContext(input: ContentGenerationInput): Promise<string> {
+  if (input.workspace === 'yeonun') {
+    const yeonunCtx = await buildYeonunContextWithPrompt(input.sourceUrl.trim());
+    if (yeonunCtx.trim()) return yeonunCtx;
+  }
+  return fetchAndSummarizeUrl(input.sourceUrl);
+}
+
 /** 기획서 7-0 generateAllContent */
 export async function generateAllContent(input: ContentGenerationInput): Promise<ContentGenerationOutput> {
-  const urlSummary = await fetchAndSummarizeUrl(input.sourceUrl);
+  const urlSummary = await resolveSourceContext(input);
 
   try {
     const [mainContent, subContent] = await Promise.all([
