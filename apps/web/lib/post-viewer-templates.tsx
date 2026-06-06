@@ -1,4 +1,5 @@
 import type { ContentType, Workspace } from '@huma/shared';
+import { formatKstDateTime } from '@/lib/format-kst';
 import { sanitizeBlogPostForNaver } from '@/lib/naver-post-sanitize';
 
 export type PostViewerTemplate = {
@@ -79,23 +80,6 @@ export function mergePostViewerTemplate(overrides: PostViewerOverrides): PostVie
   };
 }
 
-function formatKst(iso: string | null | undefined): string | null {
-  if (!iso) return null;
-  try {
-    return new Intl.DateTimeFormat('ko-KR', {
-      timeZone: 'Asia/Seoul',
-      year: 'numeric',
-      month: 'numeric',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    }).format(new Date(iso));
-  } catch {
-    return null;
-  }
-}
-
 export function PostViewerArticle({
   template,
   isLive,
@@ -108,7 +92,7 @@ export function PostViewerArticle({
   const imageUrl = overrides?.imageUrl ?? null;
   const videoUrl = overrides?.videoUrl ?? null;
   const resultUrl = overrides?.resultUrl ?? null;
-  const published = formatKst(overrides?.completedAt);
+  const published = overrides?.completedAt ? formatKstDateTime(overrides.completedAt) : null;
   const showVideo = overrides?.contentType === 'B' || Boolean(videoUrl);
   const liveBody = overrides?.content
     ? sanitizeBlogPostForNaver(overrides.content, { contentType: overrides.contentType ?? 'A' })

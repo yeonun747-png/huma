@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { getLogSocket } from '@/lib/socket';
 import { cn } from '@/lib/constants';
+import { formatLogKstTime } from '@/lib/format-kst';
 
 interface LogEntry {
   level: string;
@@ -47,7 +48,7 @@ export function LogViewer({ tall }: { tall?: boolean }) {
       ) : (
         logs.map((log, i) => (
           <div key={`${log.created_at}-${i}`} className="mb-0.5">
-            <span className="mr-2 text-[#5a7090]">{new Date(log.created_at).toLocaleTimeString('ko-KR')}</span>
+            <span className="mr-2 text-[#5a7090]">{formatLogKstTime(log.created_at)}</span>
             <span className={LEVEL_CLASS[log.level] ?? 'text-[#7ca8c8]'}>[{log.level}]</span>
             <span className="ml-1 text-huma-t2">{log.message}</span>
             {log.result_url && <span className="ml-1 text-huma-acc">{log.result_url}</span>}

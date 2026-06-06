@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { formatKstDate } from '@/lib/format-kst';
 import { AppShell } from '@/components/dashboard/app-shell';
 import { useWorkspace } from '@/components/dashboard/workspace-context';
 import { api } from '@/lib/api';
@@ -105,7 +106,7 @@ function PlatformAccountsContent() {
                 <TableCell>{ac.username}</TableCell>
                 <TableCell className="font-mono">{ac.post_count_today}</TableCell>
                 <TableCell className="font-mono text-[10px]">
-                  {ac.token_expires_at ? new Date(ac.token_expires_at).toLocaleDateString('ko-KR') : '—'}
+                  {ac.token_expires_at ? formatKstDate(ac.token_expires_at) : '—'}
                 </TableCell>
                 <TableCell>
                   <span className={cn(ac.is_active ? 'tag-ok' : 'tag-err')}>

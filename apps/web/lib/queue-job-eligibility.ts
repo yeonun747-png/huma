@@ -1,9 +1,5 @@
 import type { HumaJob } from '@huma/shared';
-
-function isSchedulePast(iso?: string): boolean {
-  if (!iso) return false;
-  return new Date(iso).getTime() < Date.now();
-}
+import { isSchedulePast } from '@/lib/format-kst';
 
 /** LIVE 제외 — 실패·지연·완료·대기 등 큐에서 제거 가능 */
 export function isDeletableQueueJob(job: HumaJob): boolean {

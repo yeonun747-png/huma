@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { HumaJob } from '@huma/shared';
 import { buildScheduledAt } from '@/lib/queue-repeat';
 import type { QueuePrefill } from '@/lib/queue-prefill';
+import { extractKstScheduleTime } from '@/lib/format-kst';
 import { formatScheduleLabel } from './job-schedule-form';
 
 export interface AutoContentFormValues {
@@ -35,11 +36,6 @@ const EMPTY_FORM: AutoContentFormValues = {
   schedule_time: '10:00',
 };
 
-function extractScheduleTime(iso?: string): string {
-  if (!iso) return '10:00';
-  const d = new Date(iso);
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-}
 
 function jobToForm(job: HumaJob): AutoContentFormValues {
   const contentType: AutoContentFormValues['content_type'] = job.content_type_auto
@@ -55,7 +51,7 @@ function jobToForm(job: HumaJob): AutoContentFormValues {
     content_type: contentType,
     auto_schedule: job.auto_scheduled ?? true,
     screenshot_base64: job.image_urls?.[0],
-    schedule_time: extractScheduleTime(job.scheduled_at),
+    schedule_time: extractKstScheduleTime(job.scheduled_at),
   };
 }
 

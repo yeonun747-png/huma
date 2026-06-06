@@ -6,7 +6,17 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { useWorkspace } from '@/components/dashboard/workspace-context';
 
-import { JobScheduleForm, formatScheduledAt, type JobScheduleFormValues } from '@/components/queue/job-schedule-form';
+import { JobScheduleForm, type JobScheduleFormValues } from '@/components/queue/job-schedule-form';
+import {
+  formatScheduledAt,
+  formatKstHm,
+  kstDatetimeLocalToIso,
+  kstDayOfWeek,
+  kstDaysInMonth,
+  kstToUtcMs,
+  kstYearMonthDay,
+  parseLogTimestamp,
+} from '@/lib/format-kst';
 
 import { MPanel } from '@/components/mockup/primitives';
 
@@ -42,7 +52,9 @@ export function CalendarView() {
 
   const { workspace } = useWorkspace();
 
-  const [viewDate, setViewDate] = useState(() => new Date());
+  const kstToday = kstYearMonthDay(new Date());
+  const [viewYear, setViewYear] = useState(kstToday.year);
+  const [viewMonth, setViewMonth] = useState(kstToday.month);
 
   const [jobs, setJobs] = useState<CalJob[]>([]);
 
@@ -64,15 +76,13 @@ export function CalendarView() {
 
 
 
-  const year = viewDate.getFullYear();
+  const year = viewYear;
 
-  const month = viewDate.getMonth();
+  const month = viewMonth;
 
-  const today = new Date();
+  const firstDay = kstDayOfWeek(year, month, 1);
 
-  const firstDay = new Date(year, month, 1).getDay();
-
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const daysInMonth = kstDaysInMonth(year, month);
 
 
 
@@ -100,15 +110,15 @@ export function CalendarView() {
 
     for (const job of jobs) {
 
-      const d = new Date(job.scheduled_at).getDate();
-
-      (map[d] ??= []).push(job);
+      const parts = kstYearMonthDay(parseLogTimestamp(job.scheduled_at));
+      if (parts.year !== year || parts.month !== month) continue;
+      (map[parts.day] ??= []).push(job);
 
     }
 
     return map;
 
-  }, [jobs]);
+  }, [jobs, year, month]);
 
 
 
@@ -130,7 +140,7 @@ export function CalendarView() {
 
   const defaultScheduleDate = selectedDay
 
-    ? new Date(year, month, selectedDay, 10, 0).toISOString()
+    ? new Date(kstToUtcMs(year, month + 1, selectedDay, 10, 0)).toISOString()
 
     : undefined;
 
@@ -148,7 +158,7 @@ export function CalendarView() {
 
       content: values.content || '',
 
-      scheduled_at: new Date(values.scheduled_at).toISOString(),
+      scheduled_at: kstDatetimeLocalToIso(values.scheduled_at),
 
       status: 'scheduled',
 
@@ -216,19 +226,29 @@ export function CalendarView() {
 
           <div className="flex gap-1">
 
-            <button type="button" className="btn-ghost px-2 py-0.5 text-[10px]" onClick={() => setViewDate(new Date(year, month - 1, 1))}>
+            <button type="button" className="btn-ghost px-2 py-0.5 text-[10px]" onClick={() => {
+              if (viewMonth === 0) { setViewYear((y) => y - 1); setViewMonth(11); }
+              else setViewMonth((m) => m - 1);
+            }}>
 
               ◀
 
             </button>
 
-            <button type="button" className="btn-ghost px-2 py-0.5 text-[10px]" onClick={() => setViewDate(new Date())}>
+            <button type="button" className="btn-ghost px-2 py-0.5 text-[10px]" onClick={() => {
+              const t = kstYearMonthDay(new Date());
+              setViewYear(t.year);
+              setViewMonth(t.month);
+            }}>
 
               오늘
 
             </button>
 
-            <button type="button" className="btn-ghost px-2 py-0.5 text-[10px]" onClick={() => setViewDate(new Date(year, month + 1, 1))}>
+            <button type="button" className="btn-ghost px-2 py-0.5 text-[10px]" onClick={() => {
+              if (viewMonth === 11) { setViewYear((y) => y + 1); setViewMonth(0); }
+              else setViewMonth((m) => m + 1);
+            }}>
 
               ▶
 
@@ -254,7 +274,7 @@ export function CalendarView() {
 
           {cells.map((d, i) => {
 
-            const isToday = d === today.getDate() && month === today.getMonth() && year === today.getFullYear();
+            const isToday = d === kstToday.day && month === kstToday.month && year === kstToday.year;
 
             const dayJobs = d ? (jobsByDay[d] ?? []) : [];
 
@@ -312,7 +332,7 @@ export function CalendarView() {
 
                       <div key={j.id} className="truncate font-mono text-[9px] text-huma-t3" title={j.title}>
 
-                        {new Date(j.scheduled_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}{' '}
+                        {formatKstHm(j.scheduled_at)}{' '}
 
                         {j.title}
 

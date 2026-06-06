@@ -1,3 +1,5 @@
+import { buildScheduledAtKst } from '@/lib/format-kst';
+
 export const REPEAT_OPTIONS = [
   { value: '', label: '없음 (1회)' },
   { value: 'daily', label: '매일' },
@@ -13,10 +15,5 @@ export function repeatLabel(rule?: string | null): string {
 }
 
 export function buildScheduledAt(time: string): string {
-  const [h, m] = time.split(':').map(Number);
-  const d = new Date();
-  d.setSeconds(0, 0);
-  d.setHours(h || 10, m || 0, 0, 0);
-  if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
-  return d.toISOString();
+  return buildScheduledAtKst(time);
 }

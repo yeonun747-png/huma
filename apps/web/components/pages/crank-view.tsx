@@ -83,20 +83,7 @@ function formatTodayJobLabel(status: string | null, error: string | null): strin
   return base;
 }
 
-function formatKstShort(iso: string | null): string {
-  if (!iso) return '—';
-  try {
-    return new Intl.DateTimeFormat('ko-KR', {
-      timeZone: 'Asia/Seoul',
-      month: 'numeric',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(new Date(iso));
-  } catch {
-    return iso;
-  }
-}
+import { formatScheduledAt } from '@/lib/format-kst';
 
 function actTypeClass(type: CrankActType) {
   if (type === '방문') return 'm-act-visit';
@@ -317,8 +304,8 @@ export function CrankView() {
   const accountRows =
     scheduler?.accounts.map((a) => [
       a.crank_label?.trim() ? `${a.crank_label} · ${a.name}` : a.name,
-      formatKstShort(a.last_crank_at),
-      formatKstShort(a.next_run_at),
+      formatScheduledAt(a.last_crank_at),
+      formatScheduledAt(a.next_run_at),
       formatTodayJobLabel(a.today_job_status, a.today_job_error),
     ]) ?? [];
 

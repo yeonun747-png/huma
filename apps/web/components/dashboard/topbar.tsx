@@ -8,21 +8,9 @@ import { useWorkspace } from './workspace-context';
 import { api } from '@/lib/api';
 import { useDashboardPeriod } from './dashboard-period-context';
 import { TOPBAR_NEXT_PUBLISH, TOPBAR_NOTIFICATIONS } from '@/lib/topbar-mock-data';
+import { formatKstClock, formatLogKstTime } from '@/lib/format-kst';
 
 type NotifItem = { type: 'err' | 'warn'; title: string; sub: string };
-
-function formatLogTime(iso: string): string {
-  try {
-    return new Intl.DateTimeFormat('ko-KR', {
-      timeZone: 'Asia/Seoul',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    }).format(new Date(iso));
-  } catch {
-    return '—';
-  }
-}
 
 export function Topbar({ title }: { title: string }) {
   const pathname = usePathname();
@@ -48,7 +36,7 @@ export function Topbar({ title }: { title: string }) {
       setNotifications(
         logs.slice(0, 5).map((log) => {
           const ws = String(log.workspace ?? 'HUMA');
-          const time = formatLogTime(String(log.created_at ?? ''));
+          const time = formatLogKstTime(String(log.created_at ?? ''));
           const msg = String(log.message ?? '오류');
           const isLayer4 = msg.includes('Layer4') || msg.includes('캡차');
           return {
@@ -63,10 +51,7 @@ export function Topbar({ title }: { title: string }) {
 
   useEffect(() => {
     const tick = () => {
-      const n = new Date();
-      setClock(
-        `${String(n.getHours()).padStart(2, '0')}:${String(n.getMinutes()).padStart(2, '0')}:${String(n.getSeconds()).padStart(2, '0')}`,
-      );
+      setClock(formatKstClock());
     };
     tick();
     const id = setInterval(tick, 1000);

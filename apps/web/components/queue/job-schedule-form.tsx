@@ -5,6 +5,14 @@ import type { JobType } from '@huma/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  formatScheduleLabel,
+  formatScheduleQueueTag,
+  formatScheduleStartDesc,
+  formatScheduledAt,
+  isSchedulePast,
+  toKstDatetimeLocalValue,
+} from '@/lib/format-kst';
 
 const JOB_TYPES: { value: JobType; label: string }[] = [
   { value: 'post_blog', label: '블로그 발행' },
@@ -34,10 +42,10 @@ interface JobScheduleFormProps {
   submitLabel?: string;
 }
 
+export { formatScheduledAt, formatScheduleLabel, formatScheduleStartDesc, formatScheduleQueueTag, isSchedulePast };
+
 export function toLocalDatetimeValue(iso?: string) {
-  const d = iso ? new Date(iso) : new Date();
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-  return d.toISOString().slice(0, 16);
+  return toKstDatetimeLocalValue(iso);
 }
 
 export function JobScheduleForm({
@@ -50,7 +58,7 @@ export function JobScheduleForm({
   const [form, setForm] = useState<JobScheduleFormValues>({
     title: '',
     job_type: 'post_blog',
-    scheduled_at: defaultDate ? toLocalDatetimeValue(defaultDate) : toLocalDatetimeValue(),
+    scheduled_at: defaultDate ? toKstDatetimeLocalValue(defaultDate) : toKstDatetimeLocalValue(),
     content: '',
   });
   const [loading, setLoading] = useState(false);
@@ -94,7 +102,7 @@ export function JobScheduleForm({
           </div>
         </div>
         <div>
-          <label className="mb-1 block text-[10px] text-huma-t3">예약 시각</label>
+          <label className="mb-1 block text-[10px] text-huma-t3">예약 시각 (KST)</label>
           <Input
             type="datetime-local"
             value={form.scheduled_at}
@@ -121,58 +129,3 @@ export function JobScheduleForm({
     </Card>
   );
 }
-
-export function formatScheduledAt(iso?: string) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleString('ko-KR', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-/** 큐 카드용 — 오늘/내일/날짜 + 시각 */
-export function formatScheduleLabel(iso?: string): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  const now = new Date();
-  const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate());
-  const diffDays = Math.round((startOf(d).getTime() - startOf(now).getTime()) / 86_400_000);
-  const time = d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
-  if (diffDays === 0) return `오늘 ${time}`;
-  if (diffDays === 1) return `내일 ${time}`;
-  if (diffDays === -1) return `어제 ${time}`;
-  return d.toLocaleString('ko-KR', {
-    month: 'short',
-    day: 'numeric',
-    weekday: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
-}
-
-export function isSchedulePast(iso?: string): boolean {
-  if (!iso) return false;
-  return new Date(iso).getTime() < Date.now();
-}
-
-/** 미래: 「오늘 22:30 시작 예정」 / 과거: 「어제 22:30 예정 시각」 */
-export function formatScheduleStartDesc(iso?: string): string {
-  if (!iso) return '—';
-  const when = formatScheduleLabel(iso);
-  return isSchedulePast(iso) ? `${when} 예정 시각` : `${when} 시작 예정`;
-}
-
-/** 큐 태그 — 지난 예약·미실행이면 「지연」 */
-export function formatScheduleQueueTag(iso: string | undefined, status: string): string {
-  if (!iso) return status;
-  const when = formatScheduleLabel(iso);
-  if (isSchedulePast(iso) && (status === 'scheduled' || status === 'pending')) {
-    return `${when} · 지연`;
-  }
-  if (status === 'failed') return `${when} · 실패`;
-  return when;
-}
-

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
 import { WORKSPACES } from '@/lib/constants';
-import { formatLogKst, kstDateKey } from '@/lib/format-kst';
+import { formatLogKst, kstDateKey, logKstDateKey } from '@/lib/format-kst';
 import { MGrid, MPanel, MStat, MTable, MTag, MUrlLink } from '@/components/mockup/primitives';
 import { useRegisterPageAction } from '@/components/dashboard/page-action-context';
 
@@ -64,11 +64,7 @@ export function OplogView() {
     const todayLogs = logs.filter((l) => {
       const created = String(l.created_at ?? '');
       if (!created) return false;
-      try {
-        return kstDateKey(new Date(created)) === today;
-      } catch {
-        return created.startsWith(today);
-      }
+      return logKstDateKey(created) === today;
     });
     return {
       ok: todayLogs.filter((l) => String(l.level).toUpperCase() === 'INFO').length,

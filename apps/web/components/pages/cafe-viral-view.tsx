@@ -11,6 +11,7 @@ import {
   type CafeFeedRow,
   type CafeFeedType,
 } from '@/lib/cafe-mock-data';
+import { formatKstHm } from '@/lib/format-kst';
 
 function feedTypeClass(type: CafeFeedType) {
   if (type === 'HUMA 글') return 'm-caf-write';
@@ -32,7 +33,7 @@ function postToFeedRow(p: Record<string, unknown>): CafeFeedRow | null {
     id: `api-${p.id}`,
     cafeId: String(p.cafe_id ?? 'all'),
     type,
-    time: ts ? new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Seoul' }).format(new Date(ts)) : '—',
+    time: ts ? formatKstHm(ts) : '—',
     title,
     sub: `${cafeRef?.cafe_name ?? '카페'} · ${String(p.post_url ?? '').replace(/^https?:\/\//, '').slice(0, 36)}`,
     reaction: hasReply ? '답글 완료' : p.status === 'pending' ? '미답글' : String(p.status ?? '—'),

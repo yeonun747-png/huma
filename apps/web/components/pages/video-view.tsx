@@ -55,12 +55,7 @@ function normalizeDisplayStep(step?: string | null): string {
   return 'image_generating';
 }
 
-function isToday(iso?: string | null): boolean {
-  if (!iso) return false;
-  const d = new Date(iso);
-  const n = new Date();
-  return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
-}
+import { isSameKstDay } from '@/lib/format-kst';
 
 function rowCost(v: HumaVideoQueue, imgChoice: ImagenPipelineChoice): string {
   if (v.status === 'done') {
@@ -162,7 +157,7 @@ export function VideoPipelineView() {
   }, [simul]);
 
   const wsItems = items;
-  const todayItems = wsItems.filter((v) => isToday(v.created_at));
+  const todayItems = wsItems.filter((v) => isSameKstDay(v.created_at));
   const running = wsItems.find((v) => v.status !== 'done' && v.status !== 'failed');
 
   const startSimul = () => {

@@ -13,6 +13,7 @@ import {
 } from '@/lib/crank-job-payload';
 import { formatScheduleStartDesc } from './job-schedule-form';
 import { formatJobErrorLabel } from '@/lib/job-error-label';
+import { formatKstDateTime, formatKstHm } from '@/lib/format-kst';
 
 export type CrankJobDetailModalProps = {
   job: HumaJob | null;
@@ -21,36 +22,6 @@ export type CrankJobDetailModalProps = {
 };
 
 type SessionDetail = Awaited<ReturnType<typeof api.crankJobSession>>;
-
-function formatKst(iso: string | null | undefined): string | null {
-  if (!iso) return null;
-  try {
-    return new Intl.DateTimeFormat('ko-KR', {
-      timeZone: 'Asia/Seoul',
-      year: 'numeric',
-      month: 'numeric',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    }).format(new Date(iso));
-  } catch {
-    return null;
-  }
-}
-
-function formatHm(iso: string): string {
-  try {
-    return new Intl.DateTimeFormat('ko-KR', {
-      timeZone: 'Asia/Seoul',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    }).format(new Date(iso));
-  } catch {
-    return iso;
-  }
-}
 
 function SessionSectionCard({
   title,
@@ -114,7 +85,7 @@ function ActivityList({
             <span className="shrink-0 rounded bg-huma-bg4 px-1 py-0.5 font-mono text-[10px] text-huma-t2">
               {row.type}
             </span>
-            <span className="text-huma-t3">{formatHm(row.at)}</span>
+            <span className="text-huma-t3">{formatKstHm(row.at)}</span>
           </div>
           <a
             href={row.url}
@@ -318,8 +289,8 @@ export function CrankJobDetailModal({ job, onClose, onDelete }: CrankJobDetailMo
 
           {(job.started_at || job.completed_at) && (
             <section className="rounded-lg border border-huma-bdr bg-huma-bg2/50 px-3 py-2 font-mono text-[11px] text-huma-t3">
-              {job.started_at ? <div>시작: {formatKst(job.started_at)}</div> : null}
-              {job.completed_at ? <div>완료: {formatKst(job.completed_at)}</div> : null}
+              {job.started_at ? <div>시작: {formatKstDateTime(job.started_at)}</div> : null}
+              {job.completed_at ? <div>완료: {formatKstDateTime(job.completed_at)}</div> : null}
             </section>
           )}
 
