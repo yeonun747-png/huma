@@ -14,6 +14,7 @@ import { uniquifyImageFromUrl } from '../../image/uniquify.js';
 
 import { enterBlogEditor } from './enter-blog-editor.js';
 import { humanClickLocator } from '../../human-engine/mouse.js';
+import { pasteBlogLinkWithOgPreview } from './paste-blog-link.js';
 
 
 
@@ -79,8 +80,8 @@ export async function postNaverBlog(params: {
 
   await typePostContent(params.page, editor, params.content, config);
 
-  if (params.linkUrl) {
-    await humanType(params.page, editor, `\n\n${params.linkUrl}`, config);
+  if (params.linkUrl?.trim()) {
+    await pasteBlogLinkWithOgPreview(params.page, editor, params.linkUrl.trim(), scale);
   }
 
 

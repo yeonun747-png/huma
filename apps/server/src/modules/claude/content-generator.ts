@@ -31,9 +31,10 @@ export interface ContentGenerationOutput {
   /** v3.26: 비우면 Kling 3.0 내장 오디오 (TTS 미사용) */
   tts_script?: string;
   hashtags: string[];
-  /** 이번 생성 목표 분량 tier (500|700|900 = 상한 구간) */
+  /** 이번 생성 목표 분량 tier (700|800|1000) */
   blog_post_target_chars?: BlogPostLengthTier;
   blog_post_target_min_chars?: number;
+  blog_post_target_max_chars?: number;
 }
 
 const SONNET_MODEL_FALLBACK = 'claude-sonnet-4-6';
@@ -112,7 +113,7 @@ function fallbackContent(
   lengthRange: BlogPostLengthRange,
 ): ContentGenerationOutput {
   const intro = input.synopsis?.trim() || input.title.trim();
-  const summaryLen = lengthRange.tier <= 500 ? 220 : lengthRange.tier <= 700 ? 320 : 400;
+  const summaryLen = lengthRange.max <= 700 ? 220 : lengthRange.max <= 800 ? 320 : 400;
   const body = finalizeBlogPost(
     [
       intro,
@@ -128,6 +129,7 @@ function fallbackContent(
     blog_post: body,
     blog_post_target_chars: lengthRange.tier,
     blog_post_target_min_chars: lengthRange.min,
+    blog_post_target_max_chars: lengthRange.max,
     tiktok_caption: short.slice(0, 150),
     instagram_caption: short.slice(0, 300),
     threads_text: `${short}\n\n${input.sourceUrl}`,
@@ -200,6 +202,7 @@ async function generateMainContent(
   parsed.blog_post = finalizeBlogPost(parsed.blog_post);
   parsed.blog_post_target_chars = lengthRange.tier;
   parsed.blog_post_target_min_chars = lengthRange.min;
+  parsed.blog_post_target_max_chars = lengthRange.max;
   return parsed;
 }
 
@@ -271,6 +274,7 @@ export async function generateAllContent(input: ContentGenerationInput): Promise
           parsed.blog_post = finalizeBlogPost(parsed.blog_post);
           parsed.blog_post_target_chars = lengthRange.tier;
           parsed.blog_post_target_min_chars = lengthRange.min;
+          parsed.blog_post_target_max_chars = lengthRange.max;
           return { ...parsed, ...sub };
         }
       }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { REVIEW_DURATION_SUMMARY } from '@huma/shared';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/constants';
 import { DEFAULT_VIDEO_MODEL, HUMAN_ENGINE_IMAGE_LABEL } from '@/lib/higgsfield-models';
@@ -300,7 +301,7 @@ export function HumanEngineSettings() {
           />
           <HeStaticRow label="백스페이스 딜레이" value="200~800ms" />
           <HeStaticRow label="문단 간 사고 정지" value="2~8초" />
-          <HeStaticRow label="발행 전 검토" value="2~5분" />
+          <HeStaticRow label="발행 전 검토" value={REVIEW_DURATION_SUMMARY} />
           <div className="he-wpm-chart">
             {chartBars.map((bar, i) => (
               <div key={i} className="he-wpm-bar" style={{ height: `${bar.height}%`, opacity: bar.opacity }} />

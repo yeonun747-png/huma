@@ -310,9 +310,10 @@ export function PostingPreviewClient({ jobId }: { jobId: string }) {
               title={job.title}
               body={prepareBodyForTypingSim(job.content, {
                 contentType,
-                linkUrl: normalizeBlogLink(job.link_url),
+                linkUrl: normalizeBlogLink(job.link_url, job.workspace),
               })}
-              linkUrl={normalizeBlogLink(job.link_url)}
+              linkUrl={normalizeBlogLink(job.link_url, job.workspace)}
+              workspace={job.workspace}
               imageUrl={displayImageUrl}
               contentType={contentType}
             />

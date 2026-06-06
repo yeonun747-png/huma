@@ -81,7 +81,7 @@ export async function runContentPreview(input: ContentPreviewInput): Promise<Con
       ...steps[0]!,
       status: 'ok',
       ms: Date.now() - claudeStart,
-      detail: `본문 ${generated.blog_post.length}자 (목표 ${generated.blog_post_target_min_chars ?? '?'}~${generated.blog_post_target_chars ?? '?'}자) · image_prompt ${generated.image_prompt.slice(0, 80)}…`,
+      detail: `본문 ${generated.blog_post.length}자 (목표 ${generated.blog_post_target_min_chars ?? '?'}~${generated.blog_post_target_max_chars ?? generated.blog_post_target_chars ?? '?'}자) · image_prompt ${generated.image_prompt.slice(0, 80)}…`,
     };
   } catch (err) {
     steps[0] = {

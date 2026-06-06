@@ -6,6 +6,8 @@ export * from './dongle-slot';
 export * from './crank-label';
 export * from './crank-service';
 export * from './paste-extract';
+export * from './blog-link';
+export * from './review-duration';
 
 export type Workspace = import('./account').Workspace;
 

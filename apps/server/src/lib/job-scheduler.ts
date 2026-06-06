@@ -1,5 +1,6 @@
 import { humaQueue, enqueueJob } from '../modules/queue/producer.js';
 import { supabase } from '../middleware/auth.js';
+import { resolveBlogLinkUrl } from './blog-link.js';
 
 export interface JobRecord {
   id: string;
@@ -46,6 +47,9 @@ export function buildEnqueuePayload(job: JobRecord) {
     job.job_type === 'social_crank' ? parseSocialCrankContent(job.content) : {};
 
   const stripBodyLink = ['threads_post', 'twitter_post'].includes(job.job_type);
+  const linkUrl = stripBodyLink
+    ? undefined
+    : resolveBlogLinkUrl(job.workspace ?? 'yeonun', job.link_url, job.link_url);
 
   return {
     type: job.job_type,
@@ -58,7 +62,8 @@ export function buildEnqueuePayload(job: JobRecord) {
       text: job.content,
       imageUrl: job.image_urls?.[0],
       imageUrls: job.image_urls,
-      linkUrl: stripBodyLink ? undefined : job.link_url,
+      linkUrl,
+      contentType: job.content_type,
       parentPostId:
         job.job_type === 'threads_reply' || job.job_type === 'twitter_reply'
           ? job.result_url

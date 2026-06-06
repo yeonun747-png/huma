@@ -492,6 +492,8 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
               video_prompt: generated.video_prompt,
               hashtags: generated.hashtags,
               blog_post_target_chars: generated.blog_post_target_chars,
+              blog_post_target_min_chars: generated.blog_post_target_min_chars,
+              blog_post_target_max_chars: generated.blog_post_target_max_chars,
             },
             updated_at: new Date().toISOString(),
           },
@@ -528,6 +530,8 @@ type PreviewGeneratedSnapshot = Pick<
   | 'video_prompt'
   | 'hashtags'
   | 'blog_post_target_chars'
+  | 'blog_post_target_min_chars'
+  | 'blog_post_target_max_chars'
 >;
 
 function extractPlatformSchedule(ps: Record<string, unknown>): PlatformSchedule | undefined {

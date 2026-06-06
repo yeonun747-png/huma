@@ -1,6 +1,8 @@
 /** 브라우저용 — server human-engine/typing.ts · timing.ts 와 동일 로직 */
 
-import { planParagraphPaste } from '@huma/shared';
+import { calcReviewDurationMs, planParagraphPaste } from '@huma/shared';
+
+export { calcReviewDurationMs };
 
 export type HumanEngineSimConfig = {
   wpm_mean: number;
@@ -40,23 +42,6 @@ export function mergeHumanEngineSim(raw: Record<string, unknown> | null | undefi
 
 export function randomBetween(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
-/** 휴먼엔진 review_duration_ms(900자 기준 2~5분)를 본문 길이에 비례 조정 */
-export function calcReviewDurationMs(
-  charCount: number,
-  reviewDurationMs: [number, number],
-  refChars = 900,
-): number {
-  const [baseMin, baseMax] = reviewDurationMs;
-  const clamped = Math.max(400, Math.min(charCount, refChars * 1.15));
-  const scale = clamped / refChars;
-  const min = Math.round(baseMin * scale);
-  const max = Math.round(baseMax * scale);
-  const floor = 45_000;
-  const lo = Math.max(floor, min);
-  const hi = Math.max(lo + 20_000, max);
-  return randomBetween(lo, hi);
 }
 
 export function gaussianRandom(mean: number, sigma: number): number {
@@ -351,6 +336,25 @@ export async function typePostContentSim(
   }
 }
 
+/** pasteBlogLinkWithOgPreview — Ctrl+V 붙여넣기 + OG 카드 로딩 대기 */
+export async function pasteBlogLinkSim(
+  linkUrl: string,
+  buffer: LiveTextBuffer,
+  cancelled: () => boolean,
+  callbacks?: { onOgCard?: () => void; onTick?: () => void },
+): Promise<void> {
+  buffer.append('\n\n');
+  callbacks?.onTick?.();
+  await sleepMs(randomBetween(400, 900), cancelled);
+  if (cancelled()) return;
+  buffer.append(linkUrl);
+  callbacks?.onTick?.();
+  await sleepMs(randomBetween(1200, 2500), cancelled);
+  if (cancelled()) return;
+  callbacks?.onOgCard?.();
+  await sleepMs(randomBetween(1500, 3500), cancelled);
+}
+
 export async function sleepMs(ms: number, cancelled: () => boolean): Promise<void> {
   await new Promise<void>((resolve) => {
     const id = window.setTimeout(resolve, ms);
@@ -608,7 +612,7 @@ export const POSTING_PHASE_LABELS: Record<PostingPhase, string> = {
   title_pause: '제목 입력 후 사고 정지',
   body_click: '본문 (.se-content) 클릭',
   body: '본문 typePostContent (인용·문어체 복붙30%·타이핑70%)',
-  link: '링크 URL 추가',
+  link: '링크 URL Ctrl+V · OG 미리보기 카드',
   image_upload: '사진 파일 업로드 (insertImage)',
   review: '발행 전 검토 (오탈자 수정)',
   publish: '발행 버튼 클릭',
