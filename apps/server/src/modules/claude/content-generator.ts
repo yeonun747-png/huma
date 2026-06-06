@@ -2,6 +2,11 @@ import { askClaudeWithModel } from '../../lib/anthropic-client.js';
 import { getMainClaudeModel, getSubClaudeModel } from '../../lib/ai-engine.js';
 import { withHumanWritingMandate, withHumanWritingSystem } from '../../lib/ai-human-writing.js';
 import { buildYeonunContextWithPrompt } from '../content/yeonun-context.js';
+import {
+  blogPostLengthPromptGuide,
+  pickBlogPostTargetChars,
+  type BlogPostLengthTarget,
+} from '../../lib/blog-post-length.js';
 
 export interface ContentGenerationInput {
   title: string;
@@ -25,6 +30,8 @@ export interface ContentGenerationOutput {
   /** v3.26: 비우면 Kling 3.0 내장 오디오 (TTS 미사용) */
   tts_script?: string;
   hashtags: string[];
+  /** 이번 생성 목표 분량 (500|700|900) */
+  blog_post_target_chars?: BlogPostLengthTarget;
 }
 
 const SONNET_MODEL_FALLBACK = 'claude-sonnet-4-6';
@@ -42,27 +49,29 @@ const SYSTEM_PROMPTS: Record<string, string> = {
 톤: 시네마틱하고 감성적인 짧은 문체. 서비스 링크 포함.`,
 };
 
-const BLOG_POST_MAX_CHARS = 900;
+const BLOG_POST_HARD_MAX = 900;
 
 function finalizeBlogPost(text: string): string {
   return sanitizeBlogLinksInPost(text.trim());
 }
 
-/** 900자 초과 시 AI로 다시 쓰게 함 — 중간 절단 없음 */
+/** 목표 분량 초과 시 AI로 다시 씀 — 중간 절단 없음 */
 async function ensureBlogPostUnderLimit(
   blogPost: string,
   input: ContentGenerationInput,
+  targetChars: BlogPostLengthTarget,
 ): Promise<string> {
   let body = finalizeBlogPost(blogPost);
-  if (body.length <= BLOG_POST_MAX_CHARS) return body;
+  const maxChars = Math.min(targetChars, BLOG_POST_HARD_MAX);
+  if (body.length <= maxChars) return body;
 
-  for (let attempt = 0; attempt < 2 && body.length > BLOG_POST_MAX_CHARS; attempt++) {
+  for (let attempt = 0; attempt < 2 && body.length > maxChars; attempt++) {
     const shortened = await askClaudeWithModel({
       model: (await getSubClaudeModel()) || HAIKU_MODEL_FALLBACK,
       max_tokens: 1500,
       system: withHumanWritingSystem(SYSTEM_PROMPTS[input.workspace] ?? SYSTEM_PROMPTS.yeonun),
       prompt: withHumanWritingMandate(
-        `아래 네이버 블로그 글을 ${BLOG_POST_MAX_CHARS}자 이하로 다시 써줘.
+        `아래 네이버 블로그 글을 ${maxChars}자 이하로 다시 써줘.
 규칙: 중간에서 자르지 말 것. 완결된 짧은 글로 처음부터 다시 작성. 말투·핵심 경험담 유지. yeonun.com 만 URL.
 
 현재 ${body.length}자:
@@ -76,9 +85,9 @@ ${body}
     }
   }
 
-  if (body.length > BLOG_POST_MAX_CHARS) {
+  if (body.length > maxChars) {
     throw new Error(
-      `블로그 본문 ${body.length}자 — ${BLOG_POST_MAX_CHARS}자 이하로 생성되지 않았습니다`,
+      `블로그 본문 ${body.length}자 — 목표 ${maxChars}자 이하로 생성되지 않았습니다`,
     );
   }
   return body;
@@ -135,13 +144,18 @@ function parseScreenshotBase64(raw: string): { mediaType: 'image/jpeg' | 'image/
   return { mediaType: data.startsWith('/9j/') ? 'image/jpeg' : 'image/png', data };
 }
 
-function fallbackContent(input: ContentGenerationInput, urlSummary: string): ContentGenerationOutput {
+function fallbackContent(
+  input: ContentGenerationInput,
+  urlSummary: string,
+  targetChars: BlogPostLengthTarget,
+): ContentGenerationOutput {
   const intro = input.synopsis?.trim() || input.title.trim();
+  const summaryLen = targetChars <= 500 ? 220 : targetChars <= 700 ? 320 : 400;
   const body = finalizeBlogPost(
     [
       intro,
       '',
-      urlSummary.slice(0, 400),
+      urlSummary.slice(0, summaryLen),
       '',
       'yeonun.com 에서 확인',
     ].join('\n'),
@@ -150,6 +164,7 @@ function fallbackContent(input: ContentGenerationInput, urlSummary: string): Con
   const wsTag = input.workspace === 'quizoasis' ? '#심리테스트' : input.workspace === 'panana' ? '#AI캐릭터' : '#사주';
   return {
     blog_post: body,
+    blog_post_target_chars: targetChars,
     tiktok_caption: short.slice(0, 150),
     instagram_caption: short.slice(0, 300),
     threads_text: `${short}\n\n${input.sourceUrl}`,
@@ -163,7 +178,9 @@ function fallbackContent(input: ContentGenerationInput, urlSummary: string): Con
 async function generateMainContent(
   input: ContentGenerationInput,
   urlSummary: string,
+  targetChars: BlogPostLengthTarget,
 ): Promise<Omit<ContentGenerationOutput, 'hashtags'>> {
+  const lengthGuide = blogPostLengthPromptGuide(targetChars);
   const synopsisGuide = input.synopsis
     ? `\n[운영자 시놉시스 - 반드시 참고]\n"${input.synopsis}"`
     : '\n[시놉시스 없음 - URL과 제목을 바탕으로 자율 작성]';
@@ -182,9 +199,9 @@ async function generateMainContent(
   const userParts: Array<Record<string, unknown>> = [
     {
       type: 'text',
-      text: withHumanWritingMandate(`URL 핵심:\n${urlSummary}\n\n제목: ${input.title}${synopsisGuide}${personaGuide}${typeGuide}\n\n순수 JSON만 (코드블록 없이):
+      text: withHumanWritingMandate(`URL 핵심:\n${urlSummary}\n\n제목: ${input.title}${synopsisGuide}${personaGuide}${typeGuide}\n${lengthGuide}\n\n순수 JSON만 (코드블록 없이):
 {
-  "blog_post": "네이버 블로그 글 900자 이하 (필수·중간 끊김 금지·완결된 글, ~요체·경험담·사람 말투). 본문 URL은 yeonun.com 만",
+  "blog_post": "네이버 블로그 글 ${targetChars}자 이내 (필수·중간 끊김 금지·완결된 글, ~요체·경험담·사람 말투). 본문 URL은 yeonun.com 만",
   "tiktok_caption": "TikTok 캡션 150자 이내",
   "instagram_caption": "Instagram 캡션 300자 이내",
   "threads_text": "Threads 텍스트 500자 이내, 링크 포함",
@@ -216,7 +233,8 @@ async function generateMainContent(
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
   const parsed = JSON.parse(jsonMatch?.[0] ?? raw) as Omit<ContentGenerationOutput, 'hashtags'>;
   if (!parsed.blog_post) throw new Error('블로그 본문 생성 실패');
-  parsed.blog_post = await ensureBlogPostUnderLimit(parsed.blog_post, input);
+  parsed.blog_post = await ensureBlogPostUnderLimit(parsed.blog_post, input, targetChars);
+  parsed.blog_post_target_chars = targetChars;
   return parsed;
 }
 
@@ -259,16 +277,17 @@ async function resolveSourceContext(input: ContentGenerationInput): Promise<stri
 /** 기획서 7-0 generateAllContent */
 export async function generateAllContent(input: ContentGenerationInput): Promise<ContentGenerationOutput> {
   const urlSummary = await resolveSourceContext(input);
+  const targetChars = pickBlogPostTargetChars();
 
   try {
     const [mainContent, subContent] = await Promise.all([
-      generateMainContent(input, urlSummary),
+      generateMainContent(input, urlSummary, targetChars),
       generateSubContent(input.title, urlSummary, input.workspace),
     ]);
     return { ...mainContent, ...subContent };
   } catch (mainErr) {
     if (!process.env.ANTHROPIC_API_KEY) {
-      return fallbackContent(input, urlSummary);
+      return fallbackContent(input, urlSummary, targetChars);
     }
     try {
       const retryRaw = await askClaudeWithModel({
@@ -276,7 +295,7 @@ export async function generateAllContent(input: ContentGenerationInput): Promise
         max_tokens: 2000,
         system: withHumanWritingSystem(SYSTEM_PROMPTS[input.workspace] ?? SYSTEM_PROMPTS.yeonun),
         prompt: withHumanWritingMandate(
-          `제목: ${input.title}\nURL 요약: ${urlSummary.slice(0, 500)}\n\n네이버 블로그용 900자 이하 완결 본문과 TikTok/Instagram/Threads/X용 짧은 캡션을 JSON으로 (tts_script 생략, Kling 내장 오디오):\n{"blog_post":"...","tiktok_caption":"...","instagram_caption":"...","threads_text":"...","x_text":"...","image_prompt":"...","video_prompt":"..."}`,
+          `제목: ${input.title}\nURL 요약: ${urlSummary.slice(0, 500)}\n${blogPostLengthPromptGuide(targetChars)}\n\n네이버 블로그용 ${targetChars}자 이내 완결 본문과 TikTok/Instagram/Threads/X용 짧은 캡션을 JSON으로 (tts_script 생략, Kling 내장 오디오):\n{"blog_post":"...","tiktok_caption":"...","instagram_caption":"...","threads_text":"...","x_text":"...","image_prompt":"...","video_prompt":"..."}`,
         ),
       });
       const jsonMatch = retryRaw?.match(/\{[\s\S]*\}/);
@@ -284,7 +303,8 @@ export async function generateAllContent(input: ContentGenerationInput): Promise
         const parsed = JSON.parse(jsonMatch[0]) as Omit<ContentGenerationOutput, 'hashtags'>;
         const sub = await generateSubContent(input.title, urlSummary, input.workspace);
         if (parsed.blog_post) {
-          parsed.blog_post = await ensureBlogPostUnderLimit(parsed.blog_post, input);
+          parsed.blog_post = await ensureBlogPostUnderLimit(parsed.blog_post, input, targetChars);
+          parsed.blog_post_target_chars = targetChars;
           return { ...parsed, ...sub };
         }
       }
@@ -292,7 +312,7 @@ export async function generateAllContent(input: ContentGenerationInput): Promise
       /* fall through */
     }
     console.warn('[content-generator] Sonnet failed, using fallback:', (mainErr as Error).message);
-    return fallbackContent(input, urlSummary);
+    return fallbackContent(input, urlSummary, targetChars);
   }
 }
 
