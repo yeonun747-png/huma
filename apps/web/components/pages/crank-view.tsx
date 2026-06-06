@@ -105,6 +105,13 @@ function actTypeClass(type: CrankActType) {
   return 'm-act-follow';
 }
 
+function feedLinkClassName(extra?: string) {
+  return cn(
+    'block truncate text-inherit transition-colors hover:text-huma-acc hover:underline underline-offset-2',
+    extra,
+  );
+}
+
 export function CrankView() {
   const { workspace } = useWorkspace();
   const [tab, setTab] = useState<'feed' | 'ops'>('feed');
@@ -466,21 +473,78 @@ export function CrankView() {
               <EmptyPanel message="오늘 C-Rank 활동 기록이 없습니다. 스케줄러 또는 수동 실행 후 표시됩니다." />
             ) : (
               feedRows.map((row) => (
-                <button
+                <div
                   key={row.id}
-                  type="button"
                   data-acct={row.acctKey ?? row.acct}
                   className="m-act-row w-full text-left"
-                  onClick={() => setExpandedId(expandedId === row.id ? null : row.id)}
                 >
-                  <span className={cn('m-act-type', actTypeClass(row.type))}>{row.type}</span>
+                  {row.targetUrl ? (
+                    <a
+                      href={row.targetUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={cn('m-act-type shrink-0', actTypeClass(row.type), 'hover:opacity-90')}
+                      title="새 창에서 열기"
+                    >
+                      {row.type}
+                    </a>
+                  ) : (
+                    <span className={cn('m-act-type', actTypeClass(row.type))}>{row.type}</span>
+                  )}
                   <div className="min-w-0 flex-1">
-                    <div className="m-act-title">{row.title}</div>
-                    <div className="m-act-sub">{row.sub}</div>
-                    {row.expand && expandedId === row.id && <div className="m-act-expand open">{row.expand}</div>}
+                    {row.targetUrl ? (
+                      <a
+                        href={row.targetUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={feedLinkClassName('m-act-title')}
+                        title="새 창에서 열기"
+                      >
+                        {row.title}
+                      </a>
+                    ) : (
+                      <div className="m-act-title">{row.title}</div>
+                    )}
+                    {row.targetUrl ? (
+                      <a
+                        href={row.targetUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={feedLinkClassName('m-act-sub')}
+                        title="새 창에서 열기"
+                      >
+                        {row.sub}
+                      </a>
+                    ) : (
+                      <div className="m-act-sub">{row.sub}</div>
+                    )}
+                    {row.expand ? (
+                      <>
+                        <button
+                          type="button"
+                          className="mt-1 text-[10px] text-huma-t3 underline-offset-2 hover:text-huma-acc hover:underline"
+                          onClick={() => setExpandedId(expandedId === row.id ? null : row.id)}
+                        >
+                          {expandedId === row.id ? '댓글 접기' : '댓글 내용 보기'}
+                        </button>
+                        {expandedId === row.id && <div className="m-act-expand open">{row.expand}</div>}
+                      </>
+                    ) : null}
                   </div>
-                  <span className="m-act-time">{row.time}</span>
-                </button>
+                  {row.targetUrl ? (
+                    <a
+                      href={row.targetUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={feedLinkClassName('m-act-time shrink-0')}
+                      title="새 창에서 열기"
+                    >
+                      {row.time} ↗
+                    </a>
+                  ) : (
+                    <span className="m-act-time">{row.time}</span>
+                  )}
+                </div>
               ))
             )}
           </MPanel>

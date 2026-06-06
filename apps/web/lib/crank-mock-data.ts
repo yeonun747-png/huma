@@ -10,6 +10,8 @@ export type CrankFeedItem = {
   title: string;
   sub: string;
   time: string;
+  /** 방문·공감·댓글 대상 URL */
+  targetUrl?: string;
   expand?: string;
 };
 

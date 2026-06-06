@@ -9,6 +9,12 @@ import {
   runDailyCrankScheduler,
 } from '../lib/crank-scheduler.js';
 
+function normalizeFeedUrl(raw?: string | null): string | undefined {
+  const u = raw?.trim();
+  if (!u) return undefined;
+  return u.startsWith('http://') || u.startsWith('https://') ? u : `https://${u}`;
+}
+
 function parseCrankAction(meta: Record<string, unknown> | null, message: string): CrankActivityType {
   const fromMeta = meta?.crank_action;
   if (fromMeta === '방문' || fromMeta === '공감' || fromMeta === '댓글' || fromMeta === '이웃') {
@@ -58,6 +64,7 @@ export async function registerCrankRoutes(app: FastifyInstance) {
       title: string;
       sub: string;
       time: string;
+      targetUrl?: string;
       expand?: string;
     }> = [];
 
@@ -86,6 +93,7 @@ export async function registerCrankRoutes(app: FastifyInstance) {
         title: log.message.slice(0, 100),
         sub: subMeta || `${acctName} · ${urlHint || (formatKstHm(log.created_at) ?? '—')}`,
         time: formatKstHm(log.created_at) ?? '—',
+        targetUrl: normalizeFeedUrl(log.result_url as string | null),
         expand: typeof meta?.comment === 'string' ? meta.comment : undefined,
       });
     }
@@ -104,6 +112,7 @@ export async function registerCrankRoutes(app: FastifyInstance) {
         title: post.post_title ?? '카페 댓글',
         sub: `${acct} · ${String(post.post_url ?? '').replace(/^https?:\/\//, '').slice(0, 40)}`,
         time: formatKstHm(post.posted_at ?? post.created_at) ?? '—',
+        targetUrl: normalizeFeedUrl(post.post_url as string | null),
         expand: post.reply_posted ? String(post.reply_posted) : undefined,
       });
     }
