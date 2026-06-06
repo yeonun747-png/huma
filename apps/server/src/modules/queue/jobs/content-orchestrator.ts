@@ -2,7 +2,7 @@ import { enqueueHumaJob, getScheduleDelay, type JobRecord } from '../../../lib/j
 import { normalizeBlogLinkUrl } from '../../../lib/blog-link.js';
 import { supabase } from '../../../middleware/auth.js';
 import { enqueueJob } from '../producer.js';
-import { generateAllContent } from '../../claude/content-generator.js';
+import { generateAllContent, type ContentGenerationOutput } from '../../claude/content-generator.js';
 import { fetchAndSummarizeUrl } from '../../claude/content-generator.js';
 import {
   autoDecideWithCredits,
@@ -482,6 +482,17 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
             image_model: imageModel,
             image_prompt: generated.image_prompt,
             image_url: imageUrl,
+            generated: {
+              blog_post: generated.blog_post,
+              tiktok_caption: generated.tiktok_caption,
+              instagram_caption: generated.instagram_caption,
+              threads_text: generated.threads_text,
+              x_text: generated.x_text,
+              image_prompt: generated.image_prompt,
+              video_prompt: generated.video_prompt,
+              hashtags: generated.hashtags,
+              blog_post_target_chars: generated.blog_post_target_chars,
+            },
             updated_at: new Date().toISOString(),
           },
         },
@@ -504,4 +515,122 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
     return runTypeA(runInput, generated, imageUrl, uniqueImageUrl, schedule);
   }
   return runTypeB(runInput, generated, imageUrl, uniqueImageUrl, videoModel, schedule);
+}
+
+type PreviewGeneratedSnapshot = Pick<
+  ContentGenerationOutput,
+  | 'blog_post'
+  | 'tiktok_caption'
+  | 'instagram_caption'
+  | 'threads_text'
+  | 'x_text'
+  | 'image_prompt'
+  | 'video_prompt'
+  | 'hashtags'
+  | 'blog_post_target_chars'
+>;
+
+function extractPlatformSchedule(ps: Record<string, unknown>): PlatformSchedule | undefined {
+  const { _dry_run: _d, _preview: _p, _promoted: _pr, ...rest } = ps;
+  if (Object.keys(rest).length === 0) return undefined;
+  return rest as PlatformSchedule;
+}
+
+function resolvePreviewGenerated(
+  job: Record<string, unknown>,
+  preview: Record<string, unknown> | undefined,
+): PreviewGeneratedSnapshot {
+  const fromPreview = preview?.generated as PreviewGeneratedSnapshot | undefined;
+  if (fromPreview?.blog_post) return fromPreview;
+
+  const title = String(job.title ?? '');
+  return {
+    blog_post: String(job.content ?? ''),
+    hashtags: (job.hashtags as string[]) ?? [],
+    tiktok_caption: title.slice(0, 150),
+    instagram_caption: title.slice(0, 300),
+    threads_text: title,
+    x_text: title.slice(0, 280),
+    image_prompt: String(preview?.image_prompt ?? ''),
+    video_prompt: '',
+  };
+}
+
+/** 검증(dry_run) 완료 job → Claude/Imagen 재생성 없이 발행 큐(post_blog 등) 등록 */
+export async function promoteDryRunToPublish(parentJobId: string) {
+  const { data: job, error } = await supabase.from('huma_jobs').select('*').eq('id', parentJobId).single();
+  if (error || !job) throw new Error('작업 없음');
+  if (!isDryRunJob(job.platform_schedule)) throw new Error('검증 미리보기 작업이 아닙니다');
+  if (job.status !== 'completed') throw new Error('검증 미리보기가 아직 완료되지 않았습니다');
+
+  const ps = (job.platform_schedule as Record<string, unknown> | null) ?? {};
+  const preview = ps._preview as Record<string, unknown> | undefined;
+  const promoted = ps._promoted as { blog_job_id?: string } | undefined;
+  if (promoted?.blog_job_id) {
+    throw new Error('이미 발행 큐에 등록된 검증 작업입니다');
+  }
+
+  const imageUrl = (preview?.image_url as string | undefined) ?? job.image_urls?.[0];
+  if (!job.content || !imageUrl) {
+    throw new Error('본문 또는 Imagen 이미지가 없습니다');
+  }
+
+  const generated = resolvePreviewGenerated(job, preview);
+  const uniqueImageUrl = await uniquifyImageFromUrl(imageUrl);
+  const schedule = extractPlatformSchedule(ps);
+  const contentType = (job.content_type ?? 'A') as ContentType;
+  const autoScheduled = job.auto_scheduled !== false;
+  const baseScheduledAt =
+    autoScheduled && schedule?.naver_blog
+      ? (toTodayDatetime(schedule.naver_blog) ?? job.scheduled_at ?? new Date().toISOString())
+      : (job.scheduled_at ?? new Date().toISOString());
+
+  const runInput: ContentOrchestratorInput = {
+    workspace: job.workspace,
+    title: job.title ?? '',
+    sourceUrl: job.link_url ?? '',
+    content_type: contentType,
+    content_type_auto: false,
+    auto_scheduled: autoScheduled,
+    video_model: job.video_model ?? undefined,
+    platform_schedule: schedule,
+    scheduled_at: baseScheduledAt,
+    repeat_rule: job.repeat_rule,
+    parentJobId,
+  };
+
+  const result =
+    contentType === 'B'
+      ? await runTypeB(
+          runInput,
+          generated as Awaited<ReturnType<typeof generateAllContent>>,
+          imageUrl,
+          uniqueImageUrl,
+          job.video_model ?? 'kling-3.0',
+          schedule,
+        )
+      : await runTypeA(
+          runInput,
+          generated as Awaited<ReturnType<typeof generateAllContent>>,
+          imageUrl,
+          uniqueImageUrl,
+          schedule,
+        );
+
+  await supabase
+    .from('huma_jobs')
+    .update({
+      platform_schedule: {
+        ...ps,
+        _promoted: {
+          blog_job_id: result.primaryJobId,
+          jobs_created: result.jobsCreated,
+          promoted_at: new Date().toISOString(),
+        },
+      },
+      result_url: result.primaryJobId,
+    })
+    .eq('id', parentJobId);
+
+  return result;
 }

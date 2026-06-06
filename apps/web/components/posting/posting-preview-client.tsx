@@ -66,6 +66,8 @@ export function PostingPreviewClient({ jobId }: { jobId: string }) {
   const [job, setJob] = useState<HumaJob | null>(null);
   const [error, setError] = useState('');
   const [displayImageUrl, setDisplayImageUrl] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState(false);
+  const [publishMsg, setPublishMsg] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -119,6 +121,9 @@ export function PostingPreviewClient({ jobId }: { jobId: string }) {
   const contentReady = Boolean(job?.content && job.content.length > 100);
   const jobDone = job?.status === 'completed';
   const dryRun = (job?.platform_schedule as Record<string, unknown> | undefined)?._dry_run === true;
+  const promoted = (job?.platform_schedule as Record<string, unknown> | undefined)?._promoted as
+    | { blog_job_id?: string; promoted_at?: string }
+    | undefined;
   const contentType = job ? resolveContentType(job) : 'A';
 
   useEffect(() => {
@@ -150,6 +155,30 @@ export function PostingPreviewClient({ jobId }: { jobId: string }) {
 
   const waitingForImagen = jobDone && contentReady && !imagenDone && !imagenError;
 
+  const canPublishFromPreview =
+    jobDone &&
+    contentReady &&
+    imagenDone &&
+    Boolean(displayImageUrl) &&
+    !imagenError &&
+    dryRun &&
+    !promoted?.blog_job_id;
+
+  const handlePublishFromPreview = async () => {
+    setPublishMsg('');
+    setPublishing(true);
+    try {
+      const result = await api.publishFromPreview(jobId);
+      setPublishMsg(`발행 큐 등록 완료 · post_blog ${result.blog_job_id.slice(0, 8)}…`);
+      const row = await api.getJob(jobId);
+      setJob(row);
+    } catch (e) {
+      setPublishMsg(e instanceof Error ? e.message : '발행 큐 등록 실패');
+    } finally {
+      setPublishing(false);
+    }
+  };
+
   const simulatorKey =
     readyForTyping && job
       ? `${job.id}-${job.content?.length ?? 0}-${displayImageUrl}`
@@ -164,6 +193,31 @@ export function PostingPreviewClient({ jobId }: { jobId: string }) {
       }
     >
       <div className={readyForTyping ? 'flex min-h-0 flex-1 flex-col' : 'mx-auto max-w-3xl'}>
+        {(canPublishFromPreview || promoted?.blog_job_id || publishMsg) && (
+          <div className="mb-2 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-huma-bdr bg-huma-bg2 px-3 py-2">
+            <span className="text-[11px] text-huma-t2">
+              {promoted?.blog_job_id
+                ? `✓ 발행 큐 등록됨 · ${promoted.blog_job_id.slice(0, 8)}…`
+                : '검증 OK → Claude/Imagen 재생성 없이 네이버 발행 큐에 넣기'}
+            </span>
+            {canPublishFromPreview ? (
+              <button
+                type="button"
+                className="btn-primary btn-sm shrink-0 px-4"
+                disabled={publishing}
+                onClick={() => void handlePublishFromPreview()}
+              >
+                {publishing ? '등록 중…' : '🚀 발행 큐 등록'}
+              </button>
+            ) : null}
+          </div>
+        )}
+        {publishMsg && !promoted?.blog_job_id && (
+          <p className={`mb-2 text-center text-[11px] ${publishMsg.includes('완료') ? 'text-huma-ok' : 'text-huma-err'}`}>
+            {publishMsg}
+          </p>
+        )}
+
         {!readyForTyping && (
           <div className="mb-4 rounded-lg border border-huma-acc/40 bg-huma-glow px-4 py-3">
             <div className="text-sm font-semibold text-huma-acc">🔍 포스팅 검증 모드</div>

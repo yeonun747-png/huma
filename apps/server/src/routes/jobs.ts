@@ -13,6 +13,7 @@ import {
   resolveAutoContentStartAt,
 } from '../modules/claude/auto-content-orchestrator.js';
 import { runContentPreview } from '../modules/claude/content-preview.js';
+import { promoteDryRunToPublish } from '../modules/queue/jobs/content-orchestrator.js';
 import { assertCafeNewPostAccount, assertCafeReplyAccount } from '../lib/cafe-accounts.js';
 import { assertManualSocialCrankAllowed } from '../lib/crank-guard.js';
 import { getCrankJobSessionDetail } from '../lib/crank-job-session.js';
@@ -244,6 +245,29 @@ export async function registerJobRoutes(app: FastifyInstance) {
       };
     } catch (err) {
       return reply.code(500).send({ error: (err as Error).message ?? 'AI 콘텐츠 생성 실패' });
+    }
+  });
+
+  app.post('/api/jobs/:id/publish-from-preview', { preHandler: authMiddleware }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const allowedWorkspaces = getWorkspaceFilter(request);
+
+    const { data: job } = await supabase.from('huma_jobs').select('workspace').eq('id', id).maybeSingle();
+    if (!job) return reply.code(404).send({ error: '작업 없음' });
+    if (!allowedWorkspaces.includes(job.workspace as string)) {
+      return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
+    }
+
+    try {
+      const result = await promoteDryRunToPublish(id);
+      return {
+        success: true,
+        blog_job_id: result.primaryJobId,
+        jobs_created: result.jobsCreated,
+        video_queue_id: result.video_queue_id,
+      };
+    } catch (err) {
+      return reply.code(400).send({ error: (err as Error).message ?? '발행 큐 등록 실패' });
     }
   });
 

@@ -163,6 +163,13 @@ export const api = {
       body: JSON.stringify(body),
       timeoutMs: 180_000,
     }),
+  publishFromPreview: (jobId: string) =>
+    request<{
+      success: boolean;
+      blog_job_id: string;
+      jobs_created: number;
+      video_queue_id?: string;
+    }>(`/api/jobs/${jobId}/publish-from-preview`, { method: 'POST' }),
   pauseJob: (id: string) => request(`/api/jobs/${id}/pause`, { method: 'PATCH' }),
   resumeJob: (id: string) => request(`/api/jobs/${id}/resume`, { method: 'PATCH' }),
   deleteJob: (id: string) => request(`/api/jobs/${id}`, { method: 'DELETE' }),

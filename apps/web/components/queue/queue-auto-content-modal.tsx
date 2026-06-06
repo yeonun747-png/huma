@@ -370,15 +370,15 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
 
         {error && <p className="mb-2 text-xs text-huma-err">{error}</p>}
 
-        <div className="m-modal-foot">
+        <div className={`m-modal-foot ${!isEdit && onPreview ? 'grid grid-cols-3' : ''}`}>
           {!isEdit && onPreview ? (
             <button
               type="button"
-              className="btn-primary flex-[2] py-2"
+              className="btn-primary min-w-0 py-2 text-[11px] leading-tight sm:text-xs"
               onClick={handlePreview}
               disabled={loading || !editable}
             >
-              {loading ? '등록 중…' : '🔍 검증 미리보기 (새 창 · 네이버 미발행)'}
+              {loading ? '등록 중…' : '🔍 검증 미리보기'}
             </button>
           ) : (
             <button type="button" className="btn-primary flex-[2] py-2" onClick={handleSubmit} disabled={loading || !editable}>
@@ -388,21 +388,26 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
           {!isEdit && onPreview ? (
             <button
               type="button"
-              className="btn-ghost flex-1 py-2 text-huma-warn"
+              className="btn-ghost min-w-0 py-2 text-[11px] leading-tight text-huma-warn sm:text-xs"
               onClick={handleSubmit}
               disabled={loading || !editable}
-              title="네이버 블로그에 실제 발행됩니다"
+              title="Claude·Imagen 새로 생성 후 네이버 발행"
             >
               발행 큐
             </button>
           ) : null}
-          <button type="button" className="btn-ghost flex-1 py-2" onClick={onClose} disabled={loading}>
+          <button
+            type="button"
+            className={`btn-ghost py-2 ${!isEdit && onPreview ? 'min-w-0 text-[11px] sm:text-xs' : 'flex-1'}`}
+            onClick={onClose}
+            disabled={loading}
+          >
             취소
           </button>
         </div>
         <p className="mt-2 text-center font-mono text-[10.5px] text-huma-t3">
           {!isEdit && onPreview
-            ? '검증 모드: Claude·Imagen 확인 + 타이핑 시뮬만 · 계정 정지 전까지 네이버 발행은 「발행 큐」만 사용'
+            ? '검증 미리보기 → 새 창 확인 후 「발행 큐 등록」 · Claude/Imagen 재생성 없음 · 모달 「발행 큐」는 새로 생성'
             : form.auto_schedule
               ? '등록 직후 AI 생성 시작 · 네이버·SNS 발행 시각만 Haiku가 결정합니다'
               : `생성·발행 시작: ${buildScheduledAt(form.schedule_time).slice(0, 16).replace('T', ' ')}`}
