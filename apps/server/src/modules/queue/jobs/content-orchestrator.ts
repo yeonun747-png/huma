@@ -456,17 +456,25 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
       image_model: imageModel,
       image_url: imageUrl,
     });
+    const { data: currentJob } = await supabase
+      .from('huma_jobs')
+      .select('platform_schedule')
+      .eq('id', input.parentJobId)
+      .maybeSingle();
+    const prevPs = (currentJob?.platform_schedule as Record<string, unknown> | null) ?? {};
     await supabase
       .from('huma_jobs')
       .update({
         image_urls: [imageUrl],
         platform_schedule: {
+          ...prevPs,
           ...(schedule ?? {}),
           _dry_run: true,
           _preview: {
             steps: previewSteps,
             image_model: imageModel,
             image_prompt: generated.image_prompt,
+            image_url: imageUrl,
             updated_at: new Date().toISOString(),
           },
         },

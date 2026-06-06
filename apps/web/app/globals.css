@@ -527,6 +527,19 @@
   .m-pub-idle-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--t4); flex-shrink: 0; }
   .m-live-box { background: #000; border-radius: 6px; padding: 10px; font-family: var(--font-jetbrains), monospace; font-size: 11.5px; line-height: 1.85; color: var(--t2); height: 90px; overflow: hidden; }
   .m-cursor-blink { display: inline-block; width: 2px; height: 11px; background: var(--acc2); animation: blink 0.8s infinite; vertical-align: middle; margin-left: 1px; }
+  .naver-editor-cursor {
+    display: inline-block;
+    width: 2px;
+    height: 1.1em;
+    margin-left: 1px;
+    background: #03c75a;
+    vertical-align: text-bottom;
+    animation: naver-cursor-blink 0.85s step-end infinite;
+  }
+  @keyframes naver-cursor-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
   .m-pub-meta { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
   .m-pub-m { font-size: 11px; font-family: var(--font-jetbrains), monospace; color: var(--t3); }
   .m-pub-m span { color: var(--t); }
