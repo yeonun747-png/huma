@@ -19,9 +19,13 @@ function formatLinksNotFoundError(raw: string): string | null {
 
   const isWarmup = raw.includes('WARMUP_NO_LINKS_FOUND') || raw.includes(':warmup:');
   const ctx = /블로그/.test(raw) ? '블로그 검색' : '통합 검색';
-  const phase = isWarmup ? '워밍업' : 'C-Rank 세션';
+  const phase = isWarmup ? '워밍업(로그인 전)' : 'C-Rank 세션';
+  const urlHint = raw.match(/\|url=([^|]+)/)?.[1];
 
-  return `${phase} 실패(${ctx}): 네이버 검색 결과에서 방문할 링크를 찾지 못했습니다. SOCKS 프록시·로그인·네이버 UI 변경을 확인하세요.`;
+  let msg = `${phase} 실패(${ctx}): 네이버 검색 결과에서 방문할 링크를 찾지 못했습니다.`;
+  if (urlHint) msg += ` (페이지: ${decodeURIComponent(urlHint).slice(0, 80)})`;
+  msg += ' DOM 변경·봇 감지 가능 — 셀렉터 확인 필요.';
+  return msg;
 }
 
 export function formatJobErrorLabel(message: string | null | undefined): string {

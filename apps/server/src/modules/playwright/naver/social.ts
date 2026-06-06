@@ -24,6 +24,7 @@ import {
 } from '../../../lib/modem-last-account.js';
 import { applyCrankResourceBlocking } from './crank-resource-block.js';
 import { logCrankActivity } from '../../../lib/crank-activity.js';
+import { blogSearchUrl, collectNaverSearchUrls } from '../../../lib/naver-search-links.js';
 
 interface SocialCrankConfig {
   visits_per_session?: number;
@@ -83,46 +84,16 @@ async function searchNaverBlogs(
 ): Promise<string[]> {
   if (limit <= 0 || keywords.length === 0) return [];
 
-  const selectors = [
-    'a.api_txt_lines.total_tit',
-    '.total_tit a[href*="blog.naver.com"]',
-    '.view_wrap a[href*="blog.naver.com"]',
-    'a[href*="blog.naver.com/"]',
-  ];
-
   const results: string[] = [];
   for (const keyword of keywords) {
-    await page.goto(
-      `https://search.naver.com/search.naver?where=blog&query=${encodeURIComponent(keyword)}&sm=tab_jum`,
-    );
+    await page.goto(blogSearchUrl(keyword));
     await page.waitForLoadState('networkidle').catch(() => {});
     await scaledHumanSleep(2000, 4000, scale);
 
-    for (const selector of selectors) {
-      const links = await page.locator(selector).all();
-      for (const link of links) {
-        let href = await link.getAttribute('href');
-        if (!href?.trim()) continue;
-        if (href.startsWith('//')) href = `https:${href}`;
-        if (href.startsWith('/')) href = `https://search.naver.com${href}`;
-        if (href.includes('blog.naver.com') && !results.includes(href)) results.push(href);
-      }
+    const found = await collectNaverSearchUrls(page, 'blog', limit);
+    for (const href of found) {
+      if (!results.includes(href)) results.push(href);
       if (results.length >= limit) break;
-    }
-
-    if (results.length < limit) {
-      await page.mouse.wheel(0, 400);
-      await scaledHumanSleep(1000, 2000, scale);
-      for (const selector of selectors) {
-        const links = await page.locator(selector).all();
-        for (const link of links) {
-          let href = await link.getAttribute('href');
-          if (!href?.trim()) continue;
-          if (href.startsWith('//')) href = `https:${href}`;
-          if (href.startsWith('/')) href = `https://search.naver.com${href}`;
-          if (href.includes('blog.naver.com') && !results.includes(href)) results.push(href);
-        }
-      }
     }
 
     if (results.length >= limit) break;
