@@ -261,13 +261,22 @@ export async function registerJobRoutes(app: FastifyInstance) {
     return data;
   });
 
-  app.patch('/api/jobs/:id/resume', { preHandler: authMiddleware }, async (request) => {
+  app.patch('/api/jobs/:id/resume', { preHandler: authMiddleware }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const { data: job } = await supabase.from('huma_jobs').select('*').eq('id', id).single();
-    if (!job) return { error: '작업 없음' };
+    if (!job) return reply.code(404).send({ error: '작업 없음' });
 
-    await enqueueHumaJob(job as JobRecord);
-    const { data } = await supabase.from('huma_jobs').select('*').eq('id', id).single();
+    const { data, error } = await supabase
+      .from('huma_jobs')
+      .update({ status: resolveJobStatus(job.scheduled_at) })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error || !data) {
+      return reply.code(500).send({ error: error?.message ?? '작업 재개 실패' });
+    }
+
+    await enqueueHumaJob(data as JobRecord);
     return data;
   });
 
@@ -282,21 +291,30 @@ export async function registerJobRoutes(app: FastifyInstance) {
 
     const now = new Date().toISOString();
     await removeBullJob(job.bull_job_id);
-    const { data } = await supabase
+    await removeBullJob(`huma-${id}`);
+
+    const basePatch = {
+      scheduled_at: now,
+      status: 'pending' as const,
+    };
+    let updated = await supabase
       .from('huma_jobs')
-      .update({
-        advance_requested_at: now,
-        scheduled_at: now,
-        status: 'pending',
-        updated_at: now,
-      })
+      .update({ ...basePatch, advance_requested_at: now })
       .eq('id', id)
       .select()
       .single();
-
-    if (data) {
-      await enqueueHumaJob(data as JobRecord, { immediate: true });
+    if (updated.error) {
+      updated = await supabase.from('huma_jobs').update(basePatch).eq('id', id).select().single();
     }
+    const { data, error } = updated;
+    if (error || !data) {
+      return reply.code(500).send({ error: error?.message ?? '작업 상태 갱신 실패' });
+    }
+
+    await enqueueHumaJob(data as JobRecord, {
+      immediate: true,
+      jobId: `huma-${id}-advance-${Date.now()}`,
+    });
     return data;
   });
 
