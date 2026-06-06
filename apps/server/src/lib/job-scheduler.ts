@@ -82,15 +82,19 @@ export async function removeBullJob(bullJobId?: string | null) {
   }
 }
 
-export async function enqueueHumaJob(job: JobRecord, opts?: { immediate?: boolean }) {
+export async function enqueueHumaJob(
+  job: JobRecord,
+  opts?: { immediate?: boolean; jobId?: string },
+) {
   const delay = opts?.immediate ? undefined : getScheduleDelay(job.scheduled_at);
   const status = delay ? 'scheduled' : 'pending';
 
   await removeBullJob(job.bull_job_id);
+  await removeBullJob(`huma-${job.id}`);
 
   const bullJob = await enqueueJob(buildEnqueuePayload(job), {
     delay,
-    jobId: `huma-${job.id}`,
+    jobId: opts?.jobId ?? `huma-${job.id}`,
   });
 
   await supabase
