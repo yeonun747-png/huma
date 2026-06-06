@@ -536,6 +536,20 @@
     vertical-align: text-bottom;
     animation: naver-cursor-blink 0.85s step-end infinite;
   }
+
+  /* 포스팅 미리보기 — HUMA 다크 테마 color 상속 차단 */
+  .naver-editor-canvas {
+    color: #111111;
+    color-scheme: light;
+  }
+
+  .naver-editor-canvas .naver-editor-title-text {
+    color: #111111 !important;
+  }
+
+  .naver-editor-canvas .naver-editor-body-text {
+    color: #222222 !important;
+  }
   @keyframes naver-cursor-blink {
     0%, 100% { opacity: 1; }
     50% { opacity: 0; }

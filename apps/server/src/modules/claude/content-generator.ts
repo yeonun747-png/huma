@@ -35,12 +35,60 @@ const SYSTEM_PROMPTS: Record<string, string> = {
 톤: ~요체, 가볍고 친근, 친구에게 카톡하듯. 경험담·솔직한 감정·짧은 추임새(ㅎㅎ, ㅠㅠ)를 적절히.
 금지: AI/마케팅 문체 — 「정리했습니다」「안내합니다」「살펴보겠습니다」「흐름과 실천 포인트를 정리」 같은 표현.
 필수: 입력에 [말투]·[캐릭터 포스팅 톤 지침]·character_mode_prompts가 있으면 그 말투를 본문에 그대로 반영.
-서비스 URL은 본문에 2~3회만 자연스럽게.`,
+서비스 URL은 본문에 yeonun.com 도메인만 1~2회 자연스럽게 (전체 경로·https 금지).`,
   quizoasis: `당신은 퀴즈오아시스 글로벌 심리테스트 플랫폼의 콘텐츠 마케터입니다.
 톤: 재미있고 공유 욕구를 자극하는 가벼운 문체. 테스트 링크 포함.`,
   panana: `당신은 파나나(PANANA) AI 캐릭터 콘텐츠 플랫폼의 콘텐츠 마케터입니다.
 톤: 시네마틱하고 감성적인 짧은 문체. 서비스 링크 포함.`,
 };
+
+const BLOG_POST_MAX_CHARS = 900;
+
+function finalizeBlogPost(text: string): string {
+  return sanitizeBlogLinksInPost(text.trim());
+}
+
+/** 900자 초과 시 AI로 다시 쓰게 함 — 중간 절단 없음 */
+async function ensureBlogPostUnderLimit(
+  blogPost: string,
+  input: ContentGenerationInput,
+): Promise<string> {
+  let body = finalizeBlogPost(blogPost);
+  if (body.length <= BLOG_POST_MAX_CHARS) return body;
+
+  for (let attempt = 0; attempt < 2 && body.length > BLOG_POST_MAX_CHARS; attempt++) {
+    const shortened = await askClaudeWithModel({
+      model: (await getSubClaudeModel()) || HAIKU_MODEL_FALLBACK,
+      max_tokens: 1500,
+      system: withHumanWritingSystem(SYSTEM_PROMPTS[input.workspace] ?? SYSTEM_PROMPTS.yeonun),
+      prompt: withHumanWritingMandate(
+        `아래 네이버 블로그 글을 ${BLOG_POST_MAX_CHARS}자 이하로 다시 써줘.
+규칙: 중간에서 자르지 말 것. 완결된 짧은 글로 처음부터 다시 작성. 말투·핵심 경험담 유지. yeonun.com 만 URL.
+
+현재 ${body.length}자:
+${body}
+
+본문 텍스트만 출력 (JSON·코드블록 없이).`,
+      ),
+    });
+    if (shortened?.trim()) {
+      body = finalizeBlogPost(shortened.trim());
+    }
+  }
+
+  if (body.length > BLOG_POST_MAX_CHARS) {
+    throw new Error(
+      `블로그 본문 ${body.length}자 — ${BLOG_POST_MAX_CHARS}자 이하로 생성되지 않았습니다`,
+    );
+  }
+  return body;
+}
+
+function sanitizeBlogLinksInPost(text: string): string {
+  return text
+    .replace(/https?:\/\/(www\.)?yeonun\.com[^\s\n]*/gi, 'yeonun.com')
+    .replace(/www\.yeonun\.com/gi, 'yeonun.com');
+}
 
 async function fetchUrlText(url: string): Promise<string> {
   try {
@@ -89,13 +137,15 @@ function parseScreenshotBase64(raw: string): { mediaType: 'image/jpeg' | 'image/
 
 function fallbackContent(input: ContentGenerationInput, urlSummary: string): ContentGenerationOutput {
   const intro = input.synopsis?.trim() || input.title.trim();
-  const body = [
-    intro,
-    '',
-    urlSummary.slice(0, 600),
-    '',
-    `자세히 보기: ${input.sourceUrl}`,
-  ].join('\n');
+  const body = finalizeBlogPost(
+    [
+      intro,
+      '',
+      urlSummary.slice(0, 400),
+      '',
+      'yeonun.com 에서 확인',
+    ].join('\n'),
+  );
   const short = `${input.title}. ${(input.synopsis ?? urlSummary).slice(0, 80).trim()}`;
   const wsTag = input.workspace === 'quizoasis' ? '#심리테스트' : input.workspace === 'panana' ? '#AI캐릭터' : '#사주';
   return {
@@ -134,12 +184,12 @@ async function generateMainContent(
       type: 'text',
       text: withHumanWritingMandate(`URL 핵심:\n${urlSummary}\n\n제목: ${input.title}${synopsisGuide}${personaGuide}${typeGuide}\n\n순수 JSON만 (코드블록 없이):
 {
-  "blog_post": "네이버 블로그 글 2000자 이상 (~요체·경험담·사람 말투)",
+  "blog_post": "네이버 블로그 글 900자 이하 (필수·중간 끊김 금지·완결된 글, ~요체·경험담·사람 말투). 본문 URL은 yeonun.com 만",
   "tiktok_caption": "TikTok 캡션 150자 이내",
   "instagram_caption": "Instagram 캡션 300자 이내",
   "threads_text": "Threads 텍스트 500자 이내, 링크 포함",
   "x_text": "X 텍스트 280자 이내, 링크 포함",
-  "image_prompt": "Imagen 4 이미지 프롬프트 (영문)",
+  "image_prompt": "Imagen 4 영문. 주제 상징 중심 still life/scene — 돈·재물 강조 시 coins/gold/wallet, 사랑·재회 시 hearts/cherry blossom/warm pink, 직장·사업 시 office/success symbols. 사람이 폰·화면 보며 사주 보는 장면 금지. 텍스트·로고·워터마크 없음. 9:16 cinematic",
   "video_prompt": "Kling 3.0 9:16 영상 프롬프트 (영문, 내장 오디오)"
 }`),
     },
@@ -166,6 +216,7 @@ async function generateMainContent(
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
   const parsed = JSON.parse(jsonMatch?.[0] ?? raw) as Omit<ContentGenerationOutput, 'hashtags'>;
   if (!parsed.blog_post) throw new Error('블로그 본문 생성 실패');
+  parsed.blog_post = await ensureBlogPostUnderLimit(parsed.blog_post, input);
   return parsed;
 }
 
@@ -225,14 +276,17 @@ export async function generateAllContent(input: ContentGenerationInput): Promise
         max_tokens: 2000,
         system: withHumanWritingSystem(SYSTEM_PROMPTS[input.workspace] ?? SYSTEM_PROMPTS.yeonun),
         prompt: withHumanWritingMandate(
-          `제목: ${input.title}\nURL 요약: ${urlSummary.slice(0, 500)}\n\n네이버 블로그용 800자 이상 본문과 TikTok/Instagram/Threads/X용 짧은 캡션을 JSON으로 (tts_script 생략, Kling 내장 오디오):\n{"blog_post":"...","tiktok_caption":"...","instagram_caption":"...","threads_text":"...","x_text":"...","image_prompt":"...","video_prompt":"..."}`,
+          `제목: ${input.title}\nURL 요약: ${urlSummary.slice(0, 500)}\n\n네이버 블로그용 900자 이하 완결 본문과 TikTok/Instagram/Threads/X용 짧은 캡션을 JSON으로 (tts_script 생략, Kling 내장 오디오):\n{"blog_post":"...","tiktok_caption":"...","instagram_caption":"...","threads_text":"...","x_text":"...","image_prompt":"...","video_prompt":"..."}`,
         ),
       });
       const jsonMatch = retryRaw?.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]) as Omit<ContentGenerationOutput, 'hashtags'>;
         const sub = await generateSubContent(input.title, urlSummary, input.workspace);
-        if (parsed.blog_post) return { ...parsed, ...sub };
+        if (parsed.blog_post) {
+          parsed.blog_post = await ensureBlogPostUnderLimit(parsed.blog_post, input);
+          return { ...parsed, ...sub };
+        }
       }
     } catch {
       /* fall through */

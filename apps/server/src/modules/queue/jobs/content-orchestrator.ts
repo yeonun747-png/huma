@@ -1,4 +1,5 @@
 import { enqueueHumaJob, getScheduleDelay, type JobRecord } from '../../../lib/job-scheduler.js';
+import { normalizeBlogLinkUrl } from '../../../lib/blog-link.js';
 import { supabase } from '../../../middleware/auth.js';
 import { enqueueJob } from '../producer.js';
 import { generateAllContent } from '../../claude/content-generator.js';
@@ -173,6 +174,7 @@ async function runTypeA(
   const accountId = account?.id ?? null;
   let jobsCreated = 0;
 
+  const blogLink = normalizeBlogLinkUrl(workspace, sourceUrl);
   const blogAt = platformTime(auto_scheduled, schedule, 'naver_blog', scheduled_at);
   const blogJob = await insertJob({
     workspace,
@@ -181,7 +183,7 @@ async function runTypeA(
     title,
     content: generated.blog_post,
     image_urls: [uniqueImageUrl],
-    link_url: sourceUrl,
+    link_url: blogLink,
     hashtags: generated.hashtags,
     platform: 'naver',
     content_type: 'A',
@@ -236,6 +238,7 @@ async function runTypeB(
   const account = await pickPostingAccount(workspace);
   const accountId = account?.id ?? null;
 
+  const blogLink = normalizeBlogLinkUrl(workspace, sourceUrl);
   const blogAt = platformTime(auto_scheduled, schedule, 'naver_blog', scheduled_at);
   const threadsAt = platformTime(auto_scheduled, schedule, 'threads', scheduled_at);
   const twitterAt = platformTime(auto_scheduled, schedule, 'x', scheduled_at);
@@ -248,7 +251,7 @@ async function runTypeB(
     title,
     content: generated.blog_post,
     image_urls: [uniqueImageUrl],
-    link_url: sourceUrl,
+    link_url: blogLink,
     hashtags: generated.hashtags,
     platform: 'naver',
     content_type: 'B',
@@ -428,7 +431,11 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
     });
     await supabase
       .from('huma_jobs')
-      .update({ content: generated.blog_post, hashtags: generated.hashtags })
+      .update({
+        content: generated.blog_post,
+        link_url: normalizeBlogLinkUrl(input.workspace, input.sourceUrl),
+        hashtags: generated.hashtags,
+      })
       .eq('id', input.parentJobId);
   }
 

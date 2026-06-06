@@ -1,4 +1,5 @@
-import type { Workspace } from '@huma/shared';
+import type { ContentType, Workspace } from '@huma/shared';
+import { sanitizeBlogPostForNaver } from '@/lib/naver-post-sanitize';
 
 export type PostViewerTemplate = {
   accent: string;
@@ -14,6 +15,7 @@ export type PostViewerOverrides = {
   title: string;
   workspace: string;
   content?: string | null;
+  contentType?: ContentType;
   resultUrl?: string | null;
   completedAt?: string | null;
   imageUrl?: string | null;
@@ -63,10 +65,14 @@ export function mergePostViewerTemplate(overrides: PostViewerOverrides): PostVie
     overrides.hashtags?.length
       ? overrides.hashtags.map((t) => (t.startsWith('#') ? t : `#${t}`)).join(' ')
       : base.hashtags;
+  const rawBody = overrides.content?.trim();
+  const displayBody = rawBody
+    ? sanitizeBlogPostForNaver(rawBody, { contentType: overrides.contentType ?? 'A' })
+    : base.body;
   return {
     ...base,
     lead: overrides.title,
-    body: overrides.content?.trim() || base.body,
+    body: displayBody,
     hashtags: tagStr,
     imageLabel: overrides.imageUrl ? '생성 이미지' : base.imageLabel,
     videoLabel: overrides.videoUrl ? '생성 영상' : base.videoLabel,
@@ -103,6 +109,10 @@ export function PostViewerArticle({
   const videoUrl = overrides?.videoUrl ?? null;
   const resultUrl = overrides?.resultUrl ?? null;
   const published = formatKst(overrides?.completedAt);
+  const showVideo = overrides?.contentType === 'B' || Boolean(videoUrl);
+  const liveBody = overrides?.content
+    ? sanitizeBlogPostForNaver(overrides.content, { contentType: overrides.contentType ?? 'A' })
+    : null;
 
   return (
     <article className="leading-relaxed">
@@ -119,10 +129,10 @@ export function PostViewerArticle({
       )}
       <p className="mb-3 whitespace-pre-wrap text-[13px] text-[#333]">
         {isLive
-          ? (overrides?.content?.slice(0, 400) ||
+          ? (liveBody?.slice(0, 400) ||
               '콘텐츠 생성이 진행 중입니다. 완료 후 실제 HTML이 이 영역에 채워집니다.')
           : template.body}
-        {isLive && overrides?.content ? <span className="m-cursor-blink inline-block" /> : null}
+        {isLive && liveBody ? <span className="m-cursor-blink inline-block" /> : null}
       </p>
       {imageUrl ? (
         <img
@@ -138,17 +148,19 @@ export function PostViewerArticle({
           {template.imageLabel}
         </div>
       )}
-      {videoUrl ? (
-        <video
-          src={videoUrl}
-          controls
-          className="mb-3 max-h-[200px] w-full rounded-md bg-black"
-        />
-      ) : (
-        <div className="mb-3 flex h-20 items-center justify-center rounded-md bg-black text-[22px] text-white">
-          ▶ {template.videoLabel}
-        </div>
-      )}
+      {showVideo ? (
+        videoUrl ? (
+          <video
+            src={videoUrl}
+            controls
+            className="mb-3 max-h-[200px] w-full rounded-md bg-black"
+          />
+        ) : (
+          <div className="mb-3 flex h-20 items-center justify-center rounded-md bg-black text-[22px] text-white">
+            ▶ {template.videoLabel}
+          </div>
+        )
+      ) : null}
       <p className="text-[11.5px] text-[#888]">{template.hashtags}</p>
     </article>
   );

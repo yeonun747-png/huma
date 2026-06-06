@@ -12,6 +12,7 @@ export type PostViewerModalProps = {
   open: boolean;
   onClose: () => void;
   isLive?: boolean;
+  contentType?: 'A' | 'B';
 } & PostViewerOverrides;
 
 export function PostViewerModal({
@@ -20,6 +21,7 @@ export function PostViewerModal({
   workspace,
   isLive = false,
   content,
+  contentType,
   resultUrl,
   completedAt,
   imageUrl,
@@ -58,6 +60,7 @@ export function PostViewerModal({
     title,
     workspace,
     content,
+    contentType,
     resultUrl,
     completedAt,
     imageUrl,

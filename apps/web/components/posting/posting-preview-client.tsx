@@ -9,6 +9,7 @@ import {
   isPreviewImagenDone,
   resolvePreviewImageUrl,
 } from '@/lib/preview-image-url';
+import { normalizeBlogLink, prepareBodyForTypingSim } from '@/lib/naver-post-sanitize';
 import { PlaywrightPostingReplay } from '@/components/posting/playwright-posting-replay';
 
 type PreviewStep = {
@@ -155,8 +156,14 @@ export function PostingPreviewClient({ jobId }: { jobId: string }) {
       : jobId;
 
   return (
-    <div className="min-h-screen bg-[#ececec] px-3 py-4 text-huma-t sm:px-4 sm:py-6">
-      <div className="mx-auto max-w-3xl">
+    <div
+      className={
+        readyForTyping
+          ? 'flex h-screen min-h-[720px] flex-col overflow-hidden px-2 py-2'
+          : 'min-h-screen px-3 py-4 text-huma-t sm:px-4 sm:py-6'
+      }
+    >
+      <div className={readyForTyping ? 'flex min-h-0 flex-1 flex-col' : 'mx-auto max-w-3xl'}>
         {!readyForTyping && (
           <div className="mb-4 rounded-lg border border-huma-acc/40 bg-huma-glow px-4 py-3">
             <div className="text-sm font-semibold text-huma-acc">🔍 포스팅 검증 모드</div>
@@ -243,24 +250,19 @@ export function PostingPreviewClient({ jobId }: { jobId: string }) {
         )}
 
         {readyForTyping && job?.title && job.content && displayImageUrl && (
-          <>
-            <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px] text-[#666]">
-              <span className="rounded bg-[#fff8e6] px-2 py-0.5 text-[#b8860b]">검증 모드 · 발행 없음</span>
-              <span>{WS_LABEL[ws] ?? ws}</span>
-              <span>·</span>
-              <span>타입 {contentType}</span>
-              <span>·</span>
-              <span className="text-huma-ok">Claude ✓ Imagen ✓</span>
-            </div>
+          <div className="flex min-h-0 flex-1 flex-col">
             <PlaywrightPostingReplay
               key={simulatorKey}
               title={job.title}
-              body={job.content}
-              linkUrl={job.link_url}
+              body={prepareBodyForTypingSim(job.content, {
+                contentType,
+                linkUrl: normalizeBlogLink(job.link_url),
+              })}
+              linkUrl={normalizeBlogLink(job.link_url)}
               imageUrl={displayImageUrl}
               contentType={contentType}
             />
-          </>
+          </div>
         )}
 
         {(job?.status === 'running' || waitingForImagen || (jobDone && imagenDone && previewImageUrl && !displayImageUrl && !imagenError)) && (

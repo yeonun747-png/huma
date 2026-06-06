@@ -102,6 +102,7 @@ export function QueueManager() {
     workspace: Workspace;
     isLive?: boolean;
     content?: string | null;
+    contentType?: 'A' | 'B';
     resultUrl?: string | null;
     completedAt?: string | null;
     imageUrl?: string | null;
@@ -232,10 +233,14 @@ export function QueueManager() {
       screenshot_base64: values.screenshot_base64,
       dry_run: true,
     });
+    const w = Math.min(1440, window.screen.availWidth - 24);
+    const h = Math.min(960, window.screen.availHeight - 48);
+    const left = Math.max(0, Math.floor((window.screen.availWidth - w) / 2));
+    const top = Math.max(0, Math.floor((window.screen.availHeight - h) / 2));
     window.open(
       `/posting-preview?jobId=${encodeURIComponent(job.id)}`,
       '_blank',
-      'noopener,noreferrer,width=1280,height=900',
+      `noopener,noreferrer,width=${w},height=${h},left=${left},top=${top}`,
     );
     load();
   };
@@ -299,6 +304,7 @@ export function QueueManager() {
         workspace={viewer?.workspace ?? workspace}
         isLive={viewer?.isLive}
         content={viewer?.content}
+        contentType={viewer?.contentType}
         resultUrl={viewer?.resultUrl}
         completedAt={viewer?.completedAt}
         imageUrl={viewer?.imageUrl}
@@ -400,6 +406,7 @@ export function QueueManager() {
                     workspace: ws,
                     isLive: job.status === 'running',
                     content: job.content,
+                    contentType: job.content_type_auto ? 'A' : (job.content_type ?? 'A'),
                     resultUrl: job.result_url,
                     completedAt: job.completed_at,
                     imageUrl: job.image_urls?.[0] ?? null,
