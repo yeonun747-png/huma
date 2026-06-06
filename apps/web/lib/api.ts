@@ -1,4 +1,5 @@
 import type { HumaJob, HumaAccount, HumaModem, HumaVideoQueue } from '@huma/shared';
+import { cachedFetch, invalidateApiCache } from '@/lib/api-cache';
 
 const API_BASE = process.env.NEXT_PUBLIC_HUMA_API_URL ?? 'http://localhost:3100';
 
@@ -88,21 +89,32 @@ function qs(params: Record<string, string | undefined>) {
   return q ? `?${q}` : '';
 }
 
+function refreshNavCaches() {
+  invalidateApiCache('nav-badges');
+  invalidateApiCache('status');
+}
+
 export const api = {
   health: () => request<{ status: string }>('/api/health'),
-  status: (params?: { workspace?: string }) =>
-    request<{
-      healthy: boolean;
-      queueActive: boolean;
-      running?: boolean;
-      pendingJobs: number;
-      queued?: number;
-      liveAccounts?: number;
-      nextScheduled?: string | null;
-      activeAccounts: number;
-      errors: number;
-      paused: boolean;
-    }>(`/api/status${qs(params ?? {})}`),
+  status: (params?: { workspace?: string }, opts?: { force?: boolean }) =>
+    cachedFetch(
+      `status:${params?.workspace ?? 'all'}`,
+      8_000,
+      () =>
+        request<{
+          healthy: boolean;
+          queueActive: boolean;
+          running?: boolean;
+          pendingJobs: number;
+          queued?: number;
+          liveAccounts?: number;
+          nextScheduled?: string | null;
+          activeAccounts: number;
+          errors: number;
+          paused: boolean;
+        }>(`/api/status${qs(params ?? {})}`),
+      opts,
+    ),
   login: (username: string, password: string) =>
     request<{
       token: string;
@@ -116,8 +128,11 @@ export const api = {
     job_type?: string;
     limit?: string;
   }) => request<HumaJob[]>(`/api/jobs${qs(params ?? {})}`),
-  createJob: (body: Partial<HumaJob>) =>
-    request<HumaJob>('/api/jobs', { method: 'POST', body: JSON.stringify(body) }),
+  createJob: async (body: Partial<HumaJob>) => {
+    const job = await request<HumaJob>('/api/jobs', { method: 'POST', body: JSON.stringify(body) });
+    refreshNavCaches();
+    return job;
+  },
   createAutoContentJob: (body: {
     workspace: string;
     title: string;
@@ -172,7 +187,11 @@ export const api = {
     }>(`/api/jobs/${jobId}/publish-from-preview`, { method: 'POST' }),
   pauseJob: (id: string) => request(`/api/jobs/${id}/pause`, { method: 'PATCH' }),
   resumeJob: (id: string) => request(`/api/jobs/${id}/resume`, { method: 'PATCH' }),
-  deleteJob: (id: string) => request(`/api/jobs/${id}`, { method: 'DELETE' }),
+  deleteJob: async (id: string) => {
+    const res = await request(`/api/jobs/${id}`, { method: 'DELETE' });
+    refreshNavCaches();
+    return res;
+  },
   bulkDeleteJobs: (ids: string[]) =>
     request<{ success: boolean; deleted: number; failed: number; errors?: string[] }>(
       '/api/jobs/bulk-delete',
@@ -189,11 +208,23 @@ export const api = {
       session_started: boolean;
     }>(`/api/jobs/${id}/crank-session`),
   runJob: (id: string) => request(`/api/jobs/${id}/run-now`, { method: 'POST' }),
-  updateJob: (id: string, body: Partial<HumaJob>) =>
-    request<HumaJob>(`/api/jobs/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
-  navBadges: (params?: { workspace?: string }) =>
-    request<{ queue: number; video: number; watcher: number }>(`/api/jobs/nav-badges${qs(params ?? {})}`),
-  accounts: () => request<HumaAccount[]>('/api/accounts'),
+  updateJob: async (id: string, body: Partial<HumaJob>) => {
+    const job = await request<HumaJob>(`/api/jobs/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+    refreshNavCaches();
+    return job;
+  },
+  navBadges: (params?: { workspace?: string }, opts?: { force?: boolean }) =>
+    cachedFetch(
+      `nav-badges:${params?.workspace ?? 'all'}`,
+      10_000,
+      () =>
+        request<{ queue: number; video: number; watcher: number }>(
+          `/api/jobs/nav-badges${qs(params ?? {})}`,
+        ),
+      opts,
+    ),
+  accounts: (opts?: { force?: boolean }) =>
+    cachedFetch('accounts', 15_000, () => request<HumaAccount[]>('/api/accounts'), opts),
   createAccount: (body: Record<string, unknown>) =>
     request('/api/accounts', { method: 'POST', body: JSON.stringify(body) }),
   updateAccount: (id: string, body: Record<string, unknown>) =>
@@ -229,20 +260,29 @@ export const api = {
   },
   deleteAccount: (id: string) => request(`/api/accounts/${id}`, { method: 'DELETE' }),
   accountLogs: (id: string) => request(`/api/accounts/${id}/logs`),
-  modems: (opts?: { probe?: boolean; slots?: number[]; timeoutMs?: number }) =>
-    request<HumaModem[]>(
-      `/api/modems${qs({
-        probe: opts?.probe ? '1' : undefined,
-        slots: opts?.slots?.length ? opts.slots.join(',') : undefined,
-      })}`,
-      { timeoutMs: opts?.timeoutMs ?? (opts?.probe ? 180_000 : undefined) },
-    ),
-  reconnectModem: (id: string) => request(`/api/modems/${id}/reconnect`, { method: 'POST' }),
-  restoreModemNetwork: () =>
-    request<{ success: boolean; message?: string; output?: string; error?: string }>(
+  modems: (opts?: { probe?: boolean; slots?: number[]; timeoutMs?: number; force?: boolean }) => {
+    const path = `/api/modems${qs({
+      probe: opts?.probe ? '1' : undefined,
+      slots: opts?.slots?.length ? opts.slots.join(',') : undefined,
+    })}`;
+    const fetcher = () =>
+      request<HumaModem[]>(path, {
+        timeoutMs: opts?.timeoutMs ?? (opts?.probe ? 180_000 : undefined),
+      });
+    if (opts?.probe) return fetcher();
+    return cachedFetch('modems:db', 30_000, fetcher, { force: opts?.force });
+  },
+  reconnectModem: async (id: string) => {
+    invalidateApiCache('modems');
+    return request(`/api/modems/${id}/reconnect`, { method: 'POST' });
+  },
+  restoreModemNetwork: async () => {
+    invalidateApiCache('modems');
+    return request<{ success: boolean; message?: string; output?: string; error?: string }>(
       '/api/modems/restore-network',
       { method: 'POST', timeoutMs: 200_000 },
-    ),
+    );
+  },
   logs: (params?: { level?: string; platform?: string; limit?: string }) =>
     request<Array<Record<string, unknown>>>(`/api/logs${qs(params ?? {})}`),
   videoQueue: () => request<HumaVideoQueue[]>('/api/video/queue'),

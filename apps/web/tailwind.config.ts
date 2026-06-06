@@ -52,7 +52,7 @@ const config: Config = {
       animation: {
         pulse: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
         blink: 'blink 1.2s infinite',
-        fadeIn: 'fadeIn 0.22s ease',
+        fadeIn: 'fadeIn 0.12s ease-out',
       },
       keyframes: {
         blink: {
@@ -60,7 +60,7 @@ const config: Config = {
           '50%': { opacity: '0.4' },
         },
         fadeIn: {
-          from: { opacity: '0', transform: 'translateY(5px)' },
+          from: { opacity: '0', transform: 'translateY(3px)' },
           to: { opacity: '1', transform: 'translateY(0)' },
         },
       },

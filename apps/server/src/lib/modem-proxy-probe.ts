@@ -36,6 +36,7 @@ async function persistModemProbePatch(id: string, patch: Record<string, unknown>
 /**
  * 프록시 관리 `GET /api/modems?probe=1` 과 동일 절차:
  * SOCKS probe → 성공 idle / 실패 error → DB 저장
+ * (reconnecting + SOCKS OK → idle 로 풀어 UI·실제 네트워크 불일치 해소)
  */
 export async function applyModemProxyProbe(
   modem: ModemProbeInput,
@@ -54,7 +55,8 @@ export async function applyModemProxyProbe(
   let geoRegion: string | null = null;
 
   if (health.ok) {
-    if (!['busy', 'reconnecting'].includes(modem.status)) {
+    // busy 제외 — reconnecting 포함, SOCKS OK면 DB 복구 (네트워크는 정상인데 UI만 재연결 고착 방지)
+    if (modem.status !== 'busy') {
       patch.status = 'idle';
       nextStatus = 'idle';
     }

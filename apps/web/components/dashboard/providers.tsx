@@ -4,7 +4,9 @@ import { useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
 import { WorkspaceProvider } from '@/components/dashboard/workspace-context';
+import { AppShell } from '@/components/dashboard/app-shell';
 import { isPublicPath } from '@/lib/public-paths';
+import { usesDashboardShell } from '@/lib/shell-paths';
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { token, loading } = useAuth();
@@ -32,6 +34,12 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  if (!usesDashboardShell(pathname)) return <>{children}</>;
+  return <AppShell>{children}</AppShell>;
+}
+
 export function Providers({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isPublic = isPublicPath(pathname);
@@ -39,7 +47,13 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <AuthProvider>
       <AuthGuard>
-        {isPublic ? children : <WorkspaceProvider>{children}</WorkspaceProvider>}
+        {isPublic ? (
+          children
+        ) : (
+          <WorkspaceProvider>
+            <AuthenticatedLayout>{children}</AuthenticatedLayout>
+          </WorkspaceProvider>
+        )}
       </AuthGuard>
     </AuthProvider>
   );

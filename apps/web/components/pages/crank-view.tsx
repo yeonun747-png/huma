@@ -223,9 +223,20 @@ export function CrankView() {
     void api.getSetting('social_crank').then(setConfig).catch(() => setConfig({}));
     void api.cafeTargets().then(setTargets).catch(() => setTargets([]));
     loadCrankAccounts();
-    void syncCrankModems();
+    void loadScheduler();
+    void (async () => {
+      setSyncingProxy(true);
+      try {
+        await api.modems({ probe: true, slots: [6, 7], timeoutMs: 60_000 });
+      } catch {
+        /* probe 실패해도 스케줄러는 표시 */
+      } finally {
+        setSyncingProxy(false);
+      }
+      await loadScheduler({ background: true });
+    })();
     loadCrankFeed();
-  }, [syncCrankModems, loadCrankFeed, loadCrankAccounts]);
+  }, [loadScheduler, loadCrankFeed, loadCrankAccounts]);
 
   useEffect(() => {
     load();

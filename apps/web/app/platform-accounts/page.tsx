@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { formatKstDate } from '@/lib/format-kst';
-import { AppShell } from '@/components/dashboard/app-shell';
 import { useWorkspace } from '@/components/dashboard/workspace-context';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -129,8 +128,6 @@ function PlatformAccountsContent() {
 
 export default function PlatformAccountsPage() {
   return (
-    <AppShell>
-      <PlatformAccountsContent />
-    </AppShell>
+    <PlatformAccountsContent />
   );
 }

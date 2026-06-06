@@ -28,6 +28,29 @@ function mergeProbedModems(existing: HumaModem[], fromApi: HumaModem[]): HumaMod
   }
   return [...bySlot.values()].sort((a, b) => a.slot_number - b.slot_number);
 }
+
+/** SOCKS probe 진행 중 — 검사중 텍스트 바운스 + 점 3개 */
+function ModemProbingLabel() {
+  return (
+    <span className="inline-flex items-center gap-0.5 whitespace-nowrap">
+      <span className="inline-block animate-bounce" style={{ animationDuration: '0.9s' }}>
+        검사중
+      </span>
+      <span className="inline-flex items-end pb-px" aria-hidden>
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className="inline-block animate-bounce text-[11px] leading-none"
+            style={{ animationDelay: `${i * 0.14}s`, animationDuration: '0.55s' }}
+          >
+            ·
+          </span>
+        ))}
+      </span>
+    </span>
+  );
+}
+
 function modemStatusTag(
   m: HumaModem,
   opts?: { probing?: boolean },
@@ -106,8 +129,8 @@ export function ModemsView() {
   const [restoring, setRestoring] = useState(false);
   const probeGenRef = useRef(0);
 
-  const runSlotProbes = useCallback(async (base: HumaModem[], gen: number) => {
-    setProbing(true);
+  const runSlotProbes = useCallback(async (base: HumaModem[], gen: number, opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setProbing(true);
     try {
       for (const slot of PROBE_SLOTS) {
         if (probeGenRef.current !== gen) return;
@@ -126,7 +149,7 @@ export function ModemsView() {
       }
     } finally {
       if (probeGenRef.current === gen) {
-        setProbing(false);
+        if (!opts?.silent) setProbing(false);
         setProbingSlot(null);
       }
     }
@@ -142,7 +165,7 @@ export function ModemsView() {
       if (probeGenRef.current !== gen) return;
       setModems(base);
       setAccounts(acc);
-      void runSlotProbes(base, gen);
+      void runSlotProbes(base, gen, { silent: true });
     } catch (err: unknown) {
       if (probeGenRef.current !== gen) return;
       const msg = err instanceof Error ? err.message : '프록시 목록 로드 실패';
@@ -237,7 +260,7 @@ export function ModemsView() {
           {m.response_ms != null ? `${m.response_ms}ms` : '—'}
         </span>,
         <MTag key="s" tone={tone}>
-          {statusLabel}
+          {probingSlot === slot ? <ModemProbingLabel /> : statusLabel}
         </MTag>,
       ];
     });
@@ -273,8 +296,8 @@ export function ModemsView() {
         <p className="mb-2 font-mono text-[10.5px] text-huma-t3">
           물리 동글 1~{I7_PHYSICAL_SLOTS} · 슬롯별 SOCKS+공인IP+지역 순차 probe (슬롯당 최대 ~90초) ·
           연운(:10001~10003) · 파나나(:10004) · 퀴즈(:10005) · C-Rank(:10006~10007)
-          {probing && probingSlot != null ? (
-            <span className="text-huma-accent"> · 동글 {probingSlot} 검사 중…</span>
+          {probingSlot != null ? (
+            <span className="text-huma-accent"> · 동글 {probingSlot} 검사중</span>
           ) : null}
           {!probing && !restoring && (
             <>

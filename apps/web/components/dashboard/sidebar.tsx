@@ -109,7 +109,7 @@ export function Sidebar() {
           const active = pathname === item.href;
           const badge = getBadge(item.badgeKey);
           return (
-            <Link key={item.href} href={item.href} className={active ? 'nav-item-active' : 'nav-item'}>
+            <Link key={item.href} href={item.href} prefetch className={active ? 'nav-item-active' : 'nav-item'}>
               <span className="w-4 shrink-0 text-center text-[13.5px]">{item.icon}</span>
               {item.label}
               {badge !== undefined && (
@@ -140,7 +140,7 @@ export function Sidebar() {
               const active = pathname === item.href;
               const badge = getBadge(item.badgeKey);
               return (
-                <Link key={item.href} href={item.href} className={active ? 'nav-item-active' : 'nav-item'}>
+                <Link key={item.href} href={item.href} prefetch className={active ? 'nav-item-active' : 'nav-item'}>
                   <span className="w-4 shrink-0 text-center text-[13.5px]">{item.icon}</span>
                   {item.label}
                   {badge !== undefined && (
@@ -158,7 +158,7 @@ export function Sidebar() {
         {systemNav.map((item) => {
           const active = pathname === item.href;
           return (
-            <Link key={item.href} href={item.href} className={active ? 'nav-item-active' : 'nav-item'}>
+            <Link key={item.href} href={item.href} prefetch className={active ? 'nav-item-active' : 'nav-item'}>
               <span className="w-4 shrink-0 text-center text-[13.5px]">{item.icon}</span>
               {item.label}
             </Link>
