@@ -64,6 +64,7 @@ function previewFingerprint(job: HumaJob): string {
 export function PostingPreviewClient({ jobId }: { jobId: string }) {
   const [job, setJob] = useState<HumaJob | null>(null);
   const [error, setError] = useState('');
+  const [displayImageUrl, setDisplayImageUrl] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -119,14 +120,38 @@ export function PostingPreviewClient({ jobId }: { jobId: string }) {
   const dryRun = (job?.platform_schedule as Record<string, unknown> | undefined)?._dry_run === true;
   const contentType = job ? resolveContentType(job) : 'A';
 
+  useEffect(() => {
+    if (!previewImageUrl || !jobDone || !imagenDone) {
+      setDisplayImageUrl(null);
+      return;
+    }
+
+    let objectUrl: string | null = null;
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        objectUrl = await api.fetchJobPreviewImageObjectUrl(jobId);
+        if (!cancelled) setDisplayImageUrl(objectUrl);
+      } catch {
+        if (!cancelled) setDisplayImageUrl(previewImageUrl);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (objectUrl?.startsWith('blob:')) URL.revokeObjectURL(objectUrl);
+    };
+  }, [jobId, previewImageUrl, jobDone, imagenDone]);
+
   const readyForTyping =
-    jobDone && contentReady && imagenDone && Boolean(previewImageUrl) && !imagenError;
+    jobDone && contentReady && imagenDone && Boolean(displayImageUrl) && !imagenError;
 
   const waitingForImagen = jobDone && contentReady && !imagenDone && !imagenError;
 
   const simulatorKey =
     readyForTyping && job
-      ? `${job.id}-${job.content?.length ?? 0}-${previewImageUrl}`
+      ? `${job.id}-${job.content?.length ?? 0}-${displayImageUrl}`
       : jobId;
 
   return (
@@ -170,16 +195,16 @@ export function PostingPreviewClient({ jobId }: { jobId: string }) {
                     <StepIcon status={step.status} />
                     <div className="min-w-0 flex-1">
                       <div className="font-medium">{step.label}</div>
-                      {step.detail && step.id === 'imagen' && step.status === 'ok' && step.detail.startsWith('http') ? (
+                      {step.id === 'imagen' && step.status === 'ok' && displayImageUrl ? (
                         <div className="mt-2">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
-                            src={step.detail}
+                            src={displayImageUrl}
                             alt="Imagen 4 생성"
                             className="max-h-[200px] rounded-md border border-huma-bdr object-contain"
                           />
                         </div>
-                      ) : step.detail ? (
+                      ) : step.detail && !(step.id === 'imagen' && step.status === 'ok' && step.detail.startsWith('http')) ? (
                         <div className="mt-0.5 break-all font-mono text-[10px] text-huma-t3">{step.detail}</div>
                       ) : null}
                       {step.ms != null && step.status === 'ok' && (
@@ -191,12 +216,12 @@ export function PostingPreviewClient({ jobId }: { jobId: string }) {
               </ul>
             </div>
 
-            {previewImageUrl && !readyForTyping && (
+            {displayImageUrl && !readyForTyping && (
               <div className="m-panel mt-4">
                 <div className="panel-title mb-2">Imagen 4 생성 이미지</div>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={previewImageUrl}
+                  src={displayImageUrl}
                   alt="Imagen 4"
                   className="mx-auto max-h-[320px] rounded-md object-contain"
                 />
@@ -217,7 +242,7 @@ export function PostingPreviewClient({ jobId }: { jobId: string }) {
           </div>
         )}
 
-        {readyForTyping && job?.title && job.content && previewImageUrl && (
+        {readyForTyping && job?.title && job.content && displayImageUrl && (
           <>
             <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px] text-[#666]">
               <span className="rounded bg-[#fff8e6] px-2 py-0.5 text-[#b8860b]">검증 모드 · 발행 없음</span>
@@ -231,17 +256,19 @@ export function PostingPreviewClient({ jobId }: { jobId: string }) {
               key={simulatorKey}
               title={job.title}
               body={job.content}
-              imageUrl={previewImageUrl}
+              imageUrl={displayImageUrl}
               contentType={contentType}
             />
           </>
         )}
 
-        {(job?.status === 'running' || waitingForImagen) && (
+        {(job?.status === 'running' || waitingForImagen || (jobDone && imagenDone && previewImageUrl && !displayImageUrl && !imagenError)) && (
           <p className="mt-6 text-center text-[12px] text-huma-t3">
             {waitingForImagen
               ? 'Claude 완료 · Imagen 4 생성 중…'
-              : '워커가 Claude → Imagen 순으로 처리 중… (1~2분)'}
+              : jobDone && imagenDone && !displayImageUrl
+                ? 'Imagen 이미지 불러오는 중…'
+                : '워커가 Claude → Imagen 순으로 처리 중… (1~2분)'}
           </p>
         )}
       </div>

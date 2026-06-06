@@ -1,9 +1,9 @@
 import { writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
-import { createClient } from '@supabase/supabase-js';
 import { askClaudeWithModel } from '../../lib/anthropic-client.js';
 import { getSubClaudeModel } from '../../lib/ai-engine.js';
 import { isGoogleImagenEnabled, isHaikuSubEnabled } from '../../lib/human-engine-policy.js';
+import { uploadHumaMediaJpeg } from '../../lib/huma-media-storage.js';
 
 /** v3.26 §7-2 — Google Imagen 4 (이미지 전용) */
 export type ImagenModel =
@@ -64,20 +64,8 @@ async function saveBase64Image(b64: string, model: ImagenModel): Promise<string>
   const localPath = join(tmpDir, `imagen_${Date.now()}.jpg`);
   await writeFile(localPath, buf);
 
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_KEY;
-  if (!url || !key) {
-    throw new Error('Imagen 이미지 저장 실패: SUPABASE_URL/SERVICE_KEY 없음');
-  }
-
-  const supa = createClient(url, key);
   const fileName = `images/${Date.now()}_${model.replace(/\./g, '_')}.jpg`;
-  await supa.storage.from('huma-media').upload(fileName, buf, {
-    contentType: 'image/jpeg',
-    upsert: true,
-  });
-  const { data } = supa.storage.from('huma-media').getPublicUrl(fileName);
-  return data.publicUrl;
+  return uploadHumaMediaJpeg(fileName, buf);
 }
 
 export async function generateImage(params: {

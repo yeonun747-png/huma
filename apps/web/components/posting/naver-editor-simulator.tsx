@@ -1,18 +1,13 @@
 'use client';
 
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef } from 'react';
 import type { ContentType } from '@huma/shared';
 import { sanitizeBlogPostForNaver, splitNaverParagraphs } from '@/lib/naver-post-sanitize';
 
 function sleep(ms: number, cancelled: () => boolean): Promise<void> {
   return new Promise((resolve) => {
-    const id = window.setTimeout(() => {
-      resolve();
-    }, ms);
-    if (cancelled()) {
-      window.clearTimeout(id);
-      resolve();
-    }
+    const id = window.setTimeout(() => resolve(), ms);
+    if (cancelled()) window.clearTimeout(id);
   });
 }
 
@@ -50,32 +45,29 @@ export const NaverEditorSimulator = memo(function NaverEditorSimulator({
     [title, contentType],
   );
 
-  const [imageVisible, setImageVisible] = useState(false);
-  const [typingDone, setTypingDone] = useState(false);
-
-  const titleTextRef = useRef<HTMLSpanElement>(null);
-  const bodyTextRef = useRef<HTMLSpanElement>(null);
+  const titleHostRef = useRef<HTMLSpanElement>(null);
+  const bodyHostRef = useRef<HTMLSpanElement>(null);
   const titleCursorRef = useRef<HTMLSpanElement>(null);
   const bodyCursorRef = useRef<HTMLSpanElement>(null);
+  const imageSlotRef = useRef<HTMLDivElement>(null);
+  const klingSlotRef = useRef<HTMLDivElement>(null);
   const statusRef = useRef<HTMLSpanElement>(null);
   const countRef = useRef<HTMLSpanElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef(false);
-  const scrollRafRef = useRef<number | null>(null);
   const imageUrlRef = useRef(imageUrl);
-  const imageInsertedRef = useRef(false);
+  const titleTextNodeRef = useRef<Text | null>(null);
+  const bodyTextNodeRef = useRef<Text | null>(null);
+  const charCountRef = useRef(0);
+  const scrollTickRef = useRef(0);
 
   useEffect(() => {
     imageUrlRef.current = imageUrl;
   }, [imageUrl]);
 
   const setCursor = (target: 'title' | 'body' | 'none') => {
-    if (titleCursorRef.current) {
-      titleCursorRef.current.style.display = target === 'title' ? 'inline-block' : 'none';
-    }
-    if (bodyCursorRef.current) {
-      bodyCursorRef.current.style.display = target === 'body' ? 'inline-block' : 'none';
-    }
+    titleCursorRef.current?.style.setProperty('visibility', target === 'title' ? 'visible' : 'hidden');
+    bodyCursorRef.current?.style.setProperty('visibility', target === 'body' ? 'visible' : 'hidden');
   };
 
   const setStatus = (label: string) => {
@@ -83,116 +75,139 @@ export const NaverEditorSimulator = memo(function NaverEditorSimulator({
   };
 
   const setCharCount = (n: number, done = false) => {
+    charCountRef.current = n;
     if (countRef.current) {
       countRef.current.textContent = `${n.toLocaleString()}자${done ? ' · 복붙 30% / 타이핑 70% 시뮬' : ''}`;
     }
   };
 
-  const scrollToBottom = () => {
-    if (scrollRafRef.current != null) return;
-    scrollRafRef.current = window.requestAnimationFrame(() => {
-      scrollRafRef.current = null;
-      const el = scrollRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
-    });
+  const followCursor = () => {
+    scrollTickRef.current += 1;
+    if (scrollTickRef.current % 6 !== 0) return;
+    bodyCursorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+  };
+
+  const appendText = (node: Text | null, chunk: string) => {
+    if (!node || !chunk) return;
+    node.data += chunk;
+    charCountRef.current += chunk.length;
+  };
+
+  const resetTextNode = (host: HTMLSpanElement | null, nodeRef: { current: Text | null }) => {
+    if (!host) return;
+    host.textContent = '';
+    const node = document.createTextNode('');
+    host.appendChild(node);
+    nodeRef.current = node;
   };
 
   useEffect(() => {
     cancelRef.current = false;
-    imageInsertedRef.current = false;
-    setImageVisible(false);
-    setTypingDone(false);
-    if (titleTextRef.current) titleTextRef.current.textContent = '';
-    if (bodyTextRef.current) bodyTextRef.current.textContent = '';
+    charCountRef.current = 0;
+    scrollTickRef.current = 0;
+
+    resetTextNode(titleHostRef.current, titleTextNodeRef);
+    resetTextNode(bodyHostRef.current, bodyTextNodeRef);
+    if (imageSlotRef.current) imageSlotRef.current.replaceChildren();
+    if (klingSlotRef.current) klingSlotRef.current.replaceChildren();
+
     setCursor('title');
     setStatus('제목 입력 중…');
     setCharCount(0);
 
     const insertImage = async () => {
-      if (imageInsertedRef.current || !imageUrlRef.current || cancelRef.current) return;
-      imageInsertedRef.current = true;
+      const url = imageUrlRef.current;
+      const slot = imageSlotRef.current;
+      if (!url || !slot || slot.childElementCount > 0 || cancelRef.current) return;
+
       setStatus('이미지 삽입 중…');
       setCursor('none');
       await sleep(600 + Math.random() * 500, () => cancelRef.current);
-      setImageVisible(true);
+
+      const img = document.createElement('img');
+      img.src = url;
+      img.alt = '본문 삽입 이미지';
+      img.decoding = 'async';
+      img.className = 'mx-auto max-h-[360px] rounded border border-[#eee] object-contain shadow-sm my-4';
+      slot.appendChild(img);
+
       setCursor('body');
       setStatus('본문 타이핑 중…');
-      scrollToBottom();
+      img.scrollIntoView({ block: 'nearest', behavior: 'auto' });
       await sleep(400, () => cancelRef.current);
+    };
+
+    const typeChunk = async (node: Text | null, text: string) => {
+      for (let i = 0; i < text.length; i++) {
+        if (cancelRef.current) return;
+        appendText(node, text[i]!);
+        if (i % 5 === 0) {
+          setCharCount(charCountRef.current);
+          followCursor();
+        }
+        await sleep(charDelay(text[i]!), () => cancelRef.current);
+      }
+    };
+
+    const pasteChunk = async (node: Text | null, text: string) => {
+      if (cancelRef.current) return;
+      appendText(node, text);
+      setCharCount(charCountRef.current);
+      followCursor();
+      await sleep(300 + Math.random() * 400, () => cancelRef.current);
     };
 
     const run = async () => {
       const paras = splitNaverParagraphs(body, { contentType });
       const pasteAt = pickPasteIndices(paras.length);
+      const titleNode = titleTextNodeRef.current;
+      const bodyNode = bodyTextNodeRef.current;
 
-      for (let i = 0; i < cleanTitle.length; i++) {
-        if (cancelRef.current) return;
-        if (titleTextRef.current) {
-          titleTextRef.current.textContent = cleanTitle.slice(0, i + 1);
-        }
-        await sleep(charDelay(cleanTitle[i]!), () => cancelRef.current);
-      }
+      await typeChunk(titleNode, cleanTitle);
 
       if (cancelRef.current) return;
       await sleep(400 + Math.random() * 400, () => cancelRef.current);
       setCursor('body');
       setStatus('본문 타이핑 중…');
 
-      let assembled = '';
-
       for (let pi = 0; pi < paras.length; pi++) {
         if (cancelRef.current) return;
         const para = paras[pi]!;
 
         if (pi > 0) {
-          assembled += '\n\n';
-          if (bodyTextRef.current) bodyTextRef.current.textContent = assembled;
-          setCharCount(assembled.length);
-          scrollToBottom();
+          appendText(bodyNode, '\n\n');
+          setCharCount(charCountRef.current);
+          followCursor();
           await sleep(500 + Math.random() * 700, () => cancelRef.current);
         }
 
         if (pasteAt.has(pi)) {
-          assembled += para;
-          if (bodyTextRef.current) bodyTextRef.current.textContent = assembled;
-          setCharCount(assembled.length);
-          scrollToBottom();
-          await sleep(300 + Math.random() * 400, () => cancelRef.current);
+          await pasteChunk(bodyNode, para);
         } else {
-          for (let ci = 0; ci < para.length; ci++) {
-            if (cancelRef.current) return;
-            assembled += para[ci];
-            if (bodyTextRef.current) {
-              bodyTextRef.current.textContent = assembled;
-            }
-            if (ci % 4 === 0) {
-              setCharCount(assembled.length);
-              scrollToBottom();
-            }
-            await sleep(charDelay(para[ci]!), () => cancelRef.current);
-          }
-          setCharCount(assembled.length);
-          scrollToBottom();
+          await typeChunk(bodyNode, para);
         }
 
-        if (pi === 0) {
-          await insertImage();
-        }
+        if (pi === 0) await insertImage();
       }
 
       if (cancelRef.current) return;
+
+      if (contentType === 'B' && klingSlotRef.current) {
+        const box = document.createElement('div');
+        box.className =
+          'mt-6 flex h-20 items-center justify-center rounded-md bg-black text-[22px] text-white';
+        box.textContent = '▶ Kling 3.0 · 15초 Shorts 미리보기';
+        klingSlotRef.current.appendChild(box);
+      }
+
       setCursor('none');
       setStatus('타이핑 완료');
-      setTypingDone(true);
-      setCharCount(assembled.length, true);
+      setCharCount(charCountRef.current, true);
     };
 
     void run();
     return () => {
       cancelRef.current = true;
-      if (scrollRafRef.current != null) {
-        window.cancelAnimationFrame(scrollRafRef.current);
-      }
     };
   }, [cleanTitle, body, contentType, imageUrl]);
 
@@ -225,7 +240,7 @@ export const NaverEditorSimulator = memo(function NaverEditorSimulator({
           className="min-h-[28px] text-[18px] font-semibold leading-snug text-[#111]"
           style={{ fontFamily: 'Malgun Gothic, sans-serif' }}
         >
-          <span ref={titleTextRef} />
+          <span ref={titleHostRef} />
           <span ref={titleCursorRef} className="naver-editor-cursor" aria-hidden />
         </div>
       </div>
@@ -233,33 +248,17 @@ export const NaverEditorSimulator = memo(function NaverEditorSimulator({
       <div
         ref={scrollRef}
         className="max-h-[min(520px,60vh)] min-h-[320px] overflow-y-auto overscroll-contain px-4 py-4"
-        style={{ contain: 'layout style paint' }}
       >
         <div
           className="whitespace-pre-wrap text-[14px] leading-[1.85] text-[#222]"
           style={{ fontFamily: 'Malgun Gothic, sans-serif' }}
         >
-          <span ref={bodyTextRef} />
-          <span ref={bodyCursorRef} className="naver-editor-cursor" style={{ display: 'none' }} aria-hidden />
+          <span ref={bodyHostRef} />
+          <span ref={bodyCursorRef} className="naver-editor-cursor" style={{ visibility: 'hidden' }} aria-hidden />
         </div>
 
-        {imageVisible && imageUrlRef.current && (
-          <div className="my-4">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={imageUrlRef.current}
-              alt="본문 삽입 이미지"
-              className="mx-auto max-h-[360px] rounded border border-[#eee] object-contain shadow-sm"
-              decoding="async"
-            />
-          </div>
-        )}
-
-        {contentType === 'B' && typingDone && (
-          <div className="mt-6 flex h-20 items-center justify-center rounded-md bg-black text-[22px] text-white">
-            ▶ Kling 3.0 · 15초 Shorts 미리보기
-          </div>
-        )}
+        <div ref={imageSlotRef} />
+        <div ref={klingSlotRef} />
       </div>
 
       <div className="flex items-center justify-between border-t border-[#eee] bg-[#fafafa] px-4 py-2 text-[11px] text-[#888]">

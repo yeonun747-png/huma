@@ -133,6 +133,16 @@ export const api = {
   }) =>
     request<HumaJob>('/api/jobs/auto-content', { method: 'POST', body: JSON.stringify(body) }),
   getJob: (id: string) => request<HumaJob>(`/api/jobs/${id}`),
+  /** Storage 비공개 버킷 — Service Key 프록시로 blob URL 생성 */
+  fetchJobPreviewImageObjectUrl: async (jobId: string): Promise<string> => {
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/api/jobs/${jobId}/preview-image`, {
+      headers: token ? { 'X-HUMA-KEY': token } : {},
+    });
+    if (!res.ok) throw new Error('미리보기 이미지 로드 실패');
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  },
   contentPreview: (body: {
     workspace: string;
     title: string;

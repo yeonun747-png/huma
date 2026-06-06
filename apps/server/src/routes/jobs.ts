@@ -17,6 +17,8 @@ import { assertCafeNewPostAccount, assertCafeReplyAccount } from '../lib/cafe-ac
 import { assertManualSocialCrankAllowed } from '../lib/crank-guard.js';
 import { getCrankJobSessionDetail } from '../lib/crank-job-session.js';
 import { deleteJobById, deleteJobsByIds } from '../lib/delete-job.js';
+import { downloadHumaMedia, parseHumaMediaStoragePath } from '../lib/huma-media-storage.js';
+import { resolveJobPreviewImageUrl } from '../lib/resolve-job-preview-image.js';
 
 async function assertJobWorkspaceAccess(
   jobId: string,
@@ -462,6 +464,37 @@ export async function registerJobRoutes(app: FastifyInstance) {
     const { data, error } = await supabase.from('huma_jobs').select('*').eq('id', id).maybeSingle();
     if (error || !data) return reply.code(404).send({ error: '작업 없음' });
     return data;
+  });
+
+  /** Imagen 미리보기 — Storage 비공개 버킷도 Service Key로 스트리밍 */
+  app.get('/api/jobs/:id/preview-image', { preHandler: authMiddleware }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const allowedWorkspaces = getWorkspaceFilter(request);
+    const access = await assertJobWorkspaceAccess(id, allowedWorkspaces);
+    if (!access.ok) return reply.code(access.status).send({ error: access.error });
+
+    const { data: job, error } = await supabase
+      .from('huma_jobs')
+      .select('image_urls, platform_schedule')
+      .eq('id', id)
+      .maybeSingle();
+    if (error || !job) return reply.code(404).send({ error: '작업 없음' });
+
+    const mediaUrl = resolveJobPreviewImageUrl(job);
+    if (!mediaUrl) return reply.code(404).send({ error: '생성 이미지 없음' });
+
+    const storagePath = parseHumaMediaStoragePath(mediaUrl);
+    if (!storagePath) return reply.code(404).send({ error: 'Storage 경로 파싱 실패' });
+
+    try {
+      const buf = await downloadHumaMedia(storagePath);
+      return reply
+        .type('image/jpeg')
+        .header('Cache-Control', 'private, max-age=3600')
+        .send(buf);
+    } catch (err) {
+      return reply.code(502).send({ error: (err as Error).message });
+    }
   });
 
   app.get('/api/jobs/:id/crank-session', { preHandler: authMiddleware }, async (request, reply) => {
