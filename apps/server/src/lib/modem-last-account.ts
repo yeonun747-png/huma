@@ -30,26 +30,39 @@ export async function reconnectModemIfAccountSwitched(
 ): Promise<boolean> {
   const lastAccountId = await redisConnection.get(lastAccountKey(proxyPort));
   const needs = lastAccountId !== null && lastAccountId !== accountId;
-  if (!needs) return false;
 
   const slot = proxyPortToSlot(proxyPort);
-  const { data: modem } = await supabase
-    .from('huma_modems')
-    .select('id, current_ip')
-    .eq('slot_number', slot)
-    .single();
+  const [{ data: modem }, { data: account }] = await Promise.all([
+    supabase.from('huma_modems').select('id, current_ip').eq('slot_number', slot).single(),
+    supabase.from('huma_accounts').select('name, crank_workspace').eq('id', accountId).single(),
+  ]);
+
+  const logBase = {
+    workspace: (account?.crank_workspace as string | undefined) ?? 'yeonun',
+    platform: 'naver_crank',
+    account_id: accountId,
+    modem_id: modem?.id,
+  };
+
+  if (!needs) {
+    const ipNote = modem?.current_ip ?? '?';
+    const message =
+      lastAccountId === null
+        ? `C-Rank 세션 시작 — :${proxyPort} IP ${ipNote} (동글 첫 계정)`
+        : `C-Rank 세션 시작 — 동일 계정·IP 유지 (${ipNote})`;
+    await logOperation({ level: 'info', message, ...logBase });
+    return false;
+  }
 
   const oldIp = modem?.current_ip ?? null;
   let newIp: string;
   try {
-    // reconnectModemBySlot 내부 sleep(5000) = IP 재할당 완료 대기
     newIp = await reconnectModemBySlot(slot);
   } catch (err) {
     await logOperation({
       level: 'WARN',
       message: `C-Rank 계정 전환 — 비행기모드 재연결 실패, 이전 IP(${oldIp ?? '?'}) 유지 후 세션 진행: ${(err as Error).message}`,
-      modem_id: modem?.id,
-      account_id: accountId,
+      ...logBase,
     });
     return false;
   }
@@ -60,8 +73,7 @@ export async function reconnectModemIfAccountSwitched(
     message: sameIp
       ? `계정 전환 IP 교체 시도 — 동일 IP(${newIp}) 재할당, 정상 진행`
       : `계정 전환 IP 교체: ${oldIp ?? '?'} → ${newIp}`,
-    modem_id: modem?.id,
-    account_id: accountId,
+    ...logBase,
   });
 
   return true;
