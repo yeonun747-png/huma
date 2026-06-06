@@ -1,5 +1,7 @@
 /** 브라우저용 — server human-engine/typing.ts · timing.ts 와 동일 로직 */
 
+import { planParagraphPaste } from '@huma/shared';
+
 export type HumanEngineSimConfig = {
   wpm_mean: number;
   wpm_sigma: number;
@@ -307,34 +309,46 @@ export function pickPasteIndices(total: number): Set<number> {
   return indices;
 }
 
-function pickSnippet(text: string, maxLen: number): string {
-  const clean = text.replace(/\s+/g, ' ').trim();
-  if (clean.length <= maxLen) return clean;
-  return `${clean.slice(0, maxLen).trim()}…`;
-}
+/** typePostContent — 단락 30% 인용·문어체 구간 복붙 · 70% 타이핑 */
+export async function typePostContentSim(
+  content: string,
+  buffer: LiveTextBuffer,
+  config: HumanEngineSimConfig,
+  cancelled: () => boolean,
+  onTick?: () => void,
+): Promise<void> {
+  const paragraphs = content.split('\n\n').filter(Boolean);
+  const total = paragraphs.length;
+  if (total === 0) return;
 
-/** 서비스 화면(운세·사주 결과)에서 복붙한 것처럼 보이는 클립 */
-export function buildServicePasteClip(sourceParagraph: string): string {
-  const date = new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' });
-  const snippet = pickSnippet(sourceParagraph, 72);
+  const pasteIndices = pickPasteIndices(total);
 
-  const hasMoney = /돈|재물|수입|월급|금전|부자|재테크|돈벌|용돈|투자/.test(sourceParagraph);
-  const hasLove = /사랑|연애|재회|이별|인연|남친|여친|썸|결혼|짝/.test(sourceParagraph);
-  const hasCareer = /직장|승진|이직|사업|취업|면접|커리어/.test(sourceParagraph);
+  for (let i = 0; i < total; i++) {
+    if (cancelled()) return;
+    const para = paragraphs[i]!;
 
-  if (hasMoney) {
-    const stars = '★'.repeat(randomBetween(3, 5)) + '☆'.repeat(randomBetween(0, 2));
-    return `[연운 재물운 결과 · ${date}]\n\n💰 재물운: ${stars}\n3개월 내 수입 변화: +${randomBetween(8, 22)}% 가능\n핵심 시기: ${randomBetween(1, 3)}개월 후\n\n"${snippet}"`;
+    if (pasteIndices.has(i)) {
+      const plan = planParagraphPaste(para);
+      for (const seg of plan.segments) {
+        if (cancelled()) return;
+        if (seg.kind === 'paste') {
+          buffer.append(seg.text);
+          onTick?.();
+          await sleepMs(randomBetween(400, 900), cancelled);
+        } else {
+          await humanTypeSim(seg.text, buffer, config, cancelled, onTick);
+        }
+      }
+    } else {
+      await humanTypeSim(para, buffer, config, cancelled, onTick);
+    }
+
+    if (i < total - 1) {
+      buffer.append('\n\n');
+      onTick?.();
+      await sleepMs(randomBetween(config.paragraph_pause_ms[0], config.paragraph_pause_ms[1]), cancelled);
+    }
   }
-  if (hasLove) {
-    const stars = '★'.repeat(randomBetween(2, 4)) + '☆'.repeat(randomBetween(1, 3));
-    return `[연운 연애·인연 결과 · ${date}]\n\n💕 인연운: ${stars}\n재회·새 인연: ${randomBetween(40, 85)}% 긍정\n\n"${snippet}"`;
-  }
-  if (hasCareer) {
-    return `[연운 직장·사업운 · ${date}]\n\n📋 종합: ${randomBetween(62, 91)}점\n승진·변화 시기: ${randomBetween(2, 6)}월\n\n"${snippet}"`;
-  }
-
-  return `[연운 사주·운세 결과 · ${date}]\n\n✨ 종합 운세: ${randomBetween(58, 88)}점\n\n"${snippet}"`;
 }
 
 export async function sleepMs(ms: number, cancelled: () => boolean): Promise<void> {
@@ -432,41 +446,6 @@ export async function humanTypeSim(
       await typeHangulChar(char, buffer, config, cancelled, onTick);
     } else {
       await typePlainChar(char, buffer, config, cancelled, onTick);
-    }
-  }
-}
-
-/** typePostContent — 단락 30% 서비스화면 복붙 · 70% 타이핑 */
-export async function typePostContentSim(
-  content: string,
-  buffer: LiveTextBuffer,
-  config: HumanEngineSimConfig,
-  cancelled: () => boolean,
-  onTick?: () => void,
-): Promise<void> {
-  const paragraphs = content.split('\n\n').filter(Boolean);
-  const total = paragraphs.length;
-  if (total === 0) return;
-
-  const pasteIndices = pickPasteIndices(total);
-
-  for (let i = 0; i < total; i++) {
-    if (cancelled()) return;
-    const para = paragraphs[i]!;
-
-    if (pasteIndices.has(i)) {
-      const clip = buildServicePasteClip(para);
-      buffer.append(clip);
-      onTick?.();
-      await sleepMs(randomBetween(400, 900), cancelled);
-    } else {
-      await humanTypeSim(para, buffer, config, cancelled, onTick);
-    }
-
-    if (i < total - 1) {
-      buffer.append('\n\n');
-      onTick?.();
-      await sleepMs(randomBetween(config.paragraph_pause_ms[0], config.paragraph_pause_ms[1]), cancelled);
     }
   }
 }
@@ -628,7 +607,7 @@ export const POSTING_PHASE_LABELS: Record<PostingPhase, string> = {
   title: '제목 (#subjectTextBox) 타이핑',
   title_pause: '제목 입력 후 사고 정지',
   body_click: '본문 (.se-content) 클릭',
-  body: '본문 typePostContent (복붙30%·타이핑70%)',
+  body: '본문 typePostContent (인용·문어체 복붙30%·타이핑70%)',
   link: '링크 URL 추가',
   image_upload: '사진 파일 업로드 (insertImage)',
   review: '발행 전 검토 (오탈자 수정)',

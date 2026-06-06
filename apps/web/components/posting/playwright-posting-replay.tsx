@@ -163,7 +163,7 @@ export const PlaywrightPostingReplay = memo(function PlaywrightPostingReplay({
 
       setPhase('body');
       setCursor('body');
-      if (statusRef.current) statusRef.current.textContent = 'typePostContent · 서비스화면 복붙 30% / 타이핑 70%';
+      if (statusRef.current) statusRef.current.textContent = 'typePostContent · 인용·문어체 복붙 30% / 타이핑 70%';
       if (bodyTextHostRef.current) bodyBufferRef.current = new LiveTextBuffer(bodyTextHostRef.current);
       await typePostContentSim(simBody, bodyBufferRef.current!, cfg, () => cancelRef.current || runToken !== runTokenRef.current, followBody);
       if (runToken !== runTokenRef.current) return;

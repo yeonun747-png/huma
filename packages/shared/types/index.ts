@@ -5,6 +5,7 @@ export * from './video';
 export * from './dongle-slot';
 export * from './crank-label';
 export * from './crank-service';
+export * from './paste-extract';
 
 export type Workspace = import('./account').Workspace;
 

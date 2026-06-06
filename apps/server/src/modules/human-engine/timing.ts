@@ -1,4 +1,5 @@
 import type { Page, Locator } from 'playwright';
+import { planParagraphPaste } from '@huma/shared';
 import { gaussianRandom, randomBetween, sleep, wpmToDelay } from '../../lib/utils.js';
 import type { HumanEngineConfig } from '../../lib/settings.js';
 import { probeModemSocks } from '../../lib/modem-socks-probe.js';
@@ -85,12 +86,19 @@ export async function typePostContent(
     const para = paragraphs[i]!;
 
     if (pasteIndices.has(i)) {
-      await element.click();
-      await page.evaluate(async (text) => {
-        await navigator.clipboard.writeText(text);
-      }, para);
-      await page.keyboard.press('Control+V');
-      await humanSleep(300, 800);
+      const plan = planParagraphPaste(para);
+      for (const seg of plan.segments) {
+        if (seg.kind === 'paste') {
+          await element.click();
+          await page.evaluate(async (text) => {
+            await navigator.clipboard.writeText(text);
+          }, seg.text);
+          await page.keyboard.press('Control+V');
+          await humanSleep(300, 800);
+        } else {
+          await humanType(page, element, seg.text, humanConfig);
+        }
+      }
     } else {
       await humanType(page, element, para, humanConfig);
     }
