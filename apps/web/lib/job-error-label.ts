@@ -126,6 +126,12 @@ export function formatJobErrorLabel(message: string | null | undefined): string 
   if (raw.includes('LAYER4_REST')) {
     return 'Layer4 휴식 중인 계정 — Watcher에서 해제 후 재시도';
   }
+  if (/Imagen API 실패 \(404\)/.test(raw)) {
+    return 'Imagen 4 API 404 — 서버 imagen.ts 엔드포인트·모델명 확인 (i7 배포 필요)';
+  }
+  if (/Imagen API 실패/.test(raw)) {
+    return `Imagen 4 이미지 생성 실패 — ${raw.replace(/^Imagen API 실패\s*/i, '').slice(0, 120)}`;
+  }
 
   return raw;
 }

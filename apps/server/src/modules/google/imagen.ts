@@ -94,8 +94,9 @@ export async function generateImage(params: {
   const model = await resolveModel(params.model, params.prompt);
   const aspectRatio = params.aspectRatio || '9:16';
 
+  // Gemini Developer API — Imagen 4는 :predict (generateImages 아님 → 404)
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateImages`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict`,
     {
       method: 'POST',
       headers: {
@@ -103,9 +104,9 @@ export async function generateImage(params: {
         'x-goog-api-key': apiKey,
       },
       body: JSON.stringify({
-        prompt: { text: params.prompt },
-        generationConfig: {
-          numberOfImages: 1,
+        instances: [{ prompt: params.prompt }],
+        parameters: {
+          sampleCount: 1,
           aspectRatio,
         },
       }),
@@ -118,10 +119,13 @@ export async function generateImage(params: {
   }
 
   const data = (await res.json()) as {
+    predictions?: Array<{ bytesBase64Encoded?: string; mimeType?: string }>;
     generatedImages?: Array<{ image?: { imageBytes?: string } }>;
   };
 
-  const b64 = data.generatedImages?.[0]?.image?.imageBytes;
+  const b64 =
+    data.predictions?.[0]?.bytesBase64Encoded ??
+    data.generatedImages?.[0]?.image?.imageBytes;
   if (!b64) throw new Error('Imagen 응답에 imageBytes 없음');
 
   return saveBase64Image(b64, model);
