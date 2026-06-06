@@ -57,7 +57,8 @@ function jobSub(job: HumaJob): string {
     if (blogCount > 0) parts.push(`우리블로그 ${blogCount}곳`);
     parts.push(`약 ${payload.sessionMinutes ?? 60}분`);
   } else if (job.job_type === 'content_full') {
-    parts.push('AI 생성·발행 분배');
+    const dryRun = (job.platform_schedule as Record<string, unknown> | undefined)?._dry_run === true;
+    parts.push(dryRun ? '검증(dry_run)·네이버 미발행' : 'AI 생성·발행 분배');
     if (['pending', 'scheduled', 'paused'].includes(job.status)) parts.push('클릭하여 수정');
   } else if (job.content_type) parts.push(`타입 ${job.content_type}`);
   else if (job.link_url) parts.push('AI 생성');
@@ -218,6 +219,27 @@ export function QueueManager() {
     }
   };
 
+  const handlePreviewSubmit = async (values: AutoContentFormValues) => {
+    const job = await api.createAutoContentJob({
+      workspace,
+      title: values.title.trim(),
+      source_url: values.source_url.trim(),
+      synopsis: values.synopsis.trim() || undefined,
+      content_type: values.content_type === 'auto' ? undefined : values.content_type,
+      content_type_auto: values.content_type === 'auto',
+      auto_schedule: values.auto_schedule,
+      schedule_time: values.schedule_time,
+      screenshot_base64: values.screenshot_base64,
+      dry_run: true,
+    });
+    window.open(
+      `/posting-preview?jobId=${encodeURIComponent(job.id)}`,
+      '_blank',
+      'noopener,noreferrer,width=1280,height=900',
+    );
+    load();
+  };
+
   const handleAutoContentSubmit = async (values: AutoContentFormValues) => {
     if (editingJob) {
       const scheduledAt = values.auto_schedule
@@ -300,6 +322,7 @@ export function QueueManager() {
           setPrefill(null);
         }}
         onSubmit={handleAutoContentSubmit}
+        onPreview={handlePreviewSubmit}
       />
 
       <MPanel

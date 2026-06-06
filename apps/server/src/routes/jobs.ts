@@ -12,6 +12,7 @@ import {
   registerAutoContentJobs,
   resolveAutoContentStartAt,
 } from '../modules/claude/auto-content-orchestrator.js';
+import { runContentPreview } from '../modules/claude/content-preview.js';
 import { assertCafeNewPostAccount, assertCafeReplyAccount } from '../lib/cafe-accounts.js';
 import { assertManualSocialCrankAllowed } from '../lib/crank-guard.js';
 import { getCrankJobSessionDetail } from '../lib/crank-job-session.js';
@@ -159,6 +160,43 @@ export async function registerJobRoutes(app: FastifyInstance) {
     return data;
   });
 
+  app.post('/api/jobs/content-preview', { preHandler: authMiddleware }, async (request, reply) => {
+    const body = request.body as {
+      workspace?: string;
+      title?: string;
+      source_url?: string;
+      synopsis?: string;
+      screenshot_base64?: string;
+      content_type?: 'A' | 'B';
+      account_id?: string;
+    };
+    const allowedWorkspaces = getWorkspaceFilter(request);
+
+    if (!body.workspace || !allowedWorkspaces.includes(body.workspace)) {
+      return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
+    }
+    if (!body.title?.trim() || !body.source_url?.trim()) {
+      return reply.code(400).send({ error: '제목과 URL은 필수입니다' });
+    }
+
+    try {
+      const result = await runContentPreview({
+        workspace: body.workspace,
+        title: body.title.trim(),
+        source_url: body.source_url.trim(),
+        synopsis: body.synopsis?.trim(),
+        screenshot_base64: body.screenshot_base64,
+        content_type: body.content_type ?? 'A',
+        account_id: body.account_id,
+      });
+      const failed = result.steps.some((s) => s.status === 'err');
+      if (failed) return reply.code(502).send({ error: '콘텐츠 검증 실패', ...result });
+      return result;
+    } catch (err) {
+      return reply.code(500).send({ error: (err as Error).message ?? '검증 실패' });
+    }
+  });
+
   app.post('/api/jobs/auto-content', { preHandler: authMiddleware }, async (request, reply) => {
     const body = request.body as {
       workspace?: string;
@@ -171,6 +209,7 @@ export async function registerJobRoutes(app: FastifyInstance) {
       auto_schedule?: boolean;
       schedule_time?: string;
       repeat_rule?: string;
+      dry_run?: boolean;
     };
     const allowedWorkspaces = getWorkspaceFilter(request);
 
@@ -195,6 +234,7 @@ export async function registerJobRoutes(app: FastifyInstance) {
         auto_schedule: autoScheduled,
         scheduled_at: scheduledAt,
         repeat_rule: body.repeat_rule || null,
+        dry_run: body.dry_run === true,
       });
       return {
         ...result.primary_job,
@@ -411,6 +451,17 @@ export async function registerJobRoutes(app: FastifyInstance) {
 
     const { data } = await query;
     return data ?? [];
+  });
+
+  app.get('/api/jobs/:id', { preHandler: authMiddleware }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const allowedWorkspaces = getWorkspaceFilter(request);
+    const access = await assertJobWorkspaceAccess(id, allowedWorkspaces);
+    if (!access.ok) return reply.code(access.status).send({ error: access.error });
+
+    const { data, error } = await supabase.from('huma_jobs').select('*').eq('id', id).maybeSingle();
+    if (error || !data) return reply.code(404).send({ error: '작업 없음' });
+    return data;
   });
 
   app.get('/api/jobs/:id/crank-session', { preHandler: authMiddleware }, async (request, reply) => {

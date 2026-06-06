@@ -11,6 +11,8 @@ export interface AccountPersona {
   likeProb: number;
   commentProb: number;
   interests: string[];
+  /** 네이버 블로그 글 문체 (~요체·경험담 등) — 계정관리 페르소나에서 편집 */
+  blogWritingPersona?: string;
 }
 
 const HAIKU_FALLBACK = 'claude-haiku-4-5-20251001';

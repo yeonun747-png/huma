@@ -23,6 +23,7 @@ interface QueueAutoContentModalProps {
   prefill?: QueuePrefill | null;
   onClose: () => void;
   onSubmit: (values: AutoContentFormValues) => Promise<void>;
+  onPreview?: (values: AutoContentFormValues) => Promise<void>;
 }
 
 const EMPTY_FORM: AutoContentFormValues = {
@@ -58,7 +59,7 @@ function jobToForm(job: HumaJob): AutoContentFormValues {
   };
 }
 
-export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmit }: QueueAutoContentModalProps) {
+export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmit, onPreview }: QueueAutoContentModalProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const isEdit = Boolean(editJob);
   const editable = !editJob || ['pending', 'scheduled', 'paused'].includes(editJob.status);
@@ -109,6 +110,27 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
       setScreenshotName(file.name);
     };
     reader.readAsDataURL(file);
+  };
+
+  const handlePreview = async () => {
+    if (!form.title.trim() || !form.source_url.trim()) {
+      setError('① 제목과 ② URL은 필수 입력 항목입니다.');
+      return;
+    }
+    if (!onPreview || isEdit) return;
+    setError('');
+    setLoading(true);
+    try {
+      await onPreview(form);
+      setForm(EMPTY_FORM);
+      setScreenshotName('');
+      setPreviewOpen(false);
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '검증 등록 실패');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSubmit = async () => {
@@ -349,17 +371,41 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
         {error && <p className="mb-2 text-xs text-huma-err">{error}</p>}
 
         <div className="m-modal-foot">
-          <button type="button" className="btn-primary flex-[2] py-2" onClick={handleSubmit} disabled={loading || !editable}>
-            {loading ? (isEdit ? '저장 중…' : 'AI 생성 중…') : isEdit ? '저장' : '🚀 AI 생성 + 발행 큐 등록'}
-          </button>
+          {!isEdit && onPreview ? (
+            <button
+              type="button"
+              className="btn-primary flex-[2] py-2"
+              onClick={handlePreview}
+              disabled={loading || !editable}
+            >
+              {loading ? '등록 중…' : '🔍 검증 미리보기 (새 창 · 네이버 미발행)'}
+            </button>
+          ) : (
+            <button type="button" className="btn-primary flex-[2] py-2" onClick={handleSubmit} disabled={loading || !editable}>
+              {loading ? (isEdit ? '저장 중…' : 'AI 생성 중…') : isEdit ? '저장' : '🚀 AI 생성 + 발행 큐 등록'}
+            </button>
+          )}
+          {!isEdit && onPreview ? (
+            <button
+              type="button"
+              className="btn-ghost flex-1 py-2 text-huma-warn"
+              onClick={handleSubmit}
+              disabled={loading || !editable}
+              title="네이버 블로그에 실제 발행됩니다"
+            >
+              발행 큐
+            </button>
+          ) : null}
           <button type="button" className="btn-ghost flex-1 py-2" onClick={onClose} disabled={loading}>
             취소
           </button>
         </div>
         <p className="mt-2 text-center font-mono text-[10.5px] text-huma-t3">
-          {form.auto_schedule
-            ? '등록 직후 AI 생성 시작 · 네이버·SNS 발행 시각만 Haiku가 결정합니다'
-            : `생성·발행 시작: ${buildScheduledAt(form.schedule_time).slice(0, 16).replace('T', ' ')}`}
+          {!isEdit && onPreview
+            ? '검증 모드: Claude·Imagen 확인 + 타이핑 시뮬만 · 계정 정지 전까지 네이버 발행은 「발행 큐」만 사용'
+            : form.auto_schedule
+              ? '등록 직후 AI 생성 시작 · 네이버·SNS 발행 시각만 Haiku가 결정합니다'
+              : `생성·발행 시작: ${buildScheduledAt(form.schedule_time).slice(0, 16).replace('T', ' ')}`}
         </p>
       </div>
     </div>

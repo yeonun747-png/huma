@@ -13,8 +13,15 @@ import {
 import { generateImage, type ImageModel } from '../../higgsfield/image.js';
 import { uniquifyImageFromUrl } from '../../image/uniquify.js';
 import { getPipelineModelSettings } from '../../../lib/pipeline-settings.js';
+import { resolveBlogWritingPersona } from '../../../lib/blog-writing-persona.js';
+import { patchJobPreviewProgress, type PreviewStep } from '../../claude/content-preview.js';
 
 export type ContentType = 'A' | 'B';
+
+export function isDryRunJob(platformSchedule: unknown): boolean {
+  if (!platformSchedule || typeof platformSchedule !== 'object') return false;
+  return (platformSchedule as Record<string, unknown>)._dry_run === true;
+}
 
 export interface ContentOrchestratorInput {
   workspace: string;
@@ -32,16 +39,16 @@ export interface ContentOrchestratorInput {
   parentJobId?: string;
 }
 
-async function pickPostingAccount(workspace: string): Promise<string | null> {
+async function pickPostingAccount(workspace: string): Promise<{ id: string; persona?: Record<string, unknown> } | null> {
   const { data } = await supabase
     .from('huma_accounts')
-    .select('id')
+    .select('id, persona')
     .eq('workspace', workspace)
     .eq('account_type', 'posting')
     .eq('is_active', true)
     .limit(1)
     .maybeSingle();
-  return data?.id ?? null;
+  return data ? { id: data.id as string, persona: data.persona as Record<string, unknown> | undefined } : null;
 }
 
 async function pickPlatformAccount(workspace: string, platform: string): Promise<string | null> {
@@ -162,7 +169,8 @@ async function runTypeA(
   schedule?: PlatformSchedule,
 ) {
   const { workspace, title, sourceUrl, scheduled_at, repeat_rule, auto_scheduled = true } = params;
-  const accountId = await pickPostingAccount(workspace);
+  const account = await pickPostingAccount(workspace);
+  const accountId = account?.id ?? null;
   let jobsCreated = 0;
 
   const blogAt = platformTime(auto_scheduled, schedule, 'naver_blog', scheduled_at);
@@ -225,7 +233,8 @@ async function runTypeB(
   schedule?: PlatformSchedule,
 ) {
   const { workspace, title, sourceUrl, scheduled_at, repeat_rule, auto_scheduled = true } = params;
-  const accountId = await pickPostingAccount(workspace);
+  const account = await pickPostingAccount(workspace);
+  const accountId = account?.id ?? null;
 
   const blogAt = platformTime(auto_scheduled, schedule, 'naver_blog', scheduled_at);
   const threadsAt = platformTime(auto_scheduled, schedule, 'threads', scheduled_at);
@@ -326,12 +335,22 @@ async function persistAutoDecision(
   },
 ) {
   if (!parentJobId) return;
+  const { data: job } = await supabase
+    .from('huma_jobs')
+    .select('platform_schedule')
+    .eq('id', parentJobId)
+    .maybeSingle();
+  const wasDryRun = isDryRunJob(job?.platform_schedule);
+  const platformSchedule = wasDryRun
+    ? { ...decision.platform_schedule, _dry_run: true }
+    : decision.platform_schedule;
+
   await supabase
     .from('huma_jobs')
     .update({
       content_type: decision.content_type,
       video_model: decision.video_model,
-      platform_schedule: decision.platform_schedule,
+      platform_schedule: platformSchedule,
     })
     .eq('id', parentJobId);
 }
@@ -341,8 +360,9 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
   let videoModel = input.video_model ?? 'kling-3.0';
   let schedule = input.platform_schedule;
   const autoScheduled = input.auto_scheduled !== false;
+  const dryRun = isDryRunJob(schedule);
   const shouldAutoDecide = input.content_type_auto !== false && !contentType;
-  const needsSchedule = autoScheduled && !schedule;
+  const needsSchedule = autoScheduled && !schedule && !dryRun;
   const needsVideoModel = !input.video_model;
 
   if (shouldAutoDecide || needsSchedule || needsVideoModel) {
@@ -366,10 +386,25 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
 
   const resolvedType = contentType ?? 'A';
   const baseScheduledAt =
-    autoScheduled && schedule?.naver_blog
+    autoScheduled && schedule?.naver_blog && !dryRun
       ? (toTodayDatetime(schedule.naver_blog) ?? input.scheduled_at)
       : input.scheduled_at;
 
+  const postingAccount = await pickPostingAccount(input.workspace);
+  const blogWritingPersona = resolveBlogWritingPersona(
+    input.workspace,
+    postingAccount?.persona ?? null,
+  );
+
+  const previewSteps: PreviewStep[] = [
+    { id: 'claude', label: 'Claude Sonnet', status: 'running' },
+    { id: 'imagen', label: 'Imagen 4', status: 'pending' },
+  ];
+  if (dryRun && input.parentJobId) {
+    await patchJobPreviewProgress(input.parentJobId, previewSteps);
+  }
+
+  const claudeStart = Date.now();
   const generated = await generateAllContent({
     title: input.title.trim(),
     sourceUrl: input.sourceUrl.trim(),
@@ -377,13 +412,76 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
     screenshotBase64: input.screenshotBase64,
     workspace: input.workspace,
     content_type: resolvedType,
+    blogWritingPersona,
   });
 
+  previewSteps[0] = {
+    ...previewSteps[0]!,
+    status: 'ok',
+    ms: Date.now() - claudeStart,
+    detail: `${generated.blog_post.length}자`,
+  };
+  previewSteps[1] = { ...previewSteps[1]!, status: 'running' };
+  if (dryRun && input.parentJobId) {
+    await patchJobPreviewProgress(input.parentJobId, previewSteps, {
+      blog_post_length: generated.blog_post.length,
+    });
+    await supabase
+      .from('huma_jobs')
+      .update({ content: generated.blog_post, hashtags: generated.hashtags })
+      .eq('id', input.parentJobId);
+  }
+
+  const imagenStart = Date.now();
+  const imageModel = selectImageModel(input.workspace);
   const imageUrl = await generateImage({
     prompt: generated.image_prompt,
-    model: selectImageModel(input.workspace) as ImageModel,
+    model: imageModel as ImageModel,
   });
-  const uniqueImageUrl = await uniquifyImageFromUrl(imageUrl);
+
+  previewSteps[1] = {
+    ...previewSteps[1]!,
+    status: 'ok',
+    ms: Date.now() - imagenStart,
+    detail: imageUrl,
+  };
+
+  let uniqueImageUrl = imageUrl;
+  if (!dryRun) {
+    uniqueImageUrl = await uniquifyImageFromUrl(imageUrl);
+  }
+
+  if (dryRun && input.parentJobId) {
+    await patchJobPreviewProgress(input.parentJobId, previewSteps, {
+      image_model: imageModel,
+      image_url: imageUrl,
+    });
+    await supabase
+      .from('huma_jobs')
+      .update({
+        image_urls: [imageUrl],
+        platform_schedule: {
+          ...(schedule ?? {}),
+          _dry_run: true,
+          _preview: {
+            steps: previewSteps,
+            image_model: imageModel,
+            image_prompt: generated.image_prompt,
+            updated_at: new Date().toISOString(),
+          },
+        },
+      })
+      .eq('id', input.parentJobId);
+
+    return {
+      jobsCreated: 0,
+      primaryJobId: input.parentJobId,
+      video_queue_id: undefined as string | undefined,
+      dry_run: true as const,
+      generated,
+      image_url: imageUrl,
+    };
+  }
 
   const runInput = { ...input, scheduled_at: baseScheduledAt, auto_scheduled: autoScheduled };
 

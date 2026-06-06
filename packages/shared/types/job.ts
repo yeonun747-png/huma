@@ -37,7 +37,7 @@ export interface HumaJob {
   content_type_auto?: boolean;
   video_model?: string;
   auto_scheduled?: boolean;
-  platform_schedule?: Record<string, string>;
+  platform_schedule?: Record<string, unknown>;
   scheduled_at?: string;
   repeat_rule?: string;
   status: JobStatus;

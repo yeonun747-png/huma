@@ -10,6 +10,8 @@ export interface ContentGenerationInput {
   screenshotBase64?: string;
   workspace: string;
   content_type?: 'A' | 'B';
+  /** 계정별 블로그 문체 지침 (연운 ~요체 등) */
+  blogWritingPersona?: string;
 }
 
 export interface ContentGenerationOutput {
@@ -29,8 +31,11 @@ const SONNET_MODEL_FALLBACK = 'claude-sonnet-4-6';
 const HAIKU_MODEL_FALLBACK = 'claude-haiku-4-5-20251001';
 
 const SYSTEM_PROMPTS: Record<string, string> = {
-  yeonun: `당신은 연운(緣運) AI 사주·운세 플랫폼의 전문 콘텐츠 마케터입니다.
-톤: 신비롭고 따뜻한 동양적 감성. 서비스 URL을 2~3회 자연스럽게 포함.`,
+  yeonun: `당신은 연운(緣運) 네이버 블로그에 글을 쓰는 30대 한국인 독자입니다. 마케터·AI가 아닙니다.
+톤: ~요체, 가볍고 친근, 친구에게 카톡하듯. 경험담·솔직한 감정·짧은 추임새(ㅎㅎ, ㅠㅠ)를 적절히.
+금지: AI/마케팅 문체 — 「정리했습니다」「안내합니다」「살펴보겠습니다」「흐름과 실천 포인트를 정리」 같은 표현.
+필수: 입력에 [말투]·[캐릭터 포스팅 톤 지침]·character_mode_prompts가 있으면 그 말투를 본문에 그대로 반영.
+서비스 URL은 본문에 2~3회만 자연스럽게.`,
   quizoasis: `당신은 퀴즈오아시스 글로벌 심리테스트 플랫폼의 콘텐츠 마케터입니다.
 톤: 재미있고 공유 욕구를 자극하는 가벼운 문체. 테스트 링크 포함.`,
   panana: `당신은 파나나(PANANA) AI 캐릭터 콘텐츠 플랫폼의 콘텐츠 마케터입니다.
@@ -118,12 +123,18 @@ async function generateMainContent(
       ? '\n콘텐츠 타입 A: 텍스트+이미지 중심. video_prompt는 짧게.'
       : '\n콘텐츠 타입 B: 텍스트+이미지+영상. video_prompt를 풍부하게. 오디오는 Kling 3.0 내장 — tts_script 필드 생략.';
 
+  const personaGuide = input.blogWritingPersona?.trim()
+    ? `\n[계정 블로그 문체 — 반드시 준수]\n${input.blogWritingPersona.trim()}`
+    : input.workspace === 'yeonun'
+      ? '\n[블로그 문체] ~요체·경험담·AI 티 금지. speech_style·캐릭터 톤 지침을 본문 말투에 반영.'
+      : '';
+
   const userParts: Array<Record<string, unknown>> = [
     {
       type: 'text',
-      text: withHumanWritingMandate(`URL 핵심:\n${urlSummary}\n\n제목: ${input.title}${synopsisGuide}${typeGuide}\n\n순수 JSON만 (코드블록 없이):
+      text: withHumanWritingMandate(`URL 핵심:\n${urlSummary}\n\n제목: ${input.title}${synopsisGuide}${personaGuide}${typeGuide}\n\n순수 JSON만 (코드블록 없이):
 {
-  "blog_post": "네이버 블로그 글 2000자 이상",
+  "blog_post": "네이버 블로그 글 2000자 이상 (~요체·경험담·사람 말투)",
   "tiktok_caption": "TikTok 캡션 150자 이내",
   "instagram_caption": "Instagram 캡션 300자 이내",
   "threads_text": "Threads 텍스트 500자 이내, 링크 포함",

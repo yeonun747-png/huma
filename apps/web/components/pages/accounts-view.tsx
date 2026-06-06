@@ -19,6 +19,7 @@ import { useRegisterPageAction } from '@/components/dashboard/page-action-contex
 import { useWorkspace } from '@/components/dashboard/workspace-context';
 import { useAuth } from '@/lib/auth-context';
 import { alertAccountError } from '@/lib/account-errors';
+import { BlogPersonaModal } from '@/components/accounts/blog-persona-modal';
 import {
   BUSINESS_UNITS,
   defaultAccountGroup,
@@ -62,6 +63,13 @@ const SOCIAL_PLATFORMS_QUIZOASIS = [
   { value: 'twitter_ja', label: 'X (JA)' },
   { value: 'pinterest', label: 'Pinterest' },
 ];
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isValidAccountId(id: string): boolean {
+  return UUID_RE.test(id.trim());
+}
 
 const TYPE_LABEL: Record<AccountType, string> = {
   posting: 'POSTING',
@@ -128,6 +136,9 @@ export function AccountsView() {
   const [editingAccount, setEditingAccount] = useState<HumaAccount | null>(null);
   const [editBlogUrl, setEditBlogUrl] = useState('');
   const [editSaving, setEditSaving] = useState(false);
+  const [personaAccount, setPersonaAccount] = useState<HumaAccount | null>(null);
+  const [personaSaving, setPersonaSaving] = useState(false);
+  const [personaError, setPersonaError] = useState('');
 
   const postingColumns = useMemo(() => visiblePostingColumns(admin), [admin]);
 
@@ -276,6 +287,45 @@ export function AccountsView() {
     }
   };
 
+  const handleOpenPersona = (ac: HumaAccount) => {
+    setPersonaError('');
+    if (!ac.id || !isValidAccountId(ac.id)) {
+      setPersonaError(
+        `계정 id가 유효하지 않습니다 (${ac.name}). Supabase huma_accounts에 연운 포스팅 계정(:${ac.proxy_port ?? '?'})이 등록되어 있는지 확인하세요.`,
+      );
+      setPersonaAccount(ac);
+      return;
+    }
+    setPersonaAccount(ac);
+  };
+
+  const handleSavePersona = async (text: string) => {
+    if (!personaAccount) return;
+    if (!personaAccount.id || !isValidAccountId(personaAccount.id)) {
+      setPersonaError('저장할 수 없는 계정 id입니다. 계정관리에서 연운3 포스팅 계정을 다시 등록하세요.');
+      return;
+    }
+    setPersonaSaving(true);
+    setPersonaError('');
+    try {
+      const updated = await api.updateAccountBlogPersona(
+        personaAccount.id,
+        text,
+        personaAccount.proxy_port,
+        personaAccount.persona ?? null,
+      );
+      if (!updated || typeof updated !== 'object') {
+        throw new Error('서버 응답 없음 — API 연결·배포 상태를 확인하세요');
+      }
+      setPersonaAccount(null);
+      load();
+    } catch (e) {
+      setPersonaError(e instanceof Error ? e.message : '페르소나 저장 실패');
+    } finally {
+      setPersonaSaving(false);
+    }
+  };
+
   const handleDeleteNaver = async (ac: HumaAccount) => {
     if (!(await confirmDelete(ac.name))) return;
     try {
@@ -308,7 +358,9 @@ export function AccountsView() {
   };
 
   const accountsInWorkspace = (ws: Workspace) =>
-    accounts.filter((a) => isPostingAccount(a) && a.workspace === ws);
+    accounts
+      .filter((a) => isPostingAccount(a) && a.workspace === ws)
+      .sort((a, b) => (a.proxy_port ?? 99) - (b.proxy_port ?? 99));
 
   const platformsInWorkspace = (ws: Workspace) =>
     platforms.filter((p) => String(p.workspace) === ws);
@@ -477,6 +529,20 @@ export function AccountsView() {
         </div>
       )}
 
+      {personaAccount && (
+        <BlogPersonaModal
+          account={personaAccount}
+          open
+          onClose={() => {
+            setPersonaAccount(null);
+            setPersonaError('');
+          }}
+          onSave={handleSavePersona}
+          saving={personaSaving}
+          error={personaError}
+        />
+      )}
+
       {editingAccount && (
         <div className="m-panel mb-3 space-y-2">
           <div className="text-[12px] font-semibold text-huma-t">
@@ -524,7 +590,10 @@ export function AccountsView() {
                           <span className="m-type-badge m-type-posting">POSTING</span>
                         </>
                       }
-                      url={ac.blog_url ?? `${ac.naver_id} · 지수${ac.blog_index ?? 5}`}
+                      url={
+                        ac.blog_url ??
+                        `${ac.naver_id} · :${ac.proxy_port ?? '?'} · 지수${ac.blog_index ?? 5}`
+                      }
                       status={statusLabel(ac)}
                       statusTone={!ac.blog_url ? 'warn' : statusTone(ac)}
                       stats={[
@@ -535,6 +604,7 @@ export function AccountsView() {
                       actions={[
                         { label: '편집', primary: true, onClick: () => handleStartEditPosting(ac) },
                         { label: '▶ 모니터', onClick: () => router.push('/monitor') },
+                        { label: '페르소나', onClick: () => handleOpenPersona(ac) },
                         { label: ac.is_active ? '정지' : '재개', onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(load) },
                       ]}
                     />

@@ -63,12 +63,19 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     );
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
+    const err = (await res.json().catch(() => ({ error: res.statusText, message: res.statusText }))) as {
+      error?: string;
+      message?: string;
+    };
     if (res.status === 401 && typeof window !== 'undefined') {
       localStorage.removeItem('huma_token');
       window.dispatchEvent(new Event('huma:auth-expired'));
     }
-    throw new Error(err.error ?? 'API 요청 실패');
+    const detail = [err.error, err.message]
+      .filter((s): s is string => typeof s === 'string' && s.trim().length > 0 && s !== 'Not Found')
+      .join(' — ');
+    const fallback = res.statusText || 'API 요청 실패';
+    throw new Error(detail || (err.error === 'Not Found' ? `API 경로 없음 (${res.status}) — 서버 git pull·build·pm2 restart 필요` : fallback));
   }
   return res.json();
 }
@@ -122,8 +129,30 @@ export const api = {
     auto_schedule?: boolean;
     schedule_time?: string;
     repeat_rule?: string;
+    dry_run?: boolean;
   }) =>
     request<HumaJob>('/api/jobs/auto-content', { method: 'POST', body: JSON.stringify(body) }),
+  getJob: (id: string) => request<HumaJob>(`/api/jobs/${id}`),
+  contentPreview: (body: {
+    workspace: string;
+    title: string;
+    source_url: string;
+    synopsis?: string;
+    screenshot_base64?: string;
+    content_type?: 'A' | 'B';
+    account_id?: string;
+  }) =>
+    request<{
+      steps: Array<{ id: string; label: string; status: string; detail?: string; ms?: number }>;
+      generated?: { blog_post: string; image_prompt: string };
+      image_url?: string;
+      image_model?: string;
+      total_ms: number;
+    }>('/api/jobs/content-preview', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      timeoutMs: 180_000,
+    }),
   pauseJob: (id: string) => request(`/api/jobs/${id}/pause`, { method: 'PATCH' }),
   resumeJob: (id: string) => request(`/api/jobs/${id}/resume`, { method: 'PATCH' }),
   deleteJob: (id: string) => request(`/api/jobs/${id}`, { method: 'DELETE' }),
@@ -152,6 +181,35 @@ export const api = {
     request('/api/accounts', { method: 'POST', body: JSON.stringify(body) }),
   updateAccount: (id: string, body: Record<string, unknown>) =>
     request(`/api/accounts/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  updateAccountBlogPersona: async (
+    id: string,
+    text: string,
+    proxyPort?: number,
+    existingPersona?: Record<string, unknown> | null,
+  ) => {
+    const path = `/api/accounts/${encodeURIComponent(id)}`;
+    const primary = { blog_writing_persona: text, lookup_proxy_port: proxyPort };
+    try {
+      return await request<HumaAccount>(path, {
+        method: 'PATCH',
+        body: JSON.stringify(primary),
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '';
+      const needsFallback =
+        msg.includes('변경할 필드') ||
+        msg.includes('blog_writing_persona') ||
+        msg.includes('API 경로 없음');
+      if (!needsFallback) throw e;
+      const { mergeBlogWritingPersona } = await import('./blog-writing-persona');
+      return request<HumaAccount>(path, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          persona: mergeBlogWritingPersona(existingPersona ?? null, text),
+        }),
+      });
+    }
+  },
   deleteAccount: (id: string) => request(`/api/accounts/${id}`, { method: 'DELETE' }),
   accountLogs: (id: string) => request(`/api/accounts/${id}/logs`),
   modems: (opts?: { probe?: boolean; slots?: number[]; timeoutMs?: number }) =>

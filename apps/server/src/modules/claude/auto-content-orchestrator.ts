@@ -18,6 +18,8 @@ export interface AutoContentRequest {
   scheduled_at?: string;
   schedule_time?: string;
   repeat_rule?: string | null;
+  /** true면 Claude+Imagen만 실행, post_blog·SNS 발행 job 미생성 */
+  dry_run?: boolean;
 }
 
 export interface AutoContentResult {
@@ -60,6 +62,7 @@ export async function registerAutoContentJobs(body: AutoContentRequest): Promise
       image_urls: body.screenshot_base64 ? [body.screenshot_base64] : null,
       scheduled_at: scheduledAt,
       repeat_rule: body.repeat_rule || null,
+      platform_schedule: body.dry_run ? { _dry_run: true } : null,
       status,
       retry_count: 0,
     })
@@ -86,7 +89,7 @@ export async function executeContentFull(humaJobId: string) {
     title: job.title ?? '',
     sourceUrl: job.link_url ?? '',
     synopsis: job.content ?? undefined,
-    screenshotBase64: job.image_urls?.[0],
+    screenshotBase64: job.image_urls?.[0]?.startsWith('data:') ? job.image_urls[0] : undefined,
     content_type: job.content_type_auto ? undefined : (job.content_type as ContentType | undefined),
     content_type_auto: job.content_type_auto ?? true,
     auto_scheduled: job.auto_scheduled ?? true,
