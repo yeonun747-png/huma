@@ -492,6 +492,7 @@
   .m-tag-idle { background: var(--bg3); color: var(--t3); }
   .m-tag-blue { background: var(--blue-bg); color: var(--blue); }
   .m-tag-live { background: var(--err); color: #fff; animation: blink 1.2s infinite; }
+  .m-tag-datetime { font-size: 9.5px; font-weight: 500; letter-spacing: -0.02em; white-space: nowrap; }
 
   .m-tw { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--bdr2); }
   .m-tw:last-child { border-bottom: none; }

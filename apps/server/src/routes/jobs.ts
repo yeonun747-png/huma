@@ -33,6 +33,38 @@ async function assertJobWorkspaceAccess(
   return { ok: true };
 }
 
+function kstTodayStartIso(): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const pick = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((p) => p.type === type)?.value ?? 0);
+  const y = pick('year');
+  const m = pick('month');
+  const d = pick('day');
+  return new Date(Date.UTC(y, m - 1, d, -9, 0, 0)).toISOString();
+}
+
+async function fetchQueueStats(workspace: string) {
+  const todayStart = kstTodayStartIso();
+  const base = () => supabase.from('huma_jobs').select('*', { count: 'exact', head: true }).eq('workspace', workspace);
+  const [pendingRes, runningRes, doneTodayRes, doneAllRes] = await Promise.all([
+    base().in('status', ['pending', 'scheduled']),
+    base().eq('status', 'running'),
+    base().eq('status', 'completed').gte('completed_at', todayStart),
+    base().eq('status', 'completed'),
+  ]);
+  return {
+    pending: pendingRes.count ?? 0,
+    running: runningRes.count ?? 0,
+    doneToday: doneTodayRes.count ?? 0,
+    doneAll: doneAllRes.count ?? 0,
+  };
+}
+
 export async function registerJobRoutes(app: FastifyInstance) {
   app.get('/api/jobs', { preHandler: authMiddleware }, async (request) => {
     const allowedWorkspaces = getWorkspaceFilter(request);
@@ -59,6 +91,41 @@ export async function registerJobRoutes(app: FastifyInstance) {
     const { data, error } = await query;
     if (error) return [];
     return data;
+  });
+
+  app.get('/api/jobs/page', { preHandler: authMiddleware }, async (request, reply) => {
+    const allowedWorkspaces = getWorkspaceFilter(request);
+    const { workspace, limit = '20', offset = '0' } = request.query as {
+      workspace?: string;
+      limit?: string;
+      offset?: string;
+    };
+    if (!workspace || !allowedWorkspaces.includes(workspace)) {
+      return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
+    }
+
+    const take = Math.min(100, Math.max(1, Number(limit) || 20));
+    const skip = Math.max(0, Number(offset) || 0);
+    const from = skip;
+    const to = skip + take - 1;
+
+    const { data, error, count } = await supabase
+      .from('huma_jobs')
+      .select('*', { count: 'exact' })
+      .eq('workspace', workspace)
+      .order('created_at', { ascending: false })
+      .range(from, to);
+
+    if (error) {
+      return reply.code(500).send({ error: error.message });
+    }
+
+    const stats = await fetchQueueStats(workspace);
+    return {
+      items: data ?? [],
+      total: count ?? 0,
+      stats,
+    };
   });
 
   app.get('/api/jobs/nav-badges', { preHandler: authMiddleware }, async (request) => {

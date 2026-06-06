@@ -1,16 +1,16 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { HumaJob, Workspace } from '@huma/shared';
 import { api } from '@/lib/api';
 import { WS_LABEL } from '@/lib/constants';
 import { useWorkspace } from '@/components/dashboard/workspace-context';
-import { MGrid, MPanel, MQueueItem, MStat } from '@/components/mockup/primitives';
+import { MGrid, MPanel, MQueueItem, MStat, MTag } from '@/components/mockup/primitives';
 import { useRegisterPageAction } from '@/components/dashboard/page-action-context';
 import { PostViewerModal } from '@/components/viewer/post-viewer-modal';
 import { CrankJobDetailModal } from './crank-job-detail-modal';
 import { parseSocialCrankJobContent } from '@/lib/crank-job-payload';
-import { formatScheduleLabel, formatScheduleQueueTag, isSchedulePast } from './job-schedule-form';
+import { formatLogKst, isSchedulePast } from '@/lib/format-kst';
 import { QueueAutoContentModal, type AutoContentFormValues } from './queue-auto-content-modal';
 import { buildScheduledAt } from '@/lib/queue-repeat';
 import { formatJobErrorLabel } from '@/lib/job-error-label';
@@ -20,6 +20,18 @@ import {
   isStaleOrFailedQueueJob,
 } from '@/lib/queue-job-eligibility';
 import type { QueuePrefill } from '@/lib/queue-prefill';
+import { isSameKstDay } from '@/lib/format-kst';
+
+const QUEUE_PAGE_SIZE_KEY = 'huma_queue_page_size';
+const PAGE_SIZES = [20, 50, 100] as const;
+type PageSize = (typeof PAGE_SIZES)[number];
+
+function readPageSize(): PageSize {
+  if (typeof window === 'undefined') return 20;
+  const v = localStorage.getItem(QUEUE_PAGE_SIZE_KEY);
+  if (v === '50' || v === '100') return Number(v) as PageSize;
+  return 20;
+}
 
 function jobIcon(type: string) {
   if (type === 'social_crank') return '💬';
@@ -29,20 +41,46 @@ function jobIcon(type: string) {
   return '📝';
 }
 
-function tagFor(job: HumaJob): { label: string; tone: 'live' | 'warn' | 'idle' | 'err' } {
-  if (job.status === 'running') return { label: 'LIVE', tone: 'live' };
-  if (job.status === 'failed') {
-    return {
-      label: job.scheduled_at ? formatScheduleQueueTag(job.scheduled_at, 'failed') : '실패',
-      tone: 'err',
-    };
-  }
+function queueTagSlot(job: HumaJob): ReactNode {
+  if (job.status === 'running') return <MTag tone="live">LIVE</MTag>;
+
   if (job.scheduled_at) {
-    const label = formatScheduleQueueTag(job.scheduled_at, job.status);
-    const pastPending = isSchedulePast(job.scheduled_at) && ['scheduled', 'pending'].includes(job.status);
-    return { label, tone: pastPending ? 'err' : 'warn' };
+    const dt = formatLogKst(job.scheduled_at);
+    const pastPending =
+      isSchedulePast(job.scheduled_at) && ['scheduled', 'pending', 'paused'].includes(job.status);
+    if (job.status === 'failed') {
+      return (
+        <MTag tone="err" className="m-tag-datetime" title={`${dt} · 실패`}>
+          {dt} · 실패
+        </MTag>
+      );
+    }
+    if (pastPending) {
+      return (
+        <MTag tone="err" className="m-tag-datetime" title={`${dt} · 지연`}>
+          {dt} · 지연
+        </MTag>
+      );
+    }
+    return (
+      <MTag tone="warn" className="m-tag-datetime" title={dt}>
+        {dt}
+      </MTag>
+    );
   }
-  return { label: job.status, tone: 'idle' };
+
+  if (job.status === 'failed') return <MTag tone="err">실패</MTag>;
+
+  if (job.status === 'completed' && job.completed_at) {
+    const dt = formatLogKst(job.completed_at);
+    return (
+      <MTag tone="ok" className="m-tag-datetime" title={dt}>
+        {dt}
+      </MTag>
+    );
+  }
+
+  return <MTag tone="idle">{job.status}</MTag>;
 }
 
 function jobSub(job: HumaJob): string {
@@ -74,7 +112,7 @@ function jobSub(job: HumaJob): string {
             ? '미실행·지연'
             : '세션 시작'
           : '발행 예약';
-    parts.push(`${formatScheduleLabel(job.scheduled_at)} ${scheduleHint}`);
+    parts.push(scheduleHint);
   }
 
   if (job.status === 'failed' && job.error_message) {
@@ -91,6 +129,11 @@ function jobSub(job: HumaJob): string {
 export function QueueManager() {
   const { workspace } = useWorkspace();
   const [jobs, setJobs] = useState<HumaJob[]>([]);
+  const [total, setTotal] = useState(0);
+  const [stats, setStats] = useState({ pending: 0, running: 0, doneToday: 0, doneAll: 0 });
+  const [pageSize, setPageSize] = useState<PageSize>(() => readPageSize());
+  const [page, setPage] = useState(1);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [editingJob, setEditingJob] = useState<HumaJob | null>(null);
   const [prefill, setPrefill] = useState<QueuePrefill | null>(null);
@@ -111,23 +154,53 @@ export function QueueManager() {
   } | null>(null);
 
   const load = useCallback(async () => {
+    const offset = (page - 1) * pageSize;
     try {
-      /** 워크스페이스 탭 = 해당 workspace job만 (스케줄러만 전체 풀) */
-      const rows = await api.jobs({ workspace, limit: '200' });
-      setJobs(
-        rows.sort((a, b) =>
-          String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')),
-        ),
+      const result = await api.jobsPage({
+        workspace,
+        limit: String(pageSize),
+        offset: String(offset),
+      });
+      setJobs(result.items);
+      setTotal(result.total);
+      setStats(result.stats);
+      setLoadError(null);
+      return;
+    } catch {
+      /* 구 서버(/api/jobs/page 미배포) — 기존 API로 폴백 */
+    }
+
+    try {
+      const all = await api.jobs({ workspace, limit: '500' });
+      const sorted = [...all].sort((a, b) =>
+        String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')),
       );
+      const completed = sorted.filter((j) => j.status === 'completed');
+      setStats({
+        pending: sorted.filter((j) => j.status === 'pending' || j.status === 'scheduled').length,
+        running: sorted.filter((j) => j.status === 'running').length,
+        doneToday: completed.filter((j) => isSameKstDay(j.completed_at)).length,
+        doneAll: completed.length,
+      });
+      setTotal(sorted.length);
+      setJobs(sorted.slice(offset, offset + pageSize));
+      setLoadError(null);
     } catch {
       setJobs([]);
+      setTotal(0);
+      setStats({ pending: 0, running: 0, doneToday: 0, doneAll: 0 });
+      setLoadError('큐 데이터를 불러오지 못했습니다. 서버 연결을 확인하세요.');
     }
-  }, [workspace]);
+  }, [workspace, page, pageSize]);
 
   useEffect(() => {
     load();
     setSelectedIds(new Set());
   }, [load]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [workspace, pageSize]);
 
   useEffect(() => {
     const onPrefill = (e: Event) => {
@@ -142,14 +215,12 @@ export function QueueManager() {
 
   useRegisterPageAction('openQueueForm', () => setShowModal(true));
 
-  const stats = useMemo(
-    () => ({
-      pending: jobs.filter((j) => j.status === 'pending' || j.status === 'scheduled').length,
-      running: jobs.filter((j) => j.status === 'running').length,
-      done: jobs.filter((j) => j.status === 'completed').length,
-    }),
-    [jobs],
-  );
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const showPagination = total > pageSize;
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   const deletableJobs = useMemo(() => jobs.filter(isDeletableQueueJob), [jobs]);
   const staleFailedJobs = useMemo(() => jobs.filter(isStaleOrFailedQueueJob), [jobs]);
@@ -314,10 +385,11 @@ export function QueueManager() {
         onClose={() => setViewer(null)}
       />
 
-      <MGrid cols={3}>
+      <MGrid cols={4}>
         <MStat label="총 대기" value={stats.pending} />
         <MStat label="진행중" value={stats.running} tone="warn" />
-        <MStat label="오늘 완료" value={stats.done} tone="ok" />
+        <MStat label="오늘 완료" value={stats.doneToday} tone="ok" />
+        <MStat label="완료 전체" value={stats.doneAll} sub="큐에 남은 건" />
       </MGrid>
 
       <QueueAutoContentModal
@@ -345,7 +417,9 @@ export function QueueManager() {
         }
       >
         {jobs.length === 0 ? (
-          <div className="py-8 text-center text-sm text-huma-t3">대기 중인 작업이 없습니다</div>
+          <div className="py-8 text-center text-sm text-huma-t3">
+            {loadError ?? (total > 0 ? '이 페이지에 표시할 작업이 없습니다' : '등록된 작업이 없습니다')}
+          </div>
         ) : (
           <>
             <div className="m-qi-toolbar">
@@ -381,7 +455,6 @@ export function QueueManager() {
               )}
             </div>
             {jobs.map((job) => {
-            const tag = tagFor(job);
             const ws = (job.workspace ?? workspace) as Workspace;
             const canAdvance = ['pending', 'scheduled', 'paused'].includes(job.status);
             const deletable = isDeletableQueueJob(job);
@@ -392,8 +465,9 @@ export function QueueManager() {
                 icon={jobIcon(job.job_type)}
                 title={job.title ?? job.job_type}
                 sub={jobSub(job)}
-                tag={tag.label}
-                tagTone={tag.tone}
+                tag=""
+                tagTone="idle"
+                tagSlot={queueTagSlot(job)}
                 workspaceBorder={ws}
                 selectable={deletable}
                 checked={selectedIds.has(job.id)}
@@ -438,6 +512,52 @@ export function QueueManager() {
               />
             );
           })}
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-huma-bdr2 pt-3">
+              <label className="flex items-center gap-1.5 font-mono text-[11px] text-huma-t3">
+                표시
+                <select
+                  className="rounded border border-huma-bdr bg-huma-bg3 px-1.5 py-0.5 text-[11px] text-huma-t2"
+                  value={pageSize}
+                  onChange={(e) => {
+                    const next = Number(e.target.value) as PageSize;
+                    setPageSize(next);
+                    localStorage.setItem(QUEUE_PAGE_SIZE_KEY, String(next));
+                  }}
+                >
+                  {PAGE_SIZES.map((n) => (
+                    <option key={n} value={n}>
+                      {n}개
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {showPagination ? (
+                <div className="flex items-center gap-2 font-mono text-[11px] text-huma-t3">
+                  <button
+                    type="button"
+                    className="btn-ghost btn-sm"
+                    disabled={page <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  >
+                    ◀
+                  </button>
+                  <span>
+                    {page} / {totalPages}
+                    <span className="ml-1 text-huma-t4">· 전체 {total}건</span>
+                  </span>
+                  <button
+                    type="button"
+                    className="btn-ghost btn-sm"
+                    disabled={page >= totalPages}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  >
+                    ▶
+                  </button>
+                </div>
+              ) : (
+                <span className="font-mono text-[11px] text-huma-t4">전체 {total}건</span>
+              )}
+            </div>
           </>
         )}
       </MPanel>

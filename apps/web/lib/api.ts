@@ -128,6 +128,12 @@ export const api = {
     job_type?: string;
     limit?: string;
   }) => request<HumaJob[]>(`/api/jobs${qs(params ?? {})}`),
+  jobsPage: (params: { workspace: string; limit?: string; offset?: string }) =>
+    request<{
+      items: HumaJob[];
+      total: number;
+      stats: { pending: number; running: number; doneToday: number; doneAll: number };
+    }>(`/api/jobs/page${qs(params)}`),
   createJob: async (body: Partial<HumaJob>) => {
     const job = await request<HumaJob>('/api/jobs', { method: 'POST', body: JSON.stringify(body) });
     refreshNavCaches();

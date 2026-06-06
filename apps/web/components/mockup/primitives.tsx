@@ -40,8 +40,16 @@ export function MStat({
   );
 }
 
-export function MTag({ children, tone = 'idle' }: { children: ReactNode; tone?: 'ok' | 'warn' | 'err' | 'idle' | 'live' | 'blue' }) {
-  return <span className={cn('m-tag', `m-tag-${tone}`)}>{children}</span>;
+export function MTag({
+  children,
+  tone = 'idle',
+  className,
+}: {
+  children: ReactNode;
+  tone?: 'ok' | 'warn' | 'err' | 'idle' | 'live' | 'blue';
+  className?: string;
+}) {
+  return <span className={cn('m-tag', `m-tag-${tone}`, className)}>{children}</span>;
 }
 
 export function MTable({
@@ -122,6 +130,7 @@ export function MQueueItem({
   sub,
   tag,
   tagTone,
+  tagSlot,
   workspaceBorder,
   onClick,
   onAdvance,
@@ -136,6 +145,7 @@ export function MQueueItem({
   sub: string;
   tag: string;
   tagTone: 'live' | 'warn' | 'idle' | 'err';
+  tagSlot?: ReactNode;
   workspaceBorder?: 'yeonun' | 'quizoasis' | 'panana';
   onClick?: () => void;
   onAdvance?: () => void;
@@ -185,7 +195,7 @@ export function MQueueItem({
         <div className="m-qi-sub">{sub}</div>
       </div>
       <div className="m-qi-r">
-        <MTag tone={tagTone}>{tag}</MTag>
+        {tagSlot ?? <MTag tone={tagTone}>{tag}</MTag>}
         {onAdvance ? (
           <button
             type="button"
