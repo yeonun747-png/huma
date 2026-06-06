@@ -1,5 +1,31 @@
 /** huma_jobs.error_message → 운영자용 한 줄 설명 */
 
+const WARMUP_REASON_LABEL: Record<string, string> = {
+  connection: '접속 실패',
+  block_captcha: '차단·캡차',
+  dom_mismatch: 'DOM 불일치',
+  filter_zero: '링크 필터로 0개',
+};
+
+function decodeField(value: string | undefined): string {
+  if (!value) return '';
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function parsePipeFields(raw: string): Record<string, string> {
+  const fields: Record<string, string> = {};
+  for (const part of raw.split('|')) {
+    const eq = part.indexOf('=');
+    if (eq <= 0) continue;
+    fields[part.slice(0, eq)] = part.slice(eq + 1);
+  }
+  return fields;
+}
+
 function dedupeErrorMessage(message: string): string {
   const seen = new Set<string>();
   return message
@@ -20,11 +46,29 @@ function formatLinksNotFoundError(raw: string): string | null {
   const isWarmup = raw.includes('WARMUP_NO_LINKS_FOUND') || raw.includes(':warmup:');
   const ctx = /블로그/.test(raw) ? '블로그 검색' : '통합 검색';
   const phase = isWarmup ? '워밍업(로그인 전)' : 'C-Rank 세션';
-  const urlHint = raw.match(/\|url=([^|]+)/)?.[1];
+  const fields = parsePipeFields(raw);
 
-  let msg = `${phase} 실패(${ctx}): 네이버 검색 결과에서 방문할 링크를 찾지 못했습니다.`;
-  if (urlHint) msg += ` (페이지: ${decodeURIComponent(urlHint).slice(0, 80)})`;
-  msg += ' DOM 변경·봇 감지 가능 — 셀렉터 확인 필요.';
+  const reasonKey = fields.reason ?? '';
+  const reasonLabel = WARMUP_REASON_LABEL[reasonKey] ?? '원인 미분류';
+  const urlHint = decodeField(fields.url);
+  const titleHint = decodeField(fields.title);
+  const screenshot = decodeField(fields.screenshot);
+  const rawCount = fields.raw;
+  const filteredCount = fields.filtered;
+  const mainPack = fields.main_pack;
+
+  let msg = `${phase} 실패(${ctx}) [${reasonLabel}]`;
+  if (urlHint) msg += ` · ${urlHint.slice(0, 80)}`;
+  if (titleHint) msg += ` · "${titleHint.slice(0, 40)}"`;
+  if (rawCount != null) msg += ` · DOM링크 ${rawCount}개`;
+  if (filteredCount != null && filteredCount !== '0') msg += `(필터제외 ${filteredCount})`;
+  if (mainPack === '0') msg += ' · #main_pack 없음';
+  if (screenshot) msg += ` · 스크린샷: ${screenshot.slice(0, 120)}`;
+
+  if (!reasonKey) {
+    msg += ' · DOM 변경·봇 감지 가능 — 셀렉터 확인 필요';
+  }
+
   return msg;
 }
 

@@ -385,7 +385,14 @@ export function QueueManager() {
                 }}
                 onAdvance={
                   canAdvance
-                    ? () => api.advanceJob(job.id).then(load).catch((e) => alert((e as Error).message))
+                    ? () =>
+                        api
+                          .advanceJob(job.id)
+                          .then(() => {
+                            void load();
+                            alert('앞당김 — 큐에 등록했습니다. 잠시 후 LIVE로 바뀌는지 확인하세요.');
+                          })
+                          .catch((e) => alert((e as Error).message))
                     : undefined
                 }
                 onStop={

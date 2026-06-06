@@ -4,12 +4,12 @@ import { scrollWithReverse } from '../../human-engine/timing.js';
 import { randomBetween } from '../../../lib/utils.js';
 import type { HumanEngineConfig } from '../../../lib/settings.js';
 import type { AccountPersona } from '../persona.js';
-import { notifySlack } from '../../watcher/detector.js';
 import {
   blogSearchUrl,
-  collectNaverSearchUrls,
+  collectNaverSearchUrlsDetailed,
   integratedSearchUrl,
 } from '../../../lib/naver-search-links.js';
+import { throwWarmupFailure } from '../../../lib/warmup-failure.js';
 
 export type WarmupAccountType = 'posting' | 'crank';
 
@@ -21,14 +21,6 @@ const KEYWORD_POOL: Record<string, string[]> = {
   운세: ['오늘운세', '사주', '타로', '꿈해몽', '신년운세'],
   일상: ['맛집추천', '카페투어', '주말여행', '요리레시피', '드라마추천'],
 };
-
-async function failWarmupNoLinks(page: Page, context: string): Promise<never> {
-  const url = page.url();
-  const title = (await page.title().catch(() => '')).slice(0, 80);
-  const message = `워밍업 실패: ${context} — 검색 결과 링크 없음 (NO_LINKS_FOUND) · ${url} · ${title}`;
-  await notifySlack(message);
-  throw new Error(`NO_LINKS_FOUND:warmup:${context}|url=${url}|title=${title}`);
-}
 
 async function warmupStayScroll(page: Page, durationMs: number): Promise<void> {
   await scrollWithReverse(page, durationMs, [300, 800], [2000, 5000], 0.2);
@@ -50,10 +42,19 @@ async function visitWarmupUrls(
   }
 }
 
-async function openSearchResults(page: Page, url: string): Promise<void> {
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
-  await page.waitForLoadState('networkidle').catch(() => {});
-  await humanSleep(2000, 4000);
+/** 검색 결과 페이지 로드 — 실패 시 navError 반환 */
+async function openSearchResults(page: Page, url: string): Promise<string | null> {
+  try {
+    const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    if (response && response.status() >= 400) {
+      return `HTTP ${response.status()}`;
+    }
+    await page.waitForLoadState('networkidle').catch(() => {});
+    await humanSleep(2000, 4000);
+    return null;
+  } catch (err) {
+    return (err as Error).message || 'navigation_failed';
+  }
 }
 
 /** v3.25 §7-14-1 — posting·crank 세션 진입 전 필수 워밍업 */
@@ -80,30 +81,30 @@ export async function preSessionWarmup(
   _humanEngine?: HumanEngineConfig,
 ): Promise<void> {
   const keyword = selectWarmupKeyword(persona);
-  await openSearchResults(page, integratedSearchUrl(keyword));
+  const navError = await openSearchResults(page, integratedSearchUrl(keyword));
 
   const visitCount =
     accountType === 'posting' ? randomBetween(1, 2) : randomBetween(2, 3);
   const stayMin = accountType === 'posting' ? 15000 : 60000;
   const stayMax = accountType === 'posting' ? 45000 : 180000;
 
-  const searchUrls = await collectNaverSearchUrls(page, 'integrated', 6);
-  if (searchUrls.length === 0) {
-    await failWarmupNoLinks(page, '네이버 검색 결과');
+  const integrated = await collectNaverSearchUrlsDetailed(page, 'integrated', 6);
+  if (navError || integrated.urls.length === 0) {
+    await throwWarmupFailure(page, '네이버 검색 결과', integrated.diagnostics, navError);
   }
 
-  await visitWarmupUrls(page, searchUrls, visitCount, stayMin, stayMax);
+  await visitWarmupUrls(page, integrated.urls, visitCount, stayMin, stayMax);
 
   if (accountType === 'crank') {
     const blogKeyword = selectWarmupKeyword(persona);
-    await openSearchResults(page, blogSearchUrl(blogKeyword));
+    const blogNavError = await openSearchResults(page, blogSearchUrl(blogKeyword));
 
-    const blogUrls = await collectNaverSearchUrls(page, 'blog', 3);
-    if (blogUrls.length === 0) {
-      await failWarmupNoLinks(page, '네이버 블로그 검색');
+    const blog = await collectNaverSearchUrlsDetailed(page, 'blog', 3);
+    if (blogNavError || blog.urls.length === 0) {
+      await throwWarmupFailure(page, '네이버 블로그 검색', blog.diagnostics, blogNavError);
     }
 
-    await page.goto(blogUrls[0]!, { waitUntil: 'domcontentloaded' });
+    await page.goto(blog.urls[0]!, { waitUntil: 'domcontentloaded' });
     await humanSleep(60000, 120000);
     await warmupStayScroll(page, randomBetween(8000, 20000));
     await page.goBack({ waitUntil: 'domcontentloaded' }).catch(() => {});
