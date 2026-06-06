@@ -67,7 +67,7 @@ export function PostingPreviewClient({ jobId }: { jobId: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    let intervalId: ReturnType<typeof setInterval> | null = null;
+    let intervalId: number | null = null;
 
     const stopPolling = () => {
       if (intervalId != null) {
