@@ -7,6 +7,16 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { api } from '@/lib/api';
 
 import { cn } from '@/lib/constants';
+import { formatLogKst } from '@/lib/format-kst';
+import {
+  classifyWatcherLogType,
+  formatWatcherLogMessage,
+  isLayer4FailSafeLog,
+  layer4ActionLabel,
+  resolveWatcherLogService,
+  watcherLogTypeTagClass,
+  type WatcherLogRow,
+} from '@/lib/watcher-log-label';
 
 import { MGrid, MPanel } from '@/components/mockup/primitives';
 import { useRegisterPageAction } from '@/components/dashboard/page-action-context';
@@ -305,19 +315,19 @@ export function WatcherView() {
 
   const [watcher, setWatcher] = useState<Record<string, unknown>>({});
 
-  const [logs, setLogs] = useState<Array<Record<string, unknown>>>([]);
+  const [logs, setLogs] = useState<WatcherLogRow[]>([]);
 
 
 
   const load = useCallback(() => {
 
-    Promise.all([api.getSetting('watcher'), api.logs({ level: 'ERROR', limit: '20' })])
+    Promise.all([api.getSetting('watcher'), api.logs({ level: 'ERROR', limit: '50' })])
 
       .then(([w, l]) => {
 
         setWatcher(w);
 
-        setLogs(l);
+        setLogs(l as WatcherLogRow[]);
 
       })
 
@@ -349,37 +359,28 @@ export function WatcherView() {
 
 
 
-  const rows = logs.slice(0, 5).map((l) => [
+  const layer4Logs = logs.filter(isLayer4FailSafeLog);
+  const otherErrors = logs.length - layer4Logs.length;
 
-    <span key="t" className="font-mono">
-
-      {String(l.created_at ?? '').slice(11, 16)}
-
-    </span>,
-
-    String(l.workspace ?? '—'),
-
-    <span key="e" className="m-tag m-tag-err">
-
-      {String(l.level ?? 'ERROR')}
-
-    </span>,
-
-    '즉시 중지',
-
-    <span key="s" className="m-tag m-tag-ok">
-
-      전송됨
-
-    </span>,
-
-    <span key="r" className="m-tag m-tag-warn">
-
-      복구중
-
-    </span>,
-
-  ]);
+  const rows = layer4Logs.slice(0, 8).map((l) => {
+    const type = classifyWatcherLogType(l);
+    return [
+      <span key="t" className="font-mono whitespace-nowrap text-[11px]">
+        {formatLogKst(String(l.created_at ?? ''))}
+      </span>,
+      resolveWatcherLogService(l),
+      <span key="e" className={cn('m-tag', watcherLogTypeTagClass(type))}>
+        {type}
+      </span>,
+      layer4ActionLabel(l),
+      <span key="s" className="m-tag m-tag-ok">
+        전송됨
+      </span>,
+      <span key="r" className="m-tag m-tag-warn">
+        복구 대기
+      </span>,
+    ];
+  });
 
 
 
@@ -393,19 +394,19 @@ export function WatcherView() {
 
           <div className="m-sc-l">감지 (오늘)</div>
 
-          <div className="m-sc-v err">{logs.length}</div>
+          <div className="m-sc-v err">{layer4Logs.length}</div>
 
-          <div className="m-sc-s">캡차 · 429</div>
+          <div className="m-sc-s">CAPTCHA · 429 · 휴식</div>
 
         </div>
 
         <div className="m-sc">
 
-          <div className="m-sc-l">자동 복구</div>
+          <div className="m-sc-l">기타 ERROR</div>
 
-          <div className="m-sc-v ok">2</div>
+          <div className="m-sc-v warn">{otherErrors}</div>
 
-          <div className="m-sc-s">1건 진행중</div>
+          <div className="m-sc-s">동글 · 워밍업 · 타임아웃 등</div>
 
         </div>
 
@@ -421,7 +422,7 @@ export function WatcherView() {
 
       </MGrid>
 
-      <MPanel title="Fail-Safe 감지 이력">
+      <MPanel title="Fail-Safe 감지 이력 (Layer4만)">
 
         {rows.length ? (
 
@@ -463,7 +464,9 @@ export function WatcherView() {
 
         ) : (
 
-          <div className="py-6 text-center text-sm text-huma-t3">감지 이력 없음</div>
+          <div className="py-6 text-center text-sm text-huma-t3">
+            오늘 Layer4 탐지 없음 — 아래 실시간 로그는 전체 ERROR입니다
+          </div>
 
         )}
 
@@ -523,27 +526,39 @@ export function WatcherView() {
 
         </MPanel>
 
-        <MPanel title="실시간 로그">
+        <MPanel title="실시간 로그 (전체 ERROR)">
+
+          <p className="mb-2 text-[11px] text-huma-t3">
+            Layer4 CAPTCHA/429만 Fail-Safe 대상입니다. 동글·워밍업·타임아웃은 별도 장애입니다.
+          </p>
 
           <div className="m-log-t tall">
 
-            {logs.map((l, i) => (
+            {logs.map((l, i) => {
+              const type = classifyWatcherLogType(l);
+              const service = resolveWatcherLogService(l);
+              return (
+              <div key={i} className="mb-1.5 leading-snug">
 
-              <div key={i}>
+                <span className="mr-2 whitespace-nowrap font-mono text-[11px] text-[#5a7090]">
+                  {formatLogKst(String(l.created_at ?? ''))}
+                </span>
 
-                <span className="text-[#5a7090] mr-2">{String(l.created_at ?? '').slice(11, 16)}</span>
+                <span className={cn('m-tag mr-1.5 align-middle text-[10px]', watcherLogTypeTagClass(type))}>
+                  {type}
+                </span>
+
+                {service !== '—' ? (
+                  <span className="mr-1.5 text-[11px] text-huma-t3">[{service}]</span>
+                ) : null}
 
                 <span className={String(l.level) === 'ERROR' ? 'text-huma-err' : 'text-huma-warn'}>
-
-                  [{String(l.level)}]
-
-                </span>{' '}
-
-                {String(l.message ?? '')}
+                  {formatWatcherLogMessage(l)}
+                </span>
 
               </div>
-
-            ))}
+              );
+            })}
 
           </div>
 
