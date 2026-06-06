@@ -125,6 +125,7 @@ export function CrankView() {
   const [schedulerError, setSchedulerError] = useState<string | null>(null);
   const [schedulerLoading, setSchedulerLoading] = useState(true);
   const [syncingProxy, setSyncingProxy] = useState(false);
+  const [restoringNetwork, setRestoringNetwork] = useState(false);
   const [crankFeed, setCrankFeed] = useState<{
     kpi: { visit: { current: number; max: number }; like: { current: number; max: number }; comment: { current: number; max: number }; neighbor: { current: number; max: number } };
     accountCards: Array<{ id: string; label: string; count: number; sub: string }>;
@@ -180,6 +181,27 @@ export function CrankView() {
 
   const syncProxyModems = useCallback(async () => {
     await syncCrankModems();
+  }, [syncCrankModems]);
+
+  const restoreCrankNetwork = useCallback(async () => {
+    if (
+      !window.confirm(
+        'C-Rank 동글(6·7) 포함 전체 동글 네트워크를 복구합니다.\n1~2분 걸릴 수 있습니다.',
+      )
+    ) {
+      return;
+    }
+    setRestoringNetwork(true);
+    try {
+      const res = await api.restoreModemNetwork();
+      if (!res.success) throw new Error(res.error ?? '복구 실패');
+      window.alert(res.message ?? '복구 완료');
+      await syncCrankModems();
+    } catch (err: unknown) {
+      window.alert(err instanceof Error ? err.message : '복구 실패');
+    } finally {
+      setRestoringNetwork(false);
+    }
   }, [syncCrankModems]);
 
   const loadCrankFeed = useCallback(() => {
@@ -648,7 +670,8 @@ export function CrankView() {
           매일 00:01 KST 큐 생성 · 08:00~22:00 분산(±15분) · 세션 60분 · 동글당 일 6세션·월 2500MB ·
           예비 슬롯(8~10)은 스케줄 제외 · 슬롯 6·7은 프록시 관리와 동일 SOCKS probe
           {syncingProxy ? ' (검사 중…)' : ''}
-          {!syncingProxy && (
+          {restoringNetwork ? ' (네트워크 복구 중…)' : ''}
+          {!syncingProxy && !restoringNetwork && (
             <>
               {' '}
               (
@@ -658,6 +681,14 @@ export function CrankView() {
                 onClick={() => void syncProxyModems()}
               >
                 다시 검사
+              </button>
+              {' · '}
+              <button
+                type="button"
+                className="text-huma-accent underline"
+                onClick={() => void restoreCrankNetwork()}
+              >
+                동글 네트워크 복구
               </button>
               )
             </>

@@ -3,6 +3,8 @@ import { authMiddleware, supabase } from '../middleware/auth.js';
 import { reconnectModem } from '../modules/modem/reconnect.js';
 import { applyModemProxyProbe, shouldRunModemProxyProbe } from '../lib/modem-proxy-probe.js';
 import { probeModemsWithConcurrency } from '../lib/modem-socks-probe.js';
+import { runRestoreDongleNetwork } from '../lib/restore-dongle-network.js';
+import { logOperation } from '../lib/log-emitter.js';
 
 function parseProbeSlots(raw: string | undefined): Set<number> | null {
   if (!raw?.trim()) return null;
@@ -89,6 +91,33 @@ export async function registerModemRoutes(app: FastifyInstance) {
     } catch (err) {
       return reply.code(500).send({ error: (err as Error).message });
     }
+  });
+
+  /** DHCP + policy routing + 3proxy 일괄 복구 (UI 「동글 네트워크 복구」) */
+  app.post('/api/modems/restore-network', { preHandler: authMiddleware }, async (_request, reply) => {
+    const result = runRestoreDongleNetwork();
+    if (!result.ok) {
+      await logOperation({
+        level: 'ERROR',
+        message: `[modems] 동글 네트워크 복구 실패: ${result.error ?? 'unknown'}`,
+      });
+      return reply.code(500).send({
+        success: false,
+        error: result.error ?? '복구 실패',
+        output: result.output,
+      });
+    }
+
+    await logOperation({
+      level: 'INFO',
+      message: '[modems] 동글 네트워크 일괄 복구 완료 (restore-dongle-by-subnet)',
+    });
+
+    return {
+      success: true,
+      message: '동글 네트워크 복구 완료 — SOCKS 재검사를 실행합니다.',
+      output: result.output,
+    };
   });
 
   app.get('/api/modems/:id/ip', { preHandler: authMiddleware }, async (request) => {

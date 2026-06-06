@@ -103,6 +103,7 @@ export function ModemsView() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [probing, setProbing] = useState(false);
   const [probingSlot, setProbingSlot] = useState<number | null>(null);
+  const [restoring, setRestoring] = useState(false);
   const probeGenRef = useRef(0);
 
   const runSlotProbes = useCallback(async (base: HumaModem[], gen: number) => {
@@ -148,6 +149,34 @@ export function ModemsView() {
       setLoadError(msg);
     }
   }, [runSlotProbes]);
+
+  const restoreNetwork = useCallback(async () => {
+    if (
+      !window.confirm(
+        '동글 DHCP · policy routing · 3proxy를 일괄 복구합니다.\n1~2분 걸릴 수 있습니다. 계속할까요?',
+      )
+    ) {
+      return;
+    }
+    setRestoring(true);
+    setLoadError(null);
+    try {
+      const res = await api.restoreModemNetwork();
+      if (!res.success) {
+        throw new Error(res.error ?? '복구 실패');
+      }
+      window.alert(res.message ?? '복구 완료. SOCKS 재검사를 실행합니다.');
+      await load();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '동글 네트워크 복구 실패';
+      setLoadError(msg);
+      window.alert(msg);
+    } finally {
+      setRestoring(false);
+    }
+  }, [load]);
+
+  useRegisterPageAction('restoreModemNetwork', restoreNetwork);
 
   useEffect(() => {
     void load();
@@ -249,7 +278,7 @@ export function ModemsView() {
           {probing && probingSlot != null ? (
             <span className="text-huma-accent"> · 동글 {probingSlot} 검사 중…</span>
           ) : null}
-          {!probing && (
+          {!probing && !restoring && (
             <>
               {' '}
               (
@@ -259,6 +288,7 @@ export function ModemsView() {
               )
             </>
           )}
+          {restoring ? <span className="text-huma-accent"> · 네트워크 복구 중…</span> : null}
         </p>
         {loadError && (
           <p className="mb-2 text-xs text-huma-err">
@@ -279,6 +309,14 @@ export function ModemsView() {
         )}
         {modems.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="btn-primary btn-sm"
+              disabled={restoring || probing}
+              onClick={() => void restoreNetwork()}
+            >
+              {restoring ? '복구 중…' : '🔧 동글 네트워크 일괄 복구'}
+            </button>
             {modems
               .filter((m) => m.slot_number >= 1 && m.slot_number <= I7_PHYSICAL_SLOTS)
               .sort((a, b) => a.slot_number - b.slot_number)
@@ -287,6 +325,7 @@ export function ModemsView() {
                   key={m.id}
                   type="button"
                   className="btn-ghost text-[10px]"
+                  disabled={restoring}
                   onClick={() => api.reconnectModem(m.id).then(load)}
                 >
                   동글 {m.slot_number} IP 재발급
@@ -300,7 +339,8 @@ export function ModemsView() {
           참고용) · UI 오류만으로 포스팅 큐가 막히지는 않으나 SOCKS 불가 시 작업 실행 중 실패할 수 있음
         </p>
         <p className="mt-1 font-mono text-[10px] text-huma-t3">
-          i7: sudo bash apps/server/scripts/restore-dongle-by-subnet.sh
+          <strong>오류가 계속되면</strong> 「동글 네트워크 일괄 복구」(DHCP·routing·3proxy) → 「다시 검사」 순서.
+          단일 슬롯만 IP 바꿀 때는 「IP 재발급」.
         </p>
       </MPanel>
     </div>

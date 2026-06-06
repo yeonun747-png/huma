@@ -163,6 +163,11 @@ export const api = {
       { timeoutMs: opts?.timeoutMs ?? (opts?.probe ? 180_000 : undefined) },
     ),
   reconnectModem: (id: string) => request(`/api/modems/${id}/reconnect`, { method: 'POST' }),
+  restoreModemNetwork: () =>
+    request<{ success: boolean; message?: string; output?: string; error?: string }>(
+      '/api/modems/restore-network',
+      { method: 'POST', timeoutMs: 200_000 },
+    ),
   logs: (params?: { level?: string; platform?: string; limit?: string }) =>
     request<Array<Record<string, unknown>>>(`/api/logs${qs(params ?? {})}`),
   videoQueue: () => request<HumaVideoQueue[]>('/api/video/queue'),
