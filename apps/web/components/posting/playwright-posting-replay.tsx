@@ -4,6 +4,7 @@ import { memo, useEffect, useRef, useState } from 'react';
 import type { ContentType } from '@huma/shared';
 import { api } from '@/lib/api';
 import {
+  calcReviewDurationMs,
   DEFAULT_HUMAN_ENGINE_SIM,
   LiveTextBuffer,
   mergeHumanEngineSim,
@@ -191,7 +192,10 @@ export const PlaywrightPostingReplay = memo(function PlaywrightPostingReplay({
 
       setPhase('review');
       setCursor('none');
-      const reviewMs = cfg.review_duration_ms[0] + Math.random() * (cfg.review_duration_ms[1] - cfg.review_duration_ms[0]);
+      const reviewMs = calcReviewDurationMs(
+        title.trim().length + (bodyBufferRef.current?.length ?? simBody.length) + (blogLink?.length ?? 0),
+        cfg.review_duration_ms,
+      );
       if (statusRef.current) statusRef.current.textContent = 'scrollReview · 오탈자 찾아 수정';
       const scrollEl = scrollRef.current;
       const bodyHost = bodyTextHostRef.current;

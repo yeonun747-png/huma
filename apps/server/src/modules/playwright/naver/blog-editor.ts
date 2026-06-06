@@ -4,7 +4,7 @@ import { humanType, humanSleep } from '../../human-engine/typing.js';
 
 import { scrollReview, typePostContent, scaledHumanSleep } from '../../human-engine/timing.js';
 
-import { randomBetween } from '../../../lib/utils.js';
+import { calcReviewDurationMs } from '../../../lib/review-duration.js';
 
 import type { HumanEngineConfig } from '../../../lib/settings.js';
 
@@ -100,11 +100,11 @@ export async function postNaverBlog(params: {
 
 
   await scrollReview(
-
     params.page,
-
-    randomBetween(params.humanEngine.review_duration_ms[0], params.humanEngine.review_duration_ms[1])
-
+    calcReviewDurationMs(
+      params.title.length + params.content.length + (params.linkUrl?.length ?? 0),
+      config.review_duration_ms,
+    ),
   );
 
 

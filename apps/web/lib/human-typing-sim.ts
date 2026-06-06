@@ -40,6 +40,23 @@ export function randomBetween(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+/** 휴먼엔진 review_duration_ms(900자 기준 2~5분)를 본문 길이에 비례 조정 */
+export function calcReviewDurationMs(
+  charCount: number,
+  reviewDurationMs: [number, number],
+  refChars = 900,
+): number {
+  const [baseMin, baseMax] = reviewDurationMs;
+  const clamped = Math.max(400, Math.min(charCount, refChars * 1.15));
+  const scale = clamped / refChars;
+  const min = Math.round(baseMin * scale);
+  const max = Math.round(baseMax * scale);
+  const floor = 45_000;
+  const lo = Math.max(floor, min);
+  const hi = Math.max(lo + 20_000, max);
+  return randomBetween(lo, hi);
+}
+
 export function gaussianRandom(mean: number, sigma: number): number {
   const u1 = Math.random();
   const u2 = Math.random();
@@ -307,17 +324,17 @@ export function buildServicePasteClip(sourceParagraph: string): string {
 
   if (hasMoney) {
     const stars = '★'.repeat(randomBetween(3, 5)) + '☆'.repeat(randomBetween(0, 2));
-    return `[연운 재물운 결과 · ${date}]\n\n💰 재물운: ${stars}\n3개월 내 수입 변화: +${randomBetween(8, 22)}% 가능\n핵심 시기: ${randomBetween(1, 3)}개월 후\n\n"${snippet}"\n\n※ yeonun.com 결과 화면에서 복사`;
+    return `[연운 재물운 결과 · ${date}]\n\n💰 재물운: ${stars}\n3개월 내 수입 변화: +${randomBetween(8, 22)}% 가능\n핵심 시기: ${randomBetween(1, 3)}개월 후\n\n"${snippet}"`;
   }
   if (hasLove) {
     const stars = '★'.repeat(randomBetween(2, 4)) + '☆'.repeat(randomBetween(1, 3));
-    return `[연운 연애·인연 결과 · ${date}]\n\n💕 인연운: ${stars}\n재회·새 인연: ${randomBetween(40, 85)}% 긍정\n\n"${snippet}"\n\n※ yeonun.com 결과 화면에서 복사`;
+    return `[연운 연애·인연 결과 · ${date}]\n\n💕 인연운: ${stars}\n재회·새 인연: ${randomBetween(40, 85)}% 긍정\n\n"${snippet}"`;
   }
   if (hasCareer) {
-    return `[연운 직장·사업운 · ${date}]\n\n📋 종합: ${randomBetween(62, 91)}점\n승진·변화 시기: ${randomBetween(2, 6)}월\n\n"${snippet}"\n\n※ yeonun.com 결과 화면에서 복사`;
+    return `[연운 직장·사업운 · ${date}]\n\n📋 종합: ${randomBetween(62, 91)}점\n승진·변화 시기: ${randomBetween(2, 6)}월\n\n"${snippet}"`;
   }
 
-  return `[연운 사주·운세 결과 · ${date}]\n\n✨ 종합 운세: ${randomBetween(58, 88)}점\n\n"${snippet}"\n\n※ yeonun.com 결과 화면에서 복사`;
+  return `[연운 사주·운세 결과 · ${date}]\n\n✨ 종합 운세: ${randomBetween(58, 88)}점\n\n"${snippet}"`;
 }
 
 export async function sleepMs(ms: number, cancelled: () => boolean): Promise<void> {
