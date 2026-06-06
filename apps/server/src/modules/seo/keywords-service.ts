@@ -1,3 +1,5 @@
+import type { Workspace } from '@huma/shared';
+import { DEFAULT_CRANK_KEYWORD_POOLS } from '@huma/shared';
 import { supabase } from '../../middleware/auth.js';
 import { getSetting } from '../../lib/settings.js';
 import {
@@ -15,10 +17,9 @@ const WS_BADGE: Record<string, string> = {
   panana: '파나나 워크스페이스',
 };
 
-const DEFAULT_POOLS: Record<string, string[]> = {
-  yeonun: ['사주풀이', '신년운세', '꿈해몽', '자미두수', '사주 궁합', '오늘 운세', '연애운'],
-  quizoasis: ['MBTI 테스트', '성격유형 테스트', '연애유형', '직업적성', '심리테스트', '애착유형'],
-  panana: ['AI 캐릭터', 'AI 친구', '감성 AI', 'AI 대화', '파나나'],
+/** SEO·포스팅 참조용 보조 키워드 (연운 전용 — 퀴즈·파나나는 DEFAULT_CRANK_KEYWORD_POOLS 사용) */
+const SEO_EXTRA_POOLS: Partial<Record<Workspace, string[]>> = {
+  yeonun: ['사주풀이', '신년운세', '꿈해몽', '자미두수', '사주 궁합', '오늘 운세', '연애운', '무료 사주'],
 };
 
 function rankLabel(position: number): string {
@@ -40,9 +41,38 @@ function mapTone(cnt: number): { st: string; tone: 'ok' | 'warn' | 'err' } {
   return { st: '부족', tone: 'err' };
 }
 
+/** 캐시 무효화 — 키워드풀 정책 변경 시 증가 */
+const SEO_POOL_VERSION = 2;
+
+function resolveWorkspaceKeywordPool(
+  ws: Workspace,
+  crank: { keyword_pools?: Partial<Record<Workspace, string[]>> },
+): string[] {
+  // SEO UI: 퀴즈·파나나는 코드 상수가 단일 소스 (DB legacy 혼입 방지)
+  if (ws === 'quizoasis' || ws === 'panana') {
+    return [...DEFAULT_CRANK_KEYWORD_POOLS[ws]];
+  }
+  const fromDb = crank.keyword_pools?.[ws];
+  if (Array.isArray(fromDb) && fromDb.length > 0) {
+    return fromDb.filter(Boolean);
+  }
+  return [...(DEFAULT_CRANK_KEYWORD_POOLS[ws] ?? [])];
+}
+
 async function loadKeywordPool(workspace: string): Promise<string[]> {
-  const crank = await getSetting<{ keywords?: string[] }>('social_crank', {});
-  const crankKw = Array.isArray(crank.keywords) ? crank.keywords : [];
+  const ws = workspace as Workspace;
+  const crank = await getSetting<{ keyword_pools?: Partial<Record<Workspace, string[]>>; keywords?: string[] }>(
+    'social_crank',
+    {},
+  );
+  const canonical = resolveWorkspaceKeywordPool(ws, crank);
+
+  // 퀴즈·파나나: 지정 키워드풀만 표시 (연운 legacy keywords·job 태그 혼입 방지)
+  if (ws === 'quizoasis' || ws === 'panana') {
+    return canonical.slice(0, 24);
+  }
+
+  const legacyKw = Array.isArray(crank.keywords) ? crank.keywords : [];
   const { data: jobs } = await supabase
     .from('huma_jobs')
     .select('hashtags, title')
@@ -63,8 +93,9 @@ async function loadKeywordPool(workspace: string): Promise<string[]> {
     }
   }
 
-  const pool = [...new Set([...crankKw, ...fromTags, ...(DEFAULT_POOLS[workspace] ?? [])])];
-  return pool.slice(0, 24);
+  return [
+    ...new Set([...canonical, ...legacyKw, ...fromTags, ...(SEO_EXTRA_POOLS[ws] ?? [])]),
+  ].slice(0, 24);
 }
 
 async function buildContentMap(workspace: string): Promise<SeoMapRow[]> {
@@ -148,9 +179,17 @@ async function buildRanksFromGsc(workspace: string): Promise<SeoRankRow[]> {
 
 export async function buildSeoKeywords(workspace: string) {
   const gscConfigured = isSearchConsoleConfigured(workspace);
-  const ranks = gscConfigured
-    ? await buildRanksFromGsc(workspace).catch(() => buildRanksFromJobs(workspace))
-    : await buildRanksFromJobs(workspace);
+  let ranks: SeoRankRow[];
+  if (gscConfigured) {
+    try {
+      const gscRanks = await buildRanksFromGsc(workspace);
+      ranks = gscRanks.length > 0 ? gscRanks : await buildRanksFromJobs(workspace);
+    } catch {
+      ranks = await buildRanksFromJobs(workspace);
+    }
+  } else {
+    ranks = await buildRanksFromJobs(workspace);
+  }
   const pool = await loadKeywordPool(workspace);
   const table = await buildContentMap(workspace);
 
@@ -163,6 +202,7 @@ export async function buildSeoKeywords(workspace: string) {
     pool,
     table,
     source: gscConfigured ? 'search_console' : 'jobs',
+    poolVersion: SEO_POOL_VERSION,
     crawledAt: new Date().toISOString(),
   };
 }
@@ -185,7 +225,12 @@ export async function getSeoKeywords(workspace: string) {
     .maybeSingle();
 
   const cached = data?.value as Record<string, unknown> | undefined;
-  if (cached?.ranks && cached?.pool) {
+  const cachedPool = cached?.pool;
+  const cachedRanks = cached?.ranks;
+  const poolOk = Array.isArray(cachedPool) && cachedPool.length > 0;
+  const ranksOk = Array.isArray(cachedRanks);
+  const versionOk = cached?.poolVersion === SEO_POOL_VERSION;
+  if (poolOk && ranksOk && versionOk) {
     return { ...cached, cachedAt: data?.updated_at };
   }
   return buildSeoKeywords(workspace);

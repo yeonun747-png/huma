@@ -37,9 +37,6 @@ const PIPE_STEPS = [
   { key: 'uploading' },
 ] as const;
 
-const PREVIEW_TABS = ['text', 'image', 'video'] as const;
-type PreviewTab = (typeof PREVIEW_TABS)[number] | 'post';
-
 const IS_DEV = process.env.NODE_ENV === 'development';
 const SIMUL_STEP_MS = [3000, 8000, 2000, 2500] as const;
 const SIMUL_TITLES: Record<string, string> = {
@@ -88,10 +85,8 @@ export function VideoPipelineView() {
   const [imgChoice, setImgChoice] = useState<ImagenPipelineChoice>('auto');
   const [haikuAuto, setHaikuAuto] = useState(true);
   const [vidSelect, setVidSelect] = useState('kling-3.0');
-  const [previewTab, setPreviewTab] = useState<PreviewTab>('text');
   const [viewer, setViewer] = useState<{
     title: string;
-    isLive?: boolean;
     content?: string | null;
     imageUrl?: string | null;
     videoUrl?: string | null;
@@ -177,7 +172,6 @@ export function VideoPipelineView() {
       ? normalizeDisplayStep(running.current_step ?? running.status)
       : null;
   const stepIndex = displayStep ? PIPE_STEPS.findIndex((s) => s.key === displayStep) : -1;
-  const simulPrompt = simul?.title ?? simulDone;
 
   const imgCost = pipelineImageCost(imgChoice);
   const vidCost = pipelineVideoCost(vidSelect);
@@ -244,7 +238,6 @@ export function VideoPipelineView() {
         open={Boolean(viewer)}
         title={viewer?.title ?? ''}
         workspace={workspace}
-        isLive={viewer?.isLive}
         content={viewer?.content}
         imageUrl={viewer?.imageUrl}
         videoUrl={viewer?.videoUrl}
@@ -451,72 +444,7 @@ export function VideoPipelineView() {
         </MPanel>
       </MGrid>
 
-      <MPanel
-        title={
-          <div className="flex flex-wrap items-center gap-2">
-            <span>콘텐츠 조감</span>
-            <div className="inline-flex gap-0.5">
-              {(['text', 'image', 'video'] as const).map((tab) => (
-                <button
-                  key={tab}
-                  type="button"
-                  className={cn('m-prev-tab', previewTab === tab && 'on')}
-                  onClick={() => setPreviewTab(tab)}
-                >
-                  {tab === 'text' ? '텍스트' : tab === 'image' ? '이미지' : '영상'}
-                </button>
-              ))}
-              <button
-                type="button"
-                className="m-prev-tab on bg-[var(--glow)] text-huma-acc"
-                onClick={() =>
-                  setViewer({
-                    title: (simulPrompt ?? running?.image_prompt)?.slice(0, 40) ?? '콘텐츠 미리보기',
-                    isLive: Boolean(running || simulActive),
-                    content: running?.caption ?? running?.image_prompt ?? simulPrompt,
-                    imageUrl: running?.generated_image_url ?? null,
-                    videoUrl: running?.source_video_url ?? null,
-                  })
-                }
-              >
-                포스팅 전체조감 ↗
-              </button>
-            </div>
-          </div>
-        }
-      >
-        <div className="m-preview-frame min-h-[220px]">
-          {previewTab === 'text' && (
-            <EmptyPanel
-              message={
-                simulPrompt
-                  ? simulPrompt.slice(0, 120)
-                  : running?.image_prompt
-                    ? running.image_prompt.slice(0, 120)
-                    : '파이프라인 실행 후 생성된 텍스트 표시'
-              }
-            />
-          )}
-          {previewTab === 'image' && (
-            <EmptyPanel
-              message={
-                running?.generated_image_url
-                  ? '이미지 생성 완료 — URL 저장됨'
-                  : '이미지 생성(Step 1) 완료 후 표시'
-              }
-            />
-          )}
-          {previewTab === 'video' && (
-            <EmptyPanel
-              message={
-                running?.source_video_url ? '영상 생성 완료' : '영상 생성(Step 2) 완료 후 플레이어 활성화'
-              }
-            />
-          )}
-        </div>
-      </MPanel>
-
-      <MPanel title="오늘 완료된 영상">
+      <MPanel title="오늘 영상 작업">
         {todayItems.length === 0 ? (
           <EmptyPanel message="오늘 영상 파이프라인 작업이 없습니다" />
         ) : (

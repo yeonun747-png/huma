@@ -43,8 +43,9 @@ export const SEO_DATA: Record<
       { rank: '#18', word: '심리 테스트', vol: '412 클릭', chg: '▲1', ok: true },
     ],
     pool: [
-      'MBTI 테스트', '성격유형 테스트', '연애유형', '직업적성', '심리테스트', '애착유형', '성격분석',
-      '16가지유형', 'personality test', 'mbti quiz', 'love type test', '성격 검사',
+      'MBTI 테스트', '심리테스트', '성격테스트', '연애테스트', '성격유형검사', '무료MBTI',
+      'MBTI궁합', '연애유형테스트', '직업적성테스트', '퍼스널컬러테스트', '에니어그램',
+      '애착유형테스트', '직장인테스트', '공감능력테스트', '두뇌유형테스트',
     ],
     table: [
       { id: 'mbti-test', kw: 'MBTI 테스트, 16유형', cnt: 38, reflect: '포스팅 5건 → 순위 #3', st: '최상', tone: 'ok' },
@@ -62,8 +63,8 @@ export const SEO_DATA: Record<
       { rank: '#21', word: 'AI 연애 챗봇', vol: '287 클릭', chg: '신규', ok: true },
     ],
     pool: [
-      'AI 캐릭터', 'AI 친구', '감성 AI', 'AI 대화', '챗봇 앱', 'AI 연애',
-      'character AI', 'AI companion', '파나나', 'panana app', 'AI 소통', '감성 채팅',
+      'AI친구', 'AI캐릭터', '캐릭터챗봇', 'AI채팅', '감성AI', 'AI대화', 'AI소울메이트',
+      '새벽감성', '위로글', '감성일기', '혼자있고싶을때', 'AI남자친구', 'AI여자친구', '감성채팅', '외로울때',
     ],
     table: [
       { id: 'ai-character-chat', kw: 'AI 캐릭터 채팅, AI친구', cnt: 18, reflect: '포스팅 3건 → 순위 #4', st: '양호', tone: 'ok' },

@@ -15,7 +15,6 @@ import { useAuth } from '@/lib/auth-context';
 const STORAGE_KEY = 'huma_workspace';
 
 const WS_ROUTE_MAP: Partial<Record<string, Workspace>> = {
-  '/seo-keywords': 'yeonun',
   '/adsense': 'quizoasis',
   '/cafe-viral': 'yeonun',
 };

@@ -99,13 +99,17 @@ export function SeoKeywordsView() {
         </MPanel>
 
         <MPanel title="키워드 풀">
-          <div className="flex flex-wrap gap-1">
-            {d.pool.map((kw) => (
-              <button key={kw} type="button" className="m-kw-tag" title="이 키워드로 큐 추가" onClick={() => addKwToQueue(kw)}>
-                {kw}
-              </button>
-            ))}
-          </div>
+          {d.pool.length === 0 ? (
+            <EmptyPanel message="키워드 없음 — ↻ SEO 갱신" />
+          ) : (
+            <div className="flex flex-wrap gap-1">
+              {d.pool.map((kw) => (
+                <button key={kw} type="button" className="m-kw-tag" title="이 키워드로 큐 추가" onClick={() => addKwToQueue(kw)}>
+                  {kw}
+                </button>
+              ))}
+            </div>
+          )}
         </MPanel>
       </MGrid>
 
