@@ -15,6 +15,26 @@ function normalizeFeedUrl(raw?: string | null): string | undefined {
   return u.startsWith('http://') || u.startsWith('https://') ? u : `https://${u}`;
 }
 
+/** Operation Log 전용 — 세션/IP·비행기모드 등 운영 메시지 */
+const CRANK_SESSION_LOG = /^C-Rank (세션 시작|계정 전환)|^계정 전환 IP/;
+
+function isCrankFeedActivity(
+  meta: Record<string, unknown> | null,
+  message: string,
+): boolean {
+  if (meta?.source === 'crank_session') return false;
+  if (CRANK_SESSION_LOG.test(message)) return false;
+  if (meta?.source === 'crank_activity') return true;
+  const action = meta?.crank_action;
+  if (action === '방문' || action === '공감' || action === '댓글' || action === '이웃') return true;
+  return (
+    message.startsWith('블로그 방문') ||
+    message.startsWith('공감 —') ||
+    message.startsWith('댓글 —') ||
+    message.startsWith('이웃')
+  );
+}
+
 function parseCrankAction(meta: Record<string, unknown> | null, message: string): CrankActivityType {
   const fromMeta = meta?.crank_action;
   if (fromMeta === '방문' || fromMeta === '공감' || fromMeta === '댓글' || fromMeta === '이웃') {
@@ -73,10 +93,11 @@ export async function registerCrankRoutes(app: FastifyInstance) {
 
     for (const log of activityLogs ?? []) {
       const meta = (log.metadata as Record<string, unknown> | null) ?? null;
-      // 세션/IP 교체·운영 로그는 Operation Log 전용 — 활동 피드는 블로그 소통만
-      if (meta?.source !== 'crank_activity') continue;
+      const message = String(log.message ?? '');
+      // 세션/IP·비행기모드 실패 등 운영 로그는 피드 행 자체를 내리지 않음 (Operation Log 전용)
+      if (!isCrankFeedActivity(meta, message)) continue;
 
-      const type = parseCrankAction(meta, log.message);
+      const type = parseCrankAction(meta, message);
       if (type === '방문') kpiCounts.visit++;
       else if (type === '공감') kpiCounts.like++;
       else if (type === '댓글') kpiCounts.comment++;
@@ -93,7 +114,7 @@ export async function registerCrankRoutes(app: FastifyInstance) {
         acctKey,
         acctId: acctKey,
         type,
-        title: log.message.slice(0, 100),
+        title: message.slice(0, 100),
         sub: subMeta || `${acctName} · ${urlHint || (formatKstHm(log.created_at) ?? '—')}`,
         time: formatKstHm(log.created_at) ?? '—',
         targetUrl: normalizeFeedUrl(log.result_url as string | null),
