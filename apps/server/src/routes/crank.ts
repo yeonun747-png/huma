@@ -73,6 +73,9 @@ export async function registerCrankRoutes(app: FastifyInstance) {
 
     for (const log of activityLogs ?? []) {
       const meta = (log.metadata as Record<string, unknown> | null) ?? null;
+      // 세션/IP 교체·운영 로그는 Operation Log 전용 — 활동 피드는 블로그 소통만
+      if (meta?.source !== 'crank_activity') continue;
+
       const type = parseCrankAction(meta, log.message);
       if (type === '방문') kpiCounts.visit++;
       else if (type === '공감') kpiCounts.like++;

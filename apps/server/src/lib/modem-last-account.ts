@@ -3,8 +3,10 @@ import { redisConnection } from '../modules/queue/producer.js';
 import { reconnectModemBySlot } from '../modules/modem/reconnect.js';
 import { proxyPortToSlot } from './modem-ports.js';
 import { logOperation } from './log-emitter.js';
+import { sleep } from './utils.js';
 
 const LAST_ACCOUNT_TTL_SEC = 86400;
+const RECONNECT_ATTEMPTS = 2;
 
 function lastAccountKey(port: number): string {
   return `modem_last_account:${port}`;
@@ -42,6 +44,7 @@ export async function reconnectModemIfAccountSwitched(
     platform: 'naver_crank',
     account_id: accountId,
     modem_id: modem?.id,
+    metadata: { source: 'crank_session' },
   };
 
   if (!needs) {
@@ -55,13 +58,25 @@ export async function reconnectModemIfAccountSwitched(
   }
 
   const oldIp = modem?.current_ip ?? null;
-  let newIp: string;
-  try {
-    newIp = await reconnectModemBySlot(slot);
-  } catch (err) {
+  let newIp: string | undefined;
+  let lastErr: Error | undefined;
+
+  for (let attempt = 1; attempt <= RECONNECT_ATTEMPTS; attempt++) {
+    try {
+      newIp = await reconnectModemBySlot(slot);
+      break;
+    } catch (err) {
+      lastErr = err as Error;
+      if (attempt < RECONNECT_ATTEMPTS) {
+        await sleep(5000);
+      }
+    }
+  }
+
+  if (!newIp) {
     await logOperation({
       level: 'WARN',
-      message: `C-Rank 계정 전환 — 비행기모드 재연결 실패, 이전 IP(${oldIp ?? '?'}) 유지 후 세션 진행: ${(err as Error).message}`,
+      message: `C-Rank 계정 전환 — 비행기모드 재연결 실패(${RECONNECT_ATTEMPTS}회), 이전 IP(${oldIp ?? '?'}) 유지 후 세션 진행: ${lastErr?.message ?? 'unknown'}`,
       ...logBase,
     });
     return false;
