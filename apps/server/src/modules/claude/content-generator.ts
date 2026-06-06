@@ -49,48 +49,8 @@ const SYSTEM_PROMPTS: Record<string, string> = {
 톤: 시네마틱하고 감성적인 짧은 문체. 서비스 링크 포함.`,
 };
 
-const BLOG_POST_HARD_MAX = 900;
-
 function finalizeBlogPost(text: string): string {
   return sanitizeBlogLinksInPost(text.trim());
-}
-
-/** 목표 분량 초과 시 AI로 다시 씀 — 중간 절단 없음 */
-async function ensureBlogPostUnderLimit(
-  blogPost: string,
-  input: ContentGenerationInput,
-  targetChars: BlogPostLengthTarget,
-): Promise<string> {
-  let body = finalizeBlogPost(blogPost);
-  const maxChars = Math.min(targetChars, BLOG_POST_HARD_MAX);
-  if (body.length <= maxChars) return body;
-
-  for (let attempt = 0; attempt < 2 && body.length > maxChars; attempt++) {
-    const shortened = await askClaudeWithModel({
-      model: (await getSubClaudeModel()) || HAIKU_MODEL_FALLBACK,
-      max_tokens: 1500,
-      system: withHumanWritingSystem(SYSTEM_PROMPTS[input.workspace] ?? SYSTEM_PROMPTS.yeonun),
-      prompt: withHumanWritingMandate(
-        `아래 네이버 블로그 글을 ${maxChars}자 이하로 다시 써줘.
-규칙: 중간에서 자르지 말 것. 완결된 짧은 글로 처음부터 다시 작성. 말투·핵심 경험담 유지. yeonun.com 만 URL.
-
-현재 ${body.length}자:
-${body}
-
-본문 텍스트만 출력 (JSON·코드블록 없이).`,
-      ),
-    });
-    if (shortened?.trim()) {
-      body = finalizeBlogPost(shortened.trim());
-    }
-  }
-
-  if (body.length > maxChars) {
-    throw new Error(
-      `블로그 본문 ${body.length}자 — 목표 ${maxChars}자 이하로 생성되지 않았습니다`,
-    );
-  }
-  return body;
 }
 
 function sanitizeBlogLinksInPost(text: string): string {
@@ -233,7 +193,7 @@ async function generateMainContent(
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
   const parsed = JSON.parse(jsonMatch?.[0] ?? raw) as Omit<ContentGenerationOutput, 'hashtags'>;
   if (!parsed.blog_post) throw new Error('블로그 본문 생성 실패');
-  parsed.blog_post = await ensureBlogPostUnderLimit(parsed.blog_post, input, targetChars);
+  parsed.blog_post = finalizeBlogPost(parsed.blog_post);
   parsed.blog_post_target_chars = targetChars;
   return parsed;
 }
@@ -303,7 +263,7 @@ export async function generateAllContent(input: ContentGenerationInput): Promise
         const parsed = JSON.parse(jsonMatch[0]) as Omit<ContentGenerationOutput, 'hashtags'>;
         const sub = await generateSubContent(input.title, urlSummary, input.workspace);
         if (parsed.blog_post) {
-          parsed.blog_post = await ensureBlogPostUnderLimit(parsed.blog_post, input, targetChars);
+          parsed.blog_post = finalizeBlogPost(parsed.blog_post);
           parsed.blog_post_target_chars = targetChars;
           return { ...parsed, ...sub };
         }
