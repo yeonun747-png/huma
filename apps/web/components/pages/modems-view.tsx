@@ -176,8 +176,6 @@ export function ModemsView() {
     }
   }, [load]);
 
-  useRegisterPageAction('restoreModemNetwork', restoreNetwork);
-
   useEffect(() => {
     void load();
     return () => {
