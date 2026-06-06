@@ -9,7 +9,7 @@ import {
   isPreviewImagenDone,
   resolvePreviewImageUrl,
 } from '@/lib/preview-image-url';
-import { NaverEditorSimulator } from '@/components/posting/naver-editor-simulator';
+import { PlaywrightPostingReplay } from '@/components/posting/playwright-posting-replay';
 
 type PreviewStep = {
   id: string;
@@ -161,7 +161,7 @@ export function PostingPreviewClient({ jobId }: { jobId: string }) {
           <div className="mb-4 rounded-lg border border-huma-acc/40 bg-huma-glow px-4 py-3">
             <div className="text-sm font-semibold text-huma-acc">🔍 포스팅 검증 모드</div>
             <div className="mt-1 text-[12px] text-huma-t2">
-              Claude · Imagen 4 생성 확인 후 네이버 에디터 타이핑을 시뮬레이션합니다.{' '}
+              Playwright <code className="text-[11px]">postNaverBlog()</code> 와 동일 순서·휴먼엔진 설정으로 재현합니다.{' '}
               <strong className="text-huma-warn">실제 발행하지 않습니다.</strong>
             </div>
             {job && (
@@ -252,10 +252,11 @@ export function PostingPreviewClient({ jobId }: { jobId: string }) {
               <span>·</span>
               <span className="text-huma-ok">Claude ✓ Imagen ✓</span>
             </div>
-            <NaverEditorSimulator
+            <PlaywrightPostingReplay
               key={simulatorKey}
               title={job.title}
               body={job.content}
+              linkUrl={job.link_url}
               imageUrl={displayImageUrl}
               contentType={contentType}
             />
