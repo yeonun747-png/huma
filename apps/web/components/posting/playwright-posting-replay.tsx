@@ -14,12 +14,36 @@ import {
   sleepMs,
   humanTypeSim,
   typePostContentSim,
-  pasteBlogLinkSim,
+  typeYeonunBlogLinkSim,
   type HumanEngineSimConfig,
   type PostingPhase,
   type ReviewTypoFix,
 } from '@/lib/human-typing-sim';
-import { normalizeBlogLink, prepareBodyForTypingSim, formatBlogLinkLabel } from '@/lib/naver-post-sanitize';
+import {
+  prepareBodyForTypingSim,
+  resolveSimulatorBlogLink,
+  YEONUN_BLOG_LINK_TEXT,
+} from '@/lib/naver-post-sanitize';
+
+function stylePlainTextAsLink(host: HTMLElement, label: string, href = 'https://yeonun.com') {
+  const text = host.textContent ?? '';
+  const idx = text.lastIndexOf(label);
+  if (idx < 0) return;
+  const before = text.slice(0, idx);
+  const after = text.slice(idx + label.length);
+  host.replaceChildren();
+  if (before) host.appendChild(document.createTextNode(before));
+  const a = document.createElement('a');
+  a.href = href;
+  a.target = '_blank';
+  a.rel = 'noreferrer';
+  a.textContent = label;
+  a.style.color = '#5b7fff';
+  a.style.textDecoration = 'underline';
+  a.style.cursor = 'pointer';
+  host.appendChild(a);
+  if (after) host.appendChild(document.createTextNode(after));
+}
 
 function PhaseRow({ phase, current, done }: { phase: PostingPhase; current: PostingPhase; done: boolean }) {
   const active = phase === current;
@@ -55,7 +79,6 @@ export const PlaywrightPostingReplay = memo(function PlaywrightPostingReplay({
   const [published, setPublished] = useState(false);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
   const [keyHint, setKeyHint] = useState<string | null>(null);
-  const [ogLinkVisible, setOgLinkVisible] = useState(false);
 
   const titleHostRef = useRef<HTMLDivElement>(null);
   const bodyTextHostRef = useRef<HTMLDivElement>(null);
@@ -71,7 +94,9 @@ export const PlaywrightPostingReplay = memo(function PlaywrightPostingReplay({
   const titleBufferRef = useRef<LiveTextBuffer | null>(null);
   const bodyBufferRef = useRef<LiveTextBuffer | null>(null);
 
-  const blogLink = normalizeBlogLink(linkUrl, workspace);
+  const ws = workspace ?? 'yeonun';
+  const blogLink = resolveSimulatorBlogLink(linkUrl, ws);
+  const showLinkStep = ws === 'yeonun' || Boolean(blogLink);
   const simBody = prepareBodyForTypingSim(body, { contentType, linkUrl: blogLink });
 
   useEffect(() => {
@@ -174,13 +199,22 @@ export const PlaywrightPostingReplay = memo(function PlaywrightPostingReplay({
       reviewFixes = plantReviewTypos(bodyBufferRef.current!, 2, 4);
       markDone('body');
 
-      if (blogLink) {
+      if (showLinkStep && blogLink) {
         setPhase('link');
-        if (statusRef.current) statusRef.current.textContent = 'pasteBlogLinkWithOgPreview · Ctrl+V 붙여넣기';
-        await pasteBlogLinkSim(blogLink, bodyBufferRef.current!, () => cancelRef.current || runToken !== runTokenRef.current, {
-          onTick: followBody,
-          onOgCard: () => setOgLinkVisible(true),
-        });
+        if (statusRef.current) statusRef.current.textContent = 'yeonun.com 텍스트 링크 humanType';
+        if (ws === 'yeonun') {
+          await typeYeonunBlogLinkSim(
+            bodyBufferRef.current!,
+            cfg,
+            () => cancelRef.current || runToken !== runTokenRef.current,
+            followBody,
+          );
+          if (bodyTextHostRef.current) {
+            stylePlainTextAsLink(bodyTextHostRef.current, YEONUN_BLOG_LINK_TEXT);
+          }
+        } else {
+          await humanTypeSim(`\n\n${blogLink}`, bodyBufferRef.current!, cfg, () => cancelRef.current || runToken !== runTokenRef.current, followBody);
+        }
         if (runToken !== runTokenRef.current) return;
         markDone('link');
       }
@@ -251,7 +285,7 @@ export const PlaywrightPostingReplay = memo(function PlaywrightPostingReplay({
     return () => {
       cancelRef.current = true;
     };
-  }, [title, simBody, blogLink, imageUrl, contentType, engine, engineReady]);
+  }, [title, simBody, blogLink, showLinkStep, ws, imageUrl, contentType, engine, engineReady]);
 
   const phaseOrder: PostingPhase[] = [
     'enter_editor',
@@ -259,7 +293,7 @@ export const PlaywrightPostingReplay = memo(function PlaywrightPostingReplay({
     'title_pause',
     'body_click',
     'body',
-    ...(blogLink ? (['link'] as PostingPhase[]) : []),
+    ...(showLinkStep ? (['link'] as PostingPhase[]) : []),
     ...(imageUrl ? (['image_upload'] as PostingPhase[]) : []),
     'review',
     'publish',
@@ -312,8 +346,8 @@ export const PlaywrightPostingReplay = memo(function PlaywrightPostingReplay({
             <div className="shrink-0 border-b border-[#eee] bg-[#fafafa] px-5 py-2">
               <div className="text-[10px] text-[#888]">제목 · #subjectTextBox</div>
               <div
-                className="naver-editor-title-text min-h-[44px] py-1 text-[22px] font-bold leading-snug"
-                style={{ fontFamily: 'Malgun Gothic, sans-serif', color: '#111111' }}
+                className="naver-editor-title-text min-h-[44px] py-1 font-sans text-[22px] font-bold leading-snug"
+                style={{ color: '#111111' }}
               >
                 <div ref={titleHostRef} className="naver-editor-title-text inline" style={{ color: '#111111' }} />
                 <span ref={titleCursorRef} className="naver-editor-cursor" aria-hidden />
@@ -327,31 +361,12 @@ export const PlaywrightPostingReplay = memo(function PlaywrightPostingReplay({
             >
               <div className="mb-1 text-[10px] text-[#aaa]">본문 · .se-content</div>
               <div
-                className="naver-editor-body-text min-h-[480px] whitespace-pre-wrap text-[15px] leading-[2]"
-                style={{ fontFamily: 'Malgun Gothic, sans-serif', color: '#222222' }}
+                className="naver-editor-body-text min-h-[480px] whitespace-pre-wrap font-sans text-[15px] leading-[2]"
+                style={{ color: '#222222' }}
               >
                 <div ref={bodyTextHostRef} className="naver-editor-body-text inline" style={{ color: '#222222' }} />
                 <span ref={bodyCursorRef} className="naver-editor-cursor" style={{ visibility: 'hidden' }} aria-hidden />
               </div>
-              {ogLinkVisible && blogLink && (
-                <div className="mt-4 max-w-md overflow-hidden rounded border border-[#e0e0e0] bg-[#fafafa] shadow-sm">
-                  <div className="border-b border-[#eee] bg-[#03c75a]/10 px-3 py-1.5 text-[10px] font-semibold text-[#03c75a]">
-                    OG 링크 미리보기 · se-module-oglink
-                  </div>
-                  <div className="flex gap-3 p-3">
-                    <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded bg-gradient-to-br from-violet-100 to-pink-100 text-[10px] text-[#888]">
-                      og:image
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-[13px] font-bold text-[#111]">{title.trim() || '연운 yeonun.com'}</div>
-                      <div className="mt-0.5 truncate text-[11px] text-[#666]">{formatBlogLinkLabel(blogLink)}</div>
-                      <div className="mt-1 line-clamp-2 text-[10px] leading-snug text-[#999]">
-                        네이버가 URL의 Open Graph 메타(og:title · og:description · og:image)를 스크랩해 카드로 표시합니다.
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
               <div ref={imageSlotRef} />
             </div>
           </div>

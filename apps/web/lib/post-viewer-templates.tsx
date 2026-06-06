@@ -1,6 +1,6 @@
 import type { ContentType, Workspace } from '@huma/shared';
 import { formatKstDateTime } from '@/lib/format-kst';
-import { sanitizeBlogPostForNaver } from '@/lib/naver-post-sanitize';
+import { formatBlogLinkLabel, normalizeBlogLink, sanitizeBlogPostForNaver } from '@/lib/naver-post-sanitize';
 
 export type PostViewerTemplate = {
   accent: string;
@@ -22,6 +22,7 @@ export type PostViewerOverrides = {
   imageUrl?: string | null;
   videoUrl?: string | null;
   hashtags?: string[] | null;
+  linkUrl?: string | null;
 };
 
 const TEMPLATES: Record<Workspace, Omit<PostViewerTemplate, 'lead'>> = {
@@ -66,9 +67,10 @@ export function mergePostViewerTemplate(overrides: PostViewerOverrides): PostVie
     overrides.hashtags?.length
       ? overrides.hashtags.map((t) => (t.startsWith('#') ? t : `#${t}`)).join(' ')
       : base.hashtags;
+  const blogLink = normalizeBlogLink(overrides.linkUrl, overrides.workspace);
   const rawBody = overrides.content?.trim();
   const displayBody = rawBody
-    ? sanitizeBlogPostForNaver(rawBody, { contentType: overrides.contentType ?? 'A' })
+    ? sanitizeBlogPostForNaver(rawBody, { contentType: overrides.contentType ?? 'A', linkUrl: blogLink })
     : base.body;
   return {
     ...base,
@@ -78,6 +80,18 @@ export function mergePostViewerTemplate(overrides: PostViewerOverrides): PostVie
     imageLabel: overrides.imageUrl ? '생성 이미지' : base.imageLabel,
     videoLabel: overrides.videoUrl ? '생성 영상' : base.videoLabel,
   };
+}
+
+function PostViewerBlogLink({ label, workspace }: { label: string; workspace?: string | null }) {
+  const text = formatBlogLinkLabel(label, workspace);
+  const href = text === 'yeonun.com' ? 'https://yeonun.com' : label.startsWith('http') ? label : `https://${text}`;
+  return (
+    <p className="mb-3 text-[13px] leading-relaxed">
+      <a href={href} target="_blank" rel="noreferrer" className="text-[#5b7fff] underline">
+        {text}
+      </a>
+    </p>
+  );
 }
 
 export function PostViewerArticle({
@@ -94,8 +108,12 @@ export function PostViewerArticle({
   const resultUrl = overrides?.resultUrl ?? null;
   const published = overrides?.completedAt ? formatKstDateTime(overrides.completedAt) : null;
   const showVideo = overrides?.contentType === 'B' || Boolean(videoUrl);
+  const blogLink = normalizeBlogLink(overrides?.linkUrl, overrides?.workspace);
   const liveBody = overrides?.content
-    ? sanitizeBlogPostForNaver(overrides.content, { contentType: overrides.contentType ?? 'A' })
+    ? sanitizeBlogPostForNaver(overrides.content, {
+        contentType: overrides.contentType ?? 'A',
+        linkUrl: blogLink,
+      })
     : null;
 
   return (
@@ -118,6 +136,7 @@ export function PostViewerArticle({
           : template.body}
         {isLive && liveBody ? <span className="m-cursor-blink inline-block" /> : null}
       </p>
+      {blogLink ? <PostViewerBlogLink label={blogLink} workspace={overrides?.workspace} /> : null}
       {imageUrl ? (
         <img
           src={imageUrl}

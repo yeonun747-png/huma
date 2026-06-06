@@ -17,31 +17,24 @@ export function normalizeBlogLinkUrl(workspace: string, sourceUrl: string): stri
   return ensureHttpsUrl(sourceUrl);
 }
 
-/** 실행 시 붙여넣을 URL (클릭 가능 + OG 미리보기) */
+/** 실행 시 네이버 본문에 붙일 링크 — 연운은 yeonun.com 만 (OG 카드 유도 안 함) */
 export function resolveBlogLinkUrl(
   workspace: string,
   linkUrl?: string | null,
   sourceUrl?: string | null,
 ): string {
+  if (workspace === 'yeonun') return 'yeonun.com';
   const fromLink = linkUrl?.trim() ?? '';
   const fromSource = sourceUrl?.trim() ?? '';
-  if (workspace === 'yeonun') {
-    const raw = fromLink || fromSource;
-    if (raw && YEONUN_HOST.test(raw)) return ensureHttpsUrl(raw);
-    if (raw === 'yeonun.com' || raw === 'www.yeonun.com') return 'https://yeonun.com';
-    return 'https://yeonun.com';
-  }
   return ensureHttpsUrl(fromLink || fromSource);
 }
 
 /** UI 짧은 표시 */
-export function formatBlogLinkLabel(url: string): string {
+export function formatBlogLinkLabel(url: string, workspace?: string | null): string {
+  if (workspace === 'yeonun') return 'yeonun.com';
   try {
     const u = new URL(ensureHttpsUrl(url));
-    if (YEONUN_HOST.test(u.hostname)) {
-      const path = u.pathname.replace(/\/$/, '');
-      return path && path !== '/' ? `yeonun.com${path}` : 'yeonun.com';
-    }
+    if (YEONUN_HOST.test(u.hostname)) return 'yeonun.com';
     return u.hostname.replace(/^www\./, '');
   } catch {
     return url.replace(/^https?:\/\//, '').split('\n')[0] ?? url;

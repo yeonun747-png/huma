@@ -10,7 +10,7 @@ export function PublicLanding() {
       <header className="border-b border-huma-bdr bg-huma-bg2 px-4 py-5">
         <div className="mx-auto flex max-w-3xl items-center justify-between gap-4">
           <div>
-            <p className="font-display text-2xl tracking-[0.15em] text-huma-acc">HUMA</p>
+            <p className="font-sans text-2xl font-bold tracking-[0.15em] text-huma-acc">HUMA</p>
             <p className="mt-0.5 font-mono text-[10px] text-huma-t3">Studio · Human Automation Platform</p>
           </div>
           <Link
@@ -24,7 +24,7 @@ export function PublicLanding() {
 
       <main className="mx-auto max-w-3xl px-4 py-10">
         <section className="space-y-4">
-          <h1 className="font-display text-3xl tracking-wide text-huma-t">HUMA Studio</h1>
+          <h1 className="font-sans text-3xl font-bold tracking-wide text-huma-t">HUMA Studio</h1>
           <p className="text-sm leading-relaxed text-huma-t2">
             HUMA Studio는 romang-ai.com 운영을 위한 <strong className="font-medium text-huma-t">내부 관리자 플랫폼</strong>
             입니다. 네이버·소셜 등 멀티플랫폼 콘텐츠 발행, 큐·스케줄 관리, 발행 모니터링, SEO·수익 분석 등

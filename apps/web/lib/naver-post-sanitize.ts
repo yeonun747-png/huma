@@ -1,10 +1,19 @@
 import type { ContentType } from '@huma/shared';
 
-import { resolveBlogLinkUrl, formatBlogLinkLabel } from '@huma/shared';
+import { formatBlogLinkLabel, resolveBlogLinkUrl } from '@/lib/blog-link';
 
-/** 네이버 블로그 OG 붙여넣기용 전체 URL */
+/** 네이버 블로그 본문 말미 링크 — 연운은 yeonun.com 만 */
+export const YEONUN_BLOG_LINK_TEXT = 'yeonun.com';
+
 export function normalizeBlogLink(url?: string | null, workspace?: string | null): string {
-  return resolveBlogLinkUrl(workspace ?? 'yeonun', url, url);
+  const ws = workspace ?? 'yeonun';
+  if (ws === 'yeonun') return YEONUN_BLOG_LINK_TEXT;
+  return resolveBlogLinkUrl(ws, url, url);
+}
+
+/** 시뮬레이터·미리보기 — 연운은 항상 yeonun.com */
+export function resolveSimulatorBlogLink(url?: string | null, workspace?: string | null): string {
+  return normalizeBlogLink(url, workspace);
 }
 
 export { formatBlogLinkLabel };

@@ -9,7 +9,7 @@ import {
   isPreviewImagenDone,
   resolvePreviewImageUrl,
 } from '@/lib/preview-image-url';
-import { normalizeBlogLink, prepareBodyForTypingSim } from '@/lib/naver-post-sanitize';
+import { normalizeBlogLink, prepareBodyForTypingSim, YEONUN_BLOG_LINK_TEXT } from '@/lib/naver-post-sanitize';
 import { PlaywrightPostingReplay } from '@/components/posting/playwright-posting-replay';
 
 type PreviewStep = {
@@ -114,7 +114,9 @@ export function PostingPreviewClient({ jobId }: { jobId: string }) {
   }, [jobId]);
 
   const steps = useMemo(() => stepsFromJob(job), [job]);
-  const ws = (job?.workspace ?? 'yeonun') as keyof typeof WS_LABEL;
+  const ws = job?.workspace ?? 'yeonun';
+  const wsKey = ws as keyof typeof WS_LABEL;
+  const previewBlogLink = ws === 'yeonun' ? YEONUN_BLOG_LINK_TEXT : normalizeBlogLink(job?.link_url, ws);
   const previewImageUrl = resolvePreviewImageUrl(job);
   const imagenError = getPreviewImagenError(job);
   const imagenDone = isPreviewImagenDone(job);
@@ -227,7 +229,7 @@ export function PostingPreviewClient({ jobId }: { jobId: string }) {
             </div>
             {job && (
               <div className="mt-2 font-mono text-[10px] text-huma-t3">
-                큐 ID {job.id.slice(0, 8)}… · {WS_LABEL[ws] ?? ws} · {job.status}
+                큐 ID {job.id.slice(0, 8)}… · {WS_LABEL[wsKey] ?? ws} · {job.status}
                 {dryRun ? ' · dry_run' : ''}
               </div>
             )}
@@ -310,10 +312,10 @@ export function PostingPreviewClient({ jobId }: { jobId: string }) {
               title={job.title}
               body={prepareBodyForTypingSim(job.content, {
                 contentType,
-                linkUrl: normalizeBlogLink(job.link_url, job.workspace),
+                linkUrl: previewBlogLink,
               })}
-              linkUrl={normalizeBlogLink(job.link_url, job.workspace)}
-              workspace={job.workspace}
+              linkUrl={previewBlogLink}
+              workspace={ws}
               imageUrl={displayImageUrl}
               contentType={contentType}
             />

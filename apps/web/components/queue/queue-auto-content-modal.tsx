@@ -152,9 +152,25 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
   };
 
   return (
-    <div className="m-modal-bg open" onClick={onClose} role="presentation">
-      <div className="m-modal m-modal-queue" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-        <div className="m-modal-t">{isEdit ? '✨ AI 자동 콘텐츠 수정' : '✨ AI 자동 콘텐츠 생성 + 발행'}</div>
+    <div
+      className="m-modal-bg open"
+      role="presentation"
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => e.preventDefault()}
+    >
+      <div className="m-modal m-modal-queue" role="dialog" aria-modal="true">
+        <div className="m-modal-t flex items-start justify-between gap-2">
+          <span>{isEdit ? '✨ AI 자동 콘텐츠 수정' : '✨ AI 자동 콘텐츠 생성 + 발행'}</span>
+          <button
+            type="button"
+            className="btn-ghost btn-sm shrink-0 px-2"
+            onClick={onClose}
+            disabled={loading}
+            aria-label="닫기"
+          >
+            ✕
+          </button>
+        </div>
 
         {isEdit && editJob && (
           <div className="mb-3 rounded-md border border-huma-bdr bg-huma-bg3 px-3 py-2 text-xs text-huma-t3">
@@ -366,7 +382,7 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
 
         {error && <p className="mb-2 text-xs text-huma-err">{error}</p>}
 
-        <div className={`m-modal-foot ${!isEdit && onPreview ? 'grid grid-cols-3' : ''}`}>
+        <div className={`m-modal-foot ${!isEdit && onPreview ? 'grid grid-cols-2 gap-2' : ''}`}>
           {!isEdit && onPreview ? (
             <button
               type="button"
@@ -392,18 +408,10 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
               발행 큐
             </button>
           ) : null}
-          <button
-            type="button"
-            className={`btn-ghost py-2 ${!isEdit && onPreview ? 'min-w-0 text-[11px] sm:text-xs' : 'flex-1'}`}
-            onClick={onClose}
-            disabled={loading}
-          >
-            취소
-          </button>
         </div>
         <p className="mt-2 text-center font-mono text-[10.5px] text-huma-t3">
           {!isEdit && onPreview
-            ? '검증 미리보기 → 새 창 확인 후 「발행 큐 등록」 · Claude/Imagen 재생성 없음 · 모달 「발행 큐」는 새로 생성'
+            ? '검증 미리보기 → 새 창 확인 후 「발행 큐 등록」 · 닫기는 우상단 ✕'
             : form.auto_schedule
               ? '등록 직후 AI 생성 시작 · 네이버·SNS 발행 시각만 Haiku가 결정합니다'
               : `생성·발행 시작: ${buildScheduledAt(form.schedule_time).slice(0, 16).replace('T', ' ')}`}

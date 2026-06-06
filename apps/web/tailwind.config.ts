@@ -1,5 +1,14 @@
 import type { Config } from 'tailwindcss';
 
+const pretendardStack = [
+  'var(--font-pretendard)',
+  'Pretendard',
+  '-apple-system',
+  'BlinkMacSystemFont',
+  'Apple SD Gothic Neo',
+  'sans-serif',
+];
+
 const config: Config = {
   content: [
     './app/**/*.{js,ts,jsx,tsx,mdx}',
@@ -8,9 +17,9 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['var(--font-noto)', 'sans-serif'],
-        mono: ['var(--font-jetbrains)', 'monospace'],
-        display: ['var(--font-bebas)', 'sans-serif'],
+        sans: pretendardStack,
+        mono: pretendardStack,
+        display: pretendardStack,
       },
       fontSize: {
         xs: ['13.5px', { lineHeight: '1.25' }],

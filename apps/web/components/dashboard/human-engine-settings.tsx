@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { REVIEW_DURATION_SUMMARY } from '@huma/shared';
+import { REVIEW_DURATION_SUMMARY } from '@/lib/review-duration';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/constants';
 import { DEFAULT_VIDEO_MODEL, HUMAN_ENGINE_IMAGE_LABEL } from '@/lib/higgsfield-models';

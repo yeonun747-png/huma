@@ -107,6 +107,7 @@ export function QueueManager() {
     completedAt?: string | null;
     imageUrl?: string | null;
     hashtags?: string[] | null;
+    linkUrl?: string | null;
   } | null>(null);
 
   const load = useCallback(async () => {
@@ -309,6 +310,7 @@ export function QueueManager() {
         completedAt={viewer?.completedAt}
         imageUrl={viewer?.imageUrl}
         hashtags={viewer?.hashtags}
+        linkUrl={viewer?.linkUrl}
         onClose={() => setViewer(null)}
       />
 
@@ -411,6 +413,7 @@ export function QueueManager() {
                     completedAt: job.completed_at,
                     imageUrl: job.image_urls?.[0] ?? null,
                     hashtags: job.hashtags,
+                    linkUrl: job.link_url,
                   });
                 }}
                 onAdvance={

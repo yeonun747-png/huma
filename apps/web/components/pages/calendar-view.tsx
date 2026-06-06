@@ -43,6 +43,7 @@ type CalJob = {
   completed_at?: string | null;
   content?: string | null;
   image_urls?: string[] | null;
+  link_url?: string | null;
   platform?: string | null;
 };
 
@@ -72,6 +73,7 @@ export function CalendarView() {
     resultUrl?: string | null;
     completedAt?: string | null;
     imageUrl?: string | null;
+    linkUrl?: string | null;
   } | null>(null);
 
 
@@ -215,6 +217,7 @@ export function CalendarView() {
         resultUrl={viewer?.resultUrl}
         completedAt={viewer?.completedAt}
         imageUrl={viewer?.imageUrl}
+        linkUrl={viewer?.linkUrl}
         onClose={() => setViewer(null)}
       />
 
@@ -378,7 +381,7 @@ export function CalendarView() {
 
               <div>
 
-                <div className="font-display text-[16px] tracking-wide text-huma-acc">발행 예약 조감</div>
+                <div className="font-sans text-[16px] font-bold tracking-wide text-huma-acc">발행 예약 조감</div>
 
                 <div className="font-mono text-[11px] text-huma-t3">
 
@@ -431,6 +434,7 @@ export function CalendarView() {
                             resultUrl: j.result_url,
                             completedAt: j.completed_at ?? j.scheduled_at,
                             imageUrl: j.image_urls?.[0] ?? null,
+                            linkUrl: j.link_url,
                           })
                         }
                       >

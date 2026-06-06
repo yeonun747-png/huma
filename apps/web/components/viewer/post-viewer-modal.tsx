@@ -27,18 +27,10 @@ export function PostViewerModal({
   imageUrl,
   videoUrl,
   hashtags,
+  linkUrl,
   onClose,
 }: PostViewerModalProps) {
   const [progress, setProgress] = useState(18);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
 
   useEffect(() => {
     if (!open || !isLive) {
@@ -66,17 +58,22 @@ export function PostViewerModal({
     imageUrl,
     videoUrl,
     hashtags,
+    linkUrl,
   };
   const template = mergePostViewerTemplate(overrides);
   const wsLabel = WS_LABEL[workspace] ?? workspace;
 
   return (
-    <div className="m-modal-bg open z-[500]" role="presentation" onClick={onClose}>
+    <div
+      className="m-modal-bg open z-[500]"
+      role="presentation"
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => e.preventDefault()}
+    >
       <div
         className="m-modal m-modal-post-viewer max-h-[90vh] w-[min(720px,96vw)] overflow-hidden"
         role="dialog"
         aria-modal="true"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="m-modal-t flex items-center justify-between gap-2">
           <span className="truncate">🔍 포스팅 전체조감 — {title}</span>

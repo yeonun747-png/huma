@@ -35,7 +35,7 @@ const modalBlock = `
   .m-modal-queue { width: 520px; }
   .m-modal-t { font-size: 16px; font-weight: 700; color: var(--t); margin-bottom: 16px; }
   .m-modal-field { margin-bottom: 12px; }
-  .m-modal-label { font-size: 12px; color: var(--t3); font-family: var(--font-jetbrains), monospace; letter-spacing: 0.05em; margin-bottom: 5px; }
+  .m-modal-label { font-size: 12px; color: var(--t3); font-family: var(--font-ui); letter-spacing: 0.05em; margin-bottom: 5px; }
   .m-modal-input { width: 100%; background: var(--bg3); border: 1px solid var(--bdr); border-radius: 6px; padding: 8px 10px; color: var(--t); font-size: 14.5px; outline: none; }
   .m-modal-input:focus { border-color: var(--acc); }
   .m-modal-textarea { height: 72px; resize: none; }
@@ -47,11 +47,11 @@ const modalBlock = `
   .m-ai-engine { flex: 1; border-radius: 6px; padding: 8px 10px; }
   .m-ai-engine.main { background: var(--glow); border: 1px solid var(--acc); }
   .m-ai-engine.sub { background: rgba(255, 165, 0, 0.08); border: 1px solid rgba(255, 165, 0, 0.22); }
-  .m-ai-engine-tag { font-size: 9px; color: var(--t3); font-family: var(--font-jetbrains), monospace; margin-bottom: 2px; }
+  .m-ai-engine-tag { font-size: 9px; color: var(--t3); font-family: var(--font-ui); margin-bottom: 2px; }
   .m-ai-engine-name { font-size: 13px; font-weight: 600; }
   .m-ai-engine.main .m-ai-engine-name { color: var(--acc); }
   .m-ai-engine.sub .m-ai-engine-name { color: #e8a040; }
-  .m-ai-engine-sub { font-size: 9px; color: var(--t3); font-family: var(--font-jetbrains), monospace; }
+  .m-ai-engine-sub { font-size: 9px; color: var(--t3); font-family: var(--font-ui); }
 `;
 
 const globalsPath = path.join(ROOT, 'app/globals.css');

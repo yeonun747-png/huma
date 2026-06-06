@@ -1,24 +1,13 @@
 import type { Metadata } from 'next';
-import { Bebas_Neue, JetBrains_Mono, Noto_Sans_KR } from 'next/font/google';
+import localFont from 'next/font/local';
 import { Providers } from '@/components/dashboard/providers';
 import './globals.css';
 
-const noto = Noto_Sans_KR({
-  subsets: ['latin'],
-  weight: ['300', '400', '500', '700'],
-  variable: '--font-noto',
-});
-
-const jetbrains = JetBrains_Mono({
-  subsets: ['latin'],
-  weight: ['300', '400', '600'],
-  variable: '--font-jetbrains',
-});
-
-const bebas = Bebas_Neue({
-  subsets: ['latin'],
-  weight: '400',
-  variable: '--font-bebas',
+const pretendard = localFont({
+  src: '../public/fonts/PretendardVariable.woff2',
+  weight: '45 920',
+  variable: '--font-pretendard',
+  display: 'swap',
 });
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://romang-ai.com';
@@ -54,8 +43,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="ko" data-ws="yeonun">
-      <body className={`${noto.variable} ${jetbrains.variable} ${bebas.variable} font-sans`}>
+    <html lang="ko" data-ws="yeonun" className={pretendard.variable}>
+      <body className="font-sans">
         <Providers>{children}</Providers>
       </body>
     </html>

@@ -46,6 +46,8 @@ export async function postNaverBlog(params: {
 
   linkUrl?: string;
 
+  workspace?: string;
+
   humanEngine: HumanEngineConfig;
 
   persona?: AccountPersona;
@@ -81,7 +83,11 @@ export async function postNaverBlog(params: {
   await typePostContent(params.page, editor, params.content, config);
 
   if (params.linkUrl?.trim()) {
-    await pasteBlogLinkWithOgPreview(params.page, editor, params.linkUrl.trim(), scale);
+    await pasteBlogLinkWithOgPreview(params.page, editor, params.linkUrl.trim(), {
+      workspace: params.workspace ?? 'yeonun',
+      scale,
+      humanConfig: config,
+    });
   }
 
 

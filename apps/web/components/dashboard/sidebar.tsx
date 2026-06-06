@@ -57,7 +57,7 @@ export function Sidebar() {
   return (
     <aside className="relative z-10 flex h-screen w-[218px] min-w-[218px] flex-col border-r border-huma-bdr bg-huma-sb">
       <div className="border-b border-huma-bdr px-4 py-4">
-        <div className="font-display text-[25px] tracking-[0.25em] text-huma-acc">HUMA</div>
+        <div className="font-sans text-[25px] font-bold tracking-[0.25em] text-huma-acc">HUMA</div>
         <div className="mt-0.5 font-mono text-[9.5px] uppercase tracking-[0.2em] text-huma-t3">
           Studio v3.27 · Human Automation
         </div>

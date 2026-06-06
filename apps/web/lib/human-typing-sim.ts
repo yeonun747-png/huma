@@ -1,6 +1,7 @@
 /** 브라우저용 — server human-engine/typing.ts · timing.ts 와 동일 로직 */
 
-import { calcReviewDurationMs, planParagraphPaste } from '@huma/shared';
+import { planParagraphPaste } from '@huma/shared';
+import { calcReviewDurationMs } from '@/lib/review-duration';
 
 export { calcReviewDurationMs };
 
@@ -336,23 +337,24 @@ export async function typePostContentSim(
   }
 }
 
-/** pasteBlogLinkWithOgPreview — Ctrl+V 붙여넣기 + OG 카드 로딩 대기 */
+/** 본문 말미 yeonun.com 텍스트 링크 타이핑 (OG 카드 없음) */
+export async function typeYeonunBlogLinkSim(
+  buffer: LiveTextBuffer,
+  config: HumanEngineSimConfig,
+  cancelled: () => boolean,
+  onTick?: () => void,
+): Promise<void> {
+  await humanTypeSim('\n\nyeonun.com', buffer, config, cancelled, onTick);
+}
+
+/** @deprecated typeYeonunBlogLinkSim 사용 */
 export async function pasteBlogLinkSim(
-  linkUrl: string,
+  _linkUrl: string,
   buffer: LiveTextBuffer,
   cancelled: () => boolean,
   callbacks?: { onOgCard?: () => void; onTick?: () => void },
 ): Promise<void> {
-  buffer.append('\n\n');
-  callbacks?.onTick?.();
-  await sleepMs(randomBetween(400, 900), cancelled);
-  if (cancelled()) return;
-  buffer.append(linkUrl);
-  callbacks?.onTick?.();
-  await sleepMs(randomBetween(1200, 2500), cancelled);
-  if (cancelled()) return;
-  callbacks?.onOgCard?.();
-  await sleepMs(randomBetween(1500, 3500), cancelled);
+  await typeYeonunBlogLinkSim(buffer, DEFAULT_HUMAN_ENGINE_SIM, cancelled, callbacks?.onTick);
 }
 
 export async function sleepMs(ms: number, cancelled: () => boolean): Promise<void> {
@@ -612,7 +614,7 @@ export const POSTING_PHASE_LABELS: Record<PostingPhase, string> = {
   title_pause: '제목 입력 후 사고 정지',
   body_click: '본문 (.se-content) 클릭',
   body: '본문 typePostContent (인용·문어체 복붙30%·타이핑70%)',
-  link: '링크 URL Ctrl+V · OG 미리보기 카드',
+  link: '링크 yeonun.com 타이핑',
   image_upload: '사진 파일 업로드 (insertImage)',
   review: '발행 전 검토 (오탈자 수정)',
   publish: '발행 버튼 클릭',

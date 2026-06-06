@@ -35,7 +35,7 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-huma-bg p-4">
       <form onSubmit={handleSubmit} className="panel w-full max-w-sm space-y-4" noValidate>
         <div>
-          <div className="font-display text-3xl tracking-[0.2em] text-huma-acc">HUMA</div>
+          <div className="font-sans text-3xl font-bold tracking-[0.2em] text-huma-acc">HUMA</div>
           <p className="mt-1 font-mono text-[10px] text-huma-t3">Studio · Human Automation</p>
         </div>
         <div>

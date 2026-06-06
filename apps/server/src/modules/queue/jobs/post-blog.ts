@@ -27,6 +27,7 @@ export async function executePostBlog(params: {
     content,
     imageUrls: imgs,
     linkUrl,
+    workspace,
     humanEngine: params.humanConfig,
     persona: params.persona,
     rttScale: params.rttScale,

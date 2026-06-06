@@ -60,7 +60,7 @@ export function prepareBlogPostForPlaywright(
   sourceLink?: string | null,
   contentType?: ContentType,
 ): { content: string; linkUrl: string | undefined } {
-  const linkUrl = resolveBlogLinkUrl(workspace, sourceLink ?? '');
+  const linkUrl = resolveBlogLinkUrl(workspace, sourceLink ?? '', sourceLink ?? '');
   const content = sanitizeBlogPostForNaver(raw, { contentType, linkUrl });
   return { content, linkUrl: linkUrl || undefined };
 }

@@ -71,7 +71,7 @@ export function Topbar({ title }: { title: string }) {
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 border-b border-huma-bdr bg-huma-bg2 px-[18px] transition-all duration-300">
       <div>
-        <h1 className="font-display text-[19.5px] tracking-[0.15em] text-huma-acc">{title}</h1>
+        <h1 className="font-sans text-[19.5px] font-bold tracking-[0.15em] text-huma-acc">{title}</h1>
         <p className="font-mono text-[11px] text-huma-t3">{breadcrumb}</p>
       </div>
 
