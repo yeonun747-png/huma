@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { HumaJob } from '@huma/shared';
 import { api } from '@/lib/api';
 import { WS_LABEL } from '@/lib/constants';
-import { copyVncEndpoint, parseVncEndpoint } from '@/lib/open-vnc';
+import { copyVncEndpoint, isTailscaleEndpoint, parseVncEndpoint } from '@/lib/open-vnc';
 
 interface CaptchaHoldInfo {
   job_status: string;
@@ -66,6 +66,7 @@ export function CaptchaCompleteModal({
   const ws = WS_LABEL[job.workspace ?? ''] ?? job.workspace ?? '—';
   const expiresAt = holdInfo?.hold?.expiresAt;
   const vncEndpoint = holdInfo?.vnc_url ? parseVncEndpoint(holdInfo.vnc_url) : null;
+  const vncViaTailscale = vncEndpoint ? isTailscaleEndpoint(vncEndpoint) : false;
 
   const copyEndpoint = async () => {
     if (!vncEndpoint) return;
@@ -104,7 +105,17 @@ export function CaptchaCompleteModal({
         {holdInfo?.vnc_url && vncEndpoint ? (
           <div className="mt-3 rounded-md border border-huma-bdr2 bg-huma-bg3 px-3 py-2.5 text-sm">
             <p className="text-xs text-huma-t3">
-              <strong className="text-huma-t2">권장</strong> RealVNC Viewer → Direct → 아래 주소 (같은 Wi‑Fi/LAN)
+              {vncViaTailscale ? (
+                <>
+                  <strong className="text-huma-t2">Tailscale</strong> — RealVNC Direct · PC에도 Tailscale(
+                  goriccc@gmail.com) 로그인 필수 · 집 밖 OK
+                </>
+              ) : (
+                <>
+                  <strong className="text-huma-t2">LAN</strong> — RealVNC Direct · 같은 Wi‑Fi에서만 · 집 밖은 i7{' '}
+                  <span className="font-mono">setup-tailscale.sh</span>
+                </>
+              )}
             </p>
             <p className="mt-1.5 font-mono text-base text-huma-t1">{vncEndpoint}</p>
             <div className="mt-2">

@@ -33,6 +33,12 @@ fi
 
 VNC_URL="vnc://${TS_IP}:${VNC_PORT}"
 
+# ufw 사용 시 tailscale0 → 5900 허용 (LAN은 되는데 100.x 타임아웃 방지)
+if command -v ufw >/dev/null 2>&1 && sudo ufw status 2>/dev/null | grep -qi active; then
+  echo "ufw active — tailscale0:${VNC_PORT} 허용 추가"
+  sudo ufw allow in on tailscale0 to any port "${VNC_PORT}" proto tcp comment 'huma VNC' 2>/dev/null || true
+fi
+
 echo ""
 echo "Tailscale IPv4: ${TS_IP}"
 echo "RealVNC Direct: ${TS_IP}:${VNC_PORT}"
@@ -61,3 +67,5 @@ echo "  2) i7과 같은 계정으로 로그인"
 echo "  3) RealVNC Viewer → Direct → ${TS_IP}:${VNC_PORT}"
 echo ""
 echo "  pm2 restart huma-server --update-env"
+echo ""
+echo "진단: bash ${SCRIPT_DIR}/scripts/check-tailscale-vnc.sh"

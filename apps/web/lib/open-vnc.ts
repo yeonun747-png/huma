@@ -11,6 +11,15 @@ export function parseVncEndpoint(vncUrl: string): string | null {
   }
 }
 
+/** Tailscale CGNAT 100.64.0.0/10 */
+export function isTailscaleEndpoint(endpoint: string): boolean {
+  const host = endpoint.split(':')[0]?.trim() ?? '';
+  if (!host.startsWith('100.')) return false;
+  const parts = host.split('.').map((p) => Number(p));
+  if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return false;
+  return parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127;
+}
+
 export async function copyVncEndpoint(endpoint: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(endpoint);
