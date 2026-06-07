@@ -3,7 +3,6 @@ set -euo pipefail
 
 DISPLAY_NUM="${HUMA_DISPLAY:-:99}"
 RFB_PORT="${HUMA_VNC_PORT:-5900}"
-LOG="/tmp/huma-x11vnc.log"
 
 echo "[x11vnc] waiting for Xvfb ${DISPLAY_NUM}..."
 for _ in $(seq 1 60); do
@@ -25,8 +24,7 @@ sleep 2
 
 export DISPLAY="${DISPLAY_NUM}"
 
-echo "[x11vnc] exec on ${DISPLAY_NUM} port ${RFB_PORT} (log: ${LOG})"
-# 수동 기동과 동일 — exec 로 pm2 가 x11vnc 프로세스 직접 관리
+echo "[x11vnc] exec on ${DISPLAY_NUM} port ${RFB_PORT}"
 exec x11vnc \
   -display "${DISPLAY_NUM}" \
   -forever \
@@ -35,5 +33,4 @@ exec x11vnc \
   -no6 \
   -listen 0.0.0.0 \
   -rfbport "${RFB_PORT}" \
-  -noxdamage \
-  -o "${LOG}"
+  -noxdamage
