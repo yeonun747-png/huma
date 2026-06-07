@@ -82,6 +82,7 @@ export interface CaptchaTelegramParams {
   remindIndex?: number;
   timedOut?: boolean;
   completed?: boolean;
+  drill?: boolean;
 }
 
 export async function notifyCaptchaTelegram(params: CaptchaTelegramParams): Promise<void> {
@@ -96,13 +97,19 @@ export async function notifyCaptchaTelegram(params: CaptchaTelegramParams): Prom
 
   let head: string;
   if (params.completed) {
-    head = '✅ huma · CAPTCHA 해결 완료';
+    head = params.drill ? '✅ huma · CAPTCHA 연습(DRILL) 완료' : '✅ huma · CAPTCHA 해결 완료';
   } else if (params.timedOut) {
-    head = '⏱ huma · CAPTCHA 시간 초과 (30분)';
+    head = params.drill
+      ? '⏱ huma · CAPTCHA 연습(DRILL) 시간 초과'
+      : '⏱ huma · CAPTCHA 시간 초과 (30분)';
   } else if (params.remind) {
-    head = `🔔 huma · CAPTCHA 재알림 (${params.remindIndex ?? '?'}/3)`;
+    head = params.drill
+      ? `🔔 huma · CAPTCHA 연습 재알림 (${params.remindIndex ?? '?'}/1)`
+      : `🔔 huma · CAPTCHA 재알림 (${params.remindIndex ?? '?'}/3)`;
   } else {
-    head = '⚠️ huma · CAPTCHA — VNC에서 해결 후 huma에서 발행 완료';
+    head = params.drill
+      ? '🧪 huma · CAPTCHA 연습(DRILL) — VNC 확인 후 huma에서 발행 완료'
+      : '⚠️ huma · CAPTCHA — VNC에서 해결 후 huma에서 발행 완료';
   }
 
   const lines = [

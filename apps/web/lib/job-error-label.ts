@@ -79,6 +79,9 @@ export function formatJobErrorLabel(message: string | null | undefined): string 
   const linksErr = formatLinksNotFoundError(raw);
   if (linksErr) return linksErr;
 
+  if (raw.includes('CAPTCHA_DRILL')) {
+    return '캡cha 연습(DRILL) — VNC·Telegram·발행완료 UI 테스트';
+  }
   if (raw.includes('CAPTCHA_AWAITING_HUMAN')) {
     return '캡cha 대기 — VNC에서 해결 후 huma에서 발행 완료';
   }

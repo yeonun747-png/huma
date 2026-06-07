@@ -2,6 +2,12 @@ import type { FastifyInstance } from 'fastify';
 import { authMiddleware, getWorkspaceFilter, supabase } from '../middleware/auth.js';
 import { logOperation } from '../lib/log-emitter.js';
 import { getSystemPaused, setSystemPaused } from '../modules/queue/worker.js';
+import {
+  getActiveCaptchaDrillJobId,
+  isCaptchaDrillEnabled,
+  startCaptchaDrill,
+} from '../modules/watcher/captcha-drill.js';
+import type { Workspace } from '@huma/shared';
 
 export async function registerSystemRoutes(app: FastifyInstance) {
   app.get('/api/health', async () => ({
@@ -71,5 +77,31 @@ export async function registerSystemRoutes(app: FastifyInstance) {
     setSystemPaused(false);
     await logOperation({ level: 'INFO', message: 'HUMA 전체 재개' });
     return { success: true, message: '작업 재개됨' };
+  });
+
+  app.get('/api/system/captcha-drill', { preHandler: authMiddleware }, async () => ({
+    enabled: isCaptchaDrillEnabled(),
+    activeJobId: getActiveCaptchaDrillJobId(),
+  }));
+
+  app.post('/api/system/captcha-drill', { preHandler: authMiddleware }, async (request, reply) => {
+    if (!isCaptchaDrillEnabled()) {
+      return reply.code(403).send({ error: 'CAPTCHA 연습 비활성 (HUMA_CAPTCHA_DRILL=false)' });
+    }
+    const body = (request.body ?? {}) as { workspace?: string };
+    const ws = body.workspace as Workspace | undefined;
+    if (!ws || !['yeonun', 'panana', 'quizoasis'].includes(ws)) {
+      return reply.code(400).send({ error: 'workspace: yeonun | panana | quizoasis' });
+    }
+    try {
+      const result = await startCaptchaDrill(ws);
+      return { success: true, ...result, queueUrl: `/queue?job=${result.jobId}` };
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (msg.startsWith('CAPTCHA_DRILL_ALREADY_ACTIVE')) {
+        return reply.code(409).send({ error: '이미 연습 진행 중', activeJobId: msg.split(':')[1] });
+      }
+      return reply.code(500).send({ error: msg });
+    }
   });
 }

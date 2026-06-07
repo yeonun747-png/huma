@@ -23,8 +23,15 @@ export interface CaptchaHoldInput {
   releaseAccountLock: () => void;
 }
 
+export interface CaptchaHoldOptions {
+  holdMs?: number;
+  isDrill?: boolean;
+}
+
 interface CaptchaHoldEntry extends CaptchaHoldInput {
   holdStartedAt: number;
+  holdMs: number;
+  isDrill: boolean;
   remindCount: number;
   timers: NodeJS.Timeout[];
 }
@@ -68,7 +75,10 @@ async function completeJobRecord(jobId: string, resultUrl?: string): Promise<voi
 }
 
 function scheduleReminders(entry: CaptchaHoldEntry): void {
-  for (let i = 1; i <= MAX_REMINDS; i += 1) {
+  const remindMs = entry.isDrill ? 60 * 1000 : REMIND_MS;
+  const maxReminds = entry.isDrill ? 1 : MAX_REMINDS;
+
+  for (let i = 1; i <= maxReminds; i += 1) {
     const t = setTimeout(() => {
       if (!holds.has(entry.jobId)) return;
       entry.remindCount = i;
@@ -80,14 +90,15 @@ function scheduleReminders(entry: CaptchaHoldEntry): void {
         jobType: entry.jobType,
         remind: true,
         remindIndex: i,
+        drill: entry.isDrill,
       });
-    }, REMIND_MS * i);
+    }, remindMs * i);
     entry.timers.push(t);
   }
 
   const timeout = setTimeout(() => {
     void expireCaptchaHold(entry.jobId);
-  }, HOLD_MS);
+  }, entry.holdMs);
   entry.timers.push(timeout);
 }
 
@@ -99,26 +110,34 @@ export function listCaptchaHoldJobIds(): string[] {
   return [...holds.keys()];
 }
 
-export async function enterCaptchaHold(input: CaptchaHoldInput): Promise<void> {
+export async function enterCaptchaHold(
+  input: CaptchaHoldInput,
+  options?: CaptchaHoldOptions,
+): Promise<void> {
   if (holds.has(input.jobId)) {
     throw new Error('CAPTCHA_HOLD_ALREADY_ACTIVE');
   }
 
+  const isDrill = options?.isDrill === true;
+  const holdMs = options?.holdMs ?? HOLD_MS;
+
   let accountLabel = input.accountLabel;
-  if (!accountLabel?.trim()) {
+  if (!accountLabel?.trim() && !isDrill) {
     const { data: ac } = await supabase
       .from('huma_accounts')
       .select('name, naver_id')
       .eq('id', input.accountId)
       .maybeSingle();
     accountLabel = ac?.name ?? ac?.naver_id ?? input.accountId;
+  } else if (!accountLabel?.trim()) {
+    accountLabel = 'CAPTCHA DRILL';
   }
 
   await supabase
     .from('huma_jobs')
     .update({
       status: 'awaiting_captcha',
-      error_message: 'CAPTCHA_AWAITING_HUMAN',
+      error_message: isDrill ? 'CAPTCHA_DRILL' : 'CAPTCHA_AWAITING_HUMAN',
     })
     .eq('id', input.jobId);
 
@@ -126,6 +145,8 @@ export async function enterCaptchaHold(input: CaptchaHoldInput): Promise<void> {
     ...input,
     accountLabel,
     holdStartedAt: Date.now(),
+    holdMs,
+    isDrill,
     remindCount: 0,
     timers: [],
   };
@@ -138,11 +159,14 @@ export async function enterCaptchaHold(input: CaptchaHoldInput): Promise<void> {
     accountLabel,
     jobTitle: input.jobTitle,
     jobType: input.jobType,
+    drill: isDrill,
   });
 
   await logOperation({
-    level: 'warn',
-    message: 'CAPTCHA — 30분 세션 유지 · VNC 해결 후 huma 발행 완료',
+    level: isDrill ? 'info' : 'warn',
+    message: isDrill
+      ? 'CAPTCHA DRILL — 5분 · VNC 확인 후 huma 발행 완료'
+      : 'CAPTCHA — 30분 세션 유지 · VNC 해결 후 huma 발행 완료',
     job_id: input.jobId,
     account_id: input.accountId,
   });
@@ -182,6 +206,7 @@ export async function completeCaptchaHold(
     jobTitle: entry.jobTitle,
     jobType: entry.jobType,
     completed: true,
+    drill: entry.isDrill,
   });
 
   await logOperation({
@@ -207,7 +232,7 @@ export async function expireCaptchaHold(jobId: string): Promise<void> {
   if (entry.modemSession) await releaseModem(entry.modemSession).catch(() => {});
   entry.releaseAccountLock();
 
-  await markJobFailed(jobId, 'CAPTCHA_TIMEOUT');
+  await markJobFailed(jobId, entry.isDrill ? 'CAPTCHA_DRILL_TIMEOUT' : 'CAPTCHA_TIMEOUT');
 
   await notifyCaptchaTelegram({
     jobId,
@@ -216,11 +241,14 @@ export async function expireCaptchaHold(jobId: string): Promise<void> {
     jobTitle: entry.jobTitle,
     jobType: entry.jobType,
     timedOut: true,
+    drill: entry.isDrill,
   });
 
   await logOperation({
     level: 'ERROR',
-    message: 'CAPTCHA 30분 시간 초과 — 세션 종료',
+    message: entry.isDrill
+      ? 'CAPTCHA DRILL 5분 시간 초과'
+      : 'CAPTCHA 30분 시간 초과 — 세션 종료',
     job_id: jobId,
     account_id: entry.accountId,
   });
@@ -232,14 +260,16 @@ export function getCaptchaHoldPublicInfo(jobId: string): {
   workspace?: string | null;
   vncUrl?: string | null;
   webUrl?: string | null;
+  isDrill?: boolean;
 } | null {
   const entry = holds.get(jobId);
   if (!entry) return null;
   return {
     active: true,
-    expiresAt: new Date(entry.holdStartedAt + HOLD_MS).toISOString(),
+    expiresAt: new Date(entry.holdStartedAt + entry.holdMs).toISOString(),
     workspace: entry.workspace,
     vncUrl: resolveVncUrl(entry.workspace),
     webUrl: buildJobWebUrl(jobId),
+    isDrill: entry.isDrill,
   };
 }

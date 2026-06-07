@@ -531,4 +531,11 @@ export const api = {
     request('/api/stop-all', { method: 'POST', body: JSON.stringify({ reason }) }),
   advanceJob: (id: string) => request(`/api/jobs/${id}/advance`, { method: 'PATCH' }),
   resumeAll: () => request('/api/resume-all', { method: 'POST' }),
+  getCaptchaDrillStatus: () =>
+    request<{ enabled: boolean; activeJobId: string | null }>('/api/system/captcha-drill'),
+  startCaptchaDrill: (workspace: string) =>
+    request<{ success: boolean; jobId: string; workspace: string; queueUrl: string }>(
+      '/api/system/captcha-drill',
+      { method: 'POST', body: JSON.stringify({ workspace }) },
+    ),
 };

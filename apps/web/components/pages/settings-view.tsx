@@ -316,8 +316,15 @@ export function WatcherView() {
   const [watcher, setWatcher] = useState<Record<string, unknown>>({});
 
   const [logs, setLogs] = useState<WatcherLogRow[]>([]);
+  const [drillJobId, setDrillJobId] = useState<string | null>(null);
+  const [drillLoading, setDrillLoading] = useState(false);
 
-
+  const loadDrill = useCallback(() => {
+    api
+      .getCaptchaDrillStatus()
+      .then((s) => setDrillJobId(s.activeJobId))
+      .catch(() => setDrillJobId(null));
+  }, []);
 
   const load = useCallback(() => {
 
@@ -333,7 +340,9 @@ export function WatcherView() {
 
       .catch(() => {});
 
-  }, []);
+    loadDrill();
+
+  }, [loadDrill]);
 
 
 
@@ -355,6 +364,23 @@ export function WatcherView() {
 
     await api.updateSetting('watcher', next);
 
+  };
+
+  const startDrill = async (workspace: 'yeonun' | 'panana' | 'quizoasis') => {
+    if (!window.confirm(`${workspace} CAPTCHA 연습을 시작할까요?\nTelegram · VNC · 큐 발행완료 UI (5분, 실발행 아님)`)) {
+      return;
+    }
+    setDrillLoading(true);
+    try {
+      const r = await api.startCaptchaDrill(workspace);
+      setDrillJobId(r.jobId);
+      alert(`연습 job 생성됨\n1) Telegram 확인\n2) VNC → 빨간 DRILL 화면\n3) 큐 → 발행 완료`);
+      window.open(`/queue?job=${encodeURIComponent(r.jobId)}`, '_blank', 'noopener,noreferrer');
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setDrillLoading(false);
+    }
   };
 
 
@@ -470,6 +496,50 @@ export function WatcherView() {
 
         )}
 
+      </MPanel>
+
+      <MPanel title="CAPTCHA 연습 (DRILL)">
+        <p className="mb-3 text-[12px] leading-relaxed text-huma-t2">
+          Telegram 알림 · VNC 화면 · 큐 「발행 완료」 UI를 한 번에 테스트합니다. 실제 네이버 발행·Layer4 처리는 하지
+          않습니다. i7에서 x11vnc가 떠 있어야 VNC에 DRILL 화면이 보입니다.
+        </p>
+        {drillJobId ? (
+          <p className="mb-3 font-mono text-[11px] text-huma-warn">
+            진행 중 job: {drillJobId}{' '}
+            <a className="text-huma-accent underline" href={`/queue?job=${drillJobId}`}>
+              큐 열기
+            </a>
+          </p>
+        ) : null}
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="btn-primary btn-sm"
+            disabled={drillLoading || Boolean(drillJobId)}
+            onClick={() => void startDrill('yeonun')}
+          >
+            연운 DRILL
+          </button>
+          <button
+            type="button"
+            className="btn-primary btn-sm"
+            disabled={drillLoading || Boolean(drillJobId)}
+            onClick={() => void startDrill('panana')}
+          >
+            파나나 DRILL
+          </button>
+          <button
+            type="button"
+            className="btn-primary btn-sm"
+            disabled={drillLoading || Boolean(drillJobId)}
+            onClick={() => void startDrill('quizoasis')}
+          >
+            퀴즈 DRILL
+          </button>
+          <button type="button" className="btn-ghost btn-sm" disabled={drillLoading} onClick={() => loadDrill()}>
+            상태 새로고침
+          </button>
+        </div>
       </MPanel>
 
       <MGrid cols={2}>
