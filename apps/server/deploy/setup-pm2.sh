@@ -24,12 +24,15 @@ chmod 755 /data/browser-profiles
 echo "Building server..."
 npm run build
 
-pm2 delete huma-xvfb huma-server 2>/dev/null || true
+pm2 delete huma-xvfb huma-x11vnc huma-server 2>/dev/null || true
 pm2 start "${SCRIPT_DIR}/ecosystem.config.cjs"
 pm2 save
 
 echo ""
-echo "Enable boot startup:"
+echo "VNC (x11vnc) — systemd 등록 (재부팅 자동, pm2 파이프 이슈 회피):"
+echo "  sudo HUMA_USER=\$USER bash ${SCRIPT_DIR}/setup-x11vnc-systemd.sh"
+echo ""
+echo "Enable boot startup (pm2 — Xvfb + server):"
 echo "  pm2 startup"
 echo "  (printed command를 sudo로 실행)"
 echo ""

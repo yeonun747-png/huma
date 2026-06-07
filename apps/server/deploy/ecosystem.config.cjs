@@ -17,19 +17,8 @@ module.exports = {
         HUMA_XVFB_SCREEN: '1920x1080x24',
       },
     },
-    {
-      name: 'huma-x11vnc',
-      script: path.join(deployRoot, 'scripts/run-x11vnc.sh'),
-      interpreter: 'bash',
-      autorestart: true,
-      max_restarts: 10,
-      restart_delay: 3000,
-      out_file: '/dev/null',
-      error_file: '/dev/null',
-      env: {
-        DISPLAY: ':99',
-      },
-    },
+    // x11vnc → systemd (huma-x11vnc.service). pm2 stdout 파이프 데드락 방지 + 재부팅 자동 기동.
+    // 등록: sudo HUMA_USER=$USER bash apps/server/deploy/setup-x11vnc-systemd.sh
     {
       name: 'huma-server',
       cwd: serverRoot,

@@ -1,41 +1,45 @@
 #!/usr/bin/env bash
+# VNC 복구: systemd x11vnc 재기동 + RFB 확인
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"
+DEPLOY="${ROOT}/apps/server/deploy"
 cd "$ROOT"
 
-echo "== huma VNC fix =="
+echo "== huma VNC fix (systemd) =="
 
-git fetch origin
+git fetch origin 2>/dev/null || true
 git checkout origin/main -- \
   apps/server/deploy/ecosystem.config.cjs \
   apps/server/deploy/scripts/run-x11vnc.sh \
+  apps/server/deploy/scripts/check-vnc-rfb.sh \
   apps/server/deploy/scripts/fix-vnc.sh \
-  apps/server/deploy/scripts/start-x11vnc.sh 2>/dev/null || true
-git pull --ff-only
+  apps/server/deploy/huma-x11vnc.service \
+  apps/server/deploy/setup-x11vnc-systemd.sh 2>/dev/null || true
+git pull --ff-only 2>/dev/null || true
 
-chmod +x apps/server/deploy/scripts/run-x11vnc.sh
+chmod +x "${DEPLOY}/scripts/run-x11vnc.sh" "${DEPLOY}/scripts/check-vnc-rfb.sh"
 
-pm2 stop huma-x11vnc 2>/dev/null || true
+# pm2 x11vnc 제거 (systemd 전용)
+pm2 delete huma-x11vnc 2>/dev/null || true
+pm2 save 2>/dev/null || true
+
 pkill -9 x11vnc 2>/dev/null || true
 sleep 2
 
-pm2 delete huma-x11vnc 2>/dev/null || true
-pm2 start apps/server/deploy/ecosystem.config.cjs --only huma-x11vnc --update-env
+if systemctl is-enabled huma-x11vnc.service >/dev/null 2>&1; then
+  sudo systemctl restart huma-x11vnc.service
+else
+  echo "systemd 미등록 — 최초 1회:"
+  echo "  sudo HUMA_USER=\$USER bash ${DEPLOY}/setup-x11vnc-systemd.sh"
+  echo "수동 기동 (임시):"
+  nohup bash "${DEPLOY}/scripts/run-x11vnc.sh" >>/tmp/huma-x11vnc.log 2>&1 &
+  sleep 4
+fi
 
-echo "RFB 확인 (최대 15초)..."
-for i in $(seq 1 15); do
-  if out=$(timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/5900; head -c 12 <&3' 2>/dev/null) && [[ "$out" == RFB* ]]; then
-    echo "RFB banner: $out"
-    echo "OK — RealVNC: 172.30.1.96:5900 (Direct, 암호 없음)"
-    pm2 ls | grep x11vnc || true
-    ss -tlnp | grep 5900 || true
-    exit 0
-  fi
-  sleep 1
-done
+if bash "${DEPLOY}/scripts/check-vnc-rfb.sh"; then
+  echo "OK — RealVNC: 172.30.1.96:5900 (Direct, 암호 없음)"
+  exit 0
+fi
 
-echo "RFB banner: (없음)"
-ss -tlnp | grep 5900 || echo "5900 not listening"
-pm2 logs huma-x11vnc --lines 20 --nostream
 exit 1
