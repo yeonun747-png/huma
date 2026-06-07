@@ -416,8 +416,8 @@ export function WatcherView() {
       const r = await api.testTelegram(workspace);
       alert(
         r.ok
-          ? `${workspace} Telegram 테스트 OK\nchat_id 설정됨 — 봇 메시지 확인`
-          : `Telegram 실패: ${r.error ?? 'unknown'}\ntoken=${r.env.hasToken ? 'Y' : 'N'} chat=${r.env.chatId ? 'Y' : 'N'}`,
+          ? `${workspace} Telegram OK (@${r.botUsername ?? 'bot'}) — Telegram 앱에서 메시지 확인`
+          : `Telegram 실패:\n${r.error ?? 'unknown'}\ntoken=${r.env.hasToken ? 'Y' : 'N'} chat=${r.env.chatId ? 'Y' : 'N'}`,
       );
     } catch (e) {
       alert((e as Error).message);

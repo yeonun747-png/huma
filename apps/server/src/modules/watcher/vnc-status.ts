@@ -48,7 +48,7 @@ export async function getVncRuntimeStatus(): Promise<{
     hint = 'x11vnc 미기동 — pm2 start deploy/ecosystem.config.cjs --only huma-x11vnc';
   } else {
     hint =
-      '5900 LISTEN OK — RealVNC는 같은 Wi‑Fi/LAN에서 172.30.1.96:5900 (공인 IP·Cloud 아님). DRILL 중에만 Chrome 창 표시.';
+      '5900 LISTEN OK — RealVNC Viewer: 주소 172.30.1.96:5900 · Direct(Cloud 아님) · 암호 없음. 평소 검정=정상, DRILL 중 흰 화면.';
   }
 
   return {

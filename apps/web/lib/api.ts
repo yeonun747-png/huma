@@ -67,14 +67,16 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     const err = (await res.json().catch(() => ({ error: res.statusText, message: res.statusText }))) as {
       error?: string;
       message?: string;
+      ok?: boolean;
     };
     if (res.status === 401 && typeof window !== 'undefined') {
       localStorage.removeItem('huma_token');
       window.dispatchEvent(new Event('huma:auth-expired'));
     }
-    const detail = [err.error, err.message]
-      .filter((s): s is string => typeof s === 'string' && s.trim().length > 0 && s !== 'Not Found')
-      .join(' — ');
+    const parts = [err.error, err.message].filter(
+      (s): s is string => typeof s === 'string' && s.trim().length > 0 && s !== 'Not Found',
+    );
+    const detail = [...new Set(parts)].join(' — ');
     const fallback = res.statusText || 'API 요청 실패';
     throw new Error(detail || (err.error === 'Not Found' ? `API 경로 없음 (${res.status}) — 서버 git pull·build·pm2 restart 필요` : fallback));
   }

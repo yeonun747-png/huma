@@ -114,10 +114,7 @@ export async function registerSystemRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'workspace: yeonun | panana | quizoasis' });
     }
     const result = await sendTelegramTest(ws ?? 'yeonun');
-    if (!result.ok) {
-      return reply.code(result.error?.includes('없음') ? 503 : 502).send(result);
-    }
-    return { success: true, ...result };
+    return { success: result.ok, ...result };
   });
 
   app.get('/api/system/vnc-status', { preHandler: authMiddleware }, async () => {

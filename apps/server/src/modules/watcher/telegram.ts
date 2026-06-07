@@ -55,17 +55,55 @@ export async function sendTelegramHtml(
   if (!chatId) return { ok: false, error: 'chat_id 없음' };
 
   try {
-    await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
-      chat_id: chatId,
-      text: html,
-      parse_mode: 'HTML',
-      disable_web_page_preview: false,
-    });
+    await axios.post(
+      `https://api.telegram.org/bot${token}/sendMessage`,
+      {
+        chat_id: chatId,
+        text: html,
+        parse_mode: 'HTML',
+        disable_web_page_preview: false,
+      },
+      { timeout: 15_000 },
+    );
     return { ok: true };
   } catch (err) {
-    const ax = err as { response?: { data?: { description?: string } }; message?: string };
-    const detail = ax.response?.data?.description ?? ax.message ?? 'send failed';
+    const ax = err as {
+      response?: { status?: number; data?: { description?: string } };
+      message?: string;
+      code?: string;
+    };
+    const tg = ax.response?.data?.description;
+    const detail =
+      tg ??
+      (ax.code === 'ECONNREFUSED' || ax.code === 'ENOTFOUND'
+        ? `Telegram API 연결 실패 (${ax.code}) — i7 방화벽·DNS 확인`
+        : ax.message ?? 'send failed');
     console.warn('[telegram] send failed:', detail);
+    return { ok: false, error: detail };
+  }
+}
+
+async function verifyTelegramBot(token: string): Promise<{ ok: true; username: string } | { ok: false; error: string }> {
+  try {
+    const { data } = await axios.get<{ ok?: boolean; result?: { username?: string }; description?: string }>(
+      `https://api.telegram.org/bot${token}/getMe`,
+      { timeout: 15_000 },
+    );
+    if (!data.ok || !data.result?.username) {
+      return { ok: false, error: data.description ?? 'getMe 실패 — TELEGRAM_BOT_TOKEN 확인' };
+    }
+    return { ok: true, username: data.result.username };
+  } catch (err) {
+    const ax = err as {
+      response?: { data?: { description?: string } };
+      message?: string;
+      code?: string;
+    };
+    const detail =
+      ax.response?.data?.description ??
+      (ax.code === 'ECONNREFUSED' || ax.code === 'ENOTFOUND'
+        ? `Telegram API 연결 불가 (${ax.code}) — i7에서 curl api.telegram.org 확인`
+        : ax.message ?? 'getMe failed');
     return { ok: false, error: detail };
   }
 }
@@ -167,6 +205,7 @@ export async function notifyCaptchaTelegram(
 export async function sendTelegramTest(workspace?: string | null): Promise<{
   ok: boolean;
   chatId: string | null;
+  botUsername?: string;
   error?: string;
   env: ReturnType<typeof getTelegramEnvStatus>;
 }> {
@@ -177,9 +216,22 @@ export async function sendTelegramTest(workspace?: string | null): Promise<{
   if (!env.chatId) {
     return { ok: false, chatId: null, error: 'chat_id 없음 — TELEGRAM_CHAT_ID_* 확인', env };
   }
+
+  const token = process.env.TELEGRAM_BOT_TOKEN!.trim();
+  const bot = await verifyTelegramBot(token);
+  if (!bot.ok) {
+    return { ok: false, chatId: env.chatId, error: bot.error, env };
+  }
+
   const r = await sendTelegramHtml(
     env.chatId,
-    `<b>🧪 huma Telegram 테스트</b>\nworkspace: ${escapeHtml(workspace ?? 'default')}\n연결 OK`,
+    `<b>huma Telegram 테스트</b>\nworkspace: ${escapeHtml(workspace ?? 'default')}\n@${escapeHtml(bot.username)} 연결 OK`,
   );
-  return { ok: r.ok, chatId: env.chatId, error: r.error, env };
+  return {
+    ok: r.ok,
+    chatId: env.chatId,
+    botUsername: bot.username,
+    error: r.error,
+    env,
+  };
 }
