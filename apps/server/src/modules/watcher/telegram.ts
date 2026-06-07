@@ -46,20 +46,42 @@ function escapeHtml(text: string): string {
     .replace(/>/g, '&gt;');
 }
 
-export async function sendTelegramHtml(chatId: string, html: string): Promise<void> {
+export async function sendTelegramHtml(
+  chatId: string,
+  html: string,
+): Promise<{ ok: boolean; error?: string }> {
   const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
-  if (!token || !chatId) return;
+  if (!token) return { ok: false, error: 'TELEGRAM_BOT_TOKEN 없음' };
+  if (!chatId) return { ok: false, error: 'chat_id 없음' };
 
-  await axios
-    .post(`https://api.telegram.org/bot${token}/sendMessage`, {
+  try {
+    await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
       chat_id: chatId,
       text: html,
       parse_mode: 'HTML',
       disable_web_page_preview: false,
-    })
-    .catch((err) => {
-      console.warn('[telegram] send failed:', (err as Error).message);
     });
+    return { ok: true };
+  } catch (err) {
+    const ax = err as { response?: { data?: { description?: string } }; message?: string };
+    const detail = ax.response?.data?.description ?? ax.message ?? 'send failed';
+    console.warn('[telegram] send failed:', detail);
+    return { ok: false, error: detail };
+  }
+}
+
+export function getTelegramEnvStatus(workspace?: string | null): {
+  hasToken: boolean;
+  chatId: string | null;
+  webUrl: boolean;
+  vncUrl: boolean;
+} {
+  return {
+    hasToken: Boolean(process.env.TELEGRAM_BOT_TOKEN?.trim()),
+    chatId: resolveTelegramChatId(workspace),
+    webUrl: Boolean(process.env.HUMA_WEB_URL?.trim()),
+    vncUrl: Boolean(resolveVncUrl(workspace)),
+  };
 }
 
 export async function notifyTelegram(
@@ -83,12 +105,20 @@ export interface CaptchaTelegramParams {
   timedOut?: boolean;
   completed?: boolean;
   drill?: boolean;
+  /** DRILL 등 — 설정 토글 무시하고 token+chat_id 있으면 발송 */
+  force?: boolean;
 }
 
-export async function notifyCaptchaTelegram(params: CaptchaTelegramParams): Promise<void> {
-  if (!(await shouldNotifyTelegram())) return;
+export async function notifyCaptchaTelegram(
+  params: CaptchaTelegramParams,
+): Promise<{ ok: boolean; error?: string; skipped?: string }> {
+  if (!params.force && !(await shouldNotifyTelegram())) {
+    return { ok: false, skipped: 'Telegram 알림 꺼짐 또는 env 미설정' };
+  }
   const chatId = resolveTelegramChatId(params.workspace);
-  if (!chatId) return;
+  if (!chatId) {
+    return { ok: false, error: `chat_id 없음 (workspace=${params.workspace ?? '?'})` };
+  }
 
   const webUrl = buildJobWebUrl(params.jobId);
   const vncUrl = resolveVncUrl(params.workspace);
@@ -130,5 +160,26 @@ export async function notifyCaptchaTelegram(params: CaptchaTelegramParams): Prom
     lines.push(`VNC: <a href="${escapeHtml(vncUrl)}">${escapeHtml(vncUrl)}</a>`);
   }
 
-  await sendTelegramHtml(chatId, lines.join('\n'));
+  return sendTelegramHtml(chatId, lines.join('\n'));
+}
+
+/** env·Bot API 연결만 빠르게 확인 */
+export async function sendTelegramTest(workspace?: string | null): Promise<{
+  ok: boolean;
+  chatId: string | null;
+  error?: string;
+  env: ReturnType<typeof getTelegramEnvStatus>;
+}> {
+  const env = getTelegramEnvStatus(workspace);
+  if (!env.hasToken) {
+    return { ok: false, chatId: env.chatId, error: 'TELEGRAM_BOT_TOKEN 없음', env };
+  }
+  if (!env.chatId) {
+    return { ok: false, chatId: null, error: 'chat_id 없음 — TELEGRAM_CHAT_ID_* 확인', env };
+  }
+  const r = await sendTelegramHtml(
+    env.chatId,
+    `<b>🧪 huma Telegram 테스트</b>\nworkspace: ${escapeHtml(workspace ?? 'default')}\n연결 OK`,
+  );
+  return { ok: r.ok, chatId: env.chatId, error: r.error, env };
 }

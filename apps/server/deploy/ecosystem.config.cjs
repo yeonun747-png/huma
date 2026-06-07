@@ -18,6 +18,18 @@ module.exports = {
       },
     },
     {
+      name: 'huma-x11vnc',
+      script: path.join(deployRoot, 'scripts/start-x11vnc.sh'),
+      interpreter: 'bash',
+      autorestart: true,
+      max_restarts: 10,
+      restart_delay: 3000,
+      env: {
+        HUMA_DISPLAY: ':99',
+        HUMA_VNC_PORT: '5900',
+      },
+    },
+    {
       name: 'huma-server',
       cwd: serverRoot,
       script: 'dist/index.js',

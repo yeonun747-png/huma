@@ -7,6 +7,7 @@ import {
   isCaptchaDrillEnabled,
   startCaptchaDrill,
 } from '../modules/watcher/captcha-drill.js';
+import { sendTelegramTest } from '../modules/watcher/telegram.js';
 import type { Workspace } from '@huma/shared';
 
 export async function registerSystemRoutes(app: FastifyInstance) {
@@ -103,5 +104,18 @@ export async function registerSystemRoutes(app: FastifyInstance) {
       }
       return reply.code(500).send({ error: msg });
     }
+  });
+
+  app.post('/api/system/telegram-test', { preHandler: authMiddleware }, async (request, reply) => {
+    const body = (request.body ?? {}) as { workspace?: string };
+    const ws = body.workspace as Workspace | undefined;
+    if (ws && !['yeonun', 'panana', 'quizoasis'].includes(ws)) {
+      return reply.code(400).send({ error: 'workspace: yeonun | panana | quizoasis' });
+    }
+    const result = await sendTelegramTest(ws ?? 'yeonun');
+    if (!result.ok) {
+      return reply.code(result.error?.includes('없음') ? 503 : 502).send(result);
+    }
+    return { success: true, ...result };
   });
 }

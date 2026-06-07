@@ -91,6 +91,7 @@ function scheduleReminders(entry: CaptchaHoldEntry): void {
         remind: true,
         remindIndex: i,
         drill: entry.isDrill,
+        force: entry.isDrill,
       });
     }, remindMs * i);
     entry.timers.push(t);
@@ -113,7 +114,7 @@ export function listCaptchaHoldJobIds(): string[] {
 export async function enterCaptchaHold(
   input: CaptchaHoldInput,
   options?: CaptchaHoldOptions,
-): Promise<void> {
+): Promise<{ telegram: Awaited<ReturnType<typeof notifyCaptchaTelegram>> }> {
   if (holds.has(input.jobId)) {
     throw new Error('CAPTCHA_HOLD_ALREADY_ACTIVE');
   }
@@ -153,13 +154,14 @@ export async function enterCaptchaHold(
   holds.set(input.jobId, entry);
   scheduleReminders(entry);
 
-  await notifyCaptchaTelegram({
+  const telegram = await notifyCaptchaTelegram({
     jobId: input.jobId,
     workspace: input.workspace,
     accountLabel,
     jobTitle: input.jobTitle,
     jobType: input.jobType,
     drill: isDrill,
+    force: isDrill,
   });
 
   await logOperation({
@@ -170,6 +172,8 @@ export async function enterCaptchaHold(
     job_id: input.jobId,
     account_id: input.accountId,
   });
+
+  return { telegram };
 }
 
 export async function completeCaptchaHold(
@@ -207,6 +211,7 @@ export async function completeCaptchaHold(
     jobType: entry.jobType,
     completed: true,
     drill: entry.isDrill,
+    force: entry.isDrill,
   });
 
   await logOperation({
@@ -242,6 +247,7 @@ export async function expireCaptchaHold(jobId: string): Promise<void> {
     jobType: entry.jobType,
     timedOut: true,
     drill: entry.isDrill,
+    force: entry.isDrill,
   });
 
   await logOperation({

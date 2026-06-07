@@ -318,6 +318,7 @@ export function WatcherView() {
   const [logs, setLogs] = useState<WatcherLogRow[]>([]);
   const [drillJobId, setDrillJobId] = useState<string | null>(null);
   const [drillLoading, setDrillLoading] = useState(false);
+  const [telegramTestLoading, setTelegramTestLoading] = useState(false);
 
   const loadDrill = useCallback(() => {
     api
@@ -374,12 +375,33 @@ export function WatcherView() {
     try {
       const r = await api.startCaptchaDrill(workspace);
       setDrillJobId(r.jobId);
-      alert(`연습 job 생성됨\n1) Telegram 확인\n2) VNC → 빨간 DRILL 화면\n3) 큐 → 발행 완료`);
+      const tg = r.telegram;
+      const tgLine = tg.ok
+        ? 'Telegram: 발송 OK'
+        : `Telegram: 실패 — ${tg.error ?? tg.skipped ?? 'unknown'} (token=${tg.env.hasToken ? 'Y' : 'N'}, chat=${tg.env.chatId ? 'Y' : 'N'})`;
+      const vncLine = `VNC: ${r.browser.mode} · DISPLAY ${r.browser.display} — 밝은 흰/빨간 DRILL 화면이 보여야 함`;
+      alert(`연습 job 생성됨\n\n${tgLine}\n${vncLine}\n\n큐에서 발행 완료까지 테스트하세요.`);
       window.open(`/queue?job=${encodeURIComponent(r.jobId)}`, '_blank', 'noopener,noreferrer');
     } catch (e) {
       alert((e as Error).message);
     } finally {
       setDrillLoading(false);
+    }
+  };
+
+  const testTelegram = async (workspace: 'yeonun' | 'panana' | 'quizoasis') => {
+    setTelegramTestLoading(true);
+    try {
+      const r = await api.testTelegram(workspace);
+      alert(
+        r.ok
+          ? `${workspace} Telegram 테스트 OK\nchat_id 설정됨 — 봇 메시지 확인`
+          : `Telegram 실패: ${r.error ?? 'unknown'}\ntoken=${r.env.hasToken ? 'Y' : 'N'} chat=${r.env.chatId ? 'Y' : 'N'}`,
+      );
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setTelegramTestLoading(false);
     }
   };
 
@@ -538,6 +560,14 @@ export function WatcherView() {
           </button>
           <button type="button" className="btn-ghost btn-sm" disabled={drillLoading} onClick={() => loadDrill()}>
             상태 새로고침
+          </button>
+          <button
+            type="button"
+            className="btn-ghost btn-sm"
+            disabled={telegramTestLoading}
+            onClick={() => void testTelegram('yeonun')}
+          >
+            Telegram 테스트 (연운)
           </button>
         </div>
       </MPanel>

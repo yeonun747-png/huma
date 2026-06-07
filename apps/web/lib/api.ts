@@ -534,8 +534,25 @@ export const api = {
   getCaptchaDrillStatus: () =>
     request<{ enabled: boolean; activeJobId: string | null }>('/api/system/captcha-drill'),
   startCaptchaDrill: (workspace: string) =>
-    request<{ success: boolean; jobId: string; workspace: string; queueUrl: string }>(
-      '/api/system/captcha-drill',
-      { method: 'POST', body: JSON.stringify({ workspace }) },
-    ),
+    request<{
+      success: boolean;
+      jobId: string;
+      workspace: string;
+      queueUrl: string;
+      telegram: {
+        ok: boolean;
+        error?: string;
+        skipped?: string;
+        env: { hasToken: boolean; chatId: string | null; webUrl: boolean; vncUrl: boolean };
+      };
+      browser: { mode: string; display: string };
+    }>('/api/system/captcha-drill', { method: 'POST', body: JSON.stringify({ workspace }) }),
+  testTelegram: (workspace: string) =>
+    request<{
+      success?: boolean;
+      ok: boolean;
+      chatId: string | null;
+      error?: string;
+      env: { hasToken: boolean; chatId: string | null; webUrl: boolean; vncUrl: boolean };
+    }>('/api/system/telegram-test', { method: 'POST', body: JSON.stringify({ workspace }) }),
 };

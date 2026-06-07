@@ -2,8 +2,9 @@ import type { Workspace } from '@huma/shared';
 
 import { supabase } from '../../middleware/auth.js';
 import { logOperation } from '../../lib/log-emitter.js';
-import { createBrowser } from '../playwright/browser.js';
+import { createBrowser, chromium } from '../playwright/browser.js';
 import { enterCaptchaHold, getCaptchaHold, listCaptchaHoldJobIds } from './captcha-hold.js';
+import { getTelegramEnvStatus } from './telegram.js';
 
 const DRILL_ACCOUNT_ID = 'captcha-drill';
 const DRILL_HOLD_MS = 5 * 60 * 1000;
@@ -18,12 +19,12 @@ const DRILL_HTML = `<!DOCTYPE html>
     body {
       margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
       font-family: system-ui, sans-serif;
-      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-      color: #fff;
+      background: #fff8f0;
+      color: #111;
     }
     .card {
       max-width: 720px; padding: 48px; border-radius: 16px;
-      background: rgba(255,255,255,0.08); border: 2px solid #e94560;
+      background: #fff; border: 4px solid #e94560;
       text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,0.4);
     }
     h1 { font-size: 2rem; margin: 0 0 16px; color: #e94560; }
@@ -60,9 +61,50 @@ export function getActiveCaptchaDrillJobId(): string | null {
   return null;
 }
 
+/** Xvfb :99 — headful 강제, VNC에서 창이 보이도록 */
+async function createDrillBrowser() {
+  const display = process.env.DISPLAY?.trim() || ':99';
+  if (process.platform === 'linux' && display !== ':99') {
+    console.warn(`[captcha-drill] DISPLAY=${display} (권장 :99)`);
+  }
+
+  try {
+    const browser = await chromium.launch({
+      headless: false,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--start-maximized',
+        '--window-position=0,0',
+        '--lang=ko-KR',
+      ],
+      env: {
+        ...process.env,
+        DISPLAY: display,
+        LANG: 'ko_KR.UTF-8',
+      },
+    });
+    const context = await browser.newContext({
+      viewport: null,
+      locale: 'ko-KR',
+      timezoneId: 'Asia/Seoul',
+    });
+    return { context, mode: 'headful' as const };
+  } catch (err) {
+    console.warn('[captcha-drill] headful launch failed, fallback createBrowser:', (err as Error).message);
+    const { context } = await createBrowser();
+    return { context, mode: 'fallback' as const };
+  }
+}
+
 export async function startCaptchaDrill(
   workspace: Workspace,
-): Promise<{ jobId: string; workspace: Workspace }> {
+): Promise<{
+  jobId: string;
+  workspace: Workspace;
+  telegram: { ok: boolean; error?: string; skipped?: string; env: ReturnType<typeof getTelegramEnvStatus> };
+  browser: { mode: string; display: string };
+}> {
   if (!isCaptchaDrillEnabled()) {
     throw new Error('CAPTCHA_DRILL_DISABLED');
   }
@@ -90,12 +132,12 @@ export async function startCaptchaDrill(
     throw new Error(error?.message ?? 'DRILL_JOB_CREATE_FAILED');
   }
 
-  const { context } = await createBrowser();
+  const { context, mode } = await createDrillBrowser();
   const page = await context.newPage();
   await page.setContent(DRILL_HTML, { waitUntil: 'domcontentloaded' });
   await page.bringToFront();
 
-  await enterCaptchaHold(
+  const { telegram } = await enterCaptchaHold(
     {
       jobId: job.id,
       accountId: DRILL_ACCOUNT_ID,
@@ -109,12 +151,19 @@ export async function startCaptchaDrill(
     { holdMs: DRILL_HOLD_MS, isDrill: true },
   );
 
+  const telegramStatus = { ...telegram, env: getTelegramEnvStatus(workspace) };
+
   await logOperation({
     level: 'info',
-    message: `CAPTCHA DRILL 시작 (${workspace}) — 5분 · VNC 화면 확인`,
+    message: `CAPTCHA DRILL 시작 (${workspace}) — telegram=${telegramStatus.ok ? 'ok' : telegramStatus.error ?? telegramStatus.skipped} · browser=${mode}`,
     job_id: job.id,
     workspace,
   });
 
-  return { jobId: job.id, workspace };
+  return {
+    jobId: job.id,
+    workspace,
+    telegram: telegramStatus,
+    browser: { mode, display: process.env.DISPLAY?.trim() || ':99' },
+  };
 }
