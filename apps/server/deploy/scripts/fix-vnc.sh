@@ -2,7 +2,7 @@
 # i7 VNC(x11vnc) 복구 — git 로컬 수정 덮어쓰기 + pm2 재등록
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"
 cd "$ROOT"
 
 echo "== huma VNC fix =="
