@@ -24,6 +24,8 @@ module.exports = {
       autorestart: true,
       max_restarts: 10,
       restart_delay: 3000,
+      out_file: '/dev/null',
+      error_file: '/dev/null',
       env: {
         DISPLAY: ':99',
       },
