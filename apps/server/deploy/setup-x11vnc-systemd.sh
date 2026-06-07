@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# x11vnc → systemd 등록 (재부팅 자동 기동). pm2 huma-x11vnc 는 제거.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -11,7 +10,11 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
-chmod +x "${SCRIPT_DIR}/scripts/run-x11vnc.sh"
+chmod +x "${SCRIPT_DIR}/scripts/run-x11vnc.sh" "${SCRIPT_DIR}/scripts/check-vnc-rfb.sh"
+
+# Xvfb 먼저 (pm2)
+sudo -u "${HUMA_USER}" pm2 restart huma-xvfb 2>/dev/null || true
+sleep 3
 
 sed \
   -e "s|@HUMA_USER@|${HUMA_USER}|g" \
@@ -21,17 +24,28 @@ sed \
 systemctl daemon-reload
 systemctl enable huma-x11vnc.service
 
-# pm2 에서 x11vnc 제거 (systemd 가 담당)
 sudo -u "${HUMA_USER}" pm2 delete huma-x11vnc 2>/dev/null || true
 sudo -u "${HUMA_USER}" pm2 save 2>/dev/null || true
 
 pkill -9 x11vnc 2>/dev/null || true
 sleep 2
-systemctl restart huma-x11vnc.service
 
+if ! systemctl restart huma-x11vnc.service; then
+  echo ""
+  echo "== systemctl status =="
+  systemctl status huma-x11vnc.service --no-pager -l || true
+  echo ""
+  echo "== journalctl =="
+  journalctl -xeu huma-x11vnc.service --no-pager -n 30 || true
+  echo ""
+  echo "== /tmp/huma-x11vnc.log =="
+  tail -30 /tmp/huma-x11vnc.log 2>/dev/null || true
+  exit 1
+fi
+
+sleep 3
 echo ""
 echo "== huma-x11vnc systemd =="
 systemctl status huma-x11vnc.service --no-pager || true
 echo ""
-echo "RFB 확인:"
-sudo -u "${HUMA_USER}" bash "${SCRIPT_DIR}/scripts/check-vnc-rfb.sh" || true
+sudo -u "${HUMA_USER}" bash "${SCRIPT_DIR}/scripts/check-vnc-rfb.sh"
