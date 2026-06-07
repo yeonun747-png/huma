@@ -561,6 +561,7 @@ export const api = {
       success?: boolean;
       ok: boolean;
       chatId: string | null;
+      botUsername?: string;
       error?: string;
       env: { hasToken: boolean; chatId: string | null; webUrl: boolean; vncUrl: boolean };
     }>('/api/system/telegram-test', {
