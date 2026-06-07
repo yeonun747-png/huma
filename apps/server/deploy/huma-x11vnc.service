@@ -15,8 +15,6 @@ ExecStart=/bin/bash @HUMA_HOME@/huma/apps/server/deploy/scripts/run-x11vnc.sh
 Restart=always
 RestartSec=10
 TimeoutStartSec=180
-StandardOutput=append:/tmp/huma-x11vnc.log
-StandardError=append:/tmp/huma-x11vnc.log
 
 [Install]
 WantedBy=multi-user.target

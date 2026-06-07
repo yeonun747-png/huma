@@ -12,6 +12,15 @@ fi
 
 chmod +x "${SCRIPT_DIR}/scripts/run-x11vnc.sh" "${SCRIPT_DIR}/scripts/check-vnc-rfb.sh"
 
+# git 로컬 수정 덮어쓰기 (i7 수동 편집 방지)
+sudo -u "${HUMA_USER}" git -C "${HUMA_HOME}/huma" checkout origin/main -- \
+  apps/server/deploy/scripts/run-x11vnc.sh \
+  apps/server/deploy/huma-x11vnc.service 2>/dev/null || true
+
+mkdir -p "${HUMA_HOME}/.huma"
+chown "${HUMA_USER}:${HUMA_USER}" "${HUMA_HOME}/.huma"
+rm -f /tmp/huma-x11vnc.log
+
 # Xvfb 먼저 (pm2)
 sudo -u "${HUMA_USER}" pm2 restart huma-xvfb 2>/dev/null || true
 sleep 3
@@ -38,8 +47,8 @@ if ! systemctl restart huma-x11vnc.service; then
   echo "== journalctl =="
   journalctl -xeu huma-x11vnc.service --no-pager -n 30 || true
   echo ""
-  echo "== /tmp/huma-x11vnc.log =="
-  tail -30 /tmp/huma-x11vnc.log 2>/dev/null || true
+  echo "== ~/.huma/x11vnc.log =="
+  tail -30 "${HUMA_HOME}/.huma/x11vnc.log" 2>/dev/null || true
   exit 1
 fi
 

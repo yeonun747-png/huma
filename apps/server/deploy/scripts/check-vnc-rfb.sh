@@ -17,5 +17,5 @@ done
 
 echo "RFB banner: (없음)"
 ss -tlnp 2>/dev/null | grep 5900 || echo "5900 not listening"
-tail -20 /tmp/huma-x11vnc.log 2>/dev/null || true
+tail -20 "${HOME}/.huma/x11vnc.log" 2>/dev/null || tail -20 /tmp/huma-x11vnc.log 2>/dev/null || true
 exit 1

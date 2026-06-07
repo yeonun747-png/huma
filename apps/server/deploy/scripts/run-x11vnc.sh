@@ -4,7 +4,8 @@ set -euo pipefail
 
 DISPLAY_NUM="${DISPLAY:-:99}"
 RFB_PORT="${HUMA_VNC_PORT:-5900}"
-LOG="/tmp/huma-x11vnc.log"
+LOG="${HOME}/.huma/x11vnc.log"
+mkdir -p "$(dirname "$LOG")"
 XSOCK="/tmp/.X11-unix/X${DISPLAY_NUM#:}"
 X11VNC="/usr/bin/x11vnc"
 [[ -x "${X11VNC}" ]] || X11VNC="$(command -v x11vnc || true)"
