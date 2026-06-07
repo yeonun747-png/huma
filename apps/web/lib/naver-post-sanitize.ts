@@ -2,16 +2,18 @@ import type { ContentType } from '@huma/shared';
 
 import { formatBlogLinkLabel, resolveBlogLinkUrl } from '@/lib/blog-link';
 
-/** 네이버 블로그 본문 말미 링크 — 연운은 yeonun.com 만 */
+/** 연운 기본 붙여넣기 URL (OG 카드) */
+export const YEONUN_BLOG_PASTE_URL = 'https://yeonun.com';
+
+/** UI 짧은 표시용 */
 export const YEONUN_BLOG_LINK_TEXT = 'yeonun.com';
 
 export function normalizeBlogLink(url?: string | null, workspace?: string | null): string {
   const ws = workspace ?? 'yeonun';
-  if (ws === 'yeonun') return YEONUN_BLOG_LINK_TEXT;
   return resolveBlogLinkUrl(ws, url, url);
 }
 
-/** 시뮬레이터·미리보기 — 연운은 항상 yeonun.com */
+/** 시뮬레이터·미리보기 — resolveBlogLinkUrl 과 동일 (연운은 https 전체 URL) */
 export function resolveSimulatorBlogLink(url?: string | null, workspace?: string | null): string {
   return normalizeBlogLink(url, workspace);
 }
@@ -88,7 +90,19 @@ export function splitNaverParagraphs(
     .filter(Boolean);
 }
 
-/** 시뮬레이터용 본문 준비 — 링크·이미지는 별도 단계 */
+/** Playwright postNaverBlog 와 동일 본문·링크 준비 */
+export function prepareBlogPostForPlaywright(
+  raw: string,
+  workspace: string,
+  sourceLink?: string | null,
+  contentType?: ContentType,
+): { content: string; linkUrl: string | undefined } {
+  const linkUrl = resolveBlogLinkUrl(workspace, sourceLink ?? '', sourceLink ?? '');
+  const content = sanitizeBlogPostForNaver(raw, { contentType, linkUrl });
+  return { content, linkUrl: linkUrl || undefined };
+}
+
+/** @deprecated prepareBlogPostForPlaywright 사용 */
 export function prepareBodyForTypingSim(
   body: string,
   options?: { contentType?: ContentType; linkUrl?: string | null },

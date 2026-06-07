@@ -21,12 +21,21 @@ export async function executePostBlog(params: {
     params.payload.contentType as ContentType | undefined,
   );
   const imgs = await Promise.all(((params.payload.imageUrls as string[]) || []).map(uniquifyImageFromUrl));
+  const schedule = params.payload.platform_schedule as Record<string, unknown> | undefined;
+  const blogCategory =
+    typeof schedule?.blog_category === 'string' ? schedule.blog_category : undefined;
+  const videoPath =
+    typeof params.payload.video_path === 'string' ? params.payload.video_path : undefined;
+
   return postNaverBlog({
     page: params.page,
     title: params.payload.title as string,
     content,
     imageUrls: imgs,
     linkUrl,
+    hashtags: (params.payload.hashtags as string[]) ?? [],
+    blogCategory,
+    videoPath,
     workspace,
     humanEngine: params.humanConfig,
     persona: params.persona,

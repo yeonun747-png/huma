@@ -10,7 +10,7 @@ import { useRegisterPageAction } from '@/components/dashboard/page-action-contex
 import { PostViewerModal } from '@/components/viewer/post-viewer-modal';
 import { CrankJobDetailModal } from './crank-job-detail-modal';
 import { parseSocialCrankJobContent } from '@/lib/crank-job-payload';
-import { formatLogKst, isSchedulePast } from '@/lib/format-kst';
+import { parseQueueKstParts, isSchedulePast, isSameKstDay } from '@/lib/format-kst';
 import { QueueAutoContentModal, type AutoContentFormValues } from './queue-auto-content-modal';
 import { buildScheduledAt } from '@/lib/queue-repeat';
 import { formatJobErrorLabel } from '@/lib/job-error-label';
@@ -19,8 +19,9 @@ import {
   isPausableQueueJob,
   isStaleOrFailedQueueJob,
 } from '@/lib/queue-job-eligibility';
+import { CaptchaCompleteModal } from './captcha-complete-modal';
+import { useSearchParams } from 'next/navigation';
 import type { QueuePrefill } from '@/lib/queue-prefill';
-import { isSameKstDay } from '@/lib/format-kst';
 
 const QUEUE_PAGE_SIZE_KEY = 'huma_queue_page_size';
 const PAGE_SIZES = [20, 50, 100] as const;
@@ -41,43 +42,52 @@ function jobIcon(type: string) {
   return '📝';
 }
 
+function weekdayColorClass(weekday: string): string {
+  if (weekday === '일') return 'm-queue-wd-sun';
+  if (weekday === '토') return 'm-queue-wd-sat';
+  return 'm-queue-wd-mid';
+}
+
+function QueueDatetimeLabel({ iso, suffix }: { iso: string; suffix?: string }) {
+  const parsed = parseQueueKstParts(iso);
+  if (!parsed) return <>—</>;
+  return (
+    <>
+      {parsed.date}
+      <span className={weekdayColorClass(parsed.weekday)}>({parsed.weekday})</span> {parsed.time}
+      {suffix ? ` · ${suffix}` : null}
+    </>
+  );
+}
+
+function queueDatetimeTag(iso: string, tone: 'warn' | 'err' | 'ok', suffix?: string) {
+  const parsed = parseQueueKstParts(iso);
+  const title = parsed ? `${parsed.full}${suffix ? ` · ${suffix}` : ''}` : '—';
+  return (
+    <span title={title}>
+      <MTag tone={tone} className="m-tag-datetime">
+        <QueueDatetimeLabel iso={iso} suffix={suffix} />
+      </MTag>
+    </span>
+  );
+}
+
 function queueTagSlot(job: HumaJob): ReactNode {
+  if (job.status === 'awaiting_captcha') return <MTag tone="warn">CAPTCHA</MTag>;
   if (job.status === 'running') return <MTag tone="live">LIVE</MTag>;
 
   if (job.scheduled_at) {
-    const dt = formatLogKst(job.scheduled_at);
     const pastPending =
       isSchedulePast(job.scheduled_at) && ['scheduled', 'pending', 'paused'].includes(job.status);
-    if (job.status === 'failed') {
-      return (
-        <MTag tone="err" className="m-tag-datetime" title={`${dt} · 실패`}>
-          {dt} · 실패
-        </MTag>
-      );
-    }
-    if (pastPending) {
-      return (
-        <MTag tone="err" className="m-tag-datetime" title={`${dt} · 지연`}>
-          {dt} · 지연
-        </MTag>
-      );
-    }
-    return (
-      <MTag tone="warn" className="m-tag-datetime" title={dt}>
-        {dt}
-      </MTag>
-    );
+    if (job.status === 'failed') return queueDatetimeTag(job.scheduled_at, 'err', '실패');
+    if (pastPending) return queueDatetimeTag(job.scheduled_at, 'err', '지연');
+    return queueDatetimeTag(job.scheduled_at, 'warn');
   }
 
   if (job.status === 'failed') return <MTag tone="err">실패</MTag>;
 
   if (job.status === 'completed' && job.completed_at) {
-    const dt = formatLogKst(job.completed_at);
-    return (
-      <MTag tone="ok" className="m-tag-datetime" title={dt}>
-        {dt}
-      </MTag>
-    );
+    return queueDatetimeTag(job.completed_at, 'ok');
   }
 
   return <MTag tone="idle">{job.status}</MTag>;
@@ -115,6 +125,10 @@ function jobSub(job: HumaJob): string {
     parts.push(scheduleHint);
   }
 
+  if (job.status === 'awaiting_captcha') {
+    parts.push(formatJobErrorLabel(job.error_message) || 'VNC → 발행 → huma 완료');
+  }
+
   if (job.status === 'failed' && job.error_message) {
     parts.push(formatJobErrorLabel(job.error_message));
   }
@@ -128,6 +142,7 @@ function jobSub(job: HumaJob): string {
 
 export function QueueManager() {
   const { workspace } = useWorkspace();
+  const searchParams = useSearchParams();
   const [jobs, setJobs] = useState<HumaJob[]>([]);
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState({ pending: 0, running: 0, doneToday: 0, doneAll: 0 });
@@ -140,6 +155,7 @@ export function QueueManager() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [crankJob, setCrankJob] = useState<HumaJob | null>(null);
+  const [captchaJob, setCaptchaJob] = useState<HumaJob | null>(null);
   const [viewer, setViewer] = useState<{
     title: string;
     workspace: Workspace;
@@ -178,7 +194,8 @@ export function QueueManager() {
       const completed = sorted.filter((j) => j.status === 'completed');
       setStats({
         pending: sorted.filter((j) => j.status === 'pending' || j.status === 'scheduled').length,
-        running: sorted.filter((j) => j.status === 'running').length,
+        running:
+          sorted.filter((j) => j.status === 'running' || j.status === 'awaiting_captcha').length,
         doneToday: completed.filter((j) => isSameKstDay(j.completed_at)).length,
         doneAll: completed.length,
       });
@@ -197,6 +214,19 @@ export function QueueManager() {
     load();
     setSelectedIds(new Set());
   }, [load]);
+
+  useEffect(() => {
+    const jobId = searchParams.get('job');
+    if (!jobId) return;
+    const found = jobs.find((j) => j.id === jobId);
+    if (found?.status === 'awaiting_captcha') {
+      setCaptchaJob(found);
+      return;
+    }
+    void api.getJob(jobId).then((j) => {
+      if (j.status === 'awaiting_captcha') setCaptchaJob(j);
+    }).catch(() => {});
+  }, [searchParams, jobs]);
 
   useEffect(() => {
     setPage(1);
@@ -385,6 +415,14 @@ export function QueueManager() {
         onClose={() => setViewer(null)}
       />
 
+      {captchaJob ? (
+        <CaptchaCompleteModal
+          job={captchaJob}
+          onClose={() => setCaptchaJob(null)}
+          onCompleted={() => void load()}
+        />
+      ) : null}
+
       <MGrid cols={4}>
         <MStat label="총 대기" value={stats.pending} />
         <MStat label="진행중" value={stats.running} tone="warn" />
@@ -416,45 +454,67 @@ export function QueueManager() {
           </div>
         }
       >
-        {jobs.length === 0 ? (
-          <div className="py-8 text-center text-sm text-huma-t3">
-            {loadError ?? (total > 0 ? '이 페이지에 표시할 작업이 없습니다' : '등록된 작업이 없습니다')}
-          </div>
+        {loadError ? (
+          <div className="py-8 text-center text-sm text-huma-t3">{loadError}</div>
+        ) : total === 0 && jobs.length === 0 ? (
+          <div className="py-8 text-center text-sm text-huma-t3">등록된 작업이 없습니다</div>
         ) : (
           <>
             <div className="m-qi-toolbar">
-              <label>
-                <input
-                  type="checkbox"
-                  className="m-qi-check"
-                  checked={allDeletableSelected}
-                  disabled={deletableJobs.length === 0}
-                  onChange={toggleSelectAll}
-                />
-                큐 전체
-                {deletableJobs.length > 0 ? ` (${deletableJobs.length})` : ''}
-              </label>
-              {staleFailedJobs.length > 0 ? (
-                <button type="button" className="btn-ghost btn-sm" onClick={selectStaleFailed}>
-                  실패·지연 선택 ({staleFailedJobs.length})
-                </button>
-              ) : null}
-              {selectedCount > 0 ? (
-                <button
-                  type="button"
-                  className="btn-ghost btn-sm text-huma-err"
-                  disabled={bulkDeleting}
-                  onClick={() => void handleBulkDelete()}
+              <div className="m-qi-toolbar-main">
+                <label className="m-qi-select-all">
+                  <input
+                    type="checkbox"
+                    className="m-qi-check"
+                    checked={allDeletableSelected}
+                    disabled={deletableJobs.length === 0}
+                    onChange={toggleSelectAll}
+                  />
+                  큐 전체
+                  {deletableJobs.length > 0 ? ` (${deletableJobs.length})` : ''}
+                </label>
+                {staleFailedJobs.length > 0 ? (
+                  <button type="button" className="btn-ghost btn-sm" onClick={selectStaleFailed}>
+                    실패·지연 선택 ({staleFailedJobs.length})
+                  </button>
+                ) : null}
+                {selectedCount > 0 ? (
+                  <button
+                    type="button"
+                    className="btn-ghost btn-sm text-huma-err"
+                    disabled={bulkDeleting}
+                    onClick={() => void handleBulkDelete()}
+                  >
+                    {bulkDeleting ? '삭제 중…' : `선택 삭제 (${selectedCount})`}
+                  </button>
+                ) : (
+                  <span className="text-[11px] text-huma-t3">
+                    LIVE만 삭제 불가 · 실패·지연·완료 항목은 ✕ 또는 선택 삭제
+                  </span>
+                )}
+              </div>
+              <label className="m-qi-page-size">
+                표시
+                <select
+                  value={pageSize}
+                  onChange={(e) => {
+                    const next = Number(e.target.value) as PageSize;
+                    setPageSize(next);
+                    localStorage.setItem(QUEUE_PAGE_SIZE_KEY, String(next));
+                  }}
                 >
-                  {bulkDeleting ? '삭제 중…' : `선택 삭제 (${selectedCount})`}
-                </button>
-              ) : (
-                <span className="text-[11px] text-huma-t3">
-                  LIVE만 삭제 불가 · 실패·지연·완료 항목은 ✕ 또는 선택 삭제
-                </span>
-              )}
+                  {PAGE_SIZES.map((n) => (
+                    <option key={n} value={n}>
+                      {n}개
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
-            {jobs.map((job) => {
+            {jobs.length === 0 ? (
+              <div className="py-6 text-center text-sm text-huma-t3">이 페이지에 표시할 작업이 없습니다</div>
+            ) : (
+              jobs.map((job) => {
             const ws = (job.workspace ?? workspace) as Workspace;
             const canAdvance = ['pending', 'scheduled', 'paused'].includes(job.status);
             const deletable = isDeletableQueueJob(job);
@@ -473,6 +533,10 @@ export function QueueManager() {
                 checked={selectedIds.has(job.id)}
                 onSelectChange={(checked) => toggleSelect(job.id, checked)}
                 onClick={() => {
+                  if (job.status === 'awaiting_captcha') {
+                    setCaptchaJob(job);
+                    return;
+                  }
                   if (job.job_type === 'social_crank') {
                     setCrankJob(job);
                     return;
@@ -511,26 +575,9 @@ export function QueueManager() {
                 onDelete={deletable ? () => handleDeleteJob(job) : undefined}
               />
             );
-          })}
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-huma-bdr2 pt-3">
-              <label className="flex items-center gap-1.5 font-mono text-[11px] text-huma-t3">
-                표시
-                <select
-                  className="rounded border border-huma-bdr bg-huma-bg3 px-1.5 py-0.5 text-[11px] text-huma-t2"
-                  value={pageSize}
-                  onChange={(e) => {
-                    const next = Number(e.target.value) as PageSize;
-                    setPageSize(next);
-                    localStorage.setItem(QUEUE_PAGE_SIZE_KEY, String(next));
-                  }}
-                >
-                  {PAGE_SIZES.map((n) => (
-                    <option key={n} value={n}>
-                      {n}개
-                    </option>
-                  ))}
-                </select>
-              </label>
+          })
+            )}
+            <div className="mt-3 flex flex-wrap items-center justify-end gap-2 border-t border-huma-bdr2 pt-3">
               {showPagination ? (
                 <div className="flex items-center gap-2 font-mono text-[11px] text-huma-t3">
                   <button

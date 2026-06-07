@@ -10,7 +10,8 @@
     "start": "node dist/index.js",
     "start:worker": "node dist/worker-only.js",
     "lint": "tsc --noEmit",
-    "generate-crank-sql": "node scripts/generate-crank-import-sql.mjs"
+    "generate-crank-sql": "node scripts/generate-crank-import-sql.mjs",
+    "postinstall": "node ./scripts/apply-rebrowser-patches.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.3",
@@ -26,15 +27,14 @@
     "ioredis": "^5.4.1",
     "jsonwebtoken": "^9.0.2",
     "piexifjs": "^1.0.6",
-    "playwright": "^1.44.1",
+    "playwright": "^1.49.1",
+    "playwright-core": "^1.49.1",
     "playwright-extra": "^4.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "rebrowser-patches": "^1.0.19",
     "sharp": "^0.33.5",
     "socket.io": "^4.7.5",
     "twitter-api-v2": "^1.17.2"
-  },
-  "optionalDependencies": {
-    "rebrowser-patches": "^1.0.19"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",

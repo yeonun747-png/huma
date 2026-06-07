@@ -1,9 +1,9 @@
 import type { HumaJob } from '@huma/shared';
 import { isSchedulePast } from '@/lib/format-kst';
 
-/** LIVE 제외 — 실패·지연·완료·대기 등 큐에서 제거 가능 */
+/** LIVE·캡cha 대기 제외 — 실패·지연·완료·대기 등 큐에서 제거 가능 */
 export function isDeletableQueueJob(job: HumaJob): boolean {
-  return job.status !== 'running';
+  return job.status !== 'running' && job.status !== 'awaiting_captcha';
 }
 
 /** 예약일 지난 실패, 또는 예약일 지난 미실행(지연) */

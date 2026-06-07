@@ -9,7 +9,7 @@ import {
   isPreviewImagenDone,
   resolvePreviewImageUrl,
 } from '@/lib/preview-image-url';
-import { normalizeBlogLink, prepareBodyForTypingSim, YEONUN_BLOG_LINK_TEXT } from '@/lib/naver-post-sanitize';
+import { prepareBlogPostForPlaywright } from '@/lib/naver-post-sanitize';
 import { PlaywrightPostingReplay } from '@/components/posting/playwright-posting-replay';
 
 type PreviewStep = {
@@ -116,7 +116,11 @@ export function PostingPreviewClient({ jobId }: { jobId: string }) {
   const steps = useMemo(() => stepsFromJob(job), [job]);
   const ws = job?.workspace ?? 'yeonun';
   const wsKey = ws as keyof typeof WS_LABEL;
-  const previewBlogLink = ws === 'yeonun' ? YEONUN_BLOG_LINK_TEXT : normalizeBlogLink(job?.link_url, ws);
+  const contentType = resolveContentType(job ?? { content_type_auto: true } as HumaJob);
+  const playwrightPost = useMemo(() => {
+    if (!job?.content) return null;
+    return prepareBlogPostForPlaywright(job.content, ws, job.link_url, contentType);
+  }, [job?.content, job?.link_url, ws, contentType]);
   const previewImageUrl = resolvePreviewImageUrl(job);
   const imagenError = getPreviewImagenError(job);
   const imagenDone = isPreviewImagenDone(job);
@@ -126,7 +130,6 @@ export function PostingPreviewClient({ jobId }: { jobId: string }) {
   const promoted = (job?.platform_schedule as Record<string, unknown> | undefined)?._promoted as
     | { blog_job_id?: string; promoted_at?: string }
     | undefined;
-  const contentType = job ? resolveContentType(job) : 'A';
 
   useEffect(() => {
     if (!previewImageUrl || !jobDone || !imagenDone) {
@@ -305,19 +308,19 @@ export function PostingPreviewClient({ jobId }: { jobId: string }) {
           </div>
         )}
 
-        {readyForTyping && job?.title && job.content && displayImageUrl && (
+        {readyForTyping && job?.title && playwrightPost && displayImageUrl && (
           <div className="flex min-h-0 flex-1 flex-col">
             <PlaywrightPostingReplay
               key={simulatorKey}
               title={job.title}
-              body={prepareBodyForTypingSim(job.content, {
-                contentType,
-                linkUrl: previewBlogLink,
-              })}
-              linkUrl={previewBlogLink}
+              body={playwrightPost.content}
+              linkUrl={playwrightPost.linkUrl}
               workspace={ws}
               imageUrl={displayImageUrl}
               contentType={contentType}
+              hashtags={job.hashtags}
+              viewportSeed={job.platform_account_id ?? job.id}
+              showVideoStep={contentType === 'B'}
             />
           </div>
         )}

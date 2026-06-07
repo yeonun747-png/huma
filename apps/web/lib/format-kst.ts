@@ -106,6 +106,32 @@ export function formatLogKst(iso: string | null | undefined): string {
   }
 }
 
+/** 큐 카드 태그 — KST YYYY-MM-DD(요일) HH:mm:ss */
+export type QueueKstParts = { date: string; weekday: string; time: string; full: string };
+
+export function parseQueueKstParts(iso: string | null | undefined): QueueKstParts | null {
+  const d = parseLogTimestamp(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  try {
+    const dateParts = kstParts(d, { year: 'numeric', month: '2-digit', day: '2-digit' });
+    const y = pick(dateParts, 'year');
+    const m = pick(dateParts, 'month');
+    const day = pick(dateParts, 'day');
+    const weekday = new Intl.DateTimeFormat('ko-KR', { timeZone: KST, weekday: 'short' })
+      .format(d)
+      .replace(/\.$/, '');
+    const time = formatLogKstTime(iso);
+    const date = `${y}-${m}-${day}`;
+    return { date, weekday, time, full: `${date}(${weekday}) ${time}` };
+  } catch {
+    return null;
+  }
+}
+
+export function formatQueueKst(iso: string | null | undefined): string {
+  return parseQueueKstParts(iso)?.full ?? '—';
+}
+
 export function formatLogKstTime(iso: string | null | undefined): string {
   const full = formatLogKst(iso);
   if (full === '—') return full;

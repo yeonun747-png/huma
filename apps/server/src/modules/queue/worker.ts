@@ -18,6 +18,7 @@ import {
   passesWeekendVolumeGate,
 } from '../../lib/human-engine-policy.js';
 import { handleLayer4Detection, isCaptchaError, isBlockError } from '../watcher/detector.js';
+import { enterCaptchaHold } from '../watcher/captcha-hold.js';
 import { acquireModem, releaseModem, type ModemSession } from '../proxy/manager.js';
 import { hasIdleCrankModem } from '../modem/allocation.js';
 import { acquireAccount, releaseAccount } from '../../lib/account-lock.js';
@@ -164,6 +165,8 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         await supabase.from('huma_jobs').update({ status: 'running', started_at: new Date().toISOString() }).eq('id', humaJobId);
       }
 
+      let skipReleaseAccount = false;
+
       try {
         if (accountId) {
           if (type === 'cafe_new_post') await assertCafeNewPostAccount(accountId);
@@ -192,6 +195,16 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         const workspace = payload.workspace as string | undefined;
         if (workspace) await checkSharedWorkspaceLimit(workspace, type);
 
+        let jobWorkspace = workspace;
+        if (!jobWorkspace && humaJobId) {
+          const { data: jobRow } = await supabase
+            .from('huma_jobs')
+            .select('workspace, title')
+            .eq('id', humaJobId)
+            .maybeSingle();
+          jobWorkspace = jobRow?.workspace ?? undefined;
+        }
+
         if (PLAYWRIGHT_JOBS.includes(type)) {
           let modemSession: ModemSession | undefined;
           if (accountId) modemSession = await acquireModem(accountId);
@@ -212,6 +225,8 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
           } else {
             ({ context } = await createBrowser(modemSession?.proxyPort));
           }
+
+          let heldForCaptcha = false;
 
           try {
             let resultUrl = '';
@@ -243,14 +258,44 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
             }
 
             if (humaJobId && resultUrl) await completeJob(humaJobId, resultUrl);
-            if (accountId) await incrementAccountCount(accountId, dailyCountField(type));          } catch (err) {
+            if (accountId && !heldForCaptcha) await incrementAccountCount(accountId, dailyCountField(type));
+          } catch (err) {
+            if (
+              humaJobId &&
+              accountId &&
+              isCaptchaError(err) &&
+              POSTING_JOBS.includes(type)
+            ) {
+              await handleLayer4Detection(accountId, err, modemSession, {
+                skipExternalNotify: true,
+                workspace: jobWorkspace,
+              });
+              await enterCaptchaHold({
+                jobId: humaJobId,
+                accountId,
+                workspace: jobWorkspace,
+                jobTitle: (payload.title as string | undefined) ?? type,
+                jobType: type,
+                context,
+                modemSession,
+                releaseAccountLock: () => releaseAccount(accountId),
+              });
+              heldForCaptcha = true;
+              skipReleaseAccount = true;
+              return;
+            }
+
             if (accountId && (isCaptchaError(err) || isBlockError(err))) {
-              await handleLayer4Detection(accountId, err, modemSession);
+              await handleLayer4Detection(accountId, err, modemSession, {
+                workspace: jobWorkspace,
+              });
             }
             throw err;
           } finally {
-            await closeBrowserContext(context);
-            if (modemSession) await releaseModem(modemSession);
+            if (!heldForCaptcha) {
+              await closeBrowserContext(context);
+              if (modemSession) await releaseModem(modemSession);
+            }
           }
         } else if (type === 'social_crank') {
           const crankPayload = payload as {
@@ -325,7 +370,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         await logOperation({ level: 'ERROR', message: (err as Error).message, job_id: humaJobId, account_id: accountId });
         throw err;
       } finally {
-        if (accountId) releaseAccount(accountId);
+        if (accountId && !skipReleaseAccount) releaseAccount(accountId);
       }
     },
     { connection: redisConnection, concurrency }

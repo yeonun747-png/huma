@@ -12,6 +12,7 @@ export type HumanEngineSimConfig = {
   backspace_delay_ms: [number, number];
   paragraph_pause_ms: [number, number];
   review_duration_ms: [number, number];
+  paste_ratio?: number;
 };
 
 export const DEFAULT_HUMAN_ENGINE_SIM: HumanEngineSimConfig = {
@@ -21,6 +22,7 @@ export const DEFAULT_HUMAN_ENGINE_SIM: HumanEngineSimConfig = {
   backspace_delay_ms: [200, 800],
   paragraph_pause_ms: [2000, 8000],
   review_duration_ms: [120_000, 300_000],
+  paste_ratio: 0.55,
 };
 
 export function mergeHumanEngineSim(raw: Record<string, unknown> | null | undefined): HumanEngineSimConfig {
@@ -38,6 +40,7 @@ export function mergeHumanEngineSim(raw: Record<string, unknown> | null | undefi
     review_duration_ms: Array.isArray(raw.review_duration_ms) && raw.review_duration_ms.length === 2
       ? [Number(raw.review_duration_ms[0]), Number(raw.review_duration_ms[1])]
       : DEFAULT_HUMAN_ENGINE_SIM.review_duration_ms,
+    paste_ratio: typeof raw.paste_ratio === 'number' ? raw.paste_ratio : DEFAULT_HUMAN_ENGINE_SIM.paste_ratio,
   };
 }
 
@@ -286,8 +289,8 @@ export function plantReviewTypos(buffer: LiveTextBuffer, min = 2, max = 4): Revi
   return fixes.sort((a, b) => a.index - b.index);
 }
 
-export function pickPasteIndices(total: number): Set<number> {
-  const pasteCount = Math.floor(total * 0.3);
+export function pickPasteIndices(total: number, ratio = 0.55): Set<number> {
+  const pasteCount = Math.floor(total * ratio);
   const indices = new Set<number>();
   while (indices.size < pasteCount && indices.size < total) {
     indices.add(Math.floor(Math.random() * total));
@@ -302,12 +305,13 @@ export async function typePostContentSim(
   config: HumanEngineSimConfig,
   cancelled: () => boolean,
   onTick?: () => void,
+  callbacks?: { onPaste?: () => void },
 ): Promise<void> {
   const paragraphs = content.split('\n\n').filter(Boolean);
   const total = paragraphs.length;
   if (total === 0) return;
 
-  const pasteIndices = pickPasteIndices(total);
+  const pasteIndices = pickPasteIndices(total, config.paste_ratio ?? 0.55);
 
   for (let i = 0; i < total; i++) {
     if (cancelled()) return;
@@ -318,6 +322,7 @@ export async function typePostContentSim(
       for (const seg of plan.segments) {
         if (cancelled()) return;
         if (seg.kind === 'paste') {
+          callbacks?.onPaste?.();
           buffer.append(seg.text);
           onTick?.();
           await sleepMs(randomBetween(400, 900), cancelled);
@@ -337,24 +342,40 @@ export async function typePostContentSim(
   }
 }
 
-/** 본문 말미 yeonun.com 텍스트 링크 타이핑 (OG 카드 없음) */
+/** 본문 말미 URL Ctrl+V → OG 카드 (연운) */
+export async function pasteBlogLinkOgSim(
+  buffer: LiveTextBuffer,
+  linkUrl: string,
+  config: HumanEngineSimConfig,
+  cancelled: () => boolean,
+  callbacks?: { onPaste?: () => void; onOgCard?: () => void; onTick?: () => void },
+): Promise<void> {
+  buffer.append('\n\n');
+  callbacks?.onTick?.();
+  await sleepMs(randomBetween(300, 700), cancelled);
+  callbacks?.onPaste?.();
+  await sleepMs(randomBetween(400, 800), cancelled);
+  callbacks?.onOgCard?.();
+}
+
+/** @deprecated pasteBlogLinkOgSim 사용 */
 export async function typeYeonunBlogLinkSim(
   buffer: LiveTextBuffer,
   config: HumanEngineSimConfig,
   cancelled: () => boolean,
   onTick?: () => void,
 ): Promise<void> {
-  await humanTypeSim('\n\nyeonun.com', buffer, config, cancelled, onTick);
+  await pasteBlogLinkOgSim(buffer, 'https://yeonun.com', config, cancelled, { onTick });
 }
 
-/** @deprecated typeYeonunBlogLinkSim 사용 */
+/** @deprecated pasteBlogLinkOgSim 사용 */
 export async function pasteBlogLinkSim(
-  _linkUrl: string,
+  linkUrl: string,
   buffer: LiveTextBuffer,
   cancelled: () => boolean,
   callbacks?: { onOgCard?: () => void; onTick?: () => void },
 ): Promise<void> {
-  await typeYeonunBlogLinkSim(buffer, DEFAULT_HUMAN_ENGINE_SIM, cancelled, callbacks?.onTick);
+  await pasteBlogLinkOgSim(buffer, linkUrl, DEFAULT_HUMAN_ENGINE_SIM, cancelled, callbacks);
 }
 
 export async function sleepMs(ms: number, cancelled: () => boolean): Promise<void> {
@@ -604,20 +625,28 @@ export type PostingPhase =
   | 'body'
   | 'link'
   | 'image_upload'
+  | 'video_upload'
   | 'review'
   | 'publish'
+  | 'publish_dialog'
+  | 'publish_tags'
+  | 'publish_confirm'
   | 'done';
 
 export const POSTING_PHASE_LABELS: Record<PostingPhase, string> = {
   enter_editor: '네이버 블로그 에디터 진입',
-  title: '제목 (#subjectTextBox) 타이핑',
+  title: '제목 (#subjectTextBox) humanClick + 타이핑',
   title_pause: '제목 입력 후 사고 정지',
-  body_click: '본문 (.se-content) 클릭',
-  body: '본문 typePostContent (인용·문어체 복붙30%·타이핑70%)',
-  link: '링크 yeonun.com 타이핑',
-  image_upload: '사진 파일 업로드 (insertImage)',
+  body_click: '본문 (.se-content) humanClick',
+  body: '본문 typePostContent (복붙55%·OS IME/타이핑45%)',
+  link: '링크 — 연운: 본문 Ctrl+V(OG) · 그 외: 툴바 「링크」',
+  image_upload: '툴바 「사진」 humanClick → filechooser',
+  video_upload: '툴바 「동영상」 humanClick → filechooser',
   review: '발행 전 검토 (오탈자 수정)',
-  publish: '발행 버튼 클릭',
+  publish: '상단 발행 버튼 humanClick',
+  publish_dialog: '2차 패널 카테고리 선택',
+  publish_tags: '태그 humanType → Space/Enter 칩 완성',
+  publish_confirm: '우하단 최종 발행 humanClick',
   done: '완료 (검증 모드 — 실제 발행 없음)',
 };
 

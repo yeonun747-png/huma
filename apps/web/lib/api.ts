@@ -154,6 +154,21 @@ export const api = {
   }) =>
     request<HumaJob>('/api/jobs/auto-content', { method: 'POST', body: JSON.stringify(body) }),
   getJob: (id: string) => request<HumaJob>(`/api/jobs/${id}`),
+  getCaptchaHold: (id: string) =>
+    request<{
+      job_status: string;
+      hold: { active: boolean; expiresAt?: string } | null;
+      vnc_url?: string | null;
+      web_url?: string | null;
+    }>(`/api/jobs/${id}/captcha-hold`),
+  completeCaptchaJob: async (id: string, resultUrl?: string) => {
+    const res = await request<HumaJob>(`/api/jobs/${id}/captcha-complete`, {
+      method: 'POST',
+      body: JSON.stringify(resultUrl ? { result_url: resultUrl } : {}),
+    });
+    refreshNavCaches();
+    return res;
+  },
   /** Storage 비공개 버킷 — Service Key 프록시로 blob URL 생성 */
   fetchJobPreviewImageObjectUrl: async (jobId: string): Promise<string> => {
     const token = getToken();

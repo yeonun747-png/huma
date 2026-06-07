@@ -20,6 +20,11 @@ import { getCrankJobSessionDetail } from '../lib/crank-job-session.js';
 import { deleteJobById, deleteJobsByIds } from '../lib/delete-job.js';
 import { downloadHumaMedia, parseHumaMediaStoragePath } from '../lib/huma-media-storage.js';
 import { resolveJobPreviewImageUrl } from '../lib/resolve-job-preview-image.js';
+import {
+  completeCaptchaHold,
+  getCaptchaHoldPublicInfo,
+} from '../modules/watcher/captcha-hold.js';
+import { resolveVncUrl, buildJobWebUrl } from '../modules/watcher/telegram.js';
 
 async function assertJobWorkspaceAccess(
   jobId: string,
@@ -51,15 +56,16 @@ function kstTodayStartIso(): string {
 async function fetchQueueStats(workspace: string) {
   const todayStart = kstTodayStartIso();
   const base = () => supabase.from('huma_jobs').select('*', { count: 'exact', head: true }).eq('workspace', workspace);
-  const [pendingRes, runningRes, doneTodayRes, doneAllRes] = await Promise.all([
+  const [pendingRes, runningRes, captchaRes, doneTodayRes, doneAllRes] = await Promise.all([
     base().in('status', ['pending', 'scheduled']),
     base().eq('status', 'running'),
+    base().eq('status', 'awaiting_captcha'),
     base().eq('status', 'completed').gte('completed_at', todayStart),
     base().eq('status', 'completed'),
   ]);
   return {
     pending: pendingRes.count ?? 0,
-    running: runningRes.count ?? 0,
+    running: (runningRes.count ?? 0) + (captchaRes.count ?? 0),
     doneToday: doneTodayRes.count ?? 0,
     doneAll: doneAllRes.count ?? 0,
   };
@@ -544,6 +550,44 @@ export async function registerJobRoutes(app: FastifyInstance) {
 
     const { data } = await query;
     return data ?? [];
+  });
+
+  app.get('/api/jobs/:id/captcha-hold', { preHandler: authMiddleware }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const allowedWorkspaces = getWorkspaceFilter(request);
+    const access = await assertJobWorkspaceAccess(id, allowedWorkspaces);
+    if (!access.ok) return reply.code(access.status).send({ error: access.error });
+
+    const { data: job } = await supabase.from('huma_jobs').select('*').eq('id', id).maybeSingle();
+    if (!job) return reply.code(404).send({ error: '작업 없음' });
+
+    const hold = getCaptchaHoldPublicInfo(id);
+    return {
+      job_status: job.status,
+      hold,
+      vnc_url: resolveVncUrl(job.workspace),
+      web_url: buildJobWebUrl(id),
+    };
+  });
+
+  app.post('/api/jobs/:id/captcha-complete', { preHandler: authMiddleware }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const allowedWorkspaces = getWorkspaceFilter(request);
+    const access = await assertJobWorkspaceAccess(id, allowedWorkspaces);
+    if (!access.ok) return reply.code(access.status).send({ error: access.error });
+
+    const { data: job } = await supabase.from('huma_jobs').select('status').eq('id', id).maybeSingle();
+    if (!job) return reply.code(404).send({ error: '작업 없음' });
+    if (job.status !== 'awaiting_captcha') {
+      return reply.code(400).send({ error: '캡cha 대기 상태가 아닙니다' });
+    }
+
+    const body = (request.body ?? {}) as { result_url?: string };
+    const result = await completeCaptchaHold(id, body.result_url);
+    if (!result.ok) return reply.code(409).send({ error: result.error });
+
+    const { data: updated } = await supabase.from('huma_jobs').select('*').eq('id', id).single();
+    return updated;
   });
 
   app.get('/api/jobs/:id', { preHandler: authMiddleware }, async (request, reply) => {

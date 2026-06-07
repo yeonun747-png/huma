@@ -7,6 +7,7 @@ import {
   resolveRecoveryDelayMs,
   shouldNotifySlack,
 } from '../../lib/human-engine-policy.js';
+import { notifyTelegram } from './telegram.js';
 import { reconnectModem } from '../modem/reconnect.js';
 import type { ModemSession } from '../proxy/manager.js';
 import { getModemIdByProxyPort } from '../proxy/manager.js';
@@ -32,11 +33,12 @@ function kstDateKey(): string {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
 }
 
-async function postSlack(text: string) {
-  if (!(await shouldNotifySlack())) return;
-  const webhook = process.env.SLACK_WEBHOOK_URL?.trim();
-  if (!webhook) return;
-  await axios.post(webhook, { text }).catch(() => {});
+async function postWatcherAlert(text: string, workspace?: string | null) {
+  if (await shouldNotifySlack()) {
+    const webhook = process.env.SLACK_WEBHOOK_URL?.trim();
+    if (webhook) await axios.post(webhook, { text }).catch(() => {});
+  }
+  await notifyTelegram(text, workspace);
 }
 
 export async function pauseAccount(accountId: string) {
@@ -139,19 +141,19 @@ async function resolveModemId(session?: ModemSession, proxyPort?: number): Promi
 async function handle429Reconnect(accountId: string, session?: ModemSession) {
   const modemId = await resolveModemId(session, session?.proxyPort);
   if (!modemId) {
-    await postSlack(`⚠️ 429 탐지 — 모뎀 ID 없음\n계정: ${accountId}\n수동 IP 재발급 필요`);
+    await postWatcherAlert(`⚠️ 429 탐지 — 모뎀 ID 없음\n계정: ${accountId}\n수동 IP 재발급 필요`);
     return;
   }
 
   try {
     const result = await reconnectModem(modemId);
     if (!result.success) {
-      await postSlack(
+      await postWatcherAlert(
         `🚨 429 후 IP 재발급 실패\n계정: ${accountId}\n슬롯: ${result.slotNumber ?? '?'}\nold: ${result.oldIp ?? '?'} new: ${result.newIp ?? '?'}\n수동 대응 필요`,
       );
     }
   } catch (err) {
-    await postSlack(
+    await postWatcherAlert(
       `🚨 429 모뎀 재연결 오류\n계정: ${accountId}\n${(err as Error).message}\n수동 대응 필요`,
     );
   }
@@ -161,6 +163,7 @@ export async function handleLayer4Detection(
   accountId: string,
   err: unknown,
   session?: ModemSession,
+  options?: { skipExternalNotify?: boolean; workspace?: string | null },
 ) {
   const watcher = await getWatcherSettings();
   const human = await getHumanEngineScheduleConfig();
@@ -172,10 +175,15 @@ export async function handleLayer4Detection(
     await pauseAccount(accountId);
   }
 
+  const notify = (text: string) => {
+    if (options?.skipExternalNotify) return;
+    return postWatcherAlert(text, options?.workspace);
+  };
+
   if (countToday >= 3) {
     await setWeekRest(accountId);
     clearRecoveryTimers(accountId);
-    await postSlack(
+    await notify(
       `🛑 Layer4 수동 점검 — 1주 휴식\n계정: ${accountId}\n오늘 탐지: ${countToday}회\nlayer4_rest_until: 7일`,
     );
     await logOperation({
@@ -195,23 +203,23 @@ export async function handleLayer4Detection(
     const health = Math.max(0, (data?.health_score ?? 100) - 15);
     await supabase.from('huma_accounts').update({ health_score: health }).eq('id', accountId);
     scheduleRecovery(accountId, delayMs);
-    await postSlack(
+    await notify(
       `🚨 Layer4 3차 연속 탐지\n계정: ${accountId}\nhealth→${health}\n${Math.round(delayMs / 60000)}분 후 재개`,
     );
   } else if (is429 || tier >= 2) {
     await handle429Reconnect(accountId, session);
     scheduleRecovery(accountId, delayMs);
-    await postSlack(
+    await notify(
       `⚠️ Layer4 2차 (429/재CAPTCHA)\n계정: ${accountId}\n티어: ${tier}\n${Math.round(delayMs / 60000)}분 후 자동 재개`,
     );
   } else if (captcha || isBlockError(err)) {
     scheduleRecovery(accountId, delayMs);
-    await postSlack(
+    await notify(
       `⚠️ Layer4 1차 CAPTCHA\n계정: ${accountId}\n${Math.round(delayMs / 60000)}분 후 자동 재개`,
     );
   } else {
     scheduleRecovery(accountId, delayMs);
-    await postSlack(`⚠️ Layer4 탐지\n계정: ${accountId}\n${Math.round(delayMs / 60000)}분 후 자동 재개`);
+    await notify(`⚠️ Layer4 탐지\n계정: ${accountId}\n${Math.round(delayMs / 60000)}분 후 자동 재개`);
   }
 
   await logOperation({
@@ -221,6 +229,6 @@ export async function handleLayer4Detection(
   });
 }
 
-export async function notifySlack(message: string) {
-  await postSlack(message);
+export async function notifySlack(message: string, workspace?: string | null) {
+  await postWatcherAlert(message, workspace);
 }

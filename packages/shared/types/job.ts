@@ -18,7 +18,14 @@ export type JobType =
 
 export type ContentType = 'A' | 'B';
 
-export type JobStatus = 'pending' | 'scheduled' | 'running' | 'paused' | 'completed' | 'failed';
+export type JobStatus =
+  | 'pending'
+  | 'scheduled'
+  | 'running'
+  | 'paused'
+  | 'awaiting_captcha'
+  | 'completed'
+  | 'failed';
 
 export interface HumaJob {
   id: string;

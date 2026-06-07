@@ -47,6 +47,16 @@ export interface HumanEngineConfig {
   review_duration_ms: [number, number];
   night_ban_start: number;
   night_ban_end: number;
+  /** 본문 단락 중 Ctrl+V 비율 (0~1). 기본 0.55 */
+  paste_ratio?: number;
+  /** Linux i7 — fcitx-hangul OS IME (기본 true) */
+  use_os_ime?: boolean;
+}
+
+export function resolvePasteRatio(config: HumanEngineConfig): number {
+  const r = config.paste_ratio;
+  if (typeof r === 'number' && r >= 0 && r <= 1) return r;
+  return 0.55;
 }
 
 export async function getHumanEngineConfig(): Promise<HumanEngineConfig> {
@@ -59,6 +69,8 @@ export async function getHumanEngineConfig(): Promise<HumanEngineConfig> {
     review_duration_ms: [120000, 300000],
     night_ban_start: 1,
     night_ban_end: 7,
+    paste_ratio: 0.55,
+    use_os_ime: true,
   });
 }
 

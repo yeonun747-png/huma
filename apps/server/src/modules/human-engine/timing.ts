@@ -1,9 +1,12 @@
 import type { Page, Locator } from 'playwright';
-import { planParagraphPaste } from '@huma/shared';
 import { gaussianRandom, randomBetween, sleep, wpmToDelay } from '../../lib/utils.js';
 import type { HumanEngineConfig } from '../../lib/settings.js';
-import { probeModemSocks } from '../../lib/modem-socks-probe.js';
-import { humanSleep, humanType } from './typing.js';
+import { resolvePasteRatio } from '../../lib/settings.js';
+import { humanSleep } from './typing.js';
+import { humanTypeIntoElement, humanPasteIntoElement } from './korean-ime.js';
+import { humanClickLocator } from './mouse.js';
+
+export { humanSleep };
 
 export async function scrollWithReverse(
   page: Page,
@@ -13,17 +16,15 @@ export async function scrollWithReverse(
   reverseProbability: number,
 ) {
   const start = Date.now();
-  return (async () => {
-    while (Date.now() - start < durationMs) {
-      if (Math.random() < reverseProbability) {
-        await page.mouse.wheel(0, -randomBetween(80, 200));
-        await sleep(randomBetween(500, 1500));
-      } else {
-        await page.mouse.wheel(0, randomBetween(downRange[0], downRange[1]));
-      }
-      await sleep(randomBetween(pauseRange[0], pauseRange[1]));
+  while (Date.now() - start < durationMs) {
+    if (Math.random() < reverseProbability) {
+      await page.mouse.wheel(0, -randomBetween(80, 200));
+      await sleep(randomBetween(500, 1500));
+    } else {
+      await page.mouse.wheel(0, randomBetween(downRange[0], downRange[1]));
     }
-  })();
+    await sleep(randomBetween(pauseRange[0], pauseRange[1]));
+  }
 }
 
 export async function scrollReview(page: Page, durationMs: number) {
@@ -34,7 +35,8 @@ export async function scrollRead(page: Page, durationMs: number) {
   await scrollWithReverse(page, durationMs, [100, 350], [1500, 4000], 0.15);
 }
 
-export async function measureRTT(proxyPort: number): Promise<number> {
+export async function measureRTT(proxyPort: number) {
+  const { probeModemSocks } = await import('../../lib/modem-socks-probe.js');
   const probed = await probeModemSocks(proxyPort);
   return probed.ms ?? 3000;
 }
@@ -51,56 +53,53 @@ export async function smartType(
   page: Page,
   element: Locator,
   text: string,
-  humanConfig: HumanEngineConfig
+  humanConfig: HumanEngineConfig,
 ) {
   const paragraphs = text.split('\n\n');
-
   for (const para of paragraphs) {
     if (para.length > 0) {
-      await humanType(page, element, para, humanConfig);
+      await humanTypeIntoElement(page, element, para, humanConfig);
     }
     await humanSleep(humanConfig.paragraph_pause_ms[0], humanConfig.paragraph_pause_ms[1]);
   }
 }
 
-/** v3.36 §8-1-2 — 복붙 30% / 직접 타이핑 70%, 단락 위치 매번 랜덤 */
+/** v3.36 — 복붙 paste_ratio(기본55%) / IME 타이핑 */
 export async function typePostContent(
   page: Page,
   element: Locator,
   content: string,
   humanConfig: HumanEngineConfig,
 ) {
+  const { planParagraphPaste } = await import('@huma/shared');
   const paragraphs = content.split('\n\n').filter(Boolean);
   const total = paragraphs.length;
   if (total === 0) return;
 
-  const pasteCount = Math.floor(total * 0.3);
+  const pasteRatio = resolvePasteRatio(humanConfig);
+  const pasteCount = Math.floor(total * pasteRatio);
   const pasteIndices = new Set<number>();
   while (pasteIndices.size < pasteCount) {
     pasteIndices.add(Math.floor(Math.random() * total));
   }
 
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
-
   for (let i = 0; i < total; i++) {
     const para = paragraphs[i]!;
+    let focused = false;
 
     if (pasteIndices.has(i)) {
       const plan = planParagraphPaste(para);
       for (const seg of plan.segments) {
         if (seg.kind === 'paste') {
-          await element.click();
-          await page.evaluate(async (text) => {
-            await navigator.clipboard.writeText(text);
-          }, seg.text);
-          await page.keyboard.press('Control+V');
-          await humanSleep(300, 800);
+          await humanPasteIntoElement(page, element, seg.text);
+          focused = true;
         } else {
-          await humanType(page, element, seg.text, humanConfig);
+          await humanTypeIntoElement(page, element, seg.text, humanConfig, { skipFocus: focused });
+          focused = true;
         }
       }
     } else {
-      await humanType(page, element, para, humanConfig);
+      await humanTypeIntoElement(page, element, para, humanConfig);
     }
 
     if (i < total - 1) {

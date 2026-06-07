@@ -79,6 +79,12 @@ export function formatJobErrorLabel(message: string | null | undefined): string 
   const linksErr = formatLinksNotFoundError(raw);
   if (linksErr) return linksErr;
 
+  if (raw.includes('CAPTCHA_AWAITING_HUMAN')) {
+    return '캡cha 대기 — VNC에서 해결 후 huma에서 발행 완료';
+  }
+  if (raw.includes('CAPTCHA_TIMEOUT')) {
+    return '캡cha 30분 시간 초과 — 세션 종료';
+  }
   if (raw.includes('CAPTCHA_DETECTED') || (raw.includes('CAPTCHA') && !raw.includes('LAYER4'))) {
     return '네이버 로그인 실패: 캡차(보안문자) 감지';
   }

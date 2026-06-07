@@ -17,8 +17,20 @@
     "turbo": "^2.3.3",
     "typescript": "^5.4.5"
   },
+  "dependencies": {
+    "playwright": "1.49.1",
+    "playwright-core": "1.49.1"
+  },
   "engines": {
     "node": ">=20"
+  },
+  "overrides": {
+    "playwright": "1.49.1",
+    "playwright-core": "1.49.1",
+    "playwright-extra": {
+      "playwright": "1.49.1",
+      "playwright-core": "1.49.1"
+    }
   },
   "packageManager": "npm@10.8.2"
 }

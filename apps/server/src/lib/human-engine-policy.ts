@@ -30,6 +30,7 @@ export interface HumanEngineScheduleConfig extends HumanEngineConfig {
   min_publish_interval_hours?: number;
   fingerprint?: {
     captcha_slack?: boolean;
+    captcha_telegram?: boolean;
     cooldown_429_hours?: number;
     canvas_spoof?: boolean;
     webgl_spoof?: boolean;
@@ -233,4 +234,17 @@ export async function shouldNotifySlack(): Promise<boolean> {
   if (human.fingerprint?.captcha_slack === false) return false;
 
   return Boolean(process.env.SLACK_WEBHOOK_URL?.trim());
+}
+
+export async function shouldNotifyTelegram(): Promise<boolean> {
+  const human = await getHumanEngineScheduleConfig();
+  if (human.fingerprint?.captcha_telegram === false) return false;
+
+  const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
+  if (!token) return false;
+
+  return Boolean(
+    process.env.TELEGRAM_CHAT_ID_YEONUN?.trim() ||
+      process.env.TELEGRAM_CHAT_ID_QUIZ_PANANA?.trim(),
+  );
 }

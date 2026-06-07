@@ -2,9 +2,15 @@ import { chromium } from 'playwright-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import type { BrowserContext } from 'playwright';
 import { mkdirSync } from 'fs';
-import { injectFingerprint, type AccountFingerprint } from './fingerprint.js';
+import {
+  injectFingerprint,
+  normalizeFingerprintForLaunch,
+  type AccountFingerprint,
+} from './fingerprint.js';
 import type { AccountPersona } from './persona.js';
-import { getFingerprintConfig } from '../../lib/settings.js';
+import { getFingerprintConfig, getHumanEngineConfig } from '../../lib/settings.js';
+import { getBundledChromiumVersion, syncUserAgentChromeVersion } from '../../lib/chromium-version.js';
+import { fcitxBrowserEnv, resolveUseOsIme } from '../human-engine/os-ime.js';
 
 chromium.use(StealthPlugin());
 
@@ -43,15 +49,40 @@ function baseLaunchArgs(fp: AccountFingerprint) {
     '--disable-setuid-sandbox',
     '--disable-blink-features=AutomationControlled',
     `--window-size=${fp.screenWidth},${fp.screenHeight}`,
-    fp.useSoftwareGL ? '--use-gl=swiftshader' : '--use-gl=desktop',
+    '--use-gl=desktop',
     `--font-render-hinting=${fp.fontHint}`,
+    '--lang=ko-KR',
     '--webrtc-ip-handling-policy=disable_non_proxied_udp',
     '--force-webrtc-ip-handling-policy',
   ];
 }
 
-function persistentLaunchOptions(account: BrowserAccountContext, fpConfig: Awaited<ReturnType<typeof getFingerprintConfig>>) {
-  const fp = account.fingerprint;
+async function resolveLaunchFingerprint(
+  account: BrowserAccountContext,
+): Promise<AccountFingerprint> {
+  const normalized = normalizeFingerprintForLaunch(account.fingerprint, account.id);
+  const chromiumVersion = await getBundledChromiumVersion();
+  return {
+    ...normalized,
+    userAgent: syncUserAgentChromeVersion(normalized.userAgent, chromiumVersion),
+  };
+}
+
+function buildBrowserEnv(headless: boolean, useOsIme: boolean): Record<string, string> | undefined {
+  if (headless) return undefined;
+  const base: Record<string, string> = {
+    DISPLAY: process.env.DISPLAY ?? ':99',
+    LANG: 'ko_KR.UTF-8',
+  };
+  return useOsIme ? fcitxBrowserEnv(base) : base;
+}
+
+function persistentLaunchOptions(
+  account: BrowserAccountContext,
+  fp: AccountFingerprint,
+  fpConfig: Awaited<ReturnType<typeof getFingerprintConfig>>,
+  useOsIme: boolean,
+) {
   const headless = resolveHeadless();
 
   const proxy = account.proxy_port
@@ -66,10 +97,11 @@ function persistentLaunchOptions(account: BrowserAccountContext, fpConfig: Await
     viewport: { width: fp.screenWidth, height: fp.screenHeight },
     locale: 'ko-KR',
     timezoneId: 'Asia/Seoul',
+    deviceScaleFactor: fp.devicePixelRatio ?? 1,
     ...(process.env.PLAYWRIGHT_EXECUTABLE_PATH
       ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH }
       : {}),
-    env: headless ? undefined : { DISPLAY: process.env.DISPLAY ?? ':99' },
+    env: buildBrowserEnv(headless, useOsIme),
     fpConfig,
   };
 }
@@ -77,11 +109,21 @@ function persistentLaunchOptions(account: BrowserAccountContext, fpConfig: Await
 export async function createBrowserForAccount(account: BrowserAccountContext) {
   mkdirSync(account.profile_path, { recursive: true });
   const fpConfig = await getFingerprintConfig();
-  const opts = persistentLaunchOptions(account, fpConfig);
+  const humanCfg = await getHumanEngineConfig();
+  const useOsIme = resolveUseOsIme(humanCfg);
+  const fp = await resolveLaunchFingerprint(account);
+  const opts = persistentLaunchOptions(account, fp, fpConfig, useOsIme);
   const { fpConfig: cfg, ...launchOpts } = opts;
 
   const context = await chromium.launchPersistentContext(account.profile_path, launchOpts);
-  await injectFingerprint(context, account.fingerprint, cfg);
+  await injectFingerprint(context, fp, cfg);
+
+  context.on('page', (page) => {
+    void import('../human-engine/mouse.js').then(({ seedMousePosition }) => {
+      seedMousePosition(page);
+    });
+  });
+
   return { context };
 }
 
@@ -106,6 +148,7 @@ export async function createBrowser(proxyPort?: number) {
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
+      '--lang=ko-KR',
       '--webrtc-ip-handling-policy=disable_non_proxied_udp',
     ],
     proxy: proxyPort ? { server: `socks5://127.0.0.1:${proxyPort}` } : undefined,
