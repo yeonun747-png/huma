@@ -24,6 +24,9 @@ chmod 755 /data/browser-profiles
 echo "Building server..."
 npm run build
 
+echo "Installing Playwright Chromium (DRILL · 발행)..."
+bash scripts/install-playwright-browsers.sh
+
 pm2 delete huma-xvfb huma-x11vnc huma-server 2>/dev/null || true
 pm2 start "${SCRIPT_DIR}/ecosystem.config.cjs"
 pm2 save

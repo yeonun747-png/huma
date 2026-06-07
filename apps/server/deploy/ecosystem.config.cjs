@@ -33,6 +33,7 @@ module.exports = {
         NODE_ENV: 'production',
         DISPLAY: ':99',
         XVFB_AVAILABLE: 'true',
+        NODE_OPTIONS: '--dns-result-order=ipv4first',
       },
     },
   ],

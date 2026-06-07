@@ -91,7 +91,13 @@ async function createDrillBrowser() {
     });
     return { context, mode: 'headful' as const };
   } catch (err) {
-    console.warn('[captcha-drill] headful launch failed, fallback createBrowser:', (err as Error).message);
+    const msg = (err as Error).message;
+    if (/Executable doesn't exist|playwright install/i.test(msg)) {
+      throw new Error(
+        'Playwright Chromium 미설치 — i7: cd ~/huma/apps/server && bash scripts/install-playwright-browsers.sh && pm2 restart huma-server',
+      );
+    }
+    console.warn('[captcha-drill] headful launch failed, fallback createBrowser:', msg);
     const { context } = await createBrowser();
     return { context, mode: 'fallback' as const };
   }
@@ -132,38 +138,46 @@ export async function startCaptchaDrill(
     throw new Error(error?.message ?? 'DRILL_JOB_CREATE_FAILED');
   }
 
-  const { context, mode } = await createDrillBrowser();
-  const page = await context.newPage();
-  await page.setContent(DRILL_HTML, { waitUntil: 'domcontentloaded' });
-  await page.bringToFront();
+  try {
+    const { context, mode } = await createDrillBrowser();
+    const page = await context.newPage();
+    await page.setContent(DRILL_HTML, { waitUntil: 'domcontentloaded' });
+    await page.bringToFront();
 
-  const { telegram } = await enterCaptchaHold(
-    {
-      jobId: job.id,
-      accountId: DRILL_ACCOUNT_ID,
+    const { telegram } = await enterCaptchaHold(
+      {
+        jobId: job.id,
+        accountId: DRILL_ACCOUNT_ID,
+        workspace,
+        accountLabel: 'CAPTCHA DRILL',
+        jobTitle: '[DRILL] CAPTCHA 연습',
+        jobType: 'captcha_drill',
+        context,
+        releaseAccountLock: () => {},
+      },
+      { holdMs: DRILL_HOLD_MS, isDrill: true },
+    );
+
+    const telegramStatus = { ...telegram, env: getTelegramEnvStatus(workspace) };
+
+    await logOperation({
+      level: 'info',
+      message: `CAPTCHA DRILL 시작 (${workspace}) — telegram=${telegramStatus.ok ? 'ok' : telegramStatus.error ?? telegramStatus.skipped} · browser=${mode}`,
+      job_id: job.id,
       workspace,
-      accountLabel: 'CAPTCHA DRILL',
-      jobTitle: '[DRILL] CAPTCHA 연습',
-      jobType: 'captcha_drill',
-      context,
-      releaseAccountLock: () => {},
-    },
-    { holdMs: DRILL_HOLD_MS, isDrill: true },
-  );
+    });
 
-  const telegramStatus = { ...telegram, env: getTelegramEnvStatus(workspace) };
-
-  await logOperation({
-    level: 'info',
-    message: `CAPTCHA DRILL 시작 (${workspace}) — telegram=${telegramStatus.ok ? 'ok' : telegramStatus.error ?? telegramStatus.skipped} · browser=${mode}`,
-    job_id: job.id,
-    workspace,
-  });
-
-  return {
-    jobId: job.id,
-    workspace,
-    telegram: telegramStatus,
-    browser: { mode, display: process.env.DISPLAY?.trim() || ':99' },
-  };
+    return {
+      jobId: job.id,
+      workspace,
+      telegram: telegramStatus,
+      browser: { mode, display: process.env.DISPLAY?.trim() || ':99' },
+    };
+  } catch (err) {
+    await supabase
+      .from('huma_jobs')
+      .update({ status: 'failed', error_message: (err as Error).message })
+      .eq('id', job.id);
+    throw err;
+  }
 }

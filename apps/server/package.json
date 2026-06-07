@@ -11,7 +11,8 @@
     "start:worker": "node dist/worker-only.js",
     "lint": "tsc --noEmit",
     "generate-crank-sql": "node scripts/generate-crank-import-sql.mjs",
-    "postinstall": "node ./scripts/apply-rebrowser-patches.mjs"
+    "postinstall": "node ./scripts/apply-rebrowser-patches.mjs",
+    "install:browsers": "bash scripts/install-playwright-browsers.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.3",

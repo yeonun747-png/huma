@@ -113,8 +113,20 @@ export async function registerSystemRoutes(app: FastifyInstance) {
     if (ws && !['yeonun', 'panana', 'quizoasis'].includes(ws)) {
       return reply.code(400).send({ error: 'workspace: yeonun | panana | quizoasis' });
     }
-    const result = await sendTelegramTest(ws ?? 'yeonun');
-    return { success: result.ok, ...result };
+    try {
+      const result = await sendTelegramTest(ws ?? 'yeonun');
+      return { success: result.ok, ...result };
+    } catch (err) {
+      const msg = (err as Error).message;
+      console.warn('[telegram-test]', msg);
+      return {
+        success: false,
+        ok: false,
+        chatId: null,
+        error: msg,
+        env: { hasToken: false, chatId: null, webUrl: false, vncUrl: false },
+      };
+    }
   });
 
   app.get('/api/system/vnc-status', { preHandler: authMiddleware }, async () => {
