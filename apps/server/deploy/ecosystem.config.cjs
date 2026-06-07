@@ -19,13 +19,14 @@ module.exports = {
     },
     {
       name: 'huma-x11vnc',
-      script: path.join(deployRoot, 'scripts/start-x11vnc.sh'),
-      interpreter: 'bash',
+      script: 'x11vnc',
+      args:
+        '-display :99 -forever -shared -nopw -no6 -listen 0.0.0.0 -rfbport 5900 -noxdamage',
       autorestart: true,
       max_restarts: 10,
       restart_delay: 3000,
       env: {
-        HUMA_DISPLAY: ':99',
+        DISPLAY: ':99',
         HUMA_VNC_PORT: '5900',
       },
     },
