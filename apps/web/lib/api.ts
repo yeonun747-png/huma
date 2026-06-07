@@ -578,6 +578,8 @@ export const api = {
       x11vnc: boolean;
       drillActive: boolean;
       vncUrlYeonun: string | null;
+      vncEndpoint: string | null;
+      tailscale: boolean;
       hint: string;
     }>('/api/system/vnc-status', { sameOrigin: typeof window !== 'undefined' }),
 };

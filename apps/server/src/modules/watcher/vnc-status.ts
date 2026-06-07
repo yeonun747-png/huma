@@ -25,6 +25,25 @@ function hasLinuxProcess(pattern: string): boolean {
   }
 }
 
+/** vnc://100.x.x.x:5900 → 100.x.x.x:5900 */
+function vncEndpointFromEnvUrl(vncUrl: string | null | undefined): string | null {
+  const raw = vncUrl?.trim();
+  if (!raw) return null;
+  try {
+    const u = new URL(raw);
+    const host = u.hostname || u.pathname.replace(/^\//, '').split('/')[0];
+    if (!host) return null;
+    return `${host}:${u.port || '5900'}`;
+  } catch {
+    const m = raw.match(/^vnc:\/\/([^/?#]+)/i);
+    return m?.[1] ?? null;
+  }
+}
+
+function isTailscaleIp(host: string): boolean {
+  return host.startsWith('100.') || host.endsWith('.ts.net');
+}
+
 export async function getVncRuntimeStatus(): Promise<{
   port: number;
   display: string;
@@ -33,6 +52,8 @@ export async function getVncRuntimeStatus(): Promise<{
   x11vnc: boolean;
   drillActive: boolean;
   vncUrlYeonun: string | null;
+  vncEndpoint: string | null;
+  tailscale: boolean;
   hint: string;
 }> {
   const port = Number(process.env.HUMA_VNC_PORT ?? 5900);
@@ -41,14 +62,20 @@ export async function getVncRuntimeStatus(): Promise<{
   const xvfb = hasLinuxProcess(`Xvfb ${display} `);
   const x11vnc = hasLinuxProcess(`x11vnc.*-display ${display}`);
 
+  const vncUrlYeonun = process.env.HUMA_VNC_URL_YEONUN?.trim() || null;
+  const endpoint = vncEndpointFromEnvUrl(vncUrlYeonun) ?? `172.30.1.96:${port}`;
+  const host = endpoint.split(':')[0] ?? endpoint;
+  const viaTailscale = isTailscaleIp(host);
+
   let hint: string;
   if (!xvfb) {
     hint = 'Xvfb 미실행 — pm2 restart huma-xvfb';
   } else if (!listening || !x11vnc) {
-    hint = 'x11vnc 미기동 — pm2 start deploy/ecosystem.config.cjs --only huma-x11vnc';
+    hint = 'x11vnc 미기동 — sudo systemctl restart huma-x11vnc';
+  } else if (viaTailscale) {
+    hint = `5900 OK — RealVNC Direct ${endpoint} (Tailscale · 집 밖 가능). 평소 검정=정상, DRILL 중 흰 화면.`;
   } else {
-    hint =
-      '5900 LISTEN OK — RealVNC Viewer: 주소 172.30.1.96:5900 · Direct(Cloud 아님) · 암호 없음. 평소 검정=정상, DRILL 중 흰 화면.';
+    hint = `5900 OK — RealVNC Direct ${endpoint} (LAN만). 집 밖: bash apps/server/deploy/setup-tailscale.sh`;
   }
 
   return {
@@ -58,7 +85,9 @@ export async function getVncRuntimeStatus(): Promise<{
     xvfb,
     x11vnc,
     drillActive: false,
-    vncUrlYeonun: process.env.HUMA_VNC_URL_YEONUN?.trim() || null,
+    vncUrlYeonun,
+    vncEndpoint: endpoint,
+    tailscale: viaTailscale,
     hint,
   };
 }

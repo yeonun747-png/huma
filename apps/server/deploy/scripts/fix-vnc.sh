@@ -38,7 +38,13 @@ else
 fi
 
 if bash "${DEPLOY}/scripts/check-vnc-rfb.sh"; then
-  echo "OK — RealVNC: 172.30.1.96:5900 (Direct, 암호 없음)"
+  ENDPOINT="$("${DEPLOY}/scripts/print-tailscale-vnc.sh" 2>/dev/null | grep '^HUMA_' | cut -d= -f2- || true)"
+  if [[ -z "${ENDPOINT}" ]]; then
+    ENDPOINT="172.30.1.96:5900"
+  else
+    ENDPOINT="${ENDPOINT#vnc://}"
+  fi
+  echo "OK — RealVNC Direct: ${ENDPOINT} (암호 없음 · Tailscale 권장: setup-tailscale.sh)"
   exit 0
 fi
 
