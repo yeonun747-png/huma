@@ -129,11 +129,29 @@ export function formatJobErrorLabel(message: string | null | undefined): string 
   if (raw.includes('NO_IDLE_MODEM')) {
     return 'C-Rank 동글 대기 — 슬롯 6·7이 사용 중이어서 15분 후 자동 재예약됩니다';
   }
+  if (raw.includes('MODEM_IP_ROTATE_FAILED') || raw.includes('MODEM_IP_ROTATE_SAME')) {
+    return 'C-Rank IP 교체 실패 — 동일 IP로 다른 계정 로그인 방지, 15분 후 재예약';
+  }
+  if (raw.includes('MODEM_UNHEALTHY')) {
+    return 'C-Rank 동글 error/offline — 프록시 관리에서 슬롯 6·7 복구 후 재시도';
+  }
   if (raw.includes('NO_MODEM')) {
     return '가용 C-Rank 동글(SOCKS) 없음 — 프록시 관리에서 슬롯 6·7 상태 확인';
   }
   if (raw.includes('LAYER4_REST')) {
     return 'Layer4 휴식 중인 계정 — Watcher에서 해제 후 재시도';
+  }
+  if (raw.includes('SYSTEM_PAUSED')) {
+    return '전체 중지 상태 — 대시보드에서 재시작 후 다시 시도';
+  }
+  if (raw.includes('NIGHT_BAN')) {
+    return '야간 실행 금지 시간대 — 활동 허용 시간 이후 재시도';
+  }
+  if (raw.includes('ACTIVE_HOURS_BLOCKED')) {
+    return '활동 허용 시간 외 — Human Engine 스케줄 확인';
+  }
+  if (raw.includes('ACCOUNT_INACTIVE')) {
+    return '비활성 계정 — 계정 관리에서 is_active 후 재시도';
   }
   if (/Imagen API 실패 \(404\)/.test(raw)) {
     return 'Imagen 4 API 404 — 서버 imagen.ts 엔드포인트·모델명 확인 (i7 배포 필요)';

@@ -1,6 +1,7 @@
 import { humaQueue, enqueueJob } from '../modules/queue/producer.js';
 import { supabase } from '../middleware/auth.js';
 import { resolveBlogLinkUrl } from './blog-link.js';
+import { getSystemPaused } from './system-pause.js';
 
 export interface JobRecord {
   id: string;
@@ -111,6 +112,8 @@ export async function enqueueHumaJob(
 }
 
 export async function recoverScheduledJobs() {
+  if (getSystemPaused()) return;
+
   const { data: jobs } = await supabase
     .from('huma_jobs')
     .select('*')

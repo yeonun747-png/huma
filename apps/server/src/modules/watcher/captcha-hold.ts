@@ -176,6 +176,22 @@ export async function enterCaptchaHold(
   return { telegram };
 }
 
+export async function cancelCaptchaHold(jobId: string): Promise<boolean> {
+  const entry = holds.get(jobId);
+  if (!entry) return false;
+
+  await cleanupHold(jobId, entry);
+
+  await logOperation({
+    level: 'info',
+    message: entry.isDrill ? 'CAPTCHA DRILL 큐에서 삭제 — 세션 종료' : 'CAPTCHA hold 취소',
+    job_id: jobId,
+    account_id: entry.accountId,
+  });
+
+  return true;
+}
+
 export async function completeCaptchaHold(
   jobId: string,
   resultUrl?: string,

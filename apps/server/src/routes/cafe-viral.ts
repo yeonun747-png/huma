@@ -1,6 +1,5 @@
 import type { FastifyInstance } from 'fastify';
 import { authMiddleware, supabase, getWorkspaceFilter } from '../middleware/auth.js';
-import { createBrowser, createBrowserForAccount, closeBrowserContext } from '../modules/playwright/browser.js';
 import { pickCafeReplyCrankAccount, pickCafeScanAccount } from '../lib/cafe-accounts.js';
 import {
   assertCafeViralReplyLimits,
@@ -8,12 +7,12 @@ import {
   assertCafeWarmupComplete,
   normalizeCafePostUrl,
 } from '../lib/cafe-viral-config.js';
+import { assertSystemNotPaused, assertTemporalNaverGates } from '../lib/account-guards.js';
+import { withNaverBrowserSession } from '../lib/naver-browser-session.js';
 import { scanCafeById } from '../modules/cafe/viral.js';
 import { autoDetectGradeRequirements, executeViralReplyPost, runCafeWarmup } from '../modules/cafe/warmup.js';
 import { runDailyActivity, getTodayActivityCounts, assertActivityRatioSlot } from '../modules/cafe/activity.js';
 import { generateViralReply } from '../modules/cafe/viral.js';
-import { loadAccountForBrowser } from '../modules/playwright/account-loader.js';
-import { naverLogin } from '../modules/playwright/naver/login.js';
 
 export async function registerCafeViralRoutes(app: FastifyInstance) {
   app.get('/api/cafe-viral/cafes', { preHandler: authMiddleware }, async (request) => {
@@ -83,16 +82,28 @@ export async function registerCafeViralRoutes(app: FastifyInstance) {
     return data;
   });
 
-  app.post('/api/cafe-viral/cafes/:id/detect-grade', { preHandler: authMiddleware }, async (request) => {
+  app.post('/api/cafe-viral/cafes/:id/detect-grade', { preHandler: authMiddleware }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const { data: cafe } = await supabase.from('huma_cafe_viral_cafes').select('*').eq('id', id).single();
     if (!cafe) return { error: '카페 없음' };
 
-    const slug = String(cafe.cafe_url).split('/')[0];
-    const { browser, context } = await createBrowser();
     try {
-      const page = await context.newPage();
-      const requirements = await autoDetectGradeRequirements(slug, page);
+      await assertSystemNotPaused();
+      await assertTemporalNaverGates();
+    } catch (err) {
+      return reply.code(400).send({ error: (err as Error).message });
+    }
+
+    const slug = String(cafe.cafe_url).split('/')[0];
+    const accountId = await pickCafeScanAccount();
+    if (!accountId) {
+      return reply.code(400).send({ error: '등업 조건 감지에 사용할 C-Rank·카페 계정이 없습니다' });
+    }
+
+    try {
+      const requirements = await withNaverBrowserSession(accountId, async ({ page }) =>
+        autoDetectGradeRequirements(slug, page),
+      );
       if (!requirements) return { error: '등업 조건 자동 감지 실패 — 수동 입력 필요' };
 
       await supabase
@@ -105,8 +116,8 @@ export async function registerCafeViralRoutes(app: FastifyInstance) {
         .eq('id', id);
 
       return { success: true, grade_requirements: requirements };
-    } finally {
-      await browser.close();
+    } catch (err) {
+      return reply.code(400).send({ error: (err as Error).message });
     }
   });
 
@@ -119,20 +130,12 @@ export async function registerCafeViralRoutes(app: FastifyInstance) {
       if (!accountId) {
         return reply.code(400).send({
           error:
-            '비공개 카페 스캔에는 네이버 계정이 필요합니다. 계정관리에서 C-Rank·카페·포스팅 계정을 등록하고 럭키포에버(raise1)에 가입하세요.',
+            '비공개 카페 스캔에는 네이버 계정이 필요합니다. 계정관리에서 C-Rank·카페 계정을 등록하고 럭키포에버(raise1)에 가입하세요.',
         });
       }
 
-      const accountCtx = await loadAccountForBrowser(accountId);
-      const { context } = await createBrowserForAccount(accountCtx);
-      try {
-        await naverLogin(context, accountId);
-        const page = await context.newPage();
-        const count = await scanCafeById(id, page);
-        return { success: true, count };
-      } finally {
-        await closeBrowserContext(context);
-      }
+      const count = await withNaverBrowserSession(accountId, async ({ page }) => scanCafeById(id, page));
+      return { success: true, count };
     } catch (err) {
       return reply.code(400).send({ error: (err as Error).message });
     }
@@ -181,15 +184,13 @@ export async function registerCafeViralRoutes(app: FastifyInstance) {
 
     await assertCafeWarmupComplete(accountId, post.cafe_id);
 
-    const accountCtx = await loadAccountForBrowser(accountId);
-    const { browser, context } = await createBrowser(accountCtx?.proxy_port);
     try {
-      await naverLogin(context, accountId);
-      const page = await context.newPage();
-      await executeViralReplyPost({ postId: id, accountId, page });
+      await withNaverBrowserSession(accountId, async ({ page }) => {
+        await executeViralReplyPost({ postId: id, accountId, page });
+      });
       return { success: true, post_url: normalizeCafePostUrl(post.post_url) };
-    } finally {
-      await browser.close();
+    } catch (err) {
+      return reply.code(400).send({ error: (err as Error).message });
     }
   });
 
@@ -199,15 +200,13 @@ export async function registerCafeViralRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'account_id, cafe_id 필요' });
     }
 
-    const accountCtx = await loadAccountForBrowser(body.account_id);
-    const { browser, context } = await createBrowser(accountCtx?.proxy_port);
     try {
-      await naverLogin(context, body.account_id);
-      const page = await context.newPage();
-      await runCafeWarmup({ accountId: body.account_id, cafeId: body.cafe_id, page });
+      await withNaverBrowserSession(body.account_id, async ({ page }) => {
+        await runCafeWarmup({ accountId: body.account_id, cafeId: body.cafe_id, page });
+      });
       return { success: true };
-    } finally {
-      await browser.close();
+    } catch (err) {
+      return reply.code(400).send({ error: (err as Error).message });
     }
   });
 
@@ -219,20 +218,18 @@ export async function registerCafeViralRoutes(app: FastifyInstance) {
 
     await assertCafeWarmupComplete(body.account_id, body.cafe_id);
 
-    const accountCtx = await loadAccountForBrowser(body.account_id);
-    const { browser, context } = await createBrowser(accountCtx?.proxy_port);
     try {
-      await naverLogin(context, body.account_id);
-      const page = await context.newPage();
-      const result = await runDailyActivity({
-        accountId: body.account_id,
-        cafeId: body.cafe_id,
-        workspace: body.workspace,
-        page,
-      });
+      const result = await withNaverBrowserSession(body.account_id, async ({ page }) =>
+        runDailyActivity({
+          accountId: body.account_id,
+          cafeId: body.cafe_id,
+          workspace: body.workspace,
+          page,
+        }),
+      );
       return { success: true, ...result };
-    } finally {
-      await browser.close();
+    } catch (err) {
+      return reply.code(400).send({ error: (err as Error).message });
     }
   });
 

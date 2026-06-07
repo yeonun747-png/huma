@@ -15,6 +15,7 @@ import {
 import { runContentPreview } from '../modules/claude/content-preview.js';
 import { promoteDryRunToPublish } from '../modules/queue/jobs/content-orchestrator.js';
 import { assertCafeNewPostAccount, assertCafeReplyAccount } from '../lib/cafe-accounts.js';
+import { assertHumaJobRunnable } from '../lib/account-guards.js';
 import { assertManualSocialCrankAllowed } from '../lib/crank-guard.js';
 import { getCrankJobSessionDetail } from '../lib/crank-job-session.js';
 import { deleteJobById, deleteJobsByIds } from '../lib/delete-job.js';
@@ -218,6 +219,7 @@ export async function registerJobRoutes(app: FastifyInstance) {
       if (jobType === 'social_crank' && accountId) {
         await assertManualSocialCrankAllowed(accountId, body.content as string | undefined);
       }
+      await assertHumaJobRunnable({ job_type: jobType, account_id: accountId });
     } catch (err) {
       return reply.code(400).send({ error: (err as Error).message });
     }
@@ -405,6 +407,12 @@ export async function registerJobRoutes(app: FastifyInstance) {
     const { data: job } = await supabase.from('huma_jobs').select('*').eq('id', id).single();
     if (!job) return reply.code(404).send({ error: '작업 없음' });
 
+    try {
+      await assertHumaJobRunnable(job);
+    } catch (err) {
+      return reply.code(400).send({ error: (err as Error).message });
+    }
+
     const { data, error } = await supabase
       .from('huma_jobs')
       .update({ status: resolveJobStatus(job.scheduled_at) })
@@ -426,6 +434,12 @@ export async function registerJobRoutes(app: FastifyInstance) {
     if (!job) return reply.code(404).send({ error: '작업 없음' });
     if (!['pending', 'scheduled', 'paused'].includes(String(job.status))) {
       return reply.code(400).send({ error: '대기·예약·일시정지 작업만 앞당길 수 있습니다' });
+    }
+
+    try {
+      await assertHumaJobRunnable(job);
+    } catch (err) {
+      return reply.code(400).send({ error: (err as Error).message });
     }
 
     const now = new Date().toISOString();
@@ -508,12 +522,13 @@ export async function registerJobRoutes(app: FastifyInstance) {
     const { data: job } = await supabase.from('huma_jobs').select('*').eq('id', id).single();
     if (!job) return { error: '작업 없음' };
 
-    if (job.job_type === 'social_crank' && job.account_id) {
-      try {
+    try {
+      if (job.job_type === 'social_crank' && job.account_id) {
         await assertManualSocialCrankAllowed(job.account_id, job.content);
-      } catch (err) {
-        return reply.code(400).send({ error: (err as Error).message });
       }
+      await assertHumaJobRunnable(job);
+    } catch (err) {
+      return reply.code(400).send({ error: (err as Error).message });
     }
 
     await removeBullJob(job.bull_job_id);

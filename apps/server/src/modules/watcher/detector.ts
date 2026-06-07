@@ -12,8 +12,6 @@ import { reconnectModem } from '../modem/reconnect.js';
 import type { ModemSession } from '../proxy/manager.js';
 import { getModemIdByProxyPort } from '../proxy/manager.js';
 
-const recoveryTimers = new Map<string, NodeJS.Timeout[]>();
-
 export function isCaptchaError(err: unknown): boolean {
   const msg = (err as Error).message ?? '';
   return msg.includes('CAPTCHA') || msg.includes('captcha');
@@ -45,42 +43,17 @@ export async function pauseAccount(accountId: string) {
   await supabase.from('huma_accounts').update({ is_active: false }).eq('id', accountId);
 }
 
-async function resumeAccount(accountId: string) {
-  const { data } = await supabase
+async function setTimedRest(accountId: string, delayMs: number): Promise<number> {
+  const ms = Math.max(delayMs, 15 * 60_000);
+  const until = new Date(Date.now() + ms);
+  await supabase
     .from('huma_accounts')
-    .select('layer4_rest_until, is_active')
-    .eq('id', accountId)
-    .single();
-
-  if (data?.layer4_rest_until && new Date(data.layer4_rest_until) > new Date()) {
-    return;
-  }
-
-  await supabase.from('huma_accounts').update({ is_active: true }).eq('id', accountId);
-}
-
-function clearRecoveryTimers(accountId: string) {
-  const existing = recoveryTimers.get(accountId) ?? [];
-  existing.forEach(clearTimeout);
-  recoveryTimers.delete(accountId);
-}
-
-export function scheduleRecovery(accountId: string, delayMs: number) {
-  clearRecoveryTimers(accountId);
-  if (delayMs <= 0) {
-    void resumeAccount(accountId);
-    return;
-  }
-  const t = setTimeout(async () => {
-    await resumeAccount(accountId);
-    await logOperation({
-      level: 'info',
-      message: `Layer4 복구 완료 (${Math.round(delayMs / 60000)}분 대기)`,
-      account_id: accountId,
-    });
-    recoveryTimers.delete(accountId);
-  }, delayMs);
-  recoveryTimers.set(accountId, [t]);
+    .update({
+      is_active: false,
+      layer4_rest_until: until.toISOString(),
+    })
+    .eq('id', accountId);
+  return ms;
 }
 
 async function setWeekRest(accountId: string) {
@@ -92,6 +65,25 @@ async function setWeekRest(accountId: string) {
       layer4_rest_until: until.toISOString(),
     })
     .eq('id', accountId);
+}
+
+function captchaRestMs(): number {
+  const hours = Number(process.env.HUMA_LAYER4_CAPTCHA_REST_HOURS);
+  const resolved = Number.isFinite(hours) && hours > 0 ? hours : 24;
+  return resolved * 3600_000;
+}
+
+async function setCaptchaRest(accountId: string): Promise<number> {
+  const ms = captchaRestMs();
+  const until = new Date(Date.now() + ms);
+  await supabase
+    .from('huma_accounts')
+    .update({
+      is_active: false,
+      layer4_rest_until: until.toISOString(),
+    })
+    .eq('id', accountId);
+  return ms;
 }
 
 async function bumpDetectionState(accountId: string): Promise<{
@@ -182,9 +174,8 @@ export async function handleLayer4Detection(
 
   if (countToday >= 3) {
     await setWeekRest(accountId);
-    clearRecoveryTimers(accountId);
     await notify(
-      `🛑 Layer4 수동 점검 — 1주 휴식\n계정: ${accountId}\n오늘 탐지: ${countToday}회\nlayer4_rest_until: 7일`,
+      `🛑 Layer4 수동 점검 — 1주 휴식\n계정: ${accountId}\n오늘 탐지: ${countToday}회\nlayer4_rest_until: 7일 (is_active 수동 후 재투입)`,
     );
     await logOperation({
       level: 'ERROR',
@@ -197,29 +188,37 @@ export async function handleLayer4Detection(
   const captcha = isCaptchaError(err);
   const is429 = is429Error(err);
   const delayMs = resolveRecoveryDelayMs(tier, is429, watcher, human);
+  const restLabel = (ms: number) =>
+    `${Math.round(ms / 60000)}분 휴식 (계정 관리에서 is_active 수동 후 재투입)`;
 
   if (tier >= 3) {
     const { data } = await supabase.from('huma_accounts').select('health_score').eq('id', accountId).single();
     const health = Math.max(0, (data?.health_score ?? 100) - 15);
     await supabase.from('huma_accounts').update({ health_score: health }).eq('id', accountId);
-    scheduleRecovery(accountId, delayMs);
+    const restMs = await setTimedRest(accountId, delayMs);
     await notify(
-      `🚨 Layer4 3차 연속 탐지\n계정: ${accountId}\nhealth→${health}\n${Math.round(delayMs / 60000)}분 후 재개`,
+      `🚨 Layer4 3차 연속 탐지\n계정: ${accountId}\nhealth→${health}\n${restLabel(restMs)}`,
     );
   } else if (is429 || tier >= 2) {
     await handle429Reconnect(accountId, session);
-    scheduleRecovery(accountId, delayMs);
+    const restMs = await setTimedRest(accountId, delayMs);
     await notify(
-      `⚠️ Layer4 2차 (429/재CAPTCHA)\n계정: ${accountId}\n티어: ${tier}\n${Math.round(delayMs / 60000)}분 후 자동 재개`,
+      `⚠️ Layer4 2차 (429/재CAPTCHA)\n계정: ${accountId}\n티어: ${tier}\n${restLabel(restMs)}`,
     );
   } else if (captcha || isBlockError(err)) {
-    scheduleRecovery(accountId, delayMs);
-    await notify(
-      `⚠️ Layer4 1차 CAPTCHA\n계정: ${accountId}\n${Math.round(delayMs / 60000)}분 후 자동 재개`,
-    );
+    if (tier === 1 && captcha) {
+      const restMs = await setCaptchaRest(accountId);
+      const restHours = Math.round(restMs / 3600000);
+      await notify(
+        `⚠️ Layer4 1차 CAPTCHA — ${restHours}시간 휴식 (계정 관리에서 is_active 수동 후 재투입)\n계정: ${accountId}`,
+      );
+    } else {
+      const restMs = await setTimedRest(accountId, delayMs);
+      await notify(`⚠️ Layer4 1차 CAPTCHA\n계정: ${accountId}\n${restLabel(restMs)}`);
+    }
   } else {
-    scheduleRecovery(accountId, delayMs);
-    await notify(`⚠️ Layer4 탐지\n계정: ${accountId}\n${Math.round(delayMs / 60000)}분 후 자동 재개`);
+    const restMs = await setTimedRest(accountId, delayMs);
+    await notify(`⚠️ Layer4 탐지\n계정: ${accountId}\n${restLabel(restMs)}`);
   }
 
   await logOperation({

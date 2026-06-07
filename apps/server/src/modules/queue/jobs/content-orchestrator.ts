@@ -1,4 +1,5 @@
 import { enqueueHumaJob, getScheduleDelay, type JobRecord } from '../../../lib/job-scheduler.js';
+import { layer4RestSupabaseOr } from '../../../lib/account-guards.js';
 import { normalizeBlogLinkUrl } from '../../../lib/blog-link.js';
 import { supabase } from '../../../middleware/auth.js';
 import { enqueueJob } from '../producer.js';
@@ -47,6 +48,7 @@ async function pickPostingAccount(workspace: string): Promise<{ id: string; pers
     .eq('workspace', workspace)
     .eq('account_type', 'posting')
     .eq('is_active', true)
+    .or(layer4RestSupabaseOr())
     .limit(1)
     .maybeSingle();
   return data ? { id: data.id as string, persona: data.persona as Record<string, unknown> | undefined } : null;

@@ -37,15 +37,7 @@ import { scheduleRepeatIfNeeded } from '../../lib/repeat-scheduler.js';
 import { activatePendingSocialReplies } from '../../lib/social-reply-chain.js';
 import { isSlimDataCapError, scheduleSlimCapRetry } from '../../lib/slim-retry.js';
 import { assertCafeNewPostAccount, assertCafeReplyAccount } from '../../lib/cafe-accounts.js';
-let systemPaused = false;
-
-export function setSystemPaused(paused: boolean) {
-  systemPaused = paused;
-}
-
-export function getSystemPaused() {
-  return systemPaused;
-}
+import { getSystemPaused } from '../../lib/system-pause.js';
 
 async function getTodayCount(accountId: string, field: 'post_count_today' | 'crank_count_today'): Promise<number> {
   const { data } = await supabase.from('huma_accounts').select(`${field}`).eq('id', accountId).single();
@@ -116,7 +108,7 @@ async function deferCrankForIdleModem(
 export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURRENCY) || 5) {  const worker = new Worker(
     'huma-jobs',
     async (job) => {
-      if (systemPaused) throw new Error('SYSTEM_PAUSED');
+      if (getSystemPaused()) throw new Error('SYSTEM_PAUSED');
 
       const { type, accountId, payload, humaJobId } = job.data as {
         type: string;
@@ -174,21 +166,15 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
 
           const countField = dailyCountField(type);
           let limit = await getEffectiveDailyLimit(type);
-          const scheduledCrank = Boolean(
-            (payload as { scheduledCrank?: boolean }).scheduledCrank,
-          );
           if (type === 'social_crank' || type === 'cafe_reply') {
-            if (!scheduledCrank) {
-              const ctx = await loadAccountForBrowser(accountId);
-              const crankCap = getCrankDailyLimit(ctx.warmup_day ?? 0);
-              limit = type === 'cafe_reply'
+            const ctx = await loadAccountForBrowser(accountId);
+            const crankCap = getCrankDailyLimit(ctx.warmup_day ?? 0);
+            limit =
+              type === 'cafe_reply'
                 ? Math.min(await getEffectiveDailyLimit('cafe_reply'), crankCap)
                 : crankCap;
-            } else if (type === 'social_crank') {
-              limit = 999;
-            }
           }
-          if (!scheduledCrank && (await getTodayCount(accountId, countField)) >= limit) {
+          if ((await getTodayCount(accountId, countField)) >= limit) {
             throw new Error('DAILY_LIMIT');
           }
         }
@@ -357,7 +343,10 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         if (
           humaJobId &&
           type === 'social_crank' &&
-          ((err as Error).message === 'NO_IDLE_MODEM' || (err as Error).message === 'MODEM_BUSY')
+          ((err as Error).message === 'NO_IDLE_MODEM' ||
+            (err as Error).message === 'MODEM_BUSY' ||
+            (err as Error).message.includes('MODEM_IP_ROTATE') ||
+            (err as Error).message.includes('MODEM_UNHEALTHY'))
         ) {
           await deferCrankForIdleModem(job, humaJobId, accountId);
           return;

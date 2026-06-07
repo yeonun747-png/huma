@@ -34,6 +34,7 @@ import { getMissingAdSenseEnvKeys, isAdSenseConfigured } from './modules/adsense
 import { setLogSocket } from './lib/log-emitter.js';
 
 import { startWorker } from './modules/queue/worker.js';
+import { initSystemPause, getSystemPaused } from './lib/system-pause.js';
 import { recoverScheduledJobs } from './lib/job-scheduler.js';
 import { startCrankScheduler } from './lib/crank-scheduler.js';
 import { startCafeActivityScheduler } from './lib/cafe-activity-scheduler.js';
@@ -124,6 +125,10 @@ async function main() {
 
 
   try {
+    await initSystemPause();
+    if (getSystemPaused()) {
+      app.log.warn('HUMA 전체 정지 상태 — ▶ 재시작 전까지 큐·스케줄러 가동 안 함');
+    }
     startWorker();
     await recoverScheduledJobs();
     startCrankScheduler();

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { HumaJob, Workspace } from '@huma/shared';
+import { isCaptchaDrillJob } from '@huma/shared';
 import { api } from '@/lib/api';
 import { WS_LABEL } from '@/lib/constants';
 import { useWorkspace } from '@/components/dashboard/workspace-context';
@@ -280,7 +281,11 @@ export function QueueManager() {
   };
 
   const handleDeleteJob = (job: HumaJob) => {
-    if (!window.confirm(`「${job.title ?? job.job_type}」 작업을 큐에서 제거할까요?`)) return;
+    const drill = isCaptchaDrillJob(job);
+    const msg = drill
+      ? `「${job.title ?? job.job_type}」 DRILL을 큐에서 제거할까요?\nVNC 브라우저 세션도 종료됩니다.`
+      : `「${job.title ?? job.job_type}」 작업을 큐에서 제거할까요?`;
+    if (!window.confirm(msg)) return;
     api
       .deleteJob(job.id)
       .then(() => {
@@ -291,6 +296,7 @@ export function QueueManager() {
           return next;
         });
         setCrankJob((current) => (current?.id === job.id ? null : current));
+        setCaptchaJob((current) => (current?.id === job.id ? null : current));
         load();
       })
       .catch((e) => {
@@ -489,7 +495,7 @@ export function QueueManager() {
                   </button>
                 ) : (
                   <span className="text-[11px] text-huma-t3">
-                    LIVE만 삭제 불가 · 실패·지연·완료 항목은 ✕ 또는 선택 삭제
+                    LIVE·CAPTCHA는 DRILL만 삭제 가능 · 그 외는 실패·지연·완료 항목
                   </span>
                 )}
               </div>

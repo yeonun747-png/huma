@@ -55,3 +55,11 @@ export interface HumaJob {
   completed_at?: string;
   created_at: string;
 }
+
+export function isCaptchaDrillJob(job: {
+  title?: string | null;
+  platform_schedule?: Record<string, unknown> | null;
+}): boolean {
+  if (job.platform_schedule?._captcha_drill === true) return true;
+  return (job.title ?? '').startsWith('[DRILL]');
+}

@@ -21,10 +21,15 @@ export async function recordLastAccountOnModem(port: number, accountId: string):
   await redisConnection.set(lastAccountKey(port), accountId, 'EX', LAST_ACCOUNT_TTL_SEC);
 }
 
+function assertModemSessionReady(status: string | null | undefined, slot: number): void {
+  if (status === 'error' || status === 'offline') {
+    throw new Error(`MODEM_UNHEALTHY:slot${slot}:${status ?? 'unknown'}`);
+  }
+}
+
 /**
  * v3.33 C-Rank — 다른 계정이 쓰던 동글이면 비행기모드 1회 시도.
- * 규칙 ⑦: 별도 고정 대기 없음 — reconnect(5s) + preSessionWarmup(2~5분)이 자연 간격.
- * 실패(sudo 등): WARN 후 이전 IP 유지 진행 (카페는 rotateCafeSession에서 스킵).
+ * IP 교체 실패·동일 IP 재할당·error 동글이면 세션 중단 (구 IP로 다른 계정 로그인 방지).
  */
 export async function reconnectModemIfAccountSwitched(
   proxyPort: number,
@@ -35,9 +40,11 @@ export async function reconnectModemIfAccountSwitched(
 
   const slot = proxyPortToSlot(proxyPort);
   const [{ data: modem }, { data: account }] = await Promise.all([
-    supabase.from('huma_modems').select('id, current_ip').eq('slot_number', slot).single(),
+    supabase.from('huma_modems').select('id, current_ip, status').eq('slot_number', slot).single(),
     supabase.from('huma_accounts').select('name, crank_workspace').eq('id', accountId).single(),
   ]);
+
+  assertModemSessionReady(modem?.status, slot);
 
   const logBase = {
     workspace: (account?.crank_workspace as string | undefined) ?? 'yeonun',
@@ -75,19 +82,25 @@ export async function reconnectModemIfAccountSwitched(
 
   if (!newIp) {
     await logOperation({
-      level: 'WARN',
-      message: `C-Rank 계정 전환 — 비행기모드 재연결 실패(${RECONNECT_ATTEMPTS}회), 이전 IP(${oldIp ?? '?'}) 유지 후 세션 진행: ${lastErr?.message ?? 'unknown'}`,
+      level: 'ERROR',
+      message: `C-Rank 계정 전환 — IP 교체 실패(${RECONNECT_ATTEMPTS}회), 세션 중단: ${lastErr?.message ?? 'unknown'}`,
       ...logBase,
     });
-    return false;
+    throw new Error(`MODEM_IP_ROTATE_FAILED:slot${slot}:${lastErr?.message ?? 'unknown'}`);
   }
 
-  const sameIp = Boolean(oldIp && oldIp === newIp);
+  if (oldIp && oldIp === newIp) {
+    await logOperation({
+      level: 'ERROR',
+      message: `C-Rank 계정 전환 — IP 동일(${newIp}) 재할당, 세션 중단 (다른 계정 연속 사용 방지)`,
+      ...logBase,
+    });
+    throw new Error(`MODEM_IP_ROTATE_SAME:slot${slot}:${newIp}`);
+  }
+
   await logOperation({
     level: 'info',
-    message: sameIp
-      ? `계정 전환 IP 교체 시도 — 동일 IP(${newIp}) 재할당, 정상 진행`
-      : `계정 전환 IP 교체: ${oldIp ?? '?'} → ${newIp}`,
+    message: `계정 전환 IP 교체: ${oldIp ?? '?'} → ${newIp}`,
     ...logBase,
   });
 

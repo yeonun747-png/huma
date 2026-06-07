@@ -1,8 +1,10 @@
 import type { HumaJob } from '@huma/shared';
+import { isCaptchaDrillJob } from '@huma/shared';
 import { isSchedulePast } from '@/lib/format-kst';
 
-/** LIVE·캡cha 대기 제외 — 실패·지연·완료·대기 등 큐에서 제거 가능 */
+/** LIVE·캡cha 대기 제외 — DRILL은 LIVE/CAPTCHA 포함 삭제 가능 */
 export function isDeletableQueueJob(job: HumaJob): boolean {
+  if (isCaptchaDrillJob(job)) return true;
   return job.status !== 'running' && job.status !== 'awaiting_captcha';
 }
 

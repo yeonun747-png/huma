@@ -21,6 +21,8 @@ import {
 import { enqueueHumaJob, type JobRecord } from './job-scheduler.js';
 import { logOperation } from './log-emitter.js';
 import { getCrankScheduleWindow } from './human-engine-policy.js';
+import { layer4RestSupabaseOr } from './account-guards.js';
+import { getSystemPaused } from './system-pause.js';
 
 const DAILY_JOB_TITLE_PREFIX = 'C-Rank 스케줄';
 
@@ -32,7 +34,8 @@ async function countActiveCrankPoolSize(): Promise<number> {
     .from('huma_accounts')
     .select('id', { count: 'exact', head: true })
     .eq('account_type', 'crank')
-    .eq('is_active', true);
+    .eq('is_active', true)
+    .or(layer4RestSupabaseOr());
   return count ?? 0;
 }
 
@@ -42,6 +45,7 @@ export async function fetchPostingBlogUrls(workspace?: Workspace): Promise<strin
     .select('blog_url')
     .eq('account_type', 'posting')
     .eq('is_active', true)
+    .or(layer4RestSupabaseOr())
     .not('blog_url', 'is', null);
 
   if (workspace) {
@@ -69,11 +73,16 @@ export async function selectCrankAccountsForToday(
 > {
   const { data: accounts } = await supabase
     .from('huma_accounts')
-    .select('id, name, last_crank_at, crank_workspace, crank_label')
+    .select('id, name, last_crank_at, crank_workspace, crank_label, layer4_rest_until')
     .eq('account_type', 'crank')
-    .eq('is_active', true);
+    .eq('is_active', true)
+    .or(layer4RestSupabaseOr());
 
-  return selectCrankAccountsForDailySchedule(accounts ?? [], cycleDays, dailyAccountCount);
+  const rested = (accounts ?? []).filter(
+    (a) => !a.layer4_rest_until || new Date(a.layer4_rest_until) <= new Date(),
+  );
+
+  return selectCrankAccountsForDailySchedule(rested, cycleDays, dailyAccountCount);
 }
 
 async function hasDailyScheduleJobs(dateKey: string): Promise<boolean> {
@@ -88,6 +97,8 @@ async function hasDailyScheduleJobs(dateKey: string): Promise<boolean> {
 
 /** 매일 00:01 KST — 당일 crank 계정 큐 + 분산 scheduled_at */
 export async function runDailyCrankScheduler(): Promise<void> {
+  if (getSystemPaused()) return;
+
   const dateKey = formatKstDateKey();
   if (await hasDailyScheduleJobs(dateKey)) {
     return;
@@ -307,6 +318,8 @@ function tickCrankSchedulerClock() {
 
 /** 서버 기동 시 오늘 큐가 없으면 보정 생성 */
 export async function ensureTodayCrankQueue(): Promise<void> {
+  if (getSystemPaused()) return;
+
   const dateKey = formatKstDateKey();
   if (!(await hasDailyScheduleJobs(dateKey))) {
     await runDailyCrankScheduler();

@@ -1,5 +1,7 @@
 import { supabase } from '../middleware/auth.js';
 import { removeBullJob } from './job-scheduler.js';
+import { isCaptchaDrillJob } from '@huma/shared';
+import { cancelCaptchaHold } from '../modules/watcher/captcha-hold.js';
 
 const VIDEO_JOB_FK_COLS = ['blog_job_id', 'threads_job_id', 'twitter_job_id'] as const;
 
@@ -7,12 +9,16 @@ const VIDEO_JOB_FK_COLS = ['blog_job_id', 'threads_job_id', 'twitter_job_id'] as
 export async function deleteJobById(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
   const { data: existing, error: selectErr } = await supabase
     .from('huma_jobs')
-    .select('id, bull_job_id')
+    .select('id, bull_job_id, title, platform_schedule')
     .eq('id', id)
     .maybeSingle();
 
   if (selectErr) return { ok: false, error: selectErr.message };
   if (!existing) return { ok: false, error: '작업 없음' };
+
+  if (isCaptchaDrillJob(existing)) {
+    await cancelCaptchaHold(id);
+  }
 
   const { error: vqRowErr } = await supabase.from('huma_video_queue').delete().eq('job_id', id);
   if (vqRowErr) return { ok: false, error: vqRowErr.message };

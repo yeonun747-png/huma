@@ -3,9 +3,11 @@
  * 2대 분산 시: REDIS_HOST=마스터 IP · npm run start:worker
  */
 import './lib/load-env.js';
+import { initSystemPause } from './lib/system-pause.js';
 import { startWorker } from './modules/queue/worker.js';
 
 const concurrency = Number(process.env.HUMA_WORKER_CONCURRENCY) || 3;
 
+await initSystemPause();
 startWorker(concurrency);
 console.log(`HUMA Worker-only started (concurrency=${concurrency}, redis=${process.env.REDIS_URL ?? process.env.REDIS_HOST ?? 'localhost'})`);

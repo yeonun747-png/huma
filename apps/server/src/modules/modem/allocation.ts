@@ -6,6 +6,7 @@ import {
   MODEM_LOCK_TTL_SEC,
 } from '../../lib/modem-ports.js';
 import { getSchedulableCrankProxyPorts } from '../../lib/crank-modems.js';
+import { logOperation } from '../../lib/log-emitter.js';
 import { shuffleArray } from '../../lib/utils.js';
 
 function crankLockKey(port: number) {
@@ -87,9 +88,21 @@ export async function getModemProxyPort(
   if (opts?.preferredProxyPort) {
     const preferred = await tryAcquirePort(opts.preferredProxyPort);
     if (preferred) return preferred;
-    throw new Error(
-      `[getModemProxyPort] C-Rank 동글 ${opts.preferredProxyPort} 사용 중 (스케줄 트랙 대기)`,
-    );
+    if (portPool.includes(opts.preferredProxyPort)) {
+      throw new Error(
+        `[getModemProxyPort] C-Rank 동글 ${opts.preferredProxyPort} 사용 중 (스케줄 트랙 대기)`,
+      );
+    }
+    await logOperation({
+      level: 'warn',
+      message: `[crank] 스케줄 트랙 ${opts.preferredProxyPort} 비가용(error/offline) — 유휴 동글 fallback`,
+      account_id: accountId,
+    });
+    for (const port of shuffleArray(portPool)) {
+      const acquired = await tryAcquirePort(port);
+      if (acquired) return acquired;
+    }
+    throw new Error(`[getModemProxyPort] 유휴 C-Rank 동글 없음. accountId=${accountId}`);
   }
 
   for (const port of shuffleArray(portPool)) {
