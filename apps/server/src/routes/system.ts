@@ -8,6 +8,7 @@ import {
   startCaptchaDrill,
 } from '../modules/watcher/captcha-drill.js';
 import { sendTelegramTest } from '../modules/watcher/telegram.js';
+import { getVncRuntimeStatus } from '../modules/watcher/vnc-status.js';
 import type { Workspace } from '@huma/shared';
 
 export async function registerSystemRoutes(app: FastifyInstance) {
@@ -117,5 +118,13 @@ export async function registerSystemRoutes(app: FastifyInstance) {
       return reply.code(result.error?.includes('없음') ? 503 : 502).send(result);
     }
     return { success: true, ...result };
+  });
+
+  app.get('/api/system/vnc-status', { preHandler: authMiddleware }, async () => {
+    const status = await getVncRuntimeStatus();
+    return {
+      ...status,
+      drillActive: Boolean(getActiveCaptchaDrillJobId()),
+    };
   });
 }

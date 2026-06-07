@@ -532,7 +532,9 @@ export const api = {
   advanceJob: (id: string) => request(`/api/jobs/${id}/advance`, { method: 'PATCH' }),
   resumeAll: () => request('/api/resume-all', { method: 'POST' }),
   getCaptchaDrillStatus: () =>
-    request<{ enabled: boolean; activeJobId: string | null }>('/api/system/captcha-drill'),
+    request<{ enabled: boolean; activeJobId: string | null }>('/api/system/captcha-drill', {
+      sameOrigin: typeof window !== 'undefined',
+    }),
   startCaptchaDrill: (workspace: string) =>
     request<{
       success: boolean;
@@ -546,7 +548,12 @@ export const api = {
         env: { hasToken: boolean; chatId: string | null; webUrl: boolean; vncUrl: boolean };
       };
       browser: { mode: string; display: string };
-    }>('/api/system/captcha-drill', { method: 'POST', body: JSON.stringify({ workspace }) }),
+    }>('/api/system/captcha-drill', {
+      method: 'POST',
+      body: JSON.stringify({ workspace }),
+      sameOrigin: typeof window !== 'undefined',
+      timeoutMs: 55_000,
+    }),
   testTelegram: (workspace: string) =>
     request<{
       success?: boolean;
@@ -554,5 +561,20 @@ export const api = {
       chatId: string | null;
       error?: string;
       env: { hasToken: boolean; chatId: string | null; webUrl: boolean; vncUrl: boolean };
-    }>('/api/system/telegram-test', { method: 'POST', body: JSON.stringify({ workspace }) }),
+    }>('/api/system/telegram-test', {
+      method: 'POST',
+      body: JSON.stringify({ workspace }),
+      sameOrigin: typeof window !== 'undefined',
+    }),
+  getVncStatus: () =>
+    request<{
+      port: number;
+      display: string;
+      listening: boolean;
+      xvfb: boolean;
+      x11vnc: boolean;
+      drillActive: boolean;
+      vncUrlYeonun: string | null;
+      hint: string;
+    }>('/api/system/vnc-status', { sameOrigin: typeof window !== 'undefined' }),
 };

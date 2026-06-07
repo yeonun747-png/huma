@@ -319,6 +319,7 @@ export function WatcherView() {
   const [drillJobId, setDrillJobId] = useState<string | null>(null);
   const [drillLoading, setDrillLoading] = useState(false);
   const [telegramTestLoading, setTelegramTestLoading] = useState(false);
+  const [vncCheckLoading, setVncCheckLoading] = useState(false);
 
   const loadDrill = useCallback(() => {
     api
@@ -386,6 +387,26 @@ export function WatcherView() {
       alert((e as Error).message);
     } finally {
       setDrillLoading(false);
+    }
+  };
+
+  const checkVnc = async () => {
+    setVncCheckLoading(true);
+    try {
+      const s = await api.getVncStatus();
+      alert(
+        [
+          `VNC ${s.listening && s.x11vnc ? 'OK' : '문제'}`,
+          `port ${s.port} · DISPLAY ${s.display}`,
+          `Xvfb: ${s.xvfb ? 'Y' : 'N'} · x11vnc: ${s.x11vnc ? 'Y' : 'N'} · DRILL: ${s.drillActive ? '진행 중' : '없음'}`,
+          s.hint,
+          s.vncUrlYeonun ? `\nenv: ${s.vncUrlYeonun}` : '',
+        ].join('\n'),
+      );
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setVncCheckLoading(false);
     }
   };
 
@@ -568,6 +589,14 @@ export function WatcherView() {
             onClick={() => void testTelegram('yeonun')}
           >
             Telegram 테스트 (연운)
+          </button>
+          <button
+            type="button"
+            className="btn-ghost btn-sm"
+            disabled={vncCheckLoading}
+            onClick={() => void checkVnc()}
+          >
+            VNC 상태 (i7)
           </button>
         </div>
       </MPanel>
