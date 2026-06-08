@@ -6,6 +6,8 @@ import {
   wrapNaverLoginTimeout,
 } from '../../../lib/naver-login-error.js';
 import { humanSleep } from '../../human-engine/typing.js';
+import { humanClickLocator } from '../../human-engine/mouse.js';
+import { randomBetween, sleep } from '../../../lib/utils.js';
 import { shadowWalk } from '../shadow-walk.js';
 import { hasStoredSession } from '../account-loader.js';
 
@@ -23,6 +25,17 @@ async function readNaverLoginErrorText(page: Page): Promise<string | null> {
     if (text?.trim()) return text.trim();
   }
   return null;
+}
+
+/** 사람처럼 필드 클릭→포커스 후 한 글자씩 입력 (keydown/keyup/input 이벤트 발생). */
+async function typeIntoLoginField(page: Page, selector: string, value: string): Promise<void> {
+  await humanClickLocator(page, page.locator(selector));
+  await sleep(randomBetween(150, 400));
+  for (const ch of value) {
+    await page.keyboard.type(ch, { delay: randomBetween(55, 175) });
+    // 가끔 입력 중 짧게 멈칫 (사람의 사고·확인)
+    if (Math.random() < 0.08) await sleep(randomBetween(180, 520));
+  }
 }
 
 async function assertLoginSucceeded(page: Page): Promise<void> {
@@ -79,11 +92,15 @@ export async function naverLogin(
     await humanSleep(1000, 2000);
 
     const password = decrypt(account.naver_pw_enc);
-    await page.fill('#id', account.naver_id);
+
+    // 네이버 nid 로그인은 키입력 타이밍·이벤트(bvsd)를 분석한다.
+    // page.fill()은 값만 즉시 주입해 keydown/keyup/input 엔트로피가 0 → 강한 봇 신호.
+    // 사람처럼 필드를 클릭→포커스 후 키스트로크로 입력하고, 로그인 버튼도 마우스로 이동·클릭한다.
+    await typeIntoLoginField(page, '#id', account.naver_id);
     await humanSleep(500, 1200);
-    await page.fill('#pw', password);
+    await typeIntoLoginField(page, '#pw', password);
     await humanSleep(800, 1500);
-    await page.click('#log\\.login');
+    await humanClickLocator(page, page.locator('#log\\.login'));
 
     try {
       await page.waitForURL((url) => !url.href.includes('nidlogin.login'), { timeout: navTimeout });

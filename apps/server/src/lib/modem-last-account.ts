@@ -5,7 +5,9 @@ import { proxyPortToSlot } from './modem-ports.js';
 import { logOperation } from './log-emitter.js';
 import { sleep } from './utils.js';
 
-const LAST_ACCOUNT_TTL_SEC = 86400;
+// IP 소유권 기록 — 만료되면 "소유 불명"이 되어 다른 계정이 같은 IP를 재사용할 수 있으므로
+// 활동 주기(2~3일)보다 충분히 길게 유지한다.
+const LAST_ACCOUNT_TTL_SEC = 7 * 86400;
 const RECONNECT_ATTEMPTS = 2;
 
 function lastAccountKey(port: number): string {
@@ -36,7 +38,6 @@ export async function reconnectModemIfAccountSwitched(
   accountId: string,
 ): Promise<boolean> {
   const lastAccountId = await redisConnection.get(lastAccountKey(proxyPort));
-  const needs = lastAccountId !== null && lastAccountId !== accountId;
 
   const slot = proxyPortToSlot(proxyPort);
   const [{ data: modem }, { data: account }] = await Promise.all([
@@ -45,6 +46,12 @@ export async function reconnectModemIfAccountSwitched(
   ]);
 
   assertModemSessionReady(modem?.status, slot);
+
+  const currentIp = modem?.current_ip ?? null;
+  // 교체 필요 = (다른 계정이 점유 || 소유 불명=기록 만료) && 이미 IP가 존재.
+  // 같은 계정이 이어서 쓰거나(동일 IP 유지), IP 자체가 없는 최초 부팅만 교체를 생략한다.
+  // → "현재 IP가 이 계정의 것임을 증명할 수 없으면 무조건 교체" 원칙으로 동일 IP 교차 사용을 차단.
+  const needs = lastAccountId !== accountId && currentIp !== null;
 
   const logBase = {
     workspace: (account?.crank_workspace as string | undefined) ?? 'yeonun',
@@ -55,11 +62,11 @@ export async function reconnectModemIfAccountSwitched(
   };
 
   if (!needs) {
-    const ipNote = modem?.current_ip ?? '?';
+    const ipNote = currentIp ?? '?';
     const message =
-      lastAccountId === null
-        ? `C-Rank 세션 시작 — :${proxyPort} IP ${ipNote} (동글 첫 계정)`
-        : `C-Rank 세션 시작 — 동일 계정·IP 유지 (${ipNote})`;
+      lastAccountId === accountId
+        ? `C-Rank 세션 시작 — 동일 계정·IP 유지 (${ipNote})`
+        : `C-Rank 세션 시작 — :${proxyPort} 신규 IP (동글 첫 사용)`;
     await logOperation({ level: 'info', message, ...logBase });
     return false;
   }

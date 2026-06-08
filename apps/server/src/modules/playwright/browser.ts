@@ -6,12 +6,13 @@ import { join } from 'path';
 import {
   injectFingerprint,
   normalizeFingerprintForLaunch,
+  normalizeUaPlatform,
   type AccountFingerprint,
 } from './fingerprint.js';
 import type { AccountPersona } from './persona.js';
 import { getFingerprintConfig, getHumanEngineConfig } from '../../lib/settings.js';
 import { getBundledChromiumVersion, syncUserAgentChromeVersion } from '../../lib/chromium-version.js';
-import { resolveUseOsIme } from '../human-engine/os-ime.js';
+import { resolveUseOsIme, fcitxBrowserEnv } from '../human-engine/os-ime.js';
 import { logOperation } from '../../lib/log-emitter.js';
 
 chromium.use(StealthPlugin());
@@ -142,22 +143,45 @@ async function resolveLaunchFingerprint(
   const chromiumVersion = await getBundledChromiumVersion();
   return {
     ...normalized,
-    userAgent: syncUserAgentChromeVersion(normalized.userAgent, chromiumVersion),
+    userAgent: normalizeUaPlatform(syncUserAgentChromeVersion(normalized.userAgent, chromiumVersion)),
   };
 }
 
 /**
- * Chromium subprocess env — fcitx GTK 모듈·invalid DBUS 상속 금지.
- * 한글 IME는 worker에서 fcitx-remote로 별도 제어 (os-ime.ts).
+ * Sec-CH-UA-Platform 등 클라이언트 힌트 헤더는 크롬 네트워크 엔진이 실제 OS(i7=Linux) 기준으로 붙인다.
+ * UA·navigator는 Windows로 위장했는데 이 헤더만 "Linux"면 서버에서 UA-OS 불일치로 탐지된다.
+ * 모든 요청의 platform 힌트를 Windows로 통일해 JS·헤더를 정합시킨다.
+ * (이미지/폰트 abort 라우트는 세션에서 나중에 등록되어 우선 실행되므로 충돌 없음.)
  */
-function buildBrowserEnv(headless: boolean, _useOsIme: boolean): Record<string, string> | undefined {
+async function applyClientHintPlatformSpoof(context: BrowserContext): Promise<void> {
+  await context.route('**/*', async (route) => {
+    const headers = route.request().headers();
+    headers['sec-ch-ua-platform'] = '"Windows"';
+    headers['sec-ch-ua-platform-version'] = '"15.0.0"';
+    await route.continue({ headers });
+  });
+}
+
+/**
+ * Chromium subprocess env.
+ * - 기본(useOsIme=false): fcitx GTK 모듈·invalid DBUS 상속 금지 (DBus 크래시 방지). 합성 IME 사용.
+ * - useOsIme=true: fcitx 모듈 + 실제 DBus 세션을 주입해야 OS IME 한글 조합이 동작.
+ *   (둘은 상호 배타 — env를 입력 방식과 정합시킨다.)
+ */
+function buildBrowserEnv(headless: boolean, useOsIme: boolean): Record<string, string> | undefined {
   if (headless) return undefined;
-  const env: Record<string, string> = {
+  const base: Record<string, string> = {
     DISPLAY: process.env.DISPLAY ?? ':99',
     LANG: 'ko_KR.UTF-8',
     LC_CTYPE: 'ko_KR.UTF-8',
-    DBUS_SESSION_BUS_ADDRESS: 'disabled:',
   };
+
+  if (useOsIme) {
+    const dbus = process.env.DBUS_SESSION_BUS_ADDRESS;
+    return fcitxBrowserEnv(dbus ? { ...base, DBUS_SESSION_BUS_ADDRESS: dbus } : base);
+  }
+
+  const env: Record<string, string> = { ...base, DBUS_SESSION_BUS_ADDRESS: 'disabled:' };
   for (const key of ['GTK_IM_MODULE', 'QT_IM_MODULE', 'XMODIFIERS', 'INPUT_METHOD']) {
     env[key] = '';
   }
@@ -239,6 +263,7 @@ export async function createBrowserForAccount(account: BrowserAccountContext) {
     account.id,
   );
   await injectFingerprint(context, fp, cfg);
+  await applyClientHintPlatformSpoof(context);
 
   context.on('page', (page) => {
     void import('../human-engine/mouse.js').then(({ seedMousePosition }) => {

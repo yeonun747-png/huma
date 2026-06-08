@@ -23,15 +23,16 @@ export async function withNaverBrowserSession<T>(
 
     await reconnectModemIfAccountSwitched(modemSession.proxyPort, accountId);
     const accountCtx = await loadAccountForBrowser(accountId, modemSession.proxyPort);
+    // IP 소유권은 로그인/활동 전에 기록 — 중단돼도 다른 계정의 동일 IP 재사용 차단(규칙⑬).
+    if (accountCtx.account_type === 'crank') {
+      await recordLastAccountOnModem(modemSession.proxyPort, accountId);
+    }
     const { context } = await createBrowserForAccount(accountCtx);
 
     try {
       await naverLogin(context, accountId, { profilePath: accountCtx.profile_path });
       const page = await context.newPage();
       const result = await run({ context, page });
-      if (accountCtx.account_type === 'crank') {
-        await recordLastAccountOnModem(modemSession.proxyPort, accountId);
-      }
       return result;
     } finally {
       await closeBrowserContext(context);

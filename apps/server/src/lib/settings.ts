@@ -49,7 +49,12 @@ export interface HumanEngineConfig {
   night_ban_end: number;
   /** 본문 단락 중 Ctrl+V 비율 (0~1). 기본 0.55 */
   paste_ratio?: number;
-  /** Linux i7 — fcitx-hangul OS IME (기본 true) */
+  /**
+   * OS IME(fcitx-hangul) 사용 여부. 기본 false.
+   * Playwright의 CDP 키 주입은 OS IME 레이어를 거치지 않아 fcitx가 한글을 조합하지 못한다
+   * (raw 알파벳 입력 위험). 합성 composition(korean-ime.ts)이 fcitx 비의존으로 한글을 정확히 입력하므로 기본값.
+   * 운영자가 fcitx 환경을 검증했다면 true로 설정 — 이때 브라우저 env에 fcitx 모듈이 함께 주입된다.
+   */
   use_os_ime?: boolean;
 }
 
@@ -70,7 +75,8 @@ export async function getHumanEngineConfig(): Promise<HumanEngineConfig> {
     night_ban_start: 1,
     night_ban_end: 7,
     paste_ratio: 0.55,
-    use_os_ime: true,
+    // 합성 composition 입력이 기본(fcitx/CDP 비의존, 한글 정확). OS IME는 명시 활성 시에만.
+    use_os_ime: false,
   });
 }
 

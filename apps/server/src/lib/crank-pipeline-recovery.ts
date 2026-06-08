@@ -12,7 +12,17 @@ import {
 import { isRetryableCrankError } from './crank-worker-defer.js';
 
 const DAILY_CRANK_TITLE = 'C-Rank 스케줄';
-const STALE_RUNNING_MS = 90 * 60 * 1000;
+/**
+ * 모뎀 락 TTL(120분) + 세션 상한(70분)보다 크게 잡아, 정상 장기 세션을
+ * 잘못 회수해 중복 실행하는 사태를 방지한다.
+ */
+const STALE_RUNNING_MS = 150 * 60 * 1000;
+
+/**
+ * crash 후 running 고착 → 재등록. video_pipeline·content_full은 자체적으로
+ * 길고 비싼(렌더·LLM) 작업이라 중복 실행 위험이 커서 watchdog 대상에서 제외한다.
+ */
+const STALE_RECOVERABLE_JOB_TYPES = ['social_crank', 'post_blog', 'cafe_new_post', 'cafe_reply'];
 
 /** worker crash 후 running 고착 → pending 재등록 */
 export async function recoverStaleRunningJobs(): Promise<number> {
@@ -21,6 +31,7 @@ export async function recoverStaleRunningJobs(): Promise<number> {
     .from('huma_jobs')
     .select('*')
     .eq('status', 'running')
+    .in('job_type', STALE_RECOVERABLE_JOB_TYPES)
     .lt('started_at', cutoff);
 
   let n = 0;

@@ -1,4 +1,4 @@
-import { Worker } from 'bullmq';
+import { Worker, DelayedError } from 'bullmq';
 import { redisConnection } from './producer.js';
 import { supabase } from '../../middleware/auth.js';
 import { createBrowserForAccount, closeBrowserContext, createBrowser } from '../playwright/browser.js';
@@ -84,7 +84,8 @@ const PLAYWRIGHT_AND_CRANK = [...PLAYWRIGHT_JOBS, 'social_crank'];
 const POSTING_JOBS = ['post_blog', 'cafe_new_post'];
 
 async function deferCrankForIdleModem(
-  job: { moveToDelayed: (ts: number) => Promise<void> },
+  job: { moveToDelayed: (ts: number, token?: string) => Promise<void> },
+  token: string | undefined,
   humaJobId: string | undefined,
   accountId: string | undefined,
   reason?: string,
@@ -92,6 +93,7 @@ async function deferCrankForIdleModem(
   await deferHumaJob(job, humaJobId, CRANK_MODEM_DEFER_MS, {
     reason: reason ?? null,
     accountId,
+    token,
     logMessage: `[crank] 동글 대기 — 15분 후 재예약${reason ? `: ${reason}` : ''}`,
   });
 }
@@ -99,7 +101,7 @@ async function deferCrankForIdleModem(
 export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURRENCY) || 5) {
   const worker = new Worker(
     'huma-jobs',
-    async (job) => {
+    async (job, token) => {
       const { type, accountId, payload, humaJobId } = job.data as {
         type: string;
         accountId?: string;
@@ -113,10 +115,11 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         await deferHumaJob(job, humaJobId, CRANK_PAUSE_DEFER_MS, {
           reason: 'SYSTEM_PAUSED',
           accountId,
+          token,
           logMessage: '[crank] 전체 정지 — 5분 후 재예약',
           level: 'info',
         });
-        return;
+        throw new DelayedError();
       }
 
       if (PLAYWRIGHT_AND_CRANK.includes(type) && !scheduledCrank) {
@@ -124,18 +127,20 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
           await deferHumaJob(job, humaJobId, CRANK_NIGHT_DEFER_MS, {
             reason: 'NIGHT_BAN',
             accountId,
+            token,
             logMessage: `[${type}] 야간 금지 — 1시간 후 재예약`,
           });
-          return;
+          throw new DelayedError();
         }
         if (!(await passesActiveHoursGate())) {
           const human = await getHumanEngineScheduleConfig();
           await deferHumaJob(job, humaJobId, msUntilNextActiveHour(human.active_hours ?? []), {
             reason: 'ACTIVE_HOURS_BLOCKED',
             accountId,
+            token,
             logMessage: `[${type}] 비활성 시간대 — 다음 활성 시간 재예약`,
           });
-          return;
+          throw new DelayedError();
         }
       }
 
@@ -143,30 +148,32 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         await deferHumaJob(job, humaJobId, CRANK_NIGHT_DEFER_MS, {
           reason: 'NIGHT_BAN',
           accountId,
+          token,
           logMessage: '[crank] 야간 금지 — 1시간 후 재예약',
         });
-        return;
+        throw new DelayedError();
       }
 
       if (POSTING_JOBS.includes(type) && !(await passesWeekendVolumeGate())) {
         await deferHumaJob(job, humaJobId, 2 * 60 * 60 * 1000, {
           reason: 'WEEKEND_VOLUME',
           accountId,
+          token,
         });
-        return;
+        throw new DelayedError();
       }
 
       if (accountId && POSTING_JOBS.includes(type)) {
         const waitMs = await checkMinPublishInterval(accountId, type);
         if (waitMs) {
-          await deferHumaJob(job, humaJobId, waitMs, { accountId });
-          return;
+          await deferHumaJob(job, humaJobId, waitMs, { accountId, token });
+          throw new DelayedError();
         }
       }
 
       if (type === 'social_crank' && !(await hasIdleCrankModem())) {
-        await deferCrankForIdleModem(job, humaJobId, accountId, '유휴 동글 없음');
-        return;
+        await deferCrankForIdleModem(job, token, humaJobId, accountId, '유휴 동글 없음');
+        throw new DelayedError();
       }
 
       if (accountId && type === 'social_crank') {
@@ -197,8 +204,8 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
 
       if (accountId && !acquireAccount(accountId)) {
         if (scheduledCrank) {
-          await deferCrankForIdleModem(job, humaJobId, accountId, 'ACCOUNT_BUSY');
-          return;
+          await deferCrankForIdleModem(job, token, humaJobId, accountId, 'ACCOUNT_BUSY');
+          throw new DelayedError();
         }
         throw new Error('ACCOUNT_BUSY');
       }
@@ -408,8 +415,8 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
           (isCrankModemDeferError((err as Error).message) ||
             (scheduledCrank && isRetryableCrankError((err as Error).message)))
         ) {
-          await deferCrankForIdleModem(job, humaJobId, accountId, (err as Error).message);
-          return;
+          await deferCrankForIdleModem(job, token, humaJobId, accountId, (err as Error).message);
+          throw new DelayedError();
         }
         if (humaJobId) {
           await supabase

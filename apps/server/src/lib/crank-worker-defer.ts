@@ -5,14 +5,23 @@ export const CRANK_MODEM_DEFER_MS = 15 * 60 * 1000;
 export const CRANK_PAUSE_DEFER_MS = 5 * 60 * 1000;
 export const CRANK_NIGHT_DEFER_MS = 60 * 60 * 1000;
 
-type BullDeferJob = { moveToDelayed: (ts: number) => Promise<void> };
+type BullDeferJob = { moveToDelayed: (ts: number, token?: string) => Promise<void> };
 
 function deferDelayMs(delayMs: number): number {
   return Date.now() + Math.max(60_000, delayMs);
 }
 
-export async function deferBullJob(bullJob: BullDeferJob, delayMs: number): Promise<void> {
-  await bullJob.moveToDelayed(deferDelayMs(delayMs));
+/**
+ * BullMQ v5 — 프로세서 내부에서 지연 전환 시 token 필수.
+ * 호출 측은 이 함수 직후 반드시 `throw new DelayedError()`로 종료해야
+ * 워커가 job을 completed로 덮어쓰지 않는다(그렇지 않으면 "Missing lock" → 지연 유실).
+ */
+export async function deferBullJob(
+  bullJob: BullDeferJob,
+  delayMs: number,
+  token?: string,
+): Promise<void> {
+  await bullJob.moveToDelayed(deferDelayMs(delayMs), token);
 }
 
 export async function syncHumaJobDeferred(
@@ -39,9 +48,15 @@ export async function deferHumaJob(
   bullJob: BullDeferJob,
   humaJobId: string | undefined,
   delayMs: number,
-  opts?: { reason?: string | null; accountId?: string; logMessage?: string; level?: 'warn' | 'info' },
+  opts?: {
+    reason?: string | null;
+    accountId?: string;
+    logMessage?: string;
+    level?: 'warn' | 'info';
+    token?: string;
+  },
 ): Promise<void> {
-  await deferBullJob(bullJob, delayMs);
+  await deferBullJob(bullJob, delayMs, opts?.token);
   await syncHumaJobDeferred(humaJobId, delayMs, opts?.reason ?? null);
   if (opts?.logMessage) {
     await logOperation({

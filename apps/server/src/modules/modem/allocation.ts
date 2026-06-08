@@ -130,6 +130,12 @@ export async function reconcileStaleCrankModemLocks(): Promise<number> {
     if (!holder) continue;
     if (activeAccounts.has(holder)) continue;
     await redisConnection.del(crankLockKey(port));
+    // crash로 DB status가 'busy'에 고착되면 대시보드·스케줄 표시가 어긋난다 → idle 복구
+    await supabase
+      .from('huma_modems')
+      .update({ status: 'idle' })
+      .eq('proxy_port', port)
+      .eq('status', 'busy');
     await logOperation({
       level: 'warn',
       message: `[crank] stale modem lock cleared :${port} (holder=${holder})`,

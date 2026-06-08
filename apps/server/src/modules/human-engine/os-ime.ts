@@ -11,13 +11,16 @@ const execFileAsync = promisify(execFile);
 
 const hangulReadyPages = new WeakSet<Page>();
 
-/** human_engine.use_os_ime · HUMA_USE_OS_IME */
+/**
+ * human_engine.use_os_ime · HUMA_USE_OS_IME
+ * 기본 false: CDP 키 주입은 fcitx를 거치지 않아 OS IME로는 한글이 깨질 수 있으므로
+ * fcitx 비의존 합성 composition을 기본 사용한다. 명시적으로 켠 경우에만 OS IME.
+ */
 export function resolveUseOsIme(config: HumanEngineConfig): boolean {
   if (process.env.HUMA_USE_OS_IME === 'false') return false;
   if (process.env.HUMA_USE_OS_IME === 'true') return true;
-  if (config.use_os_ime === false) return false;
   if (config.use_os_ime === true) return true;
-  return process.platform === 'linux';
+  return false;
 }
 
 export function fcitxBrowserEnv(base: Record<string, string>): Record<string, string> {

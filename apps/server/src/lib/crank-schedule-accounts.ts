@@ -118,9 +118,11 @@ export function selectCrankAccountsForDailySchedule(
   }));
 
   const eligible = all.filter((a) => isEligibleForCycle(a.last_crank_at, cycleDays));
-  const targets = computeServiceDailyTargets(Math.min(dailyTotal, eligible.length));
+  const cap = Math.min(dailyTotal, eligible.length);
+  const targets = computeServiceDailyTargets(cap);
 
   const pickedByService = new Map<Workspace, CrankAccountPick[]>();
+  const pickedIds = new Set<string>();
 
   for (const ws of CRANK_SERVICE_ORDER) {
     const take = targets.get(ws) ?? 0;
@@ -128,7 +130,21 @@ export function selectCrankAccountsForDailySchedule(
       .filter((a) => a.crank_workspace === ws)
       .sort(compareEligibleAccounts)
       .slice(0, take);
+    for (const a of pool) pickedIds.add(a.id);
     pickedByService.set(ws, pool);
+  }
+
+  // 서비스별 비율 쿼터가 빈 풀(해당 서비스 eligible 0)로 낭비되면 일일 용량보다 적게
+  // 선정된다. 남은 eligible 계정을 last_crank_at 오래된 순으로 채워 용량을 소진한다.
+  if (pickedIds.size < cap) {
+    const leftovers = eligible
+      .filter((a) => !pickedIds.has(a.id))
+      .sort(compareEligibleAccounts);
+    for (const a of leftovers) {
+      if (pickedIds.size >= cap) break;
+      pickedByService.get(a.crank_workspace)!.push(a);
+      pickedIds.add(a.id);
+    }
   }
 
   return interleaveCrankAccountsByService(pickedByService);

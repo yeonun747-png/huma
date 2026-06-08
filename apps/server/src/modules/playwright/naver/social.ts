@@ -9,7 +9,7 @@ import { loadAccountForBrowser, maybeIncrementWarmupDay } from '../account-loade
 import { naverLogin } from './login.js';
 import { humanSleep, humanType } from '../../human-engine/typing.js';
 import { scrollRead, measureRTT, rttScale, scaledHumanSleep } from '../../human-engine/timing.js';
-import { humanClick } from '../../human-engine/mouse.js';
+import { humanClick, humanClickLocator } from '../../human-engine/mouse.js';
 import { randomBetween, shuffleArray } from '../../../lib/utils.js';
 import { getTodayPlan, maxCrankVisitsForWarmup } from '../warmup.js';
 import type { AccountPersona } from '../persona.js';
@@ -42,6 +42,12 @@ interface BlogTarget {
   doLike: boolean;
   doComment: boolean;
 }
+
+/**
+ * 세션 절대 상한(분). 스케줄 락 TTL(CRANK_SCHEDULED_LOCK_TTL_SEC=120분)보다 충분히 짧게 유지해
+ * 세션 도중 Redis 락이 만료되어 같은 동글을 다른 작업이 점유하는 사태(규칙⑬ 위반)를 막는다.
+ */
+const SESSION_HARD_CAP_MS = 70 * 60 * 1000;
 
 async function getAccountCrankWorkspace(accountId: string): Promise<Workspace> {
   const { data } = await supabase
@@ -143,6 +149,9 @@ export async function runSocialCrank(
     if (accountCtx.account_type !== 'crank') {
       throw new Error('ACCOUNT_NOT_CRANK');
     }
+    // IP 소유권을 로그인/활동 전에 즉시 기록한다. 세션이 캡차·크래시로 중단돼도
+    // "이 IP는 이 계정이 점유"가 남아, 다음 다른 계정이 같은(소진된) IP를 재사용하는 것을 차단(규칙⑬).
+    await recordLastAccountOnModem(modemSession.proxyPort, accountId);
     const crankWorkspace = await getAccountCrankWorkspace(accountId);
     const warmupDay = accountCtx.warmup_day ?? 0;
     const plan = await getTodayPlan(accountCtx);
@@ -207,8 +216,10 @@ export async function runSocialCrank(
       let likesDone = 0;
       let commentsDone = 0;
       const visitedUrls: string[] = [];
+      const sessionDeadline = Date.now() + SESSION_HARD_CAP_MS;
 
       for (const target of allTargets) {
+        if (Date.now() > sessionDeadline) break;
         await page.goto(target.url);
         await page.waitForLoadState('networkidle');
 
@@ -250,7 +261,6 @@ export async function runSocialCrank(
 
       await updateVisitHistory(accountId, visitedUrls);
       await updateCrankCount(accountId, allTargets.length);
-      await recordLastAccountOnModem(modemSession.proxyPort, accountId);
     } finally {
       await closeBrowserContext(context);
     }
@@ -289,7 +299,7 @@ async function visitBlogActions(
       try {
         commentText = target.commentText ?? (await generateCrankComment(page, crankWorkspace));
         await scaledHumanSleep(5000, 15000, scale);
-        await commentArea.click();
+        await humanClickLocator(page, commentArea);
         const humanConfig = await getHumanEngineConfig();
         await humanType(page, commentArea, commentText, humanConfig);
         await scaledHumanSleep(2000, 5000, scale);
