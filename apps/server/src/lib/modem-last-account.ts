@@ -1,6 +1,7 @@
 import { supabase } from '../middleware/auth.js';
 import { redisConnection } from '../modules/queue/producer.js';
 import { reconnectModemBySlot } from '../modules/modem/reconnect.js';
+import { fetchPublicIpViaSocks } from './modem-geo.js';
 import { proxyPortToSlot } from './modem-ports.js';
 import { logOperation } from './log-emitter.js';
 import { sleep } from './utils.js';
@@ -41,7 +42,11 @@ export async function reconnectModemIfAccountSwitched(
 
   const slot = proxyPortToSlot(proxyPort);
   const [{ data: modem }, { data: account }] = await Promise.all([
-    supabase.from('huma_modems').select('id, current_ip, status').eq('slot_number', slot).single(),
+    supabase
+      .from('huma_modems')
+      .select('id, current_ip, public_ip, status')
+      .eq('slot_number', slot)
+      .single(),
     supabase.from('huma_accounts').select('name, crank_workspace').eq('id', accountId).single(),
   ]);
 
@@ -71,14 +76,29 @@ export async function reconnectModemIfAccountSwitched(
     return false;
   }
 
-  const oldIp = modem?.current_ip ?? null;
-  let newIp: string | undefined;
+  // RNDIS 사설 IP(192.168.x.100)는 link down/up 후에도 동일 — 공인 egress IP로 격리 판단
+  const oldPublicIp =
+    (modem?.public_ip as string | null | undefined) ?? (await fetchPublicIpViaSocks(proxyPort));
+  let newPublicIp: string | undefined;
   let lastErr: Error | undefined;
+  let publicIpUnchanged = false;
 
   for (let attempt = 1; attempt <= RECONNECT_ATTEMPTS; attempt++) {
     try {
-      newIp = await reconnectModemBySlot(slot);
-      break;
+      await reconnectModemBySlot(slot);
+      const fetched = await fetchPublicIpViaSocks(proxyPort);
+      if (!fetched) {
+        throw new Error(`:${proxyPort} SOCKS 공인 IP 확인 실패`);
+      }
+      if (!oldPublicIp || fetched !== oldPublicIp) {
+        newPublicIp = fetched;
+        break;
+      }
+      publicIpUnchanged = true;
+      lastErr = new Error(`공인 IP 동일 (${fetched})`);
+      if (attempt < RECONNECT_ATTEMPTS) {
+        await sleep(8000);
+      }
     } catch (err) {
       lastErr = err as Error;
       if (attempt < RECONNECT_ATTEMPTS) {
@@ -87,27 +107,24 @@ export async function reconnectModemIfAccountSwitched(
     }
   }
 
-  if (!newIp) {
+  if (!newPublicIp) {
+    const message = publicIpUnchanged
+      ? `C-Rank 계정 전환 — 공인 IP 동일(${oldPublicIp}) 재할당, 세션 중단 (다른 계정 연속 사용 방지)`
+      : `C-Rank 계정 전환 — IP 교체 실패(${RECONNECT_ATTEMPTS}회), 세션 중단: ${lastErr?.message ?? 'unknown'}`;
     await logOperation({
       level: 'ERROR',
-      message: `C-Rank 계정 전환 — IP 교체 실패(${RECONNECT_ATTEMPTS}회), 세션 중단: ${lastErr?.message ?? 'unknown'}`,
+      message,
       ...logBase,
     });
+    if (publicIpUnchanged) {
+      throw new Error(`MODEM_IP_ROTATE_SAME:slot${slot}:${oldPublicIp}`);
+    }
     throw new Error(`MODEM_IP_ROTATE_FAILED:slot${slot}:${lastErr?.message ?? 'unknown'}`);
-  }
-
-  if (oldIp && oldIp === newIp) {
-    await logOperation({
-      level: 'ERROR',
-      message: `C-Rank 계정 전환 — IP 동일(${newIp}) 재할당, 세션 중단 (다른 계정 연속 사용 방지)`,
-      ...logBase,
-    });
-    throw new Error(`MODEM_IP_ROTATE_SAME:slot${slot}:${newIp}`);
   }
 
   await logOperation({
     level: 'info',
-    message: `계정 전환 IP 교체: ${oldIp ?? '?'} → ${newIp}`,
+    message: `계정 전환 IP 교체: ${oldPublicIp ?? '?'} → ${newPublicIp}`,
     ...logBase,
   });
 

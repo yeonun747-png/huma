@@ -181,7 +181,8 @@ function buildBrowserEnv(headless: boolean, useOsIme: boolean): Record<string, s
     return fcitxBrowserEnv(dbus ? { ...base, DBUS_SESSION_BUS_ADDRESS: dbus } : base);
   }
 
-  const env: Record<string, string> = { ...base, DBUS_SESSION_BUS_ADDRESS: 'disabled:' };
+  // 'disabled:' 는 Chromium bus.cc 파싱 실패 → 즉시 크래시. IME 모듈만 비우고 DBUS는 부모 상속(없으면 무시).
+  const env: Record<string, string> = { ...base };
   for (const key of ['GTK_IM_MODULE', 'QT_IM_MODULE', 'XMODIFIERS', 'INPUT_METHOD']) {
     env[key] = '';
   }

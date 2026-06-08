@@ -5,6 +5,7 @@ import { sleep } from '../../lib/utils.js';
 import { proxyPortToSlot } from '../../lib/modem-ports.js';
 import { readDongleInterfaceFromConf, isPlaceholderInterfaceName } from '../../lib/dongle-interfaces.js';
 import { readInterfaceIp } from '../../lib/dongle-health.js';
+import { fetchModemPublicGeo } from '../../lib/modem-geo.js';
 import { applyDonglePolicyRoute } from '../../lib/restore-dongle-network.js';
 
 function sync3proxyExternalIp(proxyPort: number, newIp: string): void {
@@ -89,14 +90,20 @@ export async function reconnectModemBySlot(slotNumber: number): Promise<string> 
 
     sync3proxyExternalIp(modem.proxy_port, newIp);
 
-    await supabase
-      .from('huma_modems')
-      .update({ status: 'idle', current_ip: newIp, last_reconnect_at: new Date().toISOString() })
-      .eq('slot_number', slotNumber);
+    const geo = await fetchModemPublicGeo(modem.proxy_port);
+    const modemPatch: Record<string, unknown> = {
+      status: 'idle',
+      current_ip: newIp,
+      last_reconnect_at: new Date().toISOString(),
+    };
+    if (geo.public_ip) modemPatch.public_ip = geo.public_ip;
+    if (geo.geo_region) modemPatch.geo_region = geo.geo_region;
+
+    await supabase.from('huma_modems').update(modemPatch).eq('slot_number', slotNumber);
 
     await logOperation({
       level: 'info',
-      message: `모뎀 slot ${slotNumber} IP 재발급 ${oldIp ?? '?'} → ${newIp}`,
+      message: `모뎀 slot ${slotNumber} IP 재발급 ${oldIp ?? '?'} → ${newIp} (공인 ${geo.public_ip ?? '?'})`,
       modem_id: modem.id,
     });
 
