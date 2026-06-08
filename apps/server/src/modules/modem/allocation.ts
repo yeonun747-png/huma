@@ -88,17 +88,13 @@ export async function getModemProxyPort(
   if (opts?.preferredProxyPort) {
     const preferred = await tryAcquirePort(opts.preferredProxyPort);
     if (preferred) return preferred;
-    if (portPool.includes(opts.preferredProxyPort)) {
-      throw new Error(
-        `[getModemProxyPort] C-Rank 동글 ${opts.preferredProxyPort} 사용 중 (스케줄 트랙 대기)`,
-      );
-    }
     await logOperation({
       level: 'warn',
-      message: `[crank] 스케줄 트랙 ${opts.preferredProxyPort} 비가용(error/offline) — 유휴 동글 fallback`,
+      message: `[crank] 스케줄 트랙 :${opts.preferredProxyPort} 사용 중 — 유휴 동글 fallback`,
       account_id: accountId,
     });
     for (const port of shuffleArray(portPool)) {
+      if (port === opts.preferredProxyPort) continue;
       const acquired = await tryAcquirePort(port);
       if (acquired) return acquired;
     }
@@ -111,6 +107,36 @@ export async function getModemProxyPort(
   }
 
   throw new Error(`[getModemProxyPort] 유휴 C-Rank 동글 없음. accountId=${accountId}`);
+}
+
+/** worker crash 후 Redis crank lock 잔존 → running job 없으면 해제 */
+export async function reconcileStaleCrankModemLocks(): Promise<number> {
+  const { data: runningJobs } = await supabase
+    .from('huma_jobs')
+    .select('account_id')
+    .eq('job_type', 'social_crank')
+    .eq('status', 'running');
+
+  const activeAccounts = new Set(
+    (runningJobs ?? []).map((j) => j.account_id).filter(Boolean) as string[],
+  );
+
+  const crankPorts = await getSchedulableCrankProxyPorts();
+  const portPool = crankPorts.length > 0 ? crankPorts : [...CRANK_PROXY_PORTS];
+  let cleared = 0;
+
+  for (const port of portPool) {
+    const holder = await redisConnection.get(crankLockKey(port));
+    if (!holder) continue;
+    if (activeAccounts.has(holder)) continue;
+    await redisConnection.del(crankLockKey(port));
+    await logOperation({
+      level: 'warn',
+      message: `[crank] stale modem lock cleared :${port} (holder=${holder})`,
+    });
+    cleared++;
+  }
+  return cleared;
 }
 
 /** v3.22 §7-13-1 — 세션 종료 시 Redis 락 해제 */

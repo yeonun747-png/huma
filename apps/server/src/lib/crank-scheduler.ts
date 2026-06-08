@@ -19,6 +19,7 @@ import {
   resetDailyCrankCounters,
 } from './crank-modems.js';
 import { enqueueHumaJob, type JobRecord } from './job-scheduler.js';
+import { recoverCrankPipeline } from './crank-pipeline-recovery.js';
 import { logOperation } from './log-emitter.js';
 import { getCrankScheduleWindow } from './human-engine-policy.js';
 import { layer4RestSupabaseOr } from './account-guards.js';
@@ -29,6 +30,7 @@ const DAILY_JOB_TITLE_PREFIX = 'C-Rank 스케줄';
 let lastDailyRunKey = '';
 let lastMonthlyResetKey = '';
 let lastBackoffEnsureKey = '';
+let lastRecoverAt = 0;
 
 async function countActiveCrankPoolSize(): Promise<number> {
   const { count } = await supabase
@@ -91,8 +93,7 @@ async function hasDailyScheduleJobs(dateKey: string): Promise<boolean> {
     .from('huma_jobs')
     .select('id', { count: 'exact', head: true })
     .eq('job_type', 'social_crank')
-    .like('title', `${DAILY_JOB_TITLE_PREFIX} ${dateKey}%`)
-    .in('status', ['scheduled', 'pending', 'running', 'paused']);
+    .like('title', `${DAILY_JOB_TITLE_PREFIX} ${dateKey}%`);
 
   return (count ?? 0) > 0;
 }
@@ -143,13 +144,18 @@ export async function runDailyCrankScheduler(options?: { anchorFromNow?: boolean
   );
 
   const serviceCounts = { yeonun: 0, panana: 0, quizoasis: 0 };
+  const blogUrlCache = new Map<Workspace, string[]>();
 
   for (let i = 0; i < accounts.length; i++) {
     const account = accounts[i];
     const slot = scheduleSlots[i];
     const crankWorkspace = account.crank_workspace ?? 'yeonun';
     serviceCounts[crankWorkspace]++;
-    const ourBlogUrls = await fetchPostingBlogUrls(crankWorkspace);
+    let ourBlogUrls = blogUrlCache.get(crankWorkspace);
+    if (!ourBlogUrls) {
+      ourBlogUrls = await fetchPostingBlogUrls(crankWorkspace);
+      blogUrlCache.set(crankWorkspace, ourBlogUrls);
+    }
     const scheduledAt = slot.at.toISOString();
     const crankTrack = slot.track;
     const preferredProxyPort = proxyPortForCrankTrack(crankTrack);
@@ -296,6 +302,13 @@ export async function getCrankSchedulerStatus(options?: { probe?: boolean }) {
 }
 
 function tickCrankSchedulerClock() {
+  if (Date.now() - lastRecoverAt > 60_000) {
+    lastRecoverAt = Date.now();
+    recoverCrankPipeline().catch((err) =>
+      console.error('[crank-recover] tick:', err),
+    );
+  }
+
   const { hour, minute, day } = getKstClock();
   const ymd = getKstYmd();
   const monthKey = `${ymd.year}-${ymd.month}`;
@@ -326,6 +339,9 @@ function tickCrankSchedulerClock() {
       lastBackoffEnsureKey = backoffKey;
       ensureTodayCrankQueue().catch((err) =>
         console.error('[crank-scheduler] backoff ensure:', err),
+      );
+      recoverCrankPipeline().catch((err) =>
+        console.error('[crank-scheduler] recover:', err),
       );
     }
   }

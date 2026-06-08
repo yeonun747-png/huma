@@ -36,8 +36,7 @@ export async function acquireModem(
       throw new Error('NO_IDLE_MODEM');
     }
     if (
-      (err as Error).message.includes('C-Rank 사용 중') ||
-      (err as Error).message.includes('스케줄 트랙 대기')
+      (err as Error).message.includes('C-Rank 사용 중')
     ) {
       throw new Error('MODEM_BUSY');
     }

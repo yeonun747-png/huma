@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { authMiddleware, getWorkspaceFilter, supabase } from '../middleware/auth.js';
 import { logOperation } from '../lib/log-emitter.js';
-import { recoverScheduledJobs } from '../lib/job-scheduler.js';
+import { recoverCrankPipeline } from '../lib/crank-pipeline-recovery.js';
 import { ensureTodayCrankQueue } from '../lib/crank-scheduler.js';
 import { getSystemPaused, setSystemPaused } from '../lib/system-pause.js';
 import {
@@ -81,7 +81,7 @@ export async function registerSystemRoutes(app: FastifyInstance) {
   app.post('/api/resume-all', { preHandler: authMiddleware }, async () => {
     await setSystemPaused(false);
     await ensureTodayCrankQueue();
-    await recoverScheduledJobs();
+    await recoverCrankPipeline();
     await logOperation({ level: 'INFO', message: 'HUMA 전체 재개 — 당일 C-Rank·예약 큐 보정' });
     return { success: true, message: '작업 재개됨' };
   });

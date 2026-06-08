@@ -121,10 +121,24 @@ export async function recoverScheduledJobs() {
     .not('scheduled_at', 'is', null);
 
   for (const job of jobs ?? []) {
-    const bullId = job.bull_job_id ?? `huma-${job.id}`;
+    const record = job as JobRecord;
+    const bullId = record.bull_job_id ?? `huma-${record.id}`;
+    const overdue = !getScheduleDelay(record.scheduled_at);
     const existing = await humaQueue.getJob(bullId);
+
     if (!existing) {
-      await enqueueHumaJob(job as JobRecord);
+      await enqueueHumaJob(record, { immediate: overdue });
+      continue;
+    }
+
+    const state = await existing.getState();
+    if (state === 'failed' || state === 'completed') {
+      await enqueueHumaJob(record, { immediate: overdue });
+      continue;
+    }
+
+    if (overdue && (state === 'delayed' || state === 'waiting')) {
+      await enqueueHumaJob(record, { immediate: true });
     }
   }
 }

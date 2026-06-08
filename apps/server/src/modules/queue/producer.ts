@@ -12,7 +12,7 @@ export async function enqueueJob(data: Record<string, unknown>, opts?: { delay?:
     delay: opts?.delay,
     jobId: opts?.jobId,
     removeOnComplete: 100,
-    removeOnFail: 50,
+    removeOnFail: 200,
   });
 }
 

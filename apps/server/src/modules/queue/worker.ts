@@ -37,7 +37,17 @@ import { scheduleRepeatIfNeeded } from '../../lib/repeat-scheduler.js';
 import { activatePendingSocialReplies } from '../../lib/social-reply-chain.js';
 import { isSlimDataCapError, scheduleSlimCapRetry } from '../../lib/slim-retry.js';
 import { assertCafeNewPostAccount, assertCafeReplyAccount } from '../../lib/cafe-accounts.js';
+import { assertAccountRunnable } from '../../lib/account-guards.js';
 import { getSystemPaused } from '../../lib/system-pause.js';
+import {
+  CRANK_MODEM_DEFER_MS,
+  CRANK_NIGHT_DEFER_MS,
+  CRANK_PAUSE_DEFER_MS,
+  deferHumaJob,
+  isCrankModemDeferError,
+  isRetryableCrankError,
+  isScheduledCrankPayload,
+} from '../../lib/crank-worker-defer.js';
 
 async function getTodayCount(accountId: string, field: 'post_count_today' | 'crank_count_today'): Promise<number> {
   const { data } = await supabase.from('huma_accounts').select(`${field}`).eq('id', accountId).single();
@@ -73,43 +83,23 @@ function dailyCountField(jobType: string): 'post_count_today' | 'crank_count_tod
 const PLAYWRIGHT_AND_CRANK = [...PLAYWRIGHT_JOBS, 'social_crank'];
 const POSTING_JOBS = ['post_blog', 'cafe_new_post'];
 
-const CRANK_MODEM_DEFER_MS = 15 * 60 * 1000;
-
-async function deferJob(job: { moveToDelayed: (ts: number) => Promise<void> }, delayMs: number) {
-  await job.moveToDelayed(Date.now() + Math.max(60_000, delayMs));
-}
-
 async function deferCrankForIdleModem(
   job: { moveToDelayed: (ts: number) => Promise<void> },
   humaJobId: string | undefined,
   accountId: string | undefined,
+  reason?: string,
 ): Promise<void> {
-  await deferJob(job, CRANK_MODEM_DEFER_MS);
-  const nextAt = new Date(Date.now() + CRANK_MODEM_DEFER_MS).toISOString();
-  if (humaJobId) {
-    await supabase
-      .from('huma_jobs')
-      .update({
-        status: 'scheduled',
-        scheduled_at: nextAt,
-        started_at: null,
-        error_message: null,
-      })
-      .eq('id', humaJobId);
-  }
-  await logOperation({
-    level: 'warn',
-    message: `[crank] 유휴 동글 없음 — 15분 후 재예약 (슬롯 6·7 사용 중)`,
-    job_id: humaJobId,
-    account_id: accountId,
+  await deferHumaJob(job, humaJobId, CRANK_MODEM_DEFER_MS, {
+    reason: reason ?? null,
+    accountId,
+    logMessage: `[crank] 동글 대기 — 15분 후 재예약${reason ? `: ${reason}` : ''}`,
   });
 }
 
-export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURRENCY) || 5) {  const worker = new Worker(
+export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURRENCY) || 5) {
+  const worker = new Worker(
     'huma-jobs',
     async (job) => {
-      if (getSystemPaused()) throw new Error('SYSTEM_PAUSED');
-
       const { type, accountId, payload, humaJobId } = job.data as {
         type: string;
         accountId?: string;
@@ -117,39 +107,99 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         humaJobId?: string;
       };
 
-      if (PLAYWRIGHT_AND_CRANK.includes(type)) {
+      const scheduledCrank = type === 'social_crank' && isScheduledCrankPayload(payload);
+
+      if (getSystemPaused()) {
+        await deferHumaJob(job, humaJobId, CRANK_PAUSE_DEFER_MS, {
+          reason: 'SYSTEM_PAUSED',
+          accountId,
+          logMessage: '[crank] 전체 정지 — 5분 후 재예약',
+          level: 'info',
+        });
+        return;
+      }
+
+      if (PLAYWRIGHT_AND_CRANK.includes(type) && !scheduledCrank) {
         if (await isNightBanActive()) {
-          await deferJob(job, 60 * 60 * 1000);
+          await deferHumaJob(job, humaJobId, CRANK_NIGHT_DEFER_MS, {
+            reason: 'NIGHT_BAN',
+            accountId,
+            logMessage: `[${type}] 야간 금지 — 1시간 후 재예약`,
+          });
           return;
         }
         if (!(await passesActiveHoursGate())) {
           const human = await getHumanEngineScheduleConfig();
-          await deferJob(job, msUntilNextActiveHour(human.active_hours ?? []));
+          await deferHumaJob(job, humaJobId, msUntilNextActiveHour(human.active_hours ?? []), {
+            reason: 'ACTIVE_HOURS_BLOCKED',
+            accountId,
+            logMessage: `[${type}] 비활성 시간대 — 다음 활성 시간 재예약`,
+          });
           return;
         }
       }
 
+      if (scheduledCrank && (await isNightBanActive())) {
+        await deferHumaJob(job, humaJobId, CRANK_NIGHT_DEFER_MS, {
+          reason: 'NIGHT_BAN',
+          accountId,
+          logMessage: '[crank] 야간 금지 — 1시간 후 재예약',
+        });
+        return;
+      }
+
       if (POSTING_JOBS.includes(type) && !(await passesWeekendVolumeGate())) {
-        await deferJob(job, 2 * 60 * 60 * 1000);
+        await deferHumaJob(job, humaJobId, 2 * 60 * 60 * 1000, {
+          reason: 'WEEKEND_VOLUME',
+          accountId,
+        });
         return;
       }
 
       if (accountId && POSTING_JOBS.includes(type)) {
         const waitMs = await checkMinPublishInterval(accountId, type);
         if (waitMs) {
-          await deferJob(job, waitMs);
+          await deferHumaJob(job, humaJobId, waitMs, { accountId });
           return;
         }
       }
 
       if (type === 'social_crank' && !(await hasIdleCrankModem())) {
-        await deferCrankForIdleModem(job, humaJobId, accountId);
+        await deferCrankForIdleModem(job, humaJobId, accountId, '유휴 동글 없음');
         return;
+      }
+
+      if (accountId && type === 'social_crank') {
+        try {
+          await assertAccountRunnable(accountId);
+        } catch (err) {
+          const msg = (err as Error).message;
+          if (scheduledCrank && (msg === 'LAYER4_REST' || msg === 'ACCOUNT_INACTIVE')) {
+            if (humaJobId) {
+              await supabase
+                .from('huma_jobs')
+                .update({ status: 'failed', error_message: msg, started_at: null })
+                .eq('id', humaJobId);
+            }
+            await logOperation({
+              level: 'ERROR',
+              message: `[crank] 스케줄 skip: ${msg}`,
+              job_id: humaJobId,
+              account_id: accountId,
+            });
+            return;
+          }
+          throw err;
+        }
       }
 
       const humanConfig = await getHumanEngineConfig();
 
       if (accountId && !acquireAccount(accountId)) {
+        if (scheduledCrank) {
+          await deferCrankForIdleModem(job, humaJobId, accountId, 'ACCOUNT_BUSY');
+          return;
+        }
         throw new Error('ACCOUNT_BUSY');
       }
 
@@ -164,18 +214,20 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
           if (type === 'cafe_new_post') await assertCafeNewPostAccount(accountId);
           if (type === 'cafe_reply') await assertCafeReplyAccount(accountId);
 
-          const countField = dailyCountField(type);
-          let limit = await getEffectiveDailyLimit(type);
-          if (type === 'social_crank' || type === 'cafe_reply') {
-            const ctx = await loadAccountForBrowser(accountId);
-            const crankCap = getCrankDailyLimit(ctx.warmup_day ?? 0);
-            limit =
-              type === 'cafe_reply'
-                ? Math.min(await getEffectiveDailyLimit('cafe_reply'), crankCap)
-                : crankCap;
-          }
-          if ((await getTodayCount(accountId, countField)) >= limit) {
-            throw new Error('DAILY_LIMIT');
+          if (!scheduledCrank) {
+            const countField = dailyCountField(type);
+            let limit = await getEffectiveDailyLimit(type);
+            if (type === 'social_crank' || type === 'cafe_reply') {
+              const ctx = await loadAccountForBrowser(accountId);
+              const crankCap = getCrankDailyLimit(ctx.warmup_day ?? 0);
+              limit =
+                type === 'cafe_reply'
+                  ? Math.min(await getEffectiveDailyLimit('cafe_reply'), crankCap)
+                  : crankCap;
+            }
+            if ((await getTodayCount(accountId, countField)) >= limit) {
+              throw new Error('DAILY_LIMIT');
+            }
           }
         }
         const workspace = payload.workspace as string | undefined;
@@ -343,17 +395,16 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         if (
           humaJobId &&
           type === 'social_crank' &&
-          ((err as Error).message === 'NO_IDLE_MODEM' ||
-            (err as Error).message === 'MODEM_BUSY' ||
-            (err as Error).message.includes('MODEM_IP_ROTATE') ||
-            (err as Error).message.includes('MODEM_UNHEALTHY'))
+          (isCrankModemDeferError((err as Error).message) ||
+            (scheduledCrank && isRetryableCrankError((err as Error).message)))
         ) {
-          await deferCrankForIdleModem(job, humaJobId, accountId);
+          await deferCrankForIdleModem(job, humaJobId, accountId, (err as Error).message);
           return;
         }
-        if (humaJobId) {          await supabase
+        if (humaJobId) {
+          await supabase
             .from('huma_jobs')
-            .update({ status: 'failed', error_message: (err as Error).message })
+            .update({ status: 'failed', error_message: (err as Error).message, started_at: null })
             .eq('id', humaJobId);
         }
         await logOperation({ level: 'ERROR', message: (err as Error).message, job_id: humaJobId, account_id: accountId });

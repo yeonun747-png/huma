@@ -35,7 +35,7 @@ import { setLogSocket } from './lib/log-emitter.js';
 
 import { startWorker } from './modules/queue/worker.js';
 import { initSystemPause, getSystemPaused } from './lib/system-pause.js';
-import { recoverScheduledJobs } from './lib/job-scheduler.js';
+import { recoverCrankPipeline } from './lib/crank-pipeline-recovery.js';
 import { startCrankScheduler } from './lib/crank-scheduler.js';
 import { startCafeActivityScheduler } from './lib/cafe-activity-scheduler.js';
 import { registerCrankRoutes } from './routes/crank.js';
@@ -130,7 +130,7 @@ async function main() {
       app.log.warn('HUMA 전체 정지 상태 — ▶ 재시작 전까지 큐·스케줄러 가동 안 함');
     }
     startWorker();
-    await recoverScheduledJobs();
+    await recoverCrankPipeline();
     startCrankScheduler();
     startCafeActivityScheduler();
     app.log.info('BullMQ worker + crank scheduler + cafe activity scheduler started');

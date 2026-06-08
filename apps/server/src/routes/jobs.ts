@@ -532,11 +532,16 @@ export async function registerJobRoutes(app: FastifyInstance) {
     }
 
     await removeBullJob(job.bull_job_id);
-    await enqueueJob(buildEnqueuePayload(job as JobRecord), { jobId: `huma-${job.id}-now-${Date.now()}` });
+    await removeBullJob(`huma-${id}`);
+
+    await enqueueHumaJob(job as JobRecord, {
+      immediate: true,
+      jobId: `huma-${job.id}-now-${Date.now()}`,
+    });
 
     const { data } = await supabase
       .from('huma_jobs')
-      .update({ status: 'pending', started_at: new Date().toISOString() })
+      .update({ status: 'pending', scheduled_at: new Date().toISOString(), started_at: null })
       .eq('id', id)
       .select()
       .single();

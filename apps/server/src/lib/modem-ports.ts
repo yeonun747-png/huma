@@ -4,8 +4,8 @@ export const CRANK_PROXY_PORTS = [10006, 10007] as const;
 
 /** posting·일반 crank */
 export const MODEM_LOCK_TTL_SEC = 300;
-/** 스케줄 crank: 세션 60분 + 전환·워밍업 여유(~15분) */
-export const CRANK_SCHEDULED_LOCK_TTL_SEC = 75 * 60;
+/** 스케줄 crank: 세션 60분 + 전환·워밍업·지연 여유 */
+export const CRANK_SCHEDULED_LOCK_TTL_SEC = 120 * 60;
 
 export function proxyPortToSlot(proxyPort: number): number {
   return proxyPort - 10000;
