@@ -35,14 +35,21 @@ export function Sidebar() {
         setPendingJobs(s.pendingJobs);
         setLiveAccounts(s.liveAccounts ?? 0);
       });
-    api.navBadges(scope).then(mergeBadges).catch(() => {});
-    pullStatus().catch(() => {});
-    const t = setInterval(() => {
-      api.navBadges(scope).then(mergeBadges).catch(() => {});
-      pullStatus().catch(() => {});
-    }, 15000);
-    return () => clearInterval(t);
-  }, [workspace]);
+    const pullBadges = () => api.navBadges(scope).then(mergeBadges).catch(() => {});
+    const refresh = () => {
+      void pullBadges();
+      void pullStatus();
+    };
+    refresh();
+    const onQueueUpdated = () => refresh();
+    window.addEventListener('huma:queue-updated', onQueueUpdated);
+    const pollMs = pathname === '/queue' ? 5000 : 15000;
+    const t = setInterval(refresh, pollMs);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener('huma:queue-updated', onQueueUpdated);
+    };
+  }, [workspace, pathname]);
 
   const commonNav = NAV_ITEMS.filter((n) => n.group === 'common');
   const systemNav = NAV_ITEMS.filter((n) => n.group === 'system');

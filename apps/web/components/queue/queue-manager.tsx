@@ -128,6 +128,14 @@ function jobSub(job: HumaJob): string {
     parts.push(formatJobErrorLabel(job.error_message));
   }
 
+  if (
+    job.job_type === 'social_crank' &&
+    ['scheduled', 'pending'].includes(job.status) &&
+    job.error_message
+  ) {
+    parts.push(`재예약 · ${formatJobErrorLabel(job.error_message)}`);
+  }
+
   if (job.status === 'running' && job.job_type !== 'social_crank' && job.content) {
     parts.push(`${job.content.length}자`);
   }
@@ -176,6 +184,9 @@ export function QueueManager() {
       setTotal(result.total);
       setStats(result.stats);
       setLoadError(null);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('huma:queue-updated', { detail: result.stats }));
+      }
       return;
     } catch {
       /* 구 서버(/api/jobs/page 미배포) — 기존 API로 폴백 */
@@ -206,8 +217,12 @@ export function QueueManager() {
   }, [workspace, page, pageSize]);
 
   useEffect(() => {
-    load();
+    void load();
     setSelectedIds(new Set());
+    const id = setInterval(() => {
+      void load();
+    }, 5000);
+    return () => clearInterval(id);
   }, [load]);
 
   useEffect(() => {

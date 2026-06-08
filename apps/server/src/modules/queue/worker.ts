@@ -203,9 +203,14 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         throw new Error('ACCOUNT_BUSY');
       }
 
-      if (humaJobId) {
-        await supabase.from('huma_jobs').update({ status: 'running', started_at: new Date().toISOString() }).eq('id', humaJobId);
-      }
+      const markRunning = async () => {
+        if (humaJobId) {
+          await supabase
+            .from('huma_jobs')
+            .update({ status: 'running', started_at: new Date().toISOString(), error_message: null })
+            .eq('id', humaJobId);
+        }
+      };
 
       let skipReleaseAccount = false;
 
@@ -244,6 +249,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         }
 
         if (PLAYWRIGHT_JOBS.includes(type)) {
+          await markRunning();
           let modemSession: ModemSession | undefined;
           if (accountId) modemSession = await acquireModem(accountId);
 
@@ -342,6 +348,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
             crankTrack?: number;
             preferredProxyPort?: number;
           };
+          await markRunning();
           if (crankPayload.scheduledCrank) {
             await executeScheduledSocialCrank(accountId!, {
               ourBlogUrls: crankPayload.ourBlogUrls ?? [],
@@ -366,15 +373,18 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
             'pinterest_upload',
           ].includes(type)
         ) {
+          await markRunning();
           const platformPostId = await executeSocialPost(type, payload);
           if (humaJobId) await completeJob(humaJobId, platformPostId);
           if (humaJobId && platformPostId && (type === 'threads_post' || type === 'twitter_post')) {
             await activatePendingSocialReplies(humaJobId, platformPostId);
           }
         } else if (type === 'video_pipeline') {
+          await markRunning();
           await executeVideoPipeline(payload.videoQueueId as string);
           if (humaJobId) await completeJob(humaJobId);
         } else if (type === 'content_full') {
+          await markRunning();
           await executeContentFull(humaJobId!);
         }
 

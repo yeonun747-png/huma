@@ -1,7 +1,7 @@
 import { chromium } from 'playwright-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import type { BrowserContext } from 'playwright';
-import { existsSync, mkdirSync, unlinkSync } from 'fs';
+import { existsSync, mkdirSync, rmSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import {
   injectFingerprint,
@@ -11,7 +11,8 @@ import {
 import type { AccountPersona } from './persona.js';
 import { getFingerprintConfig, getHumanEngineConfig } from '../../lib/settings.js';
 import { getBundledChromiumVersion, syncUserAgentChromeVersion } from '../../lib/chromium-version.js';
-import { fcitxBrowserEnv, resolveUseOsIme } from '../human-engine/os-ime.js';
+import { resolveUseOsIme } from '../human-engine/os-ime.js';
+import { logOperation } from '../../lib/log-emitter.js';
 
 chromium.use(StealthPlugin());
 
@@ -70,9 +71,55 @@ function clearStaleProfileLocks(profilePath: string): void {
   }
 }
 
+/** GPUCache·Preferences 손상 시 elf_dynamic_array_reader 크래시 — 캐시만 정리 */
+const PROFILE_REPAIR_DIRS = [
+  'GPUCache',
+  'GrShaderCache',
+  'ShaderCache',
+  'DawnGraphiteCache',
+  'DawnWebGPUCache',
+  'GraphiteDawnCache',
+  'Code Cache',
+  'Service Worker',
+  'Cache',
+  'CacheStorage',
+  'blob_storage',
+  'BrowserMetrics',
+  'Crashpad',
+];
+
+function repairBrowserProfile(profilePath: string, aggressive = false): void {
+  clearStaleProfileLocks(profilePath);
+  for (const name of PROFILE_REPAIR_DIRS) {
+    try {
+      rmSync(join(profilePath, name), { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+  if (aggressive) {
+    for (const file of ['Local State', 'Preferences', 'First Run', 'Last Version']) {
+      try {
+        const p = join(profilePath, file);
+        if (existsSync(p)) unlinkSync(p);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
+function isBrowserLaunchCorruptionError(err: unknown): boolean {
+  const msg = String((err as Error)?.message ?? err);
+  return (
+    msg.includes('launchPersistentContext') ||
+    msg.includes('Target page, context or browser has been closed') ||
+    msg.includes('elf_dynamic_array_reader')
+  );
+}
+
 function baseLaunchArgs(fp: AccountFingerprint) {
-  return [
-    '--no-sandbox',
+  const args = [
     '--disable-setuid-sandbox',
     '--disable-blink-features=AutomationControlled',
     `--window-size=${fp.screenWidth},${fp.screenHeight}`,
@@ -82,6 +129,10 @@ function baseLaunchArgs(fp: AccountFingerprint) {
     '--webrtc-ip-handling-policy=disable_non_proxied_udp',
     '--force-webrtc-ip-handling-policy',
   ];
+  if (process.platform === 'linux') {
+    args.unshift('--no-sandbox', '--disable-dev-shm-usage');
+  }
+  return args;
 }
 
 async function resolveLaunchFingerprint(
@@ -95,13 +146,55 @@ async function resolveLaunchFingerprint(
   };
 }
 
-function buildBrowserEnv(headless: boolean, useOsIme: boolean): Record<string, string> | undefined {
+/**
+ * Chromium subprocess env — fcitx GTK 모듈·invalid DBUS 상속 금지.
+ * 한글 IME는 worker에서 fcitx-remote로 별도 제어 (os-ime.ts).
+ */
+function buildBrowserEnv(headless: boolean, _useOsIme: boolean): Record<string, string> | undefined {
   if (headless) return undefined;
-  const base: Record<string, string> = {
+  const env: Record<string, string> = {
     DISPLAY: process.env.DISPLAY ?? ':99',
     LANG: 'ko_KR.UTF-8',
+    LC_CTYPE: 'ko_KR.UTF-8',
+    DBUS_SESSION_BUS_ADDRESS: 'disabled:',
   };
-  return useOsIme ? fcitxBrowserEnv(base) : base;
+  for (const key of ['GTK_IM_MODULE', 'QT_IM_MODULE', 'XMODIFIERS', 'INPUT_METHOD']) {
+    env[key] = '';
+  }
+  return env;
+}
+
+async function launchPersistentContextWithRecovery(
+  profilePath: string,
+  launchOpts: Omit<ReturnType<typeof persistentLaunchOptions>, 'fpConfig'>,
+  accountId?: string,
+): Promise<BrowserContext> {
+  try {
+    return await chromium.launchPersistentContext(profilePath, launchOpts);
+  } catch (firstErr) {
+    if (!isBrowserLaunchCorruptionError(firstErr)) throw firstErr;
+
+    repairBrowserProfile(profilePath, false);
+    await logOperation({
+      level: 'warn',
+      message: `[browser] 프로필 캐시 정리 후 Chromium 재기동: ${profilePath}`,
+      account_id: accountId,
+    });
+
+    try {
+      return await chromium.launchPersistentContext(profilePath, launchOpts);
+    } catch (secondErr) {
+      if (!isBrowserLaunchCorruptionError(secondErr)) throw secondErr;
+
+      repairBrowserProfile(profilePath, true);
+      await logOperation({
+        level: 'warn',
+        message: `[browser] 프로필 Preferences 초기화 후 Chromium 재기동: ${profilePath}`,
+        account_id: accountId,
+      });
+      return chromium.launchPersistentContext(profilePath, launchOpts);
+    }
+  }
 }
 
 function persistentLaunchOptions(
@@ -140,7 +233,11 @@ export async function createBrowserForAccount(account: BrowserAccountContext) {
   const opts = persistentLaunchOptions(account, fp, fpConfig, useOsIme);
   const { fpConfig: cfg, ...launchOpts } = opts;
 
-  const context = await chromium.launchPersistentContext(account.profile_path, launchOpts);
+  const context = await launchPersistentContextWithRecovery(
+    account.profile_path,
+    launchOpts,
+    account.id,
+  );
   await injectFingerprint(context, fp, cfg);
 
   context.on('page', (page) => {
@@ -170,12 +267,15 @@ export async function createBrowser(proxyPort?: number) {
   const headless = process.env.PLAYWRIGHT_HEADLESS === 'true' ? true : resolveHeadless();
   const browser = await chromium.launch({
     headless,
+    env: buildBrowserEnv(headless, false),
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
       '--lang=ko-KR',
       '--webrtc-ip-handling-policy=disable_non_proxied_udp',
       ...(proxyPort ? proxyChromiumArgs(proxyPort) : []),
+      ...(process.platform === 'linux' ? [resolveGlLaunchArg()] : []),
     ],
   });
   const context = await browser.newContext({

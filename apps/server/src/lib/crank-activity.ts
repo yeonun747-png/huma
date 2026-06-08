@@ -1,4 +1,5 @@
 import { logOperation } from './log-emitter.js';
+import { supabase } from '../middleware/auth.js';
 
 export type CrankActivityType = '방문' | '공감' | '댓글' | '이웃';
 
@@ -10,6 +11,12 @@ export async function logCrankActivity(params: {
   comment?: string;
   dwellSec?: number;
 }) {
+  const { data: acct } = await supabase
+    .from('huma_accounts')
+    .select('crank_workspace')
+    .eq('id', params.accountId)
+    .maybeSingle();
+
   const host = params.targetUrl?.replace(/^https?:\/\//, '').split('/')[0] ?? '';
   const label = params.targetTitle ?? host ?? 'naver blog';
   const title =
@@ -30,7 +37,7 @@ export async function logCrankActivity(params: {
     level: 'info',
     message: title,
     account_id: params.accountId,
-    workspace: 'yeonun',
+    workspace: (acct?.crank_workspace as string | undefined) ?? 'yeonun',
     platform: 'naver_crank',
     result_url: params.targetUrl,
     metadata: {

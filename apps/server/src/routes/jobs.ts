@@ -116,20 +116,33 @@ export async function registerJobRoutes(app: FastifyInstance) {
     const from = skip;
     const to = skip + take - 1;
 
-    const { data, error, count } = await supabase
-      .from('huma_jobs')
-      .select('*', { count: 'exact' })
-      .eq('workspace', workspace)
-      .order('created_at', { ascending: false })
-      .range(from, to);
+    const [{ data: liveJobs }, { data, error, count }] = await Promise.all([
+      supabase
+        .from('huma_jobs')
+        .select('*')
+        .eq('workspace', workspace)
+        .in('status', ['running', 'awaiting_captcha'])
+        .order('started_at', { ascending: false }),
+      supabase
+        .from('huma_jobs')
+        .select('*', { count: 'exact' })
+        .eq('workspace', workspace)
+        .order('created_at', { ascending: false })
+        .range(from, to),
+    ]);
 
     if (error) {
       return reply.code(500).send({ error: error.message });
     }
 
+    const live = liveJobs ?? [];
+    const liveIds = new Set(live.map((j) => j.id));
+    const pageRows = (data ?? []).filter((j) => !liveIds.has(j.id));
+    const items = [...live, ...pageRows];
+
     const stats = await fetchQueueStats(workspace);
     return {
-      items: data ?? [],
+      items,
       total: count ?? 0,
       stats,
     };

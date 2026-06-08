@@ -249,8 +249,13 @@ export function CrankView() {
 
   useEffect(() => {
     if (tab !== 'feed') return;
-    const id = setInterval(() => loadCrankFeed(), 30_000);
-    return () => clearInterval(id);
+    const id = setInterval(() => loadCrankFeed(), 10_000);
+    const onQueue = () => loadCrankFeed();
+    window.addEventListener('huma:queue-updated', onQueue);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('huma:queue-updated', onQueue);
+    };
   }, [tab, loadCrankFeed]);
 
   useRegisterPageAction('startCrank', async () => {

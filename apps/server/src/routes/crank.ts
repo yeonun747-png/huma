@@ -5,10 +5,13 @@ import { getSetting } from '../lib/settings.js';
 import { formatKstHm } from '../lib/dashboard-period.js';
 import type { CrankActivityType } from '../lib/crank-activity.js';
 import { getKstClock } from '../lib/crank-schedule-config.js';
-import {
-  getCrankSchedulerStatus,
-  runDailyCrankScheduler,
-} from '../lib/crank-scheduler.js';
+import { getCrankSchedulerStatus, runDailyCrankScheduler } from '../lib/crank-scheduler.js';
+import { getKstYmd } from '../lib/crank-schedule-config.js';
+
+function kstTodayStartIso(): string {
+  const { year, month, day } = getKstYmd();
+  return new Date(Date.UTC(year, month - 1, day, -9, 0, 0)).toISOString();
+}
 
 function normalizeFeedUrl(raw?: string | null): string | undefined {
   const u = raw?.trim();
@@ -49,9 +52,7 @@ function parseCrankAction(meta: Record<string, unknown> | null, message: string)
 
 export async function registerCrankRoutes(app: FastifyInstance) {
   app.get('/api/crank/feed', { preHandler: authMiddleware }, async () => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayIso = today.toISOString();
+    const todayIso = kstTodayStartIso();
 
     const [{ data: activityLogs }, { data: cafePosts }, { data: crankAccounts }] = await Promise.all([
       supabase
