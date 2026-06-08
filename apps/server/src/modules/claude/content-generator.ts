@@ -1,6 +1,10 @@
 import { askClaudeWithModel } from '../../lib/anthropic-client.js';
 import { getMainClaudeModel, getSubClaudeModel } from '../../lib/ai-engine.js';
-import { withHumanWritingMandate, withHumanWritingSystem } from '../../lib/ai-human-writing.js';
+import {
+  withHumanWritingMandate,
+  withHumanWritingSystem,
+  withLongformWritingMandate,
+} from '../../lib/ai-human-writing.js';
 import { buildYeonunContextWithPrompt } from '../content/yeonun-context.js';
 import {
   blogPostLengthPromptGuide,
@@ -165,7 +169,7 @@ async function generateMainContent(
   const userParts: Array<Record<string, unknown>> = [
     {
       type: 'text',
-      text: withHumanWritingMandate(`URL 핵심:\n${urlSummary}\n\n제목: ${input.title}${synopsisGuide}${personaGuide}${typeGuide}\n${lengthGuide}\n\n순수 JSON만 (코드블록 없이):
+      text: withLongformWritingMandate(`URL 핵심:\n${urlSummary}\n\n제목: ${input.title}${synopsisGuide}${personaGuide}${typeGuide}\n${lengthGuide}\n\n순수 JSON만 (코드블록 없이):
 {
   "blog_post": "네이버 블로그 글 ${min}~${max}자 (필수·중간 끊김 금지·완결된 글, ~요체·경험담·사람 말투). 본문 URL은 yeonun.com 만",
   "tiktok_caption": "TikTok 캡션 150자 이내",
@@ -262,7 +266,7 @@ export async function generateAllContent(input: ContentGenerationInput): Promise
         model: (await getSubClaudeModel()) || HAIKU_MODEL_FALLBACK,
         max_tokens: 2000,
         system: withHumanWritingSystem(SYSTEM_PROMPTS[input.workspace] ?? SYSTEM_PROMPTS.yeonun),
-        prompt: withHumanWritingMandate(
+        prompt: withLongformWritingMandate(
           `제목: ${input.title}\nURL 요약: ${urlSummary.slice(0, 500)}\n${blogPostLengthPromptGuide(lengthRange)}\n\n네이버 블로그용 ${lengthRange.min}~${lengthRange.max}자 완결 본문과 TikTok/Instagram/Threads/X용 짧은 캡션을 JSON으로 (tts_script 생략, Kling 내장 오디오):\n{"blog_post":"...","tiktok_caption":"...","instagram_caption":"...","threads_text":"...","x_text":"...","image_prompt":"...","video_prompt":"..."}`,
         ),
       });
