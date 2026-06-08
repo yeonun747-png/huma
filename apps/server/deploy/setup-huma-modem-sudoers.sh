@@ -5,12 +5,15 @@
 set -euo pipefail
 
 HUMA_USER="${HUMA_USER:-songchunho}"
+HUMA_HOME="${HUMA_HOME:-/home/${HUMA_USER}}"
+LTE_RESET_SCRIPT="${HUMA_HOME}/huma/apps/server/scripts/huma-modem-lte-reset.sh"
 DEST="/etc/sudoers.d/huma-modem"
 TMP="$(mktemp)"
 
 cat >"$TMP" <<EOF
-# HUMA C-Rank / 포스팅 — 모뎀 ip link·policy routing (PM2 비대화형)
+# HUMA C-Rank / 포스팅 — 모뎀 ip link·policy routing·LTE 비행기모드 (PM2 비대화형)
 ${HUMA_USER} ALL=(ALL) NOPASSWD: /usr/sbin/ip, /sbin/ip
+${HUMA_USER} ALL=(ALL) NOPASSWD: /usr/bin/bash ${LTE_RESET_SCRIPT} *
 EOF
 
 visudo -cf "$TMP"

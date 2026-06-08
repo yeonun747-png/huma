@@ -9,7 +9,7 @@ import { sleep } from './utils.js';
 // IP 소유권 기록 — 만료되면 "소유 불명"이 되어 다른 계정이 같은 IP를 재사용할 수 있으므로
 // 활동 주기(2~3일)보다 충분히 길게 유지한다.
 const LAST_ACCOUNT_TTL_SEC = 7 * 86400;
-const RECONNECT_ATTEMPTS = 2;
+const RECONNECT_ATTEMPTS = 4;
 
 function lastAccountKey(port: number): string {
   return `modem_last_account:${port}`;

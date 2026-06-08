@@ -6,6 +6,7 @@ import { proxyPortToSlot } from '../../lib/modem-ports.js';
 import { readDongleInterfaceFromConf, isPlaceholderInterfaceName } from '../../lib/dongle-interfaces.js';
 import { readInterfaceIp } from '../../lib/dongle-health.js';
 import { fetchModemPublicGeo } from '../../lib/modem-geo.js';
+import { resetLteModem } from '../../lib/modem-lte-reset.js';
 import { applyDonglePolicyRoute } from '../../lib/restore-dongle-network.js';
 
 function sync3proxyExternalIp(proxyPort: number, newIp: string): void {
@@ -65,14 +66,12 @@ export async function reconnectModemBySlot(slotNumber: number): Promise<string> 
 
   try {
     if (process.platform !== 'win32') {
-      execSync(`sudo -n ip link set ${iface} down && sleep 3 && sudo -n ip link set ${iface} up`, {
-        stdio: 'pipe',
-      });
+      await resetLteModem(iface);
     } else {
       await sleep(3000);
     }
 
-    await sleep(5000); // IP 재할당 완료 대기 (v3.33 규칙⑦: 별도 고정 대기 없음)
+    await sleep(8000); // LTE attach·DHCP 안정화
     const newIp = readInterfaceIp(iface);
     if (!newIp) {
       throw new Error(`${iface} IP 재발급 실패`);

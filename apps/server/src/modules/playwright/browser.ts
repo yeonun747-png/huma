@@ -1,7 +1,7 @@
 import { chromium } from 'playwright-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import type { BrowserContext } from 'playwright';
-import { existsSync, mkdirSync, rmSync, unlinkSync } from 'fs';
+import { existsSync, mkdirSync, renameSync, rmSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import {
   injectFingerprint,
@@ -170,7 +170,11 @@ async function applyClientHintPlatformSpoof(context: BrowserContext): Promise<vo
  */
 function buildBrowserEnv(headless: boolean, useOsIme: boolean): Record<string, string> | undefined {
   if (headless) return undefined;
-  const base: Record<string, string> = {
+
+  const env: Record<string, string> = {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter(([, v]) => v != null) as [string, string][],
+    ),
     DISPLAY: process.env.DISPLAY ?? ':99',
     LANG: 'ko_KR.UTF-8',
     LC_CTYPE: 'ko_KR.UTF-8',
@@ -178,11 +182,15 @@ function buildBrowserEnv(headless: boolean, useOsIme: boolean): Record<string, s
 
   if (useOsIme) {
     const dbus = process.env.DBUS_SESSION_BUS_ADDRESS;
-    return fcitxBrowserEnv(dbus ? { ...base, DBUS_SESSION_BUS_ADDRESS: dbus } : base);
+    if (dbus?.startsWith('unix:')) {
+      env.DBUS_SESSION_BUS_ADDRESS = dbus;
+    }
+    return fcitxBrowserEnv(env);
   }
 
-  // 'disabled:' 는 Chromium bus.cc 파싱 실패 → 즉시 크래시. IME 모듈만 비우고 DBUS는 부모 상속(없으면 무시).
-  const env: Record<string, string> = { ...base };
+  // SSH/PM2의 잘못된 DBUS(예: disabled:) → bus.cc 파싱 크래시. 합성 IME 경로에서는 DBUS 제거.
+  delete env.DBUS_SESSION_BUS_ADDRESS;
+  delete env.DBUS_SYSTEM_BUS_ADDRESS;
   for (const key of ['GTK_IM_MODULE', 'QT_IM_MODULE', 'XMODIFIERS', 'INPUT_METHOD']) {
     env[key] = '';
   }
@@ -217,7 +225,26 @@ async function launchPersistentContextWithRecovery(
         message: `[browser] 프로필 Preferences 초기화 후 Chromium 재기동: ${profilePath}`,
         account_id: accountId,
       });
-      return chromium.launchPersistentContext(profilePath, launchOpts);
+
+      try {
+        return await chromium.launchPersistentContext(profilePath, launchOpts);
+      } catch (thirdErr) {
+        if (!isBrowserLaunchCorruptionError(thirdErr)) throw thirdErr;
+
+        const backupPath = `${profilePath}.corrupt-${Date.now()}`;
+        try {
+          if (existsSync(profilePath)) renameSync(profilePath, backupPath);
+        } catch {
+          rmSync(profilePath, { recursive: true, force: true });
+        }
+        mkdirSync(profilePath, { recursive: true });
+        await logOperation({
+          level: 'warn',
+          message: `[browser] 프로필 전체 교체 후 Chromium 재기동: ${profilePath}`,
+          account_id: accountId,
+        });
+        return chromium.launchPersistentContext(profilePath, launchOpts);
+      }
     }
   }
 }
