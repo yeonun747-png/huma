@@ -43,13 +43,19 @@ function resolveHeadless(): boolean {
   return false;
 }
 
+/** i7 Xvfb(:99) — desktop GL 없음 → angle(egl) 필수. desktop이면 GPU process 즉시 종료 */
+function resolveGlLaunchArg(): string {
+  if (process.platform === 'linux') return '--use-gl=angle';
+  return '--use-gl=desktop';
+}
+
 function baseLaunchArgs(fp: AccountFingerprint) {
   return [
     '--no-sandbox',
     '--disable-setuid-sandbox',
     '--disable-blink-features=AutomationControlled',
     `--window-size=${fp.screenWidth},${fp.screenHeight}`,
-    '--use-gl=desktop',
+    resolveGlLaunchArg(),
     `--font-render-hinting=${fp.fontHint}`,
     '--lang=ko-KR',
     '--webrtc-ip-handling-policy=disable_non_proxied_udp',

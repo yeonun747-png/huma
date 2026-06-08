@@ -46,6 +46,7 @@ export async function registerSystemRoutes(app: FastifyInstance) {
         .in('workspace', workspaces)
         .in('status', ['pending', 'scheduled'])
         .not('scheduled_at', 'is', null)
+        .gt('scheduled_at', new Date().toISOString())
         .order('scheduled_at', { ascending: true })
         .limit(1)
         .maybeSingle(),

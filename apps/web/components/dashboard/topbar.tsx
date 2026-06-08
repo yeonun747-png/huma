@@ -8,7 +8,6 @@ import { useWorkspace } from './workspace-context';
 import { api } from '@/lib/api';
 import { useDashboardPeriod } from './dashboard-period-context';
 import {
-  formatKstYmdHm,
   formatLogKstTime,
   parseQueueKstParts,
   weekdayColorClass,
@@ -16,6 +15,18 @@ import {
 } from '@/lib/format-kst';
 
 type NotifItem = { type: 'err' | 'warn'; title: string; sub: string };
+
+function KstWeekdayDatetime({ iso }: { iso: string | null }) {
+  if (!iso) return <>스케줄 없음</>;
+  const parsed = parseQueueKstParts(iso);
+  if (!parsed) return <>스케줄 없음</>;
+  return (
+    <>
+      {parsed.date}
+      <span className={weekdayColorClass(parsed.weekday)}>({parsed.weekday})</span> {parsed.time}
+    </>
+  );
+}
 
 export function Topbar({ title }: { title: string }) {
   const pathname = usePathname();
@@ -28,19 +39,18 @@ export function Topbar({ title }: { title: string }) {
   const [clockParts, setClockParts] = useState<QueueKstParts | null>(null);
   const [systemPaused, setSystemPaused] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
-  const [nextPublish, setNextPublish] = useState('스케줄 없음');
+  const [nextPublishAt, setNextPublishAt] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<NotifItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifDismissed, setNotifDismissed] = useState(false);
 
   const loadMeta = useCallback(() => {
     void api.dashboardStats({ period: 'today' }).then((s) => {
-      if (s.nextPublishAt) {
-        setNextPublish(formatKstYmdHm(s.nextPublishAt));
-      } else if (s.nextPublish) {
-        setNextPublish(s.nextPublish);
+      const at = s.nextPublishAt ?? null;
+      if (at && new Date(at) > new Date()) {
+        setNextPublishAt(at);
       } else {
-        setNextPublish('스케줄 없음');
+        setNextPublishAt(null);
       }
     }).catch(() => {});
 
@@ -79,8 +89,8 @@ export function Topbar({ title }: { title: string }) {
     api.status({ workspace: businessUnit }).then((s) => {
       setSystemPaused(Boolean(s.paused));
       setPendingCount(s.pendingJobs ?? 0);
-      if (s.nextScheduled) {
-        setNextPublish(formatKstYmdHm(s.nextScheduled));
+      if (s.nextScheduled && new Date(s.nextScheduled) > new Date()) {
+        setNextPublishAt(s.nextScheduled);
       }
     }).catch(() => {});
     loadMeta();
@@ -116,7 +126,9 @@ export function Topbar({ title }: { title: string }) {
           </span>
           <span className="text-[10px] text-huma-t4">│</span>
           <span className="text-[10px] text-huma-t3">다음발행</span>
-          <span className="text-[11px] font-bold text-huma-acc">{nextPublish}</span>
+          <span className="text-[11px] font-bold text-huma-acc">
+            <KstWeekdayDatetime iso={nextPublishAt} />
+          </span>
         </div>
 
         {meta.showPeriod && (

@@ -42,6 +42,7 @@ export async function registerMonitorRoutes(app: FastifyInstance) {
         .in('workspace', workspaces)
         .eq('status', 'scheduled')
         .not('scheduled_at', 'is', null)
+        .gt('scheduled_at', new Date().toISOString())
         .order('scheduled_at', { ascending: true })
         .limit(1)
         .maybeSingle(),
