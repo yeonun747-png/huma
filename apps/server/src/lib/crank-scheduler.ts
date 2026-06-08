@@ -162,7 +162,7 @@ export async function runDailyCrankScheduler(options?: { anchorFromNow?: boolean
     const sessionPayload = {
       scheduledCrank: true,
       ourBlogUrls,
-      sessionMinutes: 60,
+      sessionMinutes: 45,
       crankTrack,
       preferredProxyPort,
     };

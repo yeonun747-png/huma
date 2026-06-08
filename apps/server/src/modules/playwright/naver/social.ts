@@ -4,7 +4,15 @@ import { crankWorkspaceFromLabel } from '@huma/shared';
 import { supabase } from '../../../middleware/auth.js';
 import { fetchPostingBlogUrls } from '../../../lib/crank-scheduler.js';
 import { getSetting, getHumanEngineConfig } from '../../../lib/settings.js';
-import { createBrowserForAccount, closeBrowserContext } from '../browser.js';
+import {
+  acquireWorkflowPage,
+  createBrowserForAccount,
+  closeBrowserContext,
+} from '../browser.js';
+import {
+  clearCrankSessionProgress,
+  setCrankSessionProgress,
+} from '../../../lib/crank-session-progress.js';
 import { loadAccountForBrowser, maybeIncrementWarmupDay } from '../account-loader.js';
 import { naverLogin } from './login.js';
 import { humanSleep, humanType } from '../../human-engine/typing.js';
@@ -54,7 +62,7 @@ interface BlogTarget {
  * 세션 절대 상한(분). 스케줄 락 TTL(CRANK_SCHEDULED_LOCK_TTL_SEC=120분)보다 충분히 짧게 유지해
  * 세션 도중 Redis 락이 만료되어 같은 동글을 다른 작업이 점유하는 사태(규칙⑬ 위반)를 막는다.
  */
-const SESSION_HARD_CAP_MS = 70 * 60 * 1000;
+const SESSION_HARD_CAP_MS = 45 * 60 * 1000;
 
 async function getAccountCrankWorkspace(accountId: string): Promise<Workspace> {
   const { data } = await supabase
@@ -151,6 +159,7 @@ export async function runSocialCrank(
   const ownsModem = !options?.skipModemAcquire;
   let heldForCaptcha = false;
   let context: BrowserContext | undefined;
+  const jobId = options?.humaJobId;
 
   try {
     if (!modemSession && ownsModem) {
@@ -158,7 +167,9 @@ export async function runSocialCrank(
     }
     if (!modemSession) throw new Error('NO_MODEM');
 
+    await setCrankSessionProgress(jobId, '준비', `:${modemSession.proxyPort}`);
     // v3.33 — 계정 전환 시 reconnect 1회 → preSessionWarmup이 자연 간격(규칙⑦)
+    await setCrankSessionProgress(jobId, 'IP 교체');
     await reconnectModemIfAccountSwitched(modemSession.proxyPort, accountId);
     const accountCtx = await loadAccountForBrowser(accountId, modemSession.proxyPort);
     if (accountCtx.account_type !== 'crank') {
@@ -173,14 +184,14 @@ export async function runSocialCrank(
     const persona = accountCtx.persona;
 
     const config = await getSetting<SocialCrankConfig>('social_crank', {
-      visits_per_session: 15,
+      visits_per_session: 10,
       our_blog_ratio: 0.25,
       other_blog_ratio: 0.75,
       min_visit_interval_days: 5,
       keyword_pick_count: 4,
     });
 
-    const sessionCap = config.visits_per_session ?? config.daily_limit_per_account ?? 15;
+    const sessionCap = config.visits_per_session ?? config.daily_limit_per_account ?? 10;
     const maxVisits = Math.min(sessionCap, plan.blogVisits, maxCrankVisitsForWarmup(warmupDay));
 
     const ourTarget = Math.max(0, Math.round(maxVisits * config.our_blog_ratio));
@@ -192,16 +203,19 @@ export async function runSocialCrank(
       scale = rttScale(rtt);
     }
 
+    await setCrankSessionProgress(jobId, '브라우저 기동');
     context = (await createBrowserForAccount(accountCtx)).context;
 
     try {
-      const warmupPage = await context.newPage();
+      const warmupPage = await acquireWorkflowPage(context);
+      await setCrankSessionProgress(jobId, '워밍업', '네이버 검색·체류');
       await preSessionWarmup(warmupPage, persona, 'crank');
       await warmupPage.close();
       await applyCrankResourceBlocking(context);
 
+      await setCrankSessionProgress(jobId, '로그인');
       await naverLogin(context, accountId, { profilePath: accountCtx.profile_path });
-      const page = await context.newPage();
+      const page = await acquireWorkflowPage(context);
 
       const visitHistory = await loadVisitHistory(accountId);
       const ourBlogUrls =
@@ -213,6 +227,7 @@ export async function runSocialCrank(
         config.keyword_pick_count ?? 4,
       );
 
+      await setCrankSessionProgress(jobId, '블로그 검색', `${keywords.length}개 키워드`);
       const otherCandidates = await searchNaverBlogs(page, keywords, otherTarget * 2, scale);
       const otherUrls = filterUrlsByVisitInterval(otherCandidates, visitHistory, config.min_visit_interval_days)
         .slice(0, otherTarget);
@@ -233,15 +248,17 @@ export async function runSocialCrank(
       const visitedUrls: string[] = [];
       const sessionDeadline = Date.now() + SESSION_HARD_CAP_MS;
 
-      for (const target of allTargets) {
+      for (let visitIdx = 0; visitIdx < allTargets.length; visitIdx += 1) {
+        const target = allTargets[visitIdx]!;
         if (Date.now() > sessionDeadline) break;
+        await setCrankSessionProgress(jobId, '블로그 방문', `${visitIdx + 1}/${allTargets.length}`);
         await page.goto(target.url, {
           waitUntil: 'domcontentloaded',
           timeout: PLAYWRIGHT_NAV_TIMEOUT_MS,
         });
         await page.waitForLoadState('networkidle');
 
-        await scrollRead(page, randomBetween(60000, 180000 * (persona.visitDurationMin / 4)));
+        await scrollRead(page, randomBetween(45000, 120000));
 
         const doLike = target.doLike && likesDone < plan.likes;
         const doComment = target.doComment && commentsDone < plan.comments;
@@ -256,7 +273,7 @@ export async function runSocialCrank(
             type: '방문',
             targetUrl: pageUrl,
             targetTitle: pageTitle.slice(0, 80),
-            dwellSec: randomBetween(60, 180),
+            dwellSec: randomBetween(45, 120),
           });
         }
         if (actions.liked) {
@@ -274,11 +291,13 @@ export async function runSocialCrank(
           });
         }
 
-        await humanSleep(30000, 120000);
+        await humanSleep(15000, 45000);
       }
 
+      await setCrankSessionProgress(jobId, '마무리');
       await updateVisitHistory(accountId, visitedUrls);
       await updateCrankCount(accountId, allTargets.length);
+      await clearCrankSessionProgress(jobId);
     } catch (innerErr) {
       if (
         context &&
@@ -293,6 +312,7 @@ export async function runSocialCrank(
         }))
       ) {
         heldForCaptcha = true;
+        await setCrankSessionProgress(jobId, 'CAPTCHA 대기', 'VNC 수동 해결');
         throw new Error(CAPTCHA_AWAITING_HUMAN);
       }
       throw innerErr;
@@ -301,6 +321,7 @@ export async function runSocialCrank(
     }
   } catch (err) {
     if (isCrankCaptchaHoldSignal(err)) throw err;
+    if (!heldForCaptcha) await clearCrankSessionProgress(jobId);
     if (isCrankHumanHoldError(err) && !options?.humaJobId) {
       await handleLayer4Detection(accountId, err, modemSession);
     }

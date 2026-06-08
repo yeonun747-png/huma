@@ -105,9 +105,9 @@ export async function preSessionWarmup(
   const navError = await openSearchResults(page, integratedSearchUrl(keyword));
 
   const visitCount =
-    accountType === 'posting' ? randomBetween(1, 2) : randomBetween(2, 3);
-  const stayMin = accountType === 'posting' ? 15000 : 60000;
-  const stayMax = accountType === 'posting' ? 45000 : 180000;
+    accountType === 'posting' ? randomBetween(1, 2) : randomBetween(1, 2);
+  const stayMin = accountType === 'posting' ? 15000 : 30000;
+  const stayMax = accountType === 'posting' ? 45000 : 90000;
 
   const integrated = await collectNaverSearchUrlsDetailed(page, 'integrated', 6);
   if (navError || integrated.urls.length === 0) {
@@ -128,8 +128,8 @@ export async function preSessionWarmup(
     if (!(await safeWarmupGoto(page, blog.urls[0]!))) {
       await throwWarmupFailure(page, '네이버 블로그 방문', blog.diagnostics, 'blog_visit_timeout');
     }
-    await humanSleep(60000, 120000);
-    await warmupStayScroll(page, randomBetween(8000, 20000));
+    await humanSleep(30000, 60000);
+    await warmupStayScroll(page, randomBetween(5000, 12000));
     await page.goBack({ waitUntil: 'domcontentloaded' }).catch(() => {});
     await humanSleep(2000, 4000);
   }

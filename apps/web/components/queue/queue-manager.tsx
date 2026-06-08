@@ -98,7 +98,7 @@ function jobSub(job: HumaJob): string {
     else parts.push('수동');
     const blogCount = payload.ourBlogUrls?.length ?? 0;
     if (blogCount > 0) parts.push(`우리블로그 ${blogCount}곳`);
-    parts.push(`약 ${payload.sessionMinutes ?? 60}분`);
+    parts.push(`약 ${payload.sessionMinutes ?? 45}분`);
   } else if (job.job_type === 'content_full') {
     const dryRun = (job.platform_schedule as Record<string, unknown> | undefined)?._dry_run === true;
     parts.push(dryRun ? '검증(dry_run)·네이버 미발행' : 'AI 생성·발행 분배');

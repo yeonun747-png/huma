@@ -86,29 +86,61 @@ export function MonitorView() {
           <div key={m.jobId} className="m-pub-card">
             <div className="m-pub-top">
               <div className="m-pub-live-dot" />
-              <span className="text-[12px] font-bold text-huma-err">LIVE</span>
+              <span className="text-[12px] font-bold text-huma-err">
+                {m.jobStatus === 'awaiting_captcha' ? 'CAPTCHA' : 'LIVE'}
+              </span>
               <span className="ml-1.5 font-mono text-[11px] text-huma-t3">
                 {m.account} · {m.platform}
               </span>
-              <span className="ml-auto font-mono text-[11px] text-huma-t3">{m.wpm} WPM</span>
+              <span className="ml-auto font-mono text-[11px] text-huma-t3">
+                {m.kind === 'crank' ? 'C-Rank' : `${m.wpm} WPM`}
+              </span>
             </div>
             <div className="m-live-box whitespace-pre-line">
-              {m.preview}
+              {m.kind === 'crank' ? (
+                <>
+                  {m.crankPhase}
+                  {m.crankDetail ? (
+                    <>
+                      <br />
+                      <span className="text-huma-t3">{m.crankDetail}</span>
+                    </>
+                  ) : null}
+                </>
+              ) : (
+                m.preview
+              )}
               <span className="m-cursor-blink" />
             </div>
             <div className="m-pub-meta">
-              <span className="m-pub-m">
-                <span>{m.chars}</span>/{m.totalChars}자
-              </span>
-              <span className="m-pub-m">
-                WPM <span>{m.wpm}</span>
-              </span>
-              <span className="m-pub-m">
-                오타 <span>{m.typos}</span>회
-              </span>
-              <span className="m-pub-m text-huma-ok">
-                완료예상 <span>{m.eta}</span>
-              </span>
+              {m.kind === 'crank' ? (
+                <>
+                  <span className="m-pub-m">
+                    단계 <span>{m.crankPhase}</span>
+                  </span>
+                  <span className="m-pub-m">
+                    경과 <span>{m.elapsedMin}</span>분
+                  </span>
+                  <span className="m-pub-m text-huma-ok">
+                    상태 <span>{m.jobStatus === 'awaiting_captcha' ? 'VNC 대기' : '진행'}</span>
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="m-pub-m">
+                    <span>{m.chars}</span>/{m.totalChars}자
+                  </span>
+                  <span className="m-pub-m">
+                    WPM <span>{m.wpm}</span>
+                  </span>
+                  <span className="m-pub-m">
+                    오타 <span>{m.typos}</span>회
+                  </span>
+                  <span className="m-pub-m text-huma-ok">
+                    완료예상 <span>{m.eta}</span>
+                  </span>
+                </>
+              )}
             </div>
           </div>
         ))}

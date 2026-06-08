@@ -17,7 +17,7 @@ function resolveIpBin(): string {
 }
 
 const IP_BIN = resolveIpBin();
-const LTE_RESET_TIMEOUT_MS = 150_000;
+const LTE_RESET_TIMEOUT_MS = 180_000;
 
 function lteResetScriptPath(): string {
   return join(dirname(fileURLToPath(import.meta.url)), '../../scripts/huma-modem-lte-reset.sh');
@@ -36,18 +36,25 @@ async function longLinkDisconnect(iface: string): Promise<void> {
  * LTE 공인 IP 변경 — AT+CFUN(비행기모드) 우선, 실패 시 장시간 link down/up.
  * sudoers: NOPASSWD ip + huma-modem-lte-reset.sh (setup-huma-modem-sudoers.sh)
  */
-export async function resetLteModem(iface: string): Promise<void> {
+export async function resetLteModem(iface: string, proxyPort?: number): Promise<void> {
   if (process.platform === 'win32') return;
 
   const scriptPath = lteResetScriptPath();
+  const args = ['-n', 'bash', scriptPath, iface];
+  if (proxyPort) args.push(String(proxyPort));
+
   try {
-    execFileSync('sudo', ['-n', 'bash', scriptPath, iface], {
-      stdio: 'pipe',
+    const out = execFileSync('sudo', args, {
+      encoding: 'utf8',
       timeout: LTE_RESET_TIMEOUT_MS,
       maxBuffer: 256 * 1024,
     });
+    const tail = out.trim().split('\n').pop();
+    if (tail) console.info(`[lte-reset] ${tail}`);
     return;
-  } catch {
+  } catch (err) {
+    const e = err as { stdout?: string };
+    if (e.stdout?.trim()) console.warn(`[lte-reset] partial: ${e.stdout.trim().slice(-200)}`);
     await longLinkDisconnect(iface);
   }
 }

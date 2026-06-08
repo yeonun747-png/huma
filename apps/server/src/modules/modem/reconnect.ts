@@ -66,7 +66,7 @@ export async function reconnectModemBySlot(slotNumber: number): Promise<string> 
 
   try {
     if (process.platform !== 'win32') {
-      await resetLteModem(iface);
+      await resetLteModem(iface, modem.proxy_port);
     } else {
       await sleep(3000);
     }

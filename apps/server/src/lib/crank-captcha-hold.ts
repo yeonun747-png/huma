@@ -7,6 +7,7 @@ import {
   isCaptchaError,
 } from '../modules/watcher/detector.js';
 import type { ModemSession } from '../modules/proxy/manager.js';
+import { setCrankSessionProgress } from './crank-session-progress.js';
 
 /** worker·scheduled-session — CAPTCHA hold 진입 후 정상 종료 신호 */
 export const CAPTCHA_AWAITING_HUMAN = 'CAPTCHA_AWAITING_HUMAN';
@@ -47,6 +48,8 @@ export async function tryEnterCrankCaptchaHold(params: CrankCaptchaHoldParams): 
     skipExternalNotify: true,
     workspace: params.workspace,
   });
+
+  await setCrankSessionProgress(params.humaJobId, 'CAPTCHA 대기', 'VNC 수동 해결');
 
   await enterCaptchaHold({
     jobId: params.humaJobId,

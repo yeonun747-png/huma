@@ -1,8 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { authMiddleware, getWorkspaceFilter, supabase } from '../middleware/auth.js';
 import { formatKstHm } from '../lib/dashboard-period.js';
+import { getCrankSessionProgress } from '../lib/crank-session-progress.js';
 
-function estimateProgress(content: string | null | undefined, wpm: number, startedAt: string | null) {
+function estimatePostingProgress(content: string | null | undefined, wpm: number, startedAt: string | null) {
   const total = (content ?? '').length || 1200;
   const started = startedAt ? new Date(startedAt).getTime() : Date.now();
   const elapsedMin = Math.max(0, (Date.now() - started) / 60000);
@@ -19,12 +20,17 @@ function estimateProgress(content: string | null | undefined, wpm: number, start
   };
 }
 
+function elapsedMinutes(startedAt: string | null | undefined): number {
+  if (!startedAt) return 0;
+  return Math.max(0, Math.round((Date.now() - new Date(startedAt).getTime()) / 60000));
+}
+
 export async function registerMonitorRoutes(app: FastifyInstance) {
   app.get('/api/monitor/sessions', { preHandler: authMiddleware }, async (request) => {
     const workspaces = getWorkspaceFilter(request);
 
     const [
-      { data: runningJobs },
+      { data: activeJobs },
       { data: nextScheduled },
       { data: inactivePlatforms },
       { data: failedJobs },
@@ -33,9 +39,9 @@ export async function registerMonitorRoutes(app: FastifyInstance) {
         .from('huma_jobs')
         .select('id, title, job_type, workspace, platform, status, content, started_at, account_id, huma_accounts(name, wpm)')
         .in('workspace', workspaces)
-        .eq('status', 'running')
+        .in('status', ['running', 'awaiting_captcha'])
         .order('started_at', { ascending: false })
-        .limit(4),
+        .limit(6),
       supabase
         .from('huma_jobs')
         .select('id, title, job_type, workspace, platform, scheduled_at, huma_accounts(name)')
@@ -62,19 +68,45 @@ export async function registerMonitorRoutes(app: FastifyInstance) {
         .limit(3),
     ]);
 
-    const live = (runningJobs ?? []).map((job) => {
-      const acct = job.huma_accounts as { name?: string; wpm?: number } | null;
-      const wpm = acct?.wpm ?? 52;
-      const progress = estimateProgress(job.content, wpm, job.started_at);
-      return {
-        jobId: job.id,
-        account: acct?.name ?? '계정',
-        platform: job.platform ?? job.workspace ?? 'naver',
-        workspace: job.workspace,
-        title: job.title ?? job.job_type,
-        ...progress,
-      };
-    });
+    const live = await Promise.all(
+      (activeJobs ?? []).map(async (job) => {
+        const acct = job.huma_accounts as { name?: string; wpm?: number } | null;
+        const base = {
+          jobId: job.id,
+          account: acct?.name ?? '계정',
+          platform: job.platform ?? job.workspace ?? 'naver',
+          workspace: job.workspace,
+          title: job.title ?? job.job_type,
+          jobType: job.job_type,
+          jobStatus: job.status,
+          elapsedMin: elapsedMinutes(job.started_at),
+        };
+
+        if (job.job_type === 'social_crank') {
+          const progress = await getCrankSessionProgress(job.id);
+          const phase =
+            job.status === 'awaiting_captcha'
+              ? 'CAPTCHA 대기'
+              : (progress?.phase ?? '진행 중');
+          const detail = progress?.detail;
+          return {
+            ...base,
+            kind: 'crank' as const,
+            crankPhase: phase,
+            crankDetail: detail,
+            preview: detail ? `${phase} — ${detail}` : phase,
+          };
+        }
+
+        const wpm = acct?.wpm ?? 52;
+        const posting = estimatePostingProgress(job.content, wpm, job.started_at);
+        return {
+          ...base,
+          kind: 'posting' as const,
+          ...posting,
+        };
+      }),
+    );
 
     const idle = nextScheduled
       ? {

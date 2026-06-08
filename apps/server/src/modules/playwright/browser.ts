@@ -1,6 +1,6 @@
 import { chromium } from 'playwright-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import type { BrowserContext } from 'playwright';
+import type { BrowserContext, Page } from 'playwright';
 import { existsSync, mkdirSync, renameSync, rmSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import {
@@ -119,6 +119,9 @@ function isBrowserLaunchCorruptionError(err: unknown): boolean {
     msg.includes('elf_dynamic_array_reader')
   );
 }
+
+/** Playwright 기본 --enable-automation → Chrome 자동화 배너·탐지 신호 */
+const IGNORE_AUTOMATION_ARGS = ['--enable-automation'] as const;
 
 function baseLaunchArgs(fp: AccountFingerprint) {
   const args = [
@@ -262,6 +265,7 @@ function persistentLaunchOptions(
 
   return {
     headless,
+    ignoreDefaultArgs: [...IGNORE_AUTOMATION_ARGS],
     args: [...baseLaunchArgs(fp), ...proxyArgs],
     userAgent: fp.userAgent,
     viewport: { width: fp.screenWidth, height: fp.screenHeight },
@@ -291,6 +295,7 @@ export async function createBrowserForAccount(account: BrowserAccountContext) {
     launchOpts,
     account.id,
   );
+  await prepareCleanBrowserTabs(context);
   context.setDefaultNavigationTimeout(PLAYWRIGHT_NAV_TIMEOUT_MS);
   context.setDefaultTimeout(PLAYWRIGHT_NAV_TIMEOUT_MS);
   await injectFingerprint(context, fp, cfg);
@@ -303,6 +308,24 @@ export async function createBrowserForAccount(account: BrowserAccountContext) {
   });
 
   return { context };
+}
+
+/** 기동 시 about:blank·복원 탭 제거 — 이후 newPage()가 단일 네이버 탭만 열리게 */
+export async function prepareCleanBrowserTabs(context: BrowserContext): Promise<void> {
+  for (const page of [...context.pages()]) {
+    await page.close().catch(() => {});
+  }
+}
+
+/** 워크플로우용 탭 1개 — 불필요한 about:blank 중복 탭 방지 */
+export async function acquireWorkflowPage(context: BrowserContext): Promise<Page> {
+  const pages = context.pages();
+  if (pages.length === 0) return context.newPage();
+  const reusable = pages.find((p) => {
+    const url = p.url();
+    return url === 'about:blank' || url === 'chrome://newtab/' || url === '';
+  });
+  return reusable ?? context.newPage();
 }
 
 export async function closeBrowserContext(context: BrowserContext) {
@@ -323,6 +346,7 @@ export async function createBrowser(proxyPort?: number) {
   const headless = process.env.PLAYWRIGHT_HEADLESS === 'true' ? true : resolveHeadless();
   const browser = await chromium.launch({
     headless,
+    ignoreDefaultArgs: [...IGNORE_AUTOMATION_ARGS],
     env: buildBrowserEnv(headless, false),
     args: [
       '--no-sandbox',

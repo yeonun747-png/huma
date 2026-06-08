@@ -19,7 +19,7 @@ export async function getTodayPlan(account: {
   if (d < 30) return { blogVisits: 10, likes: 7, comments: 2 };
 
   if (!process.env.ANTHROPIC_API_KEY) {
-    return { blogVisits: 12, likes: 8, comments: 2 };
+    return { blogVisits: 8, likes: 6, comments: 2 };
   }
 
   try {
@@ -30,17 +30,17 @@ export async function getTodayPlan(account: {
 활동계획JSON:{"blogVisits":1~15,"likes":숫자,"comments":숫자}
 JSON만:`,
     });
-    if (!raw) return { blogVisits: 12, likes: 8, comments: 2 };
+    if (!raw) return { blogVisits: 8, likes: 6, comments: 2 };
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     return JSON.parse(jsonMatch?.[0] ?? raw) as WarmupPlan;
   } catch {
-    return { blogVisits: 12, likes: 8, comments: 2 };
+    return { blogVisits: 8, likes: 6, comments: 2 };
   }
 }
 
 export function maxCrankVisitsForWarmup(warmupDay: number): number {
   if (warmupDay < 7) return 2;
-  return 15;
+  return 10;
 }
 
 export function getCrankDailyLimit(warmupDay: number): number {

@@ -137,7 +137,7 @@ export function CrankJobDetailModal({ job, onClose, onDelete }: CrankJobDetailMo
     (loading ? '불러오는 중…' : '미확인');
   const accountName = crankJobAccountLabel(job.title) ?? 'C-Rank 계정';
   const crankLabel = session?.crank_label;
-  const sessionMin = payload.sessionMinutes ?? 60;
+  const sessionMin = payload.sessionMinutes ?? 45;
   const ourTargets = session?.our_blog_targets ?? [];
   const isScheduledAuto = payload.scheduledCrank === true;
   const isLive = job.status === 'running';

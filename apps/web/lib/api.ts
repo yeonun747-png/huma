@@ -366,19 +366,39 @@ export const api = {
     }>(`/api/dashboard/stats${qs({ period: params?.period })}`),
   monitorSessions: () =>
     request<{
-      live: Array<{
-        jobId: string;
-        account: string;
-        platform: string;
-        workspace: string;
-        title: string;
-        chars: number;
-        totalChars: number;
-        wpm: number;
-        typos: number;
-        eta: string;
-        preview: string;
-      }>;
+      live: Array<
+        | {
+            kind: 'posting';
+            jobId: string;
+            account: string;
+            platform: string;
+            workspace: string;
+            title: string;
+            jobType: string;
+            jobStatus: string;
+            elapsedMin: number;
+            chars: number;
+            totalChars: number;
+            wpm: number;
+            typos: number;
+            eta: string;
+            preview: string;
+          }
+        | {
+            kind: 'crank';
+            jobId: string;
+            account: string;
+            platform: string;
+            workspace: string;
+            title: string;
+            jobType: string;
+            jobStatus: string;
+            elapsedMin: number;
+            crankPhase: string;
+            crankDetail?: string;
+            preview: string;
+          }
+      >;
       idle: {
         jobId: string;
         account: string;

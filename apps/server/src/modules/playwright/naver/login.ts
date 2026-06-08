@@ -10,6 +10,7 @@ import { humanClickLocator } from '../../human-engine/mouse.js';
 import { randomBetween, sleep } from '../../../lib/utils.js';
 import { shadowWalk } from '../shadow-walk.js';
 import { hasStoredSession } from '../account-loader.js';
+import { acquireWorkflowPage } from '../browser.js';
 
 const NAVER_LOGIN_URL = 'https://nid.naver.com/nidlogin.login';
 const NAV_TIMEOUT_MS = 60_000;
@@ -69,7 +70,7 @@ export async function naverLogin(
   const profilePath = options?.profilePath ?? account.profile_path;
   const hasSession = profilePath ? hasStoredSession(profilePath) : false;
 
-  const page = await context.newPage();
+  const page = await acquireWorkflowPage(context);
 
   try {
     if (!hasSession && !options?.skipShadowWalk) {

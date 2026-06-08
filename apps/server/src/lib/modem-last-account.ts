@@ -9,7 +9,7 @@ import { sleep } from './utils.js';
 // IP 소유권 기록 — 만료되면 "소유 불명"이 되어 다른 계정이 같은 IP를 재사용할 수 있으므로
 // 활동 주기(2~3일)보다 충분히 길게 유지한다.
 const LAST_ACCOUNT_TTL_SEC = 7 * 86400;
-const RECONNECT_ATTEMPTS = 4;
+const RECONNECT_ATTEMPTS = 5;
 
 function lastAccountKey(port: number): string {
   return `modem_last_account:${port}`;
@@ -97,7 +97,7 @@ export async function reconnectModemIfAccountSwitched(
       publicIpUnchanged = true;
       lastErr = new Error(`공인 IP 동일 (${fetched})`);
       if (attempt < RECONNECT_ATTEMPTS) {
-        await sleep(8000);
+        await sleep(12_000 + attempt * 3000);
       }
     } catch (err) {
       lastErr = err as Error;
@@ -109,7 +109,7 @@ export async function reconnectModemIfAccountSwitched(
 
   if (!newPublicIp) {
     const message = publicIpUnchanged
-      ? `C-Rank 계정 전환 — 공인 IP 동일(${oldPublicIp}) 재할당, 세션 중단 (다른 계정 연속 사용 방지)`
+      ? `C-Rank 계정 전환 — 공인 IP 동일(${oldPublicIp}) ${RECONNECT_ATTEMPTS}회 재시도 후 중단 (AT+CFUN·link disconnect 확인, /etc/huma/dongle-at-ports.conf)`
       : `C-Rank 계정 전환 — IP 교체 실패(${RECONNECT_ATTEMPTS}회), 세션 중단: ${lastErr?.message ?? 'unknown'}`;
     await logOperation({
       level: 'ERROR',
