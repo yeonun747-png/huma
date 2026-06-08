@@ -1,4 +1,4 @@
-import type { Page } from 'playwright';
+import type { BrowserContext, Page } from 'playwright';
 import type { Workspace } from '@huma/shared';
 import { crankWorkspaceFromLabel } from '@huma/shared';
 import { supabase } from '../../../middleware/auth.js';
@@ -14,7 +14,13 @@ import { randomBetween, shuffleArray } from '../../../lib/utils.js';
 import { getTodayPlan, maxCrankVisitsForWarmup } from '../warmup.js';
 import type { AccountPersona } from '../persona.js';
 import { acquireModem, releaseModem, type ModemSession } from '../../proxy/manager.js';
-import { handleLayer4Detection, isCaptchaError, isBlockError } from '../../watcher/detector.js';
+import { handleLayer4Detection } from '../../watcher/detector.js';
+import {
+  CAPTCHA_AWAITING_HUMAN,
+  isCrankCaptchaHoldSignal,
+  isCrankHumanHoldError,
+  tryEnterCrankCaptchaHold,
+} from '../../../lib/crank-captcha-hold.js';
 import { generateCrankComment } from './crank-comment.js';
 import { preSessionWarmup } from './pre-session-warmup.js';
 import { selectCrankKeywordsForWorkspace } from './crank-keywords.js';
@@ -125,6 +131,9 @@ function buildBlogTargets(
 export interface RunSocialCrankOptions {
   modemSession?: ModemSession;
   skipModemAcquire?: boolean;
+  /** 큐 job — CAPTCHA·인증 시 VNC hold (포스팅과 동일) */
+  humaJobId?: string;
+  releaseAccountLock?: () => void;
 }
 
 export async function runSocialCrank(
@@ -136,6 +145,8 @@ export async function runSocialCrank(
 
   let modemSession: ModemSession | undefined = options?.modemSession;
   const ownsModem = !options?.skipModemAcquire;
+  let heldForCaptcha = false;
+  let context: BrowserContext | undefined;
 
   try {
     if (!modemSession && ownsModem) {
@@ -177,7 +188,7 @@ export async function runSocialCrank(
       scale = rttScale(rtt);
     }
 
-    const { context } = await createBrowserForAccount(accountCtx);
+    context = (await createBrowserForAccount(accountCtx)).context;
 
     try {
       const warmupPage = await context.newPage();
@@ -261,16 +272,34 @@ export async function runSocialCrank(
 
       await updateVisitHistory(accountId, visitedUrls);
       await updateCrankCount(accountId, allTargets.length);
+    } catch (innerErr) {
+      if (
+        context &&
+        (await tryEnterCrankCaptchaHold({
+          err: innerErr,
+          humaJobId: options?.humaJobId,
+          accountId,
+          workspace: crankWorkspace,
+          context,
+          modemSession,
+          releaseAccountLock: options?.releaseAccountLock,
+        }))
+      ) {
+        heldForCaptcha = true;
+        throw new Error(CAPTCHA_AWAITING_HUMAN);
+      }
+      throw innerErr;
     } finally {
-      await closeBrowserContext(context);
+      if (!heldForCaptcha && context) await closeBrowserContext(context);
     }
   } catch (err) {
-    if (isCaptchaError(err) || isBlockError(err)) {
+    if (isCrankCaptchaHoldSignal(err)) throw err;
+    if (isCrankHumanHoldError(err) && !options?.humaJobId) {
       await handleLayer4Detection(accountId, err, modemSession);
     }
     throw err;
   } finally {
-    if (ownsModem && modemSession) await releaseModem(modemSession);
+    if (!heldForCaptcha && ownsModem && modemSession) await releaseModem(modemSession);
   }
 }
 

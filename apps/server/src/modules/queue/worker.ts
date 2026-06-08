@@ -39,6 +39,7 @@ import { isSlimDataCapError, scheduleSlimCapRetry } from '../../lib/slim-retry.j
 import { assertCafeNewPostAccount, assertCafeReplyAccount } from '../../lib/cafe-accounts.js';
 import { assertAccountRunnable } from '../../lib/account-guards.js';
 import { getSystemPaused } from '../../lib/system-pause.js';
+import { isCrankCaptchaHoldSignal } from '../../lib/crank-captcha-hold.js';
 import {
   CRANK_MODEM_DEFER_MS,
   CRANK_NIGHT_DEFER_MS,
@@ -356,17 +357,31 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
             preferredProxyPort?: number;
           };
           await markRunning();
+          const crankHoldOpts =
+            humaJobId && accountId
+              ? {
+                  humaJobId,
+                  releaseAccountLock: () => releaseAccount(accountId),
+                }
+              : undefined;
+
           if (crankPayload.scheduledCrank) {
-            await executeScheduledSocialCrank(accountId!, {
-              ourBlogUrls: crankPayload.ourBlogUrls ?? [],
-              scheduledCrank: true,
-              crankTrack: crankPayload.crankTrack,
-              preferredProxyPort: crankPayload.preferredProxyPort,
-            });
+            await executeScheduledSocialCrank(
+              accountId!,
+              {
+                ourBlogUrls: crankPayload.ourBlogUrls ?? [],
+                scheduledCrank: true,
+                crankTrack: crankPayload.crankTrack,
+                preferredProxyPort: crankPayload.preferredProxyPort,
+              },
+              crankHoldOpts,
+            );
           } else {
-            await executeSocialCrank(accountId!, {
-              ourBlogUrls: crankPayload.ourBlogUrls ?? [],
-            });
+            await executeSocialCrank(
+              accountId!,
+              { ourBlogUrls: crankPayload.ourBlogUrls ?? [] },
+              crankHoldOpts,
+            );
           }
         } else if (
           [
@@ -399,6 +414,10 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
 
         await logOperation({ level: 'info', message: `작업 완료: ${type}`, job_id: humaJobId, account_id: accountId });
       } catch (err) {
+        if (type === 'social_crank' && isCrankCaptchaHoldSignal(err)) {
+          skipReleaseAccount = true;
+          return;
+        }
         if (humaJobId && isSlimDataCapError(err)) {
           await scheduleSlimCapRetry(humaJobId, job.data as Record<string, unknown>);
           await logOperation({

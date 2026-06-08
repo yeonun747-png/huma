@@ -202,7 +202,15 @@ export async function notifyCaptchaTelegram(
   ];
 
   if (!params.completed && !params.timedOut) {
-    lines.push('', '1) VNC 접속 → 캡cha 풀기 → 발행', '2) huma 큐 → 발행 완료 (URL 선택)');
+    if (params.jobType === 'social_crank') {
+      lines.push(
+        '',
+        '1) VNC 접속 → 캡cha·2FA·기기인증 등 해결',
+        '2) huma 큐 → 발행 완료 (C-Rank 세션 종료 확인)',
+      );
+    } else {
+      lines.push('', '1) VNC 접속 → 캡cha 풀기 → 발행', '2) huma 큐 → 발행 완료 (URL 선택)');
+    }
   }
 
   if (webUrl) {

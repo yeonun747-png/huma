@@ -5,6 +5,7 @@ import { logOperation } from '../../lib/log-emitter.js';
 import { closeBrowserContext } from '../playwright/browser.js';
 import type { ModemSession } from '../proxy/manager.js';
 import { releaseModem } from '../proxy/manager.js';
+import { recordCrankSessionOnModem } from '../../lib/crank-modems.js';
 import { notifyCaptchaTelegram, resolveVncUrl, buildJobWebUrl } from './telegram.js';
 
 const HOLD_MS = 30 * 60 * 1000;
@@ -168,7 +169,9 @@ export async function enterCaptchaHold(
     level: isDrill ? 'info' : 'warn',
     message: isDrill
       ? 'CAPTCHA DRILL — 5분 · VNC 확인 후 huma 발행 완료'
-      : 'CAPTCHA — 30분 세션 유지 · VNC 해결 후 huma 발행 완료',
+      : input.jobType === 'social_crank'
+        ? 'C-Rank CAPTCHA — 30분 세션 유지 · VNC 해결 후 huma 발행 완료'
+        : 'CAPTCHA — 30분 세션 유지 · VNC 해결 후 huma 발행 완료',
     job_id: input.jobId,
     account_id: input.accountId,
   });
@@ -218,6 +221,14 @@ export async function completeCaptchaHold(
   entry.releaseAccountLock();
 
   await completeJobRecord(jobId, resultUrl);
+
+  if (entry.jobType === 'social_crank') {
+    const now = new Date().toISOString();
+    await supabase.from('huma_accounts').update({ last_crank_at: now }).eq('id', entry.accountId);
+    if (entry.modemSession) {
+      await recordCrankSessionOnModem(entry.modemSession.proxyPort).catch(() => {});
+    }
+  }
 
   await notifyCaptchaTelegram({
     jobId,
