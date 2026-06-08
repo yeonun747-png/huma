@@ -4,6 +4,7 @@ import { getSetting } from '../lib/settings.js';
 import {
   buildChartBuckets,
   formatKstHm,
+  formatKstYmdHm,
   getPeriodRange,
   parseDashboardPeriod,
 } from '../lib/dashboard-period.js';
@@ -63,7 +64,7 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
         .from('huma_jobs')
         .select('scheduled_at')
         .in('workspace', workspaces)
-        .eq('status', 'scheduled')
+        .in('status', ['pending', 'scheduled'])
         .not('scheduled_at', 'is', null)
         .order('scheduled_at', { ascending: true })
         .limit(1)
@@ -222,14 +223,17 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
         todayPublish: periodCompleted ?? 0,
         todayPublishSub: periodSub,
         queuePending: (pendingJobs ?? 0) + (scheduledJobs ?? 0),
-        queueSub: formatKstHm(nextScheduled?.scheduled_at) ? `다음 ${formatKstHm(nextScheduled?.scheduled_at)}` : '스케줄 없음',
+        queueSub: formatKstYmdHm(nextScheduled?.scheduled_at)
+          ? `다음 ${formatKstYmdHm(nextScheduled?.scheduled_at)}`
+          : '스케줄 없음',
         errors: periodErrors ?? 0,
         errorsSub: period === 'today' ? `Layer4·오류 ${periodErrors ?? 0}` : `${period === 'week' ? '주간' : '월간'} 오류 ${periodErrors ?? 0}`,
         activeAccounts: activeAccounts ?? 0,
         totalAccounts: totalAccounts ?? 0,
         accountSub: errorAccountName ? `⚠ ${errorAccountName} 세션오류 →` : `${activeAccounts ?? 0}개 활성`,
       },
-      nextPublish: formatKstHm(nextScheduled?.scheduled_at),
+      nextPublish: formatKstYmdHm(nextScheduled?.scheduled_at),
+      nextPublishAt: nextScheduled?.scheduled_at ?? null,
       serviceStatus,
       workspacePosts,
       roasItems,

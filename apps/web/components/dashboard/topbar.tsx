@@ -7,8 +7,13 @@ import { getPageMeta } from '@/lib/page-config';
 import { useWorkspace } from './workspace-context';
 import { api } from '@/lib/api';
 import { useDashboardPeriod } from './dashboard-period-context';
-import { TOPBAR_NEXT_PUBLISH, TOPBAR_NOTIFICATIONS } from '@/lib/topbar-mock-data';
-import { formatKstClock, formatLogKstTime } from '@/lib/format-kst';
+import {
+  formatKstYmdHm,
+  formatLogKstTime,
+  parseQueueKstParts,
+  weekdayColorClass,
+  type QueueKstParts,
+} from '@/lib/format-kst';
 
 type NotifItem = { type: 'err' | 'warn'; title: string; sub: string };
 
@@ -20,38 +25,50 @@ export function Topbar({ title }: { title: string }) {
   const breadcrumb = `HUMA › ${unitLabel} › ${title}`;
   const { period, setPeriod } = useDashboardPeriod();
   const [notifOpen, setNotifOpen] = useState(false);
-  const [clock, setClock] = useState('');
+  const [clockParts, setClockParts] = useState<QueueKstParts | null>(null);
   const [systemPaused, setSystemPaused] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
-  const [nextPublish, setNextPublish] = useState(TOPBAR_NEXT_PUBLISH);
-  const [notifications, setNotifications] = useState<NotifItem[]>(TOPBAR_NOTIFICATIONS);
+  const [nextPublish, setNextPublish] = useState('스케줄 없음');
+  const [notifications, setNotifications] = useState<NotifItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notifDismissed, setNotifDismissed] = useState(false);
 
   const loadMeta = useCallback(() => {
     void api.dashboardStats({ period: 'today' }).then((s) => {
-      if (s.nextPublish) setNextPublish(s.nextPublish);
+      if (s.nextPublishAt) {
+        setNextPublish(formatKstYmdHm(s.nextPublishAt));
+      } else if (s.nextPublish) {
+        setNextPublish(s.nextPublish);
+      } else {
+        setNextPublish('스케줄 없음');
+      }
     }).catch(() => {});
 
     void api.logs({ level: 'ERROR', limit: '8' }).then((logs) => {
-      if (!logs.length) return;
-      setNotifications(
-        logs.slice(0, 5).map((log) => {
-          const ws = String(log.workspace ?? 'HUMA');
-          const time = formatLogKstTime(String(log.created_at ?? ''));
-          const msg = String(log.message ?? '오류');
-          const isLayer4 = msg.includes('Layer4') || msg.includes('캡차');
-          return {
-            type: isLayer4 ? ('warn' as const) : ('err' as const),
-            title: msg.slice(0, 60),
-            sub: `${ws} · ${time}`,
-          };
-        }),
-      );
+      if (!logs.length) {
+        setNotifications([]);
+        setUnreadCount(0);
+        return;
+      }
+      const items = logs.slice(0, 5).map((log) => {
+        const ws = String(log.workspace ?? 'HUMA');
+        const time = formatLogKstTime(String(log.created_at ?? ''));
+        const msg = String(log.message ?? '오류');
+        const isLayer4 = msg.includes('Layer4') || msg.includes('캡차');
+        return {
+          type: isLayer4 ? ('warn' as const) : ('err' as const),
+          title: msg.slice(0, 60),
+          sub: `${ws} · ${time}`,
+        };
+      });
+      setNotifications(items);
+      if (!notifDismissed) setUnreadCount(items.length);
     }).catch(() => {});
-  }, []);
+  }, [notifDismissed]);
 
   useEffect(() => {
     const tick = () => {
-      setClock(formatKstClock());
+      setClockParts(parseQueueKstParts(new Date().toISOString()));
     };
     tick();
     const id = setInterval(tick, 1000);
@@ -62,11 +79,20 @@ export function Topbar({ title }: { title: string }) {
     api.status({ workspace: businessUnit }).then((s) => {
       setSystemPaused(Boolean(s.paused));
       setPendingCount(s.pendingJobs ?? 0);
+      if (s.nextScheduled) {
+        setNextPublish(formatKstYmdHm(s.nextScheduled));
+      }
     }).catch(() => {});
     loadMeta();
     const id = setInterval(loadMeta, 60_000);
     return () => clearInterval(id);
   }, [businessUnit, loadMeta]);
+
+  const markAllRead = () => {
+    setNotifDismissed(true);
+    setUnreadCount(0);
+    setNotifOpen(false);
+  };
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 border-b border-huma-bdr bg-huma-bg2 px-[18px] transition-all duration-300">
@@ -77,10 +103,20 @@ export function Topbar({ title }: { title: string }) {
 
       <div className="ml-auto flex items-center gap-2">
         <div className="hidden shrink-0 items-center gap-1.5 rounded-md border border-huma-bdr2 bg-huma-bg3 px-2.5 py-1 font-mono sm:flex">
-          <span className="text-[12px] font-semibold text-huma-t2">{clock}</span>
+          <span className="text-[11px] font-semibold text-huma-t2">
+            {clockParts ? (
+              <>
+                {clockParts.date}
+                <span className={weekdayColorClass(clockParts.weekday)}>({clockParts.weekday})</span>{' '}
+                {clockParts.time}
+              </>
+            ) : (
+              '—'
+            )}
+          </span>
           <span className="text-[10px] text-huma-t4">│</span>
           <span className="text-[10px] text-huma-t3">다음발행</span>
-          <span className="text-[12px] font-bold text-huma-acc">{nextPublish}</span>
+          <span className="text-[11px] font-bold text-huma-acc">{nextPublish}</span>
         </div>
 
         {meta.showPeriod && (
@@ -108,9 +144,9 @@ export function Topbar({ title }: { title: string }) {
           >
             🔔
           </button>
-          {notifications.length > 0 && (
+          {unreadCount > 0 && (
             <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-huma-err font-mono text-[9.5px] font-bold text-white">
-              {notifications.length}
+              {unreadCount}
             </span>
           )}
           {notifOpen && (
@@ -120,7 +156,7 @@ export function Topbar({ title }: { title: string }) {
                 <button
                   type="button"
                   className="text-[11.5px] text-huma-t3 hover:text-huma-acc"
-                  onClick={() => setNotifOpen(false)}
+                  onClick={markAllRead}
                 >
                   모두 읽음
                 </button>
@@ -148,10 +184,13 @@ export function Topbar({ title }: { title: string }) {
             className="btn-ghost"
             onClick={() => {
               const ok = window.confirm(
-                `대기 중이던 큐 ${pendingCount}건은 그대로 유지됩니다.\n다음 스케줄부터 자동 재개됩니다.\n재시작하시겠습니까?`,
+                `대기 중이던 큐 ${pendingCount}건은 그대로 유지됩니다.\n당일 C-Rank 큐가 없으면 자동 보정됩니다.\n재시작하시겠습니까?`,
               );
               if (!ok) return;
-              api.resumeAll().then(() => setSystemPaused(false));
+              api.resumeAll().then(() => {
+                setSystemPaused(false);
+                loadMeta();
+              });
             }}
           >
             ▶ 재시작

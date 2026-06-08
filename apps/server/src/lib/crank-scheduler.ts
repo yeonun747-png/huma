@@ -28,6 +28,7 @@ const DAILY_JOB_TITLE_PREFIX = 'C-Rank 스케줄';
 
 let lastDailyRunKey = '';
 let lastMonthlyResetKey = '';
+let lastBackoffEnsureKey = '';
 
 async function countActiveCrankPoolSize(): Promise<number> {
   const { count } = await supabase
@@ -90,7 +91,8 @@ async function hasDailyScheduleJobs(dateKey: string): Promise<boolean> {
     .from('huma_jobs')
     .select('id', { count: 'exact', head: true })
     .eq('job_type', 'social_crank')
-    .like('title', `${DAILY_JOB_TITLE_PREFIX} ${dateKey}%`);
+    .like('title', `${DAILY_JOB_TITLE_PREFIX} ${dateKey}%`)
+    .in('status', ['scheduled', 'pending', 'running', 'paused']);
 
   return (count ?? 0) > 0;
 }
@@ -311,6 +313,17 @@ function tickCrankSchedulerClock() {
       lastDailyRunKey = dailyKey;
       runDailyCrankScheduler().catch((err) =>
         console.error('[crank-scheduler] daily:', err),
+      );
+    }
+  }
+
+  // 동글 복구·중지 해제 후 당일 큐 재시도 (매시 :00·:30 KST, 1회)
+  if (minute === 0 || minute === 30) {
+    const backoffKey = `${formatKstDateKey()}-${hour}:${minute}`;
+    if (lastBackoffEnsureKey !== backoffKey) {
+      lastBackoffEnsureKey = backoffKey;
+      ensureTodayCrankQueue().catch((err) =>
+        console.error('[crank-scheduler] backoff ensure:', err),
       );
     }
   }

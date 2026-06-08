@@ -11,7 +11,7 @@ import { useRegisterPageAction } from '@/components/dashboard/page-action-contex
 import { PostViewerModal } from '@/components/viewer/post-viewer-modal';
 import { CrankJobDetailModal } from './crank-job-detail-modal';
 import { parseSocialCrankJobContent } from '@/lib/crank-job-payload';
-import { parseQueueKstParts, isSchedulePast, isSameKstDay } from '@/lib/format-kst';
+import { parseQueueKstParts, isSchedulePast, isSameKstDay, weekdayColorClass } from '@/lib/format-kst';
 import { QueueAutoContentModal, type AutoContentFormValues } from './queue-auto-content-modal';
 import { buildScheduledAt } from '@/lib/queue-repeat';
 import { formatJobErrorLabel } from '@/lib/job-error-label';
@@ -41,12 +41,6 @@ function jobIcon(type: string) {
   if (type.includes('video')) return '🎬';
   if (type.includes('image') || type.includes('social')) return '📸';
   return '📝';
-}
-
-function weekdayColorClass(weekday: string): string {
-  if (weekday === '일') return 'm-queue-wd-sun';
-  if (weekday === '토') return 'm-queue-wd-sat';
-  return 'm-queue-wd-mid';
 }
 
 function QueueDatetimeLabel({ iso, suffix }: { iso: string; suffix?: string }) {

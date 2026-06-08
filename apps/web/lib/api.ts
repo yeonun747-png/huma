@@ -333,6 +333,7 @@ export const api = {
       period?: 'today' | 'week' | 'month';
       chartLabel?: string;
       nextPublish?: string | null;
+      nextPublishAt?: string | null;
       integrated: {
         todayPublish: number;
         todayPublishSub: string;

@@ -93,3 +93,37 @@ export function formatKstHm(iso: string | null | undefined): string | null {
     return null;
   }
 }
+
+/** KST YYYY-MM-DD HH:mm:ss */
+export function formatKstYmdHms(from: Date = new Date()): string {
+  return new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(from);
+}
+
+/** KST YYYY-MM-DD HH:mm */
+export function formatKstYmdHm(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  try {
+    const full = new Intl.DateTimeFormat('sv-SE', {
+      timeZone: 'Asia/Seoul',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(new Date(iso));
+    return full.slice(0, 16);
+  } catch {
+    return null;
+  }
+}

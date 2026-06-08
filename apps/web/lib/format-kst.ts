@@ -106,6 +106,13 @@ export function formatLogKst(iso: string | null | undefined): string {
   }
 }
 
+/** 큐 카드 · 헤더 시계 — 요일 색 (globals.css m-queue-wd-*) */
+export function weekdayColorClass(weekday: string): string {
+  if (weekday === '일') return 'm-queue-wd-sun';
+  if (weekday === '토') return 'm-queue-wd-sat';
+  return 'm-queue-wd-mid';
+}
+
 /** 큐 카드 태그 — KST YYYY-MM-DD(요일) HH:mm:ss */
 export type QueueKstParts = { date: string; weekday: string; time: string; full: string };
 
@@ -139,10 +146,24 @@ export function formatLogKstTime(iso: string | null | undefined): string {
   return space >= 0 ? full.slice(space + 1) : full;
 }
 
-/** 헤더 실시간 시계 HH:mm:ss (KST) */
+/** 헤더 실시간 시계 HH:mm:ss (KST) — @deprecated formatKstYmdHms 사용 */
 export function formatKstClock(from: Date = new Date()): string {
   const parts = kstParts(from, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
   return `${pick(parts, 'hour')}:${pick(parts, 'minute')}:${pick(parts, 'second')}`;
+}
+
+/** 헤더 실시간 시계 — KST YYYY-MM-DD HH:mm:ss */
+export function formatKstYmdHms(from: Date = new Date()): string {
+  const dateParts = kstParts(from, { year: 'numeric', month: '2-digit', day: '2-digit' });
+  const timeParts = kstParts(from, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  return `${pick(dateParts, 'year')}-${pick(dateParts, 'month')}-${pick(dateParts, 'day')} ${pick(timeParts, 'hour')}:${pick(timeParts, 'minute')}:${pick(timeParts, 'second')}`;
+}
+
+/** 다음 발행 등 — KST YYYY-MM-DD HH:mm */
+export function formatKstYmdHm(iso: string | null | undefined): string {
+  const full = formatLogKst(iso);
+  if (full === '—') return '스케줄 없음';
+  return full.slice(0, 16);
 }
 
 export function formatKstHm(iso: string | null | undefined): string {
