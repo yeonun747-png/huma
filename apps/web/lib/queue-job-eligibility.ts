@@ -2,10 +2,11 @@ import type { HumaJob } from '@huma/shared';
 import { isCaptchaDrillJob } from '@huma/shared';
 import { isSchedulePast } from '@/lib/format-kst';
 
-/** LIVE·캡cha 대기 제외 — DRILL은 LIVE/CAPTCHA 포함 삭제 가능 */
+/** LIVE 제외 — CAPTCHA·DRILL은 VNC 세션 종료 후 삭제 가능 */
 export function isDeletableQueueJob(job: HumaJob): boolean {
   if (isCaptchaDrillJob(job)) return true;
-  return job.status !== 'running' && job.status !== 'awaiting_captcha';
+  if (job.status === 'awaiting_captcha') return true;
+  return job.status !== 'running';
 }
 
 /** 예약일 지난 실패, 또는 예약일 지난 미실행(지연) */

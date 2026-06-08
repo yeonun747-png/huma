@@ -9,7 +9,7 @@ import {
   collectNaverSearchUrlsDetailed,
   integratedSearchUrl,
 } from '../../../lib/naver-search-links.js';
-import { PLAYWRIGHT_NAV_TIMEOUT_MS } from '../../../lib/playwright-nav-timeout.js';
+import { CRANK_NAV_TIMEOUT_MS, PLAYWRIGHT_NAV_TIMEOUT_MS } from '../../../lib/playwright-nav-timeout.js';
 import { throwWarmupFailure } from '../../../lib/warmup-failure.js';
 
 export type WarmupAccountType = 'posting' | 'crank';
@@ -27,11 +27,11 @@ async function warmupStayScroll(page: Page, durationMs: number): Promise<void> {
   await scrollWithReverse(page, durationMs, [300, 800], [2000, 5000], 0.2);
 }
 
-async function safeWarmupGoto(page: Page, url: string): Promise<boolean> {
+async function safeWarmupGoto(page: Page, url: string, timeoutMs: number): Promise<boolean> {
   try {
     await page.goto(url, {
       waitUntil: 'domcontentloaded',
-      timeout: PLAYWRIGHT_NAV_TIMEOUT_MS,
+      timeout: timeoutMs,
     });
     return true;
   } catch {
@@ -45,27 +45,30 @@ async function visitWarmupUrls(
   visitCount: number,
   stayMin: number,
   stayMax: number,
+  navTimeoutMs: number,
 ): Promise<void> {
   let visited = 0;
   for (const url of urls) {
     if (visited >= visitCount) break;
-    if (!(await safeWarmupGoto(page, url))) continue;
+    if (!(await safeWarmupGoto(page, url, navTimeoutMs))) continue;
     visited += 1;
     await humanSleep(stayMin, stayMax);
     await warmupStayScroll(page, randomBetween(4000, 12000));
-    await page.goBack({ waitUntil: 'domcontentloaded', timeout: PLAYWRIGHT_NAV_TIMEOUT_MS }).catch(
-      () => {},
-    );
+    await page.goBack({ waitUntil: 'domcontentloaded', timeout: navTimeoutMs }).catch(() => {});
     await humanSleep(2000, 4000);
   }
 }
 
 /** 검색 결과 페이지 로드 — 실패 시 navError 반환 */
-async function openSearchResults(page: Page, url: string): Promise<string | null> {
+async function openSearchResults(
+  page: Page,
+  url: string,
+  timeoutMs = PLAYWRIGHT_NAV_TIMEOUT_MS,
+): Promise<string | null> {
   try {
     const response = await page.goto(url, {
       waitUntil: 'domcontentloaded',
-      timeout: PLAYWRIGHT_NAV_TIMEOUT_MS,
+      timeout: timeoutMs,
     });
     if (response && response.status() >= 400) {
       return `HTTP ${response.status()}`;
@@ -95,37 +98,50 @@ export function selectWarmupKeyword(persona: AccountPersona): string {
   return pool[Math.floor(Math.random() * pool.length)] ?? '운세';
 }
 
+export type PreSessionWarmupOptions = {
+  /** 최근 성공 세션(48h) — 통합검색 1곳·짧은 체류, 블로그 워밍업 생략 */
+  express?: boolean;
+};
+
 export async function preSessionWarmup(
   page: Page,
   persona: AccountPersona,
   accountType: WarmupAccountType,
   _humanEngine?: HumanEngineConfig,
+  options?: PreSessionWarmupOptions,
 ): Promise<void> {
+  const navTimeout =
+    accountType === 'crank' ? CRANK_NAV_TIMEOUT_MS : PLAYWRIGHT_NAV_TIMEOUT_MS;
   const keyword = selectWarmupKeyword(persona);
-  const navError = await openSearchResults(page, integratedSearchUrl(keyword));
+  const navError = await openSearchResults(page, integratedSearchUrl(keyword), navTimeout);
 
+  const expressCrank = accountType === 'crank' && options?.express === true;
   const visitCount =
-    accountType === 'posting' ? randomBetween(1, 2) : randomBetween(1, 2);
-  const stayMin = accountType === 'posting' ? 15000 : 30000;
-  const stayMax = accountType === 'posting' ? 45000 : 90000;
+    accountType === 'posting'
+      ? randomBetween(1, 2)
+      : expressCrank
+        ? 1
+        : randomBetween(1, 2);
+  const stayMin = accountType === 'posting' ? 15000 : expressCrank ? 20000 : 30000;
+  const stayMax = accountType === 'posting' ? 45000 : expressCrank ? 45000 : 90000;
 
   const integrated = await collectNaverSearchUrlsDetailed(page, 'integrated', 6);
   if (navError || integrated.urls.length === 0) {
     await throwWarmupFailure(page, '네이버 검색 결과', integrated.diagnostics, navError);
   }
 
-  await visitWarmupUrls(page, integrated.urls, visitCount, stayMin, stayMax);
+  await visitWarmupUrls(page, integrated.urls, visitCount, stayMin, stayMax, navTimeout);
 
-  if (accountType === 'crank') {
+  if (accountType === 'crank' && !expressCrank) {
     const blogKeyword = selectWarmupKeyword(persona);
-    const blogNavError = await openSearchResults(page, blogSearchUrl(blogKeyword));
+    const blogNavError = await openSearchResults(page, blogSearchUrl(blogKeyword), navTimeout);
 
     const blog = await collectNaverSearchUrlsDetailed(page, 'blog', 3);
     if (blogNavError || blog.urls.length === 0) {
       await throwWarmupFailure(page, '네이버 블로그 검색', blog.diagnostics, blogNavError);
     }
 
-    if (!(await safeWarmupGoto(page, blog.urls[0]!))) {
+    if (!(await safeWarmupGoto(page, blog.urls[0]!, navTimeout))) {
       await throwWarmupFailure(page, '네이버 블로그 방문', blog.diagnostics, 'blog_visit_timeout');
     }
     await humanSleep(30000, 60000);

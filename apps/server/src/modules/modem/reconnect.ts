@@ -6,6 +6,7 @@ import { proxyPortToSlot } from '../../lib/modem-ports.js';
 import { readDongleInterfaceFromConf, isPlaceholderInterfaceName } from '../../lib/dongle-interfaces.js';
 import { readInterfaceIp } from '../../lib/dongle-health.js';
 import { fetchModemPublicGeo } from '../../lib/modem-geo.js';
+import { setCachedAtPort } from '../../lib/dongle-at-cache.js';
 import { resetLteModem } from '../../lib/modem-lte-reset.js';
 import { applyDonglePolicyRoute } from '../../lib/restore-dongle-network.js';
 
@@ -30,8 +31,16 @@ export interface ReconnectResult {
   slotNumber?: number;
 }
 
+export interface ReconnectBySlotOptions {
+  /** 1=빠른 AT, 2=AT하드, 3=link60+AT하드 */
+  attempt?: number;
+}
+
 /** v3.22 §7-13-1 — slot_number 기준 LTE 재연결 + 3proxy IP 갱신 */
-export async function reconnectModemBySlot(slotNumber: number): Promise<string> {
+export async function reconnectModemBySlot(
+  slotNumber: number,
+  options?: ReconnectBySlotOptions,
+): Promise<string> {
   const { data: modem } = await supabase
     .from('huma_modems')
     .select('*')
@@ -66,7 +75,9 @@ export async function reconnectModemBySlot(slotNumber: number): Promise<string> 
 
   try {
     if (process.platform !== 'win32') {
-      await resetLteModem(iface, modem.proxy_port);
+      const tier = Math.min(3, Math.max(1, options?.attempt ?? 1));
+      const resetResult = await resetLteModem(iface, modem.proxy_port, tier, slotNumber);
+      if (resetResult.atPort) await setCachedAtPort(slotNumber, resetResult.atPort);
     } else {
       await sleep(3000);
     }

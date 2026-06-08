@@ -2,7 +2,7 @@ import { CRANK_PROXY_PORTS } from './modem-ports.js';
 
 /** 레거시 기본값 — 실제 풀 크기는 DB 활성 crank 계정 수 */
 export const CRANK_POOL_SIZE_DEFAULT = 50;
-export const SESSION_DURATION_MINUTES = 60;
+export const SESSION_DURATION_MINUTES = 45;
 export const SESSION_DATA_MB = 7.5;
 export const MODEM_MONTHLY_DATA_CAP_MB = 2500;
 export const MAX_CRANK_SESSIONS_PER_MODEM_PER_DAY = 6;
@@ -11,7 +11,8 @@ export const SCHEDULE_WINDOW_END_HOUR = 22;
 export const START_JITTER_MINUTES = 15;
 
 /**
- * v3.33 — 동글 1트랙 연속 scheduled_at 간격 = 세션 60분.
+ * v3.33 — 동글 1트랙 연속 scheduled_at 간격 = 세션 최대 45분.
+ * 동글 busy면 worker가 defer — 간격은 목표 시각이며 실제 시작은 큐·모뎀 lock에 따름.
  * 계정 전환 시 reconnect+워밍업(2~5분)은 job 시작 시 자연 소요(규칙 ⑦).
  */
 export const SESSION_SLOT_MINUTES = SESSION_DURATION_MINUTES;
@@ -91,7 +92,7 @@ function clampScheduleMinute(
 /**
  * v3.33 — 08:00~22:00 KST
  * - 계정 i → track i%N, wave floor(i/N)
- * - 같은 트랙 wave 간격: 60분
+ * - 같은 트랙 wave 간격: 45분 (SESSION_DURATION_MINUTES)
  * - 병렬 트랙: track1 = track0 + 2~5분 (UI·큐에서 동일 시각 방지)
  * - 반환 순서 = accounts[i] 매핑 순서 (sort 금지)
  */

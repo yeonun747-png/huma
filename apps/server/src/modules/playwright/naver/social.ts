@@ -38,7 +38,7 @@ import {
 } from '../../../lib/modem-last-account.js';
 import { applyCrankResourceBlocking } from './crank-resource-block.js';
 import { logCrankActivity } from '../../../lib/crank-activity.js';
-import { PLAYWRIGHT_NAV_TIMEOUT_MS } from '../../../lib/playwright-nav-timeout.js';
+import { CRANK_NAV_TIMEOUT_MS } from '../../../lib/playwright-nav-timeout.js';
 import { blogSearchUrl, collectNaverSearchUrls } from '../../../lib/naver-search-links.js';
 
 interface SocialCrankConfig {
@@ -109,7 +109,7 @@ async function searchNaverBlogs(
   for (const keyword of keywords) {
     await page.goto(blogSearchUrl(keyword), {
       waitUntil: 'domcontentloaded',
-      timeout: PLAYWRIGHT_NAV_TIMEOUT_MS,
+      timeout: CRANK_NAV_TIMEOUT_MS,
     });
     await page.waitForLoadState('networkidle').catch(() => {});
     await scaledHumanSleep(2000, 4000, scale);
@@ -183,6 +183,16 @@ export async function runSocialCrank(
     const plan = await getTodayPlan(accountCtx);
     const persona = accountCtx.persona;
 
+    const { data: crankMeta } = await supabase
+      .from('huma_accounts')
+      .select('last_crank_at')
+      .eq('id', accountId)
+      .single();
+    const lastCrankAt = crankMeta?.last_crank_at as string | null | undefined;
+    const expressWarmup =
+      Boolean(lastCrankAt) &&
+      Date.now() - new Date(lastCrankAt!).getTime() < 48 * 3600 * 1000;
+
     const config = await getSetting<SocialCrankConfig>('social_crank', {
       visits_per_session: 10,
       our_blog_ratio: 0.25,
@@ -208,8 +218,12 @@ export async function runSocialCrank(
 
     try {
       const warmupPage = await acquireWorkflowPage(context);
-      await setCrankSessionProgress(jobId, '워밍업', '네이버 검색·체류');
-      await preSessionWarmup(warmupPage, persona, 'crank');
+      await setCrankSessionProgress(
+        jobId,
+        '워밍업',
+        expressWarmup ? '익스프레스(48h 이내 성공)' : '네이버 검색·체류',
+      );
+      await preSessionWarmup(warmupPage, persona, 'crank', undefined, { express: expressWarmup });
       await warmupPage.close();
       await applyCrankResourceBlocking(context);
 
@@ -254,7 +268,7 @@ export async function runSocialCrank(
         await setCrankSessionProgress(jobId, '블로그 방문', `${visitIdx + 1}/${allTargets.length}`);
         await page.goto(target.url, {
           waitUntil: 'domcontentloaded',
-          timeout: PLAYWRIGHT_NAV_TIMEOUT_MS,
+          timeout: CRANK_NAV_TIMEOUT_MS,
         });
         await page.waitForLoadState('networkidle');
 

@@ -9,7 +9,7 @@ import { sleep } from './utils.js';
 // IP 소유권 기록 — 만료되면 "소유 불명"이 되어 다른 계정이 같은 IP를 재사용할 수 있으므로
 // 활동 주기(2~3일)보다 충분히 길게 유지한다.
 const LAST_ACCOUNT_TTL_SEC = 7 * 86400;
-const RECONNECT_ATTEMPTS = 5;
+const RECONNECT_ATTEMPTS = 3;
 
 function lastAccountKey(port: number): string {
   return `modem_last_account:${port}`;
@@ -85,7 +85,7 @@ export async function reconnectModemIfAccountSwitched(
 
   for (let attempt = 1; attempt <= RECONNECT_ATTEMPTS; attempt++) {
     try {
-      await reconnectModemBySlot(slot);
+      await reconnectModemBySlot(slot, { attempt });
       const fetched = await fetchPublicIpViaSocks(proxyPort);
       if (!fetched) {
         throw new Error(`:${proxyPort} SOCKS 공인 IP 확인 실패`);
@@ -97,12 +97,12 @@ export async function reconnectModemIfAccountSwitched(
       publicIpUnchanged = true;
       lastErr = new Error(`공인 IP 동일 (${fetched})`);
       if (attempt < RECONNECT_ATTEMPTS) {
-        await sleep(12_000 + attempt * 3000);
+        await sleep(6000 + attempt * 2000);
       }
     } catch (err) {
       lastErr = err as Error;
       if (attempt < RECONNECT_ATTEMPTS) {
-        await sleep(5000);
+        await sleep(4000);
       }
     }
   }

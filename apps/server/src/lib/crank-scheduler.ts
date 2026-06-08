@@ -9,6 +9,7 @@ import {
   getKstClock,
   getKstYmd,
   proxyPortForCrankTrack,
+  SESSION_DURATION_MINUTES,
 } from './crank-schedule-config.js';
 import { selectCrankAccountsForDailySchedule } from './crank-schedule-accounts.js';
 import {
@@ -162,7 +163,7 @@ export async function runDailyCrankScheduler(options?: { anchorFromNow?: boolean
     const sessionPayload = {
       scheduledCrank: true,
       ourBlogUrls,
-      sessionMinutes: 45,
+      sessionMinutes: SESSION_DURATION_MINUTES,
       crankTrack,
       preferredProxyPort,
     };
@@ -295,7 +296,7 @@ export async function getCrankSchedulerStatus(options?: { probe?: boolean }) {
     max_sessions_per_modem_per_day: policy.maxSessionsPerModemPerDay,
     today_scheduled: todayScheduled,
     today_completed: todayCompleted,
-    session_duration_minutes: 60,
+    session_duration_minutes: SESSION_DURATION_MINUTES,
     modems: displayModems.map(mapModemRow),
     accounts: accountsWithNext,
   };

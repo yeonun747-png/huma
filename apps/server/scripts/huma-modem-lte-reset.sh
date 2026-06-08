@@ -1,20 +1,25 @@
 #!/bin/bash
-# ZTE RNDIS LTE — 공인 IP 변경 (AT+CFUN 비행기모드 또는 장시간 link disconnect)
-# Usage: sudo bash huma-modem-lte-reset.sh eth5 [proxyPort]
+# ZTE RNDIS LTE — 공인 IP 변경 (단계별 AT+CFUN / link disconnect)
+# Usage: sudo bash huma-modem-lte-reset.sh eth5 [proxyPort] [tier]
 #
-# proxyPort(선택): policy routing 즉시 복구 (예: 10007)
+# tier: 1=AT 소프트(빠름)  2=AT 하드+link45  3=link60+AT 하드 (최후)
+# env: HUMA_DONGLE_AT_PORT=/dev/ttyUSB17 (Redis 캐시·conf 우선)
 
 set -euo pipefail
 
 IFACE="${1:?iface required}"
 PROXY_PORT="${2:-}"
+TIER="${3:-1}"
 LINK_DOWN_SEC="${HUMA_MODEM_LINK_DOWN_SEC:-45}"
 AT_CONF="${HUMA_DONGLE_AT_PORTS_CONF:-/etc/huma/dongle-at-ports.conf}"
+CACHED_AT="${HUMA_DONGLE_AT_PORT:-}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-usb_port_id() {
-  local sysfs="$1"
-  readlink -f "$sysfs" 2>/dev/null | grep -oE '[0-9]+-[0-9]+(\.[0-9]+)?' | head -1
+# 3-1.4.2:1.0 → 3-1.4.2 (동글 물리 단위 — 3-1 허브와 구분)
+usb_iface_leaf() {
+  local p
+  p=$(readlink -f "$1" 2>/dev/null) || return 1
+  basename "${p%%:*}"
 }
 
 read_conf_at_port() {
@@ -27,26 +32,27 @@ read_conf_at_port() {
   [ -n "$port" ] && [ -e "$port" ] && echo "$port"
 }
 
-# 동일 USB 물리 포트(3-1 등)의 ttyUSB 전부 — ZTE는 net(tty)와 AT(ttyUSB) 경로가 다름
 find_at_ports_for_iface() {
   local iface="$1"
   local net_sysfs="/sys/class/net/${iface}/device"
   local net_port tty_path tty_name tty_port
 
+  if [ -n "$CACHED_AT" ] && [ -e "$CACHED_AT" ]; then
+    echo "$CACHED_AT"
+  fi
+
   conf_port=$(read_conf_at_port "$iface" || true)
   if [ -n "${conf_port:-}" ]; then
     echo "$conf_port"
-    return 0
   fi
 
-  [ -e "$net_sysfs" ] || return 1
-  net_port=$(usb_port_id "$net_sysfs")
-  [ -n "$net_port" ] || return 1
+  [ -e "$net_sysfs" ] || return 0
+  net_leaf=$(usb_iface_leaf "$net_sysfs") || return 0
 
-  for tty_path in /sys/class/tty/ttyUSB*/device /sys/class/tty/ttyACM*/device; do
+  for tty_path in /sys/class/tty/ttyACM*/device /sys/class/tty/ttyUSB*/device; do
     [ -e "$tty_path" ] || continue
-    tty_port=$(usb_port_id "$tty_path")
-    [ "$tty_port" = "$net_port" ] || continue
+    tty_leaf=$(usb_iface_leaf "$tty_path" || true)
+    [ -n "$tty_leaf" ] && [ "$tty_leaf" = "$net_leaf" ] || continue
     tty_name="/dev/$(basename "$(dirname "$tty_path")")"
     echo "$tty_name"
   done
@@ -54,9 +60,9 @@ find_at_ports_for_iface() {
 
 send_at() {
   local dev="$1" cmd="$2" out
-  stty -F "$dev" 115200 raw -echo 2>/dev/null || true
-  # ZTE: CR 필수
-  out=$(timeout 5 sh -c "printf '%s\r' \"$cmd\" > \"$dev\" && sleep 0.5 && head -c 512 < \"$dev\"" 2>/dev/null || true)
+  stty -F "$dev" 115200 raw -echo min 0 time 10 2>/dev/null || true
+  timeout 0.3 cat "$dev" >/dev/null 2>&1 || true
+  out=$(timeout 6 sh -c "printf '%s\r' \"$cmd\" > \"$dev\"; sleep 1; head -c 512 < \"$dev\"" 2>/dev/null || true)
   printf '%s' "$out"
 }
 
@@ -66,36 +72,49 @@ at_port_ready() {
   printf '%s' "$resp" | grep -qi OK
 }
 
-at_airplane_toggle() {
+at_soft_toggle() {
+  local dev="$1"
+  if ! at_port_ready "$dev"; then return 1; fi
+  send_at "$dev" 'AT+CFUN=0' >/dev/null || true
+  sleep 5
+  send_at "$dev" 'AT+CFUN=1' >/dev/null || true
+  sleep 15
+  renew_dhcp
+  return 0
+}
+
+at_hard_toggle() {
   local dev="$1" resp
-  if ! at_port_ready "$dev"; then
-    return 1
-  fi
+  if ! at_port_ready "$dev"; then return 1; fi
   send_at "$dev" 'AT+CFUN=0' >/dev/null || true
   sleep 8
   send_at "$dev" 'AT+CFUN=1' >/dev/null || true
-  sleep 20
-  # 일부 ZTE: 소프트 리셋
+  sleep 18
   resp=$(send_at "$dev" 'AT+CFUN=1,1')
   if ! printf '%s' "$resp" | grep -qi OK; then
     send_at "$dev" 'AT+CFUN=1' >/dev/null || true
   fi
-  sleep 15
-  ip link set "$IFACE" up 2>/dev/null || true
-  dhclient -r "$IFACE" 2>/dev/null || true
-  dhclient -1 "$IFACE" 2>/dev/null || true
-  sleep 8
+  sleep 12
+  renew_dhcp
   return 0
 }
 
-link_disconnect_fallback() {
+renew_dhcp() {
+  ip link set "$IFACE" up 2>/dev/null || true
+  dhclient -r "$IFACE" 2>/dev/null || true
+  dhclient -1 "$IFACE" 2>/dev/null || true
+  sleep 6
+}
+
+link_disconnect() {
+  local sec="$1"
   dhclient -r "$IFACE" 2>/dev/null || true
   ip link set "$IFACE" down 2>/dev/null || true
-  sleep "$LINK_DOWN_SEC"
+  sleep "$sec"
   ip link set "$IFACE" up 2>/dev/null || true
-  sleep 12
-  dhclient -1 "$IFACE" 2>/dev/null || true
   sleep 10
+  dhclient -1 "$IFACE" 2>/dev/null || true
+  sleep 8
 }
 
 apply_policy_route() {
@@ -103,21 +122,49 @@ apply_policy_route() {
   bash "$SCRIPT_DIR/huma-dongle-routes.sh" "${IFACE}:${PROXY_PORT}" >/dev/null 2>&1 || true
 }
 
-AT_OK=0
-while IFS= read -r at_port; do
-  [ -n "$at_port" ] || continue
-  if at_airplane_toggle "$at_port"; then
+try_at_mode() {
+  local mode="$1"
+  local at_port
+  while IFS= read -r at_port; do
+    [ -n "$at_port" ] || continue
+    if [ "$mode" = "soft" ]; then
+      if at_soft_toggle "$at_port"; then
+        apply_policy_route
+        echo "✓ ${IFACE} AT+CFUN airplane (${at_port})"
+        return 0
+      fi
+    else
+      if at_hard_toggle "$at_port"; then
+        apply_policy_route
+        echo "✓ ${IFACE} AT+CFUN airplane (${at_port})"
+        return 0
+      fi
+    fi
+  done < <(find_at_ports_for_iface "$IFACE" | awk '!seen[$0]++')
+  return 1
+}
+
+case "$TIER" in
+  1)
+    if try_at_mode soft; then exit 0; fi
+    link_disconnect 25
     apply_policy_route
-    echo "✓ ${IFACE} AT+CFUN airplane (${at_port})"
-    AT_OK=1
-    break
-  fi
-done < <(find_at_ports_for_iface "$IFACE" || true)
-
-if [ "$AT_OK" -eq 1 ]; then
-  exit 0
-fi
-
-link_disconnect_fallback
-apply_policy_route
-echo "✓ ${IFACE} link disconnect ${LINK_DOWN_SEC}s (AT 포트 미발견 또는 CFUN 실패)"
+    echo "✓ ${IFACE} link disconnect 25s tier1"
+    ;;
+  2)
+    if try_at_mode hard; then exit 0; fi
+    link_disconnect "$LINK_DOWN_SEC"
+    apply_policy_route
+    echo "✓ ${IFACE} link disconnect ${LINK_DOWN_SEC}s tier2"
+    ;;
+  3)
+    link_disconnect 60
+    if try_at_mode hard; then exit 0; fi
+    apply_policy_route
+    echo "✓ ${IFACE} link disconnect 60s tier3 (AT 실패)"
+    ;;
+  *)
+    echo "unknown tier: $TIER" >&2
+    exit 1
+    ;;
+esac

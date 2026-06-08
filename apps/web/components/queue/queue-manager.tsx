@@ -291,9 +291,12 @@ export function QueueManager() {
 
   const handleDeleteJob = (job: HumaJob) => {
     const drill = isCaptchaDrillJob(job);
+    const captchaHold = job.status === 'awaiting_captcha';
     const msg = drill
       ? `「${job.title ?? job.job_type}」 DRILL을 큐에서 제거할까요?\nVNC 브라우저 세션도 종료됩니다.`
-      : `「${job.title ?? job.job_type}」 작업을 큐에서 제거할까요?`;
+      : captchaHold
+        ? `「${job.title ?? job.job_type}」 CAPTCHA 대기 작업을 큐에서 제거할까요?\nVNC 브라우저·동글 세션도 종료됩니다.`
+        : `「${job.title ?? job.job_type}」 작업을 큐에서 제거할까요?`;
     if (!window.confirm(msg)) return;
     api
       .deleteJob(job.id)
@@ -504,7 +507,7 @@ export function QueueManager() {
                   </button>
                 ) : (
                   <span className="text-[11px] text-huma-t3">
-                    LIVE·CAPTCHA는 DRILL만 삭제 가능 · 그 외는 실패·지연·완료 항목
+                    LIVE만 삭제 불가 · CAPTCHA·실패·지연·완료 선택 삭제 가능
                   </span>
                 )}
               </div>
