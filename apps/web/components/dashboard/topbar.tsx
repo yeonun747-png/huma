@@ -16,6 +16,19 @@ import {
 
 type NotifItem = { type: 'err' | 'warn'; title: string; sub: string };
 
+const NOTIF_DISMISSED_KEY = 'huma_notif_dismissed_at';
+
+function getNotifDismissedAt(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem(NOTIF_DISMISSED_KEY);
+}
+
+function isLogUnread(createdAt: string, dismissedAt: string | null): boolean {
+  if (!dismissedAt) return true;
+  if (!createdAt) return true;
+  return new Date(createdAt).getTime() > new Date(dismissedAt).getTime();
+}
+
 function KstWeekdayDatetime({ iso }: { iso: string | null }) {
   if (!iso) return <>스케줄 없음</>;
   const parsed = parseQueueKstParts(iso);
@@ -42,7 +55,6 @@ export function Topbar({ title }: { title: string }) {
   const [nextPublishAt, setNextPublishAt] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<NotifItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [notifDismissed, setNotifDismissed] = useState(false);
 
   const loadMeta = useCallback(() => {
     void api.dashboardStats({ period: 'today' }).then((s) => {
@@ -60,7 +72,9 @@ export function Topbar({ title }: { title: string }) {
         setUnreadCount(0);
         return;
       }
-      const items = logs.slice(0, 5).map((log) => {
+      const dismissedAt = getNotifDismissedAt();
+      const recent = logs.slice(0, 5);
+      const items = recent.map((log) => {
         const ws = String(log.workspace ?? 'HUMA');
         const time = formatLogKstTime(String(log.created_at ?? ''));
         const msg = String(log.message ?? '오류');
@@ -71,10 +85,13 @@ export function Topbar({ title }: { title: string }) {
           sub: `${ws} · ${time}`,
         };
       });
+      const unread = recent.filter((log) =>
+        isLogUnread(String(log.created_at ?? ''), dismissedAt),
+      ).length;
       setNotifications(items);
-      if (!notifDismissed) setUnreadCount(items.length);
+      setUnreadCount(unread);
     }).catch(() => {});
-  }, [notifDismissed]);
+  }, []);
 
   useEffect(() => {
     const tick = () => {
@@ -99,7 +116,7 @@ export function Topbar({ title }: { title: string }) {
   }, [businessUnit, loadMeta]);
 
   const markAllRead = () => {
-    setNotifDismissed(true);
+    localStorage.setItem(NOTIF_DISMISSED_KEY, new Date().toISOString());
     setUnreadCount(0);
     setNotifOpen(false);
   };

@@ -1,7 +1,8 @@
 import { chromium } from 'playwright-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import type { BrowserContext } from 'playwright';
-import { mkdirSync } from 'fs';
+import { existsSync, mkdirSync, unlinkSync } from 'fs';
+import { join } from 'path';
 import {
   injectFingerprint,
   normalizeFingerprintForLaunch,
@@ -49,6 +50,26 @@ function resolveGlLaunchArg(): string {
   return '--use-gl=desktop';
 }
 
+/** Playwright `proxy` 옵션은 ~NOTFOUND host-resolver-rules를 주입 — Chromium 131 파싱 실패 */
+function proxyChromiumArgs(proxyPort: number): string[] {
+  return [
+    `--proxy-server=socks5://127.0.0.1:${proxyPort}`,
+    '--proxy-bypass-list=<-loopback>',
+    '--host-resolver-rules=MAP * ^NOTFOUND , EXCLUDE 127.0.0.1',
+  ];
+}
+
+function clearStaleProfileLocks(profilePath: string): void {
+  for (const name of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+    const lockPath = join(profilePath, name);
+    try {
+      if (existsSync(lockPath)) unlinkSync(lockPath);
+    } catch {
+      // 다른 프로세스가 사용 중이면 launch가 실패하므로 무시
+    }
+  }
+}
+
 function baseLaunchArgs(fp: AccountFingerprint) {
   return [
     '--no-sandbox',
@@ -91,14 +112,11 @@ function persistentLaunchOptions(
 ) {
   const headless = resolveHeadless();
 
-  const proxy = account.proxy_port
-    ? { server: `socks5://127.0.0.1:${account.proxy_port}` }
-    : undefined;
+  const proxyArgs = account.proxy_port ? proxyChromiumArgs(account.proxy_port) : [];
 
   return {
     headless,
-    args: baseLaunchArgs(fp),
-    proxy,
+    args: [...baseLaunchArgs(fp), ...proxyArgs],
     userAgent: fp.userAgent,
     viewport: { width: fp.screenWidth, height: fp.screenHeight },
     locale: 'ko-KR',
@@ -114,6 +132,7 @@ function persistentLaunchOptions(
 
 export async function createBrowserForAccount(account: BrowserAccountContext) {
   mkdirSync(account.profile_path, { recursive: true });
+  clearStaleProfileLocks(account.profile_path);
   const fpConfig = await getFingerprintConfig();
   const humanCfg = await getHumanEngineConfig();
   const useOsIme = resolveUseOsIme(humanCfg);
@@ -156,8 +175,8 @@ export async function createBrowser(proxyPort?: number) {
       '--disable-setuid-sandbox',
       '--lang=ko-KR',
       '--webrtc-ip-handling-policy=disable_non_proxied_udp',
+      ...(proxyPort ? proxyChromiumArgs(proxyPort) : []),
     ],
-    proxy: proxyPort ? { server: `socks5://127.0.0.1:${proxyPort}` } : undefined,
   });
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },
