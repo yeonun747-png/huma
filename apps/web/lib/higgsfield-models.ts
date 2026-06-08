@@ -17,8 +17,8 @@ export const IMAGE_MODELS = [
 
 /** Higgsfield Plus — 영상 생성 모델 (UI 13종) */
 export const VIDEO_MODELS = [
-  { id: 'seedance-2.0', label: 'Seedance 2.0', emoji: '🌟', sub: '최첨단 영상 모델', credits: 25, badge: 'TOP' as const },
-  { id: 'kling-3.0', label: 'Kling 3.0', emoji: '🎥', sub: '시네마틱+오디오', credits: 7 },
+  { id: 'seedance-2.0', label: 'Seedance 2.0', emoji: '🌟', sub: '최첨단 영상 모델', credits: 75, badge: 'TOP' as const },
+  { id: 'kling-3.0', label: 'Kling 3.0', emoji: '🎥', sub: '시네마틱+오디오', credits: 21 },
   { id: 'kling-3.0-motion-control', label: 'Kling 3.0 Motion Control', emoji: '🕺', sub: '영상→이미지 모션 전달', credits: 9, badge: 'NEW' as const },
   { id: 'kling-o1-edit', label: 'Kling o1 Edit', emoji: '✂️', sub: '고급 영상 편집', credits: 10 },
   { id: 'sora-2', label: 'Sora 2', emoji: '🌐', sub: 'OpenAI 최상위 영상', credits: 30 },
@@ -63,26 +63,26 @@ export const PIPELINE_VIDEO_OPTIONS = [
     selectValue: 'kling-3.0',
     id: 'kling-3.0' as VideoModelId,
     displayName: 'Kling 3.0',
-    label: '🎥 Kling 3.0 — $1.20/15초 (24크레딧) · 시네마틱+내장오디오',
-    videoUsd: 1.2,
+    label: '🎥 Kling 3.0 — $1.05/15초 (21크레딧) · 시네마틱+내장오디오',
+    videoUsd: 1.05,
     durationLabel: '15초',
-    credits: 24,
+    credits: 21,
     audioFamily: 'kling' as PipelineVideoAudioFamily,
   },
   {
     selectValue: 'seedance-2.0',
     id: 'seedance-2.0' as VideoModelId,
     displayName: 'Seedance 2.0 Standard',
-    label: '🌟 Seedance 2.0 Standard — $1.25/15초 (25크레딧) · 최고화질+오디오',
-    videoUsd: 1.25,
+    label: '🌟 Seedance 2.0 Standard — $3.75/15초 (75크레딧) · 최고화질+오디오',
+    videoUsd: 3.75,
     durationLabel: '15초',
-    credits: 25,
+    credits: 75,
     audioFamily: 'seedance' as PipelineVideoAudioFamily,
   },
 ] as const;
 
 export const PIPELINE_VIDEO_HINT =
-  '✓ 두 모델 모두 Higgsfield Cloud API · 15초 기준 $1.20~$1.25 · 내장 오디오 자동 생성';
+  '✓ 두 모델 모두 Higgsfield Cloud API · 15초 기준 Kling $1.05 · Seedance $3.75 · 내장 오디오 자동 생성';
 
 export function getPipelineVideoOption(selectValue: string) {
   return (
@@ -117,7 +117,7 @@ export function getPipelineAudioCopy(selectValue: string) {
     return {
       title: 'Kling 3.0 내장 오디오 자동 생성',
       sub: 'BGM · 효과음 · 주변음 — 영상과 동기화, 별도 설정 불필요',
-      hint: '✓ Kling 3.0 · 15초 · 24크레딧 · 시네마틱+내장오디오',
+      hint: '✓ Kling 3.0 · 15초 · 21크레딧 · 시네마틱+내장오디오',
       emoji: '🎵',
       runningLabel: 'Kling 3.0 내장 오디오',
     };

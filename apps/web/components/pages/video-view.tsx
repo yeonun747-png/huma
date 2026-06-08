@@ -356,7 +356,9 @@ export function VideoPipelineView() {
                 <span>
                   영상 {getPipelineVideoOption(vidSelect).displayName} {vidCost.durationLabel}
                 </span>
-                <span className="font-mono text-huma-t">${vidCost.usd.toFixed(2)}</span>
+                <span className="font-mono text-huma-t">
+                  ${vidCost.usd.toFixed(2)} · {getPipelineVideoOption(vidSelect).credits}크레딧
+                </span>
               </div>
               <div className="mt-1.5 flex justify-between border-t border-huma-bdr2 pt-1.5">
                 <span className="text-[12px] font-bold text-huma-t2">합계 (영상 포함)</span>

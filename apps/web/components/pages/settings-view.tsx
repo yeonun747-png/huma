@@ -235,7 +235,7 @@ export function SettingsView() {
 
             badge="영상 전용"
 
-            sub="영상 생성 · Kling 3.0 $1.20 / Seedance 2.0 Std $1.25 · 15초 · 내장 오디오"
+            sub="영상 생성 · Kling 3.0 $1.05 / Seedance 2.0 Std $3.75 · 15초 · 내장 오디오"
 
             value={Boolean(app.higgsfield_api ?? true)}
 

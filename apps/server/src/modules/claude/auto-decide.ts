@@ -17,6 +17,16 @@ export interface AutoDecideResult {
 
 const HAIKU_FALLBACK = 'claude-haiku-4-5-20251001';
 
+/** Higgsfield Cloud — 15초 영상 1건 최소 크레딧 */
+const PIPELINE_VIDEO_MIN_CREDITS: Record<string, number> = {
+  'kling-3.0': 21,
+  'seedance-2.0': 75,
+};
+
+function minCreditsForVideoModel(model: string): number {
+  return PIPELINE_VIDEO_MIN_CREDITS[model] ?? 21;
+}
+
 const DEFAULT_SCHEDULE: PlatformSchedule = {
   naver_blog: '09:00',
   tiktok: '19:30',
@@ -94,9 +104,10 @@ export async function buildScheduleFromSettings(): Promise<PlatformSchedule> {
 }
 
 function fallbackAutoDecide(workspace: string, remainingCredits: number): AutoDecideResult {
-  const content_type: ContentType = remainingCredits >= 50 && workspace !== 'quizoasis' ? 'B' : 'A';
   const video_model =
     workspace === 'yeonun' || workspace === 'panana' ? 'seedance-2.0' : 'kling-3.0';
+  const content_type: ContentType =
+    remainingCredits >= minCreditsForVideoModel(video_model) && workspace !== 'quizoasis' ? 'B' : 'A';
 
   return {
     content_type,
@@ -106,7 +117,7 @@ function fallbackAutoDecide(workspace: string, remainingCredits: number): AutoDe
 }
 
 function enforceCreditRules(decision: AutoDecideResult, remainingCredits: number): AutoDecideResult {
-  if (remainingCredits < 50 && decision.content_type === 'B') {
+  if (remainingCredits < minCreditsForVideoModel(decision.video_model) && decision.content_type === 'B') {
     return { ...decision, content_type: 'A' };
   }
   return decision;
@@ -150,12 +161,12 @@ export async function autoDecide(params: {
 아래 기준으로 JSON 결정 (JSON만, 설명 없이):
 
 content_type 결정 기준:
-  B (영상 포함): 감성·스토리·서비스소개·캐릭터·신규출시 → Higgsfield Cloud 크레딧 50개 이상 (Kling 15초=24크레딧)
-  A (이미지만):  정보성·공지·이벤트안내·크레딧 50개 미만 (이미지는 Google Imagen, Higgsfield 크레딧 불필요)
+  B (영상 포함): 감성·스토리·서비스소개·캐릭터·신규출시 → Kling 21크레딧 / Seedance 75크레딧 이상
+  A (이미지만):  정보성·공지·이벤트안내·잔여 크레딧 부족 (이미지는 Google Imagen, Higgsfield 크레딧 불필요)
 
 video_model 결정 기준 (둘 중 하나만):
-  "seedance-2.0": 연운·파나나 감성 콘텐츠 ($1.25/15초)
-  "kling-3.0":    퀴즈오아시스 또는 비용 우선 ($1.20/15초, 24크레딧)
+  "seedance-2.0": 연운·파나나 감성 콘텐츠 ($3.75/15초, 75크레딧)
+  "kling-3.0":    퀴즈오아시스 또는 비용 우선 ($1.05/15초, 21크레딧)
 
 schedule (오늘 기준 최적 시간, 플랫폼별 분산):
   naver_blog: ${JSON.stringify(optimal.naver_blog?.windows ?? [])}
