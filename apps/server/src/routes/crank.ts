@@ -4,6 +4,7 @@ import { authMiddleware, supabase } from '../middleware/auth.js';
 import { getSetting } from '../lib/settings.js';
 import { formatKstHm } from '../lib/dashboard-period.js';
 import type { CrankActivityType } from '../lib/crank-activity.js';
+import { getKstClock } from '../lib/crank-schedule-config.js';
 import {
   getCrankSchedulerStatus,
   runDailyCrankScheduler,
@@ -208,7 +209,8 @@ export async function registerCrankRoutes(app: FastifyInstance) {
     if (!request.admin?.isSuper) {
       return reply.code(403).send({ error: 'super admin만 실행 가능' });
     }
-    await runDailyCrankScheduler();
+    const { hour, minute } = getKstClock();
+    await runDailyCrankScheduler({ anchorFromNow: hour > 0 || minute > 5 });
     return getCrankSchedulerStatus({ probe: true });
   });
 }

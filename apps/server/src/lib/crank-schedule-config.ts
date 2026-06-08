@@ -100,13 +100,20 @@ export function distributeCrankScheduleSlotsKst(
   dayOffset = 0,
   window?: { start: number; end: number },
   modemCount = 1,
+  options?: { notBefore?: Date },
 ): CrankScheduleSlot[] {
   if (count <= 0) return [];
 
   const startHour = window?.start ?? SCHEDULE_WINDOW_START_HOUR;
   const endHour = window?.end ?? SCHEDULE_WINDOW_END_HOUR;
-  const windowStartMin = startHour * 60;
+  let windowStartMin = startHour * 60;
   const windowEndMin = endHour * 60;
+
+  if (options?.notBefore && dayOffset === 0) {
+    const { hour, minute } = getKstClock(options.notBefore);
+    const nowMin = hour * 60 + minute + 3;
+    windowStartMin = Math.max(windowStartMin, nowMin);
+  }
   const slotMinutes = SESSION_SLOT_MINUTES;
   const tracks = Math.max(1, Math.floor(modemCount));
   const waveCount = Math.ceil(count / tracks);

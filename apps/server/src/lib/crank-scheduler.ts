@@ -98,7 +98,7 @@ async function hasDailyScheduleJobs(dateKey: string): Promise<boolean> {
 }
 
 /** 매일 00:01 KST — 당일 crank 계정 큐 + 분산 scheduled_at */
-export async function runDailyCrankScheduler(): Promise<void> {
+export async function runDailyCrankScheduler(options?: { anchorFromNow?: boolean }): Promise<void> {
   if (getSystemPaused()) return;
 
   const dateKey = formatKstDateKey();
@@ -139,6 +139,7 @@ export async function runDailyCrankScheduler(): Promise<void> {
     0,
     scheduleWindow,
     policy.activeModemCount,
+    options?.anchorFromNow ? { notBefore: new Date() } : undefined,
   );
 
   const serviceCounts = { yeonun: 0, panana: 0, quizoasis: 0 };
@@ -186,9 +187,10 @@ export async function runDailyCrankScheduler(): Promise<void> {
     await enqueueHumaJob(job as JobRecord);
   }
 
+  const anchorNote = options?.anchorFromNow ? ' · 당일보정(현재시각~)' : '';
   await logOperation({
     level: 'info',
-    message: `[crank-scheduler] ${dateKey}: 동글 ${activeModems} · 주기 ${policy.cycleDays}일 · 계정 ${accounts.length}건 (연운 ${serviceCounts.yeonun}·파나나 ${serviceCounts.panana}·퀴즈 ${serviceCounts.quizoasis}) 큐 등록`,
+    message: `[crank-scheduler] ${dateKey}: 동글 ${activeModems} · 주기 ${policy.cycleDays}일 · 계정 ${accounts.length}건 (연운 ${serviceCounts.yeonun}·파나나 ${serviceCounts.panana}·퀴즈 ${serviceCounts.quizoasis}) 큐 등록${anchorNote}`,
   });
 }
 
@@ -335,7 +337,7 @@ export async function ensureTodayCrankQueue(): Promise<void> {
 
   const dateKey = formatKstDateKey();
   if (!(await hasDailyScheduleJobs(dateKey))) {
-    await runDailyCrankScheduler();
+    await runDailyCrankScheduler({ anchorFromNow: true });
   }
 }
 
