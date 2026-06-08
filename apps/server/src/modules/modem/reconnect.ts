@@ -5,6 +5,7 @@ import { sleep } from '../../lib/utils.js';
 import { proxyPortToSlot } from '../../lib/modem-ports.js';
 import { readDongleInterfaceFromConf, isPlaceholderInterfaceName } from '../../lib/dongle-interfaces.js';
 import { readInterfaceIp } from '../../lib/dongle-health.js';
+import { applyDonglePolicyRoute } from '../../lib/restore-dongle-network.js';
 
 function sync3proxyExternalIp(proxyPort: number, newIp: string): void {
   if (process.platform === 'win32') return;
@@ -61,34 +62,49 @@ export async function reconnectModemBySlot(slotNumber: number): Promise<string> 
     .update({ status: 'reconnecting', last_reconnect_at: new Date().toISOString() })
     .eq('slot_number', slotNumber);
 
-  if (process.platform !== 'win32') {
-    execSync(`sudo ip link set ${iface} down && sleep 3 && sudo ip link set ${iface} up`, {
-      stdio: 'inherit',
+  try {
+    if (process.platform !== 'win32') {
+      execSync(`sudo ip link set ${iface} down && sleep 3 && sudo ip link set ${iface} up`, {
+        stdio: 'inherit',
+      });
+    } else {
+      await sleep(3000);
+    }
+
+    await sleep(5000); // IP 재할당 완료 대기 (v3.33 규칙⑦: 별도 고정 대기 없음)
+    const newIp = readInterfaceIp(iface);
+    if (!newIp) {
+      throw new Error(`${iface} IP 재발급 실패`);
+    }
+
+    if (process.platform !== 'win32') {
+      try {
+        applyDonglePolicyRoute(iface, modem.proxy_port);
+      } catch (routeErr) {
+        throw new Error(
+          `${iface} policy routing 복구 실패: ${(routeErr as Error).message}`,
+        );
+      }
+    }
+
+    sync3proxyExternalIp(modem.proxy_port, newIp);
+
+    await supabase
+      .from('huma_modems')
+      .update({ status: 'idle', current_ip: newIp, last_reconnect_at: new Date().toISOString() })
+      .eq('slot_number', slotNumber);
+
+    await logOperation({
+      level: 'info',
+      message: `모뎀 slot ${slotNumber} IP 재발급 ${oldIp ?? '?'} → ${newIp}`,
+      modem_id: modem.id,
     });
-  } else {
-    await sleep(3000);
+
+    return newIp;
+  } catch (err) {
+    await supabase.from('huma_modems').update({ status: 'error' }).eq('slot_number', slotNumber);
+    throw err;
   }
-
-  await sleep(5000); // IP 재할당 완료 대기 (v3.33 규칙⑦: 별도 고정 대기 없음)
-  const newIp = readInterfaceIp(iface);
-  if (!newIp) {
-    throw new Error(`${iface} IP 재발급 실패`);
-  }
-
-  sync3proxyExternalIp(modem.proxy_port, newIp);
-
-  await supabase
-    .from('huma_modems')
-    .update({ status: 'idle', current_ip: newIp, last_reconnect_at: new Date().toISOString() })
-    .eq('slot_number', slotNumber);
-
-  await logOperation({
-    level: 'info',
-    message: `모뎀 slot ${slotNumber} IP 재발급 ${oldIp ?? '?'} → ${newIp}`,
-    modem_id: modem.id,
-  });
-
-  return newIp;
 }
 
 /** 429 등 IP 재발급 — ifdown/ifup 후 IP 변경 확인 */

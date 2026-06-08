@@ -31,9 +31,27 @@ guess_gateway() {
   echo "$ip" | awk -F. '{printf "%s.%s.%s.1\n", $1, $2, $3}'
 }
 
+add_default_route() {
+  local iface="$1" table="$2" gw="$3"
+  # ZTE RNDIS: 테이블에 link route 없이 via를 넣으면 "Nexthop has invalid gateway"
+  if ip route add default via "$gw" dev "$iface" table "$table" 2>/dev/null; then
+    echo "via ${gw}"
+    return 0
+  fi
+  if ip route add default via "$gw" dev "$iface" onlink table "$table" 2>/dev/null; then
+    echo "via ${gw} onlink"
+    return 0
+  fi
+  if ip route add default dev "$iface" table "$table" 2>/dev/null; then
+    echo "dev ${iface} (direct)"
+    return 0
+  fi
+  return 1
+}
+
 setup_slot_route() {
   local iface="$1" table="$2"
-  local ip_cidr ip_only gw link_route
+  local ip_cidr ip_only gw link_route route_note
 
   ip_cidr=$(ip -4 addr show dev "$iface" 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}/\d+' | head -1)
   if [ -z "$ip_cidr" ]; then
@@ -48,14 +66,21 @@ setup_slot_route() {
 
   ip rule add from "${ip_only}/32" table "$table"
   ip route flush table "$table" 2>/dev/null || true
-  ip route add default via "$gw" dev "$iface" table "$table"
 
   link_route=$(ip -4 route show dev "$iface" scope link 2>/dev/null | awk 'NR==1{print $1}')
   if [ -n "$link_route" ] && [ "$link_route" != "default" ]; then
-    ip route add "$link_route" dev "$iface" scope link table "$table" 2>/dev/null || true
+    ip route add "$link_route" dev "$iface" scope link table "$table"
+  else
+    # /24 RNDIS fallback
+    ip route add "${ip_only%.*}.0/24" dev "$iface" scope link table "$table"
   fi
 
-  echo "✓ ${iface} ${ip_only} → table ${table} via ${gw}"
+  if ! route_note=$(add_default_route "$iface" "$table" "$gw"); then
+    echo "✗ ${iface} ${ip_only} — table ${table} default route 실패"
+    return 1
+  fi
+
+  echo "✓ ${iface} ${ip_only} → table ${table} ${route_note}"
 }
 
 OK=0
