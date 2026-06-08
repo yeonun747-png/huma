@@ -2,23 +2,9 @@ import { execSync } from 'child_process';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
+export { applyDonglePolicyRoute } from './dongle-policy-route.js';
+
 const RESTORE_TIMEOUT_MS = 180_000;
-const SLOT_ROUTE_TIMEOUT_MS = 30_000;
-
-function dongleRoutesScriptPath(): string {
-  return join(dirname(fileURLToPath(import.meta.url)), '../../scripts/huma-dongle-routes.sh');
-}
-
-/** 단일 동글 policy routing (ip link down/up 후 필수) */
-export function applyDonglePolicyRoute(iface: string, proxyPort: number): void {
-  if (process.platform === 'win32') return;
-  const scriptPath = dongleRoutesScriptPath();
-  execSync(`sudo bash "${scriptPath}" "${iface}:${proxyPort}"`, {
-    encoding: 'utf8',
-    timeout: SLOT_ROUTE_TIMEOUT_MS,
-    maxBuffer: 512 * 1024,
-  });
-}
 
 /** i7 — DHCP + policy routing + 3proxy (restore-dongle-by-subnet.sh) */
 export function runRestoreDongleNetwork(): { ok: boolean; output: string; error?: string } {

@@ -64,8 +64,8 @@ export async function reconnectModemBySlot(slotNumber: number): Promise<string> 
 
   try {
     if (process.platform !== 'win32') {
-      execSync(`sudo ip link set ${iface} down && sleep 3 && sudo ip link set ${iface} up`, {
-        stdio: 'inherit',
+      execSync(`sudo -n ip link set ${iface} down && sleep 3 && sudo -n ip link set ${iface} up`, {
+        stdio: 'pipe',
       });
     } else {
       await sleep(3000);
