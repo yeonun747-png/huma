@@ -14,6 +14,7 @@ import { getFingerprintConfig, getHumanEngineConfig } from '../../lib/settings.j
 import { getBundledChromiumVersion, syncUserAgentChromeVersion } from '../../lib/chromium-version.js';
 import { resolveUseOsIme, fcitxBrowserEnv } from '../human-engine/os-ime.js';
 import { logOperation } from '../../lib/log-emitter.js';
+import { PLAYWRIGHT_NAV_TIMEOUT_MS } from '../../lib/playwright-nav-timeout.js';
 
 chromium.use(StealthPlugin());
 
@@ -290,6 +291,8 @@ export async function createBrowserForAccount(account: BrowserAccountContext) {
     launchOpts,
     account.id,
   );
+  context.setDefaultNavigationTimeout(PLAYWRIGHT_NAV_TIMEOUT_MS);
+  context.setDefaultTimeout(PLAYWRIGHT_NAV_TIMEOUT_MS);
   await injectFingerprint(context, fp, cfg);
   await applyClientHintPlatformSpoof(context);
 

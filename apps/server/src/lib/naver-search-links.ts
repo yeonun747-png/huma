@@ -73,9 +73,20 @@ function isBlockedWarmupNav(url: string): boolean {
   );
 }
 
+/** namu·tistory 등 SPA — LTE SOCKS에서 30s+ 로드, 워밍업 타임아웃 유발 */
+function isHeavyWarmupHost(url: string): boolean {
+  return (
+    url.includes('namu.wiki') ||
+    url.includes('tistory.com') ||
+    url.includes('fandom.com') ||
+    url.includes('wikipedia.org')
+  );
+}
+
 export function isIntegratedWarmupLink(url: string): boolean {
   if (isBlockedWarmupNav(url)) return false;
   if (url.includes('blog.naver.com')) return false;
+  if (isHeavyWarmupHost(url)) return false;
   return url.startsWith('http');
 }
 

@@ -9,6 +9,7 @@ import {
   collectNaverSearchUrlsDetailed,
   integratedSearchUrl,
 } from '../../../lib/naver-search-links.js';
+import { PLAYWRIGHT_NAV_TIMEOUT_MS } from '../../../lib/playwright-nav-timeout.js';
 import { throwWarmupFailure } from '../../../lib/warmup-failure.js';
 
 export type WarmupAccountType = 'posting' | 'crank';
@@ -26,6 +27,18 @@ async function warmupStayScroll(page: Page, durationMs: number): Promise<void> {
   await scrollWithReverse(page, durationMs, [300, 800], [2000, 5000], 0.2);
 }
 
+async function safeWarmupGoto(page: Page, url: string): Promise<boolean> {
+  try {
+    await page.goto(url, {
+      waitUntil: 'domcontentloaded',
+      timeout: PLAYWRIGHT_NAV_TIMEOUT_MS,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function visitWarmupUrls(
   page: Page,
   urls: string[],
@@ -33,11 +46,16 @@ async function visitWarmupUrls(
   stayMin: number,
   stayMax: number,
 ): Promise<void> {
-  for (const url of urls.slice(0, visitCount)) {
-    await page.goto(url, { waitUntil: 'domcontentloaded' });
+  let visited = 0;
+  for (const url of urls) {
+    if (visited >= visitCount) break;
+    if (!(await safeWarmupGoto(page, url))) continue;
+    visited += 1;
     await humanSleep(stayMin, stayMax);
     await warmupStayScroll(page, randomBetween(4000, 12000));
-    await page.goBack({ waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.goBack({ waitUntil: 'domcontentloaded', timeout: PLAYWRIGHT_NAV_TIMEOUT_MS }).catch(
+      () => {},
+    );
     await humanSleep(2000, 4000);
   }
 }
@@ -45,7 +63,10 @@ async function visitWarmupUrls(
 /** 검색 결과 페이지 로드 — 실패 시 navError 반환 */
 async function openSearchResults(page: Page, url: string): Promise<string | null> {
   try {
-    const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    const response = await page.goto(url, {
+      waitUntil: 'domcontentloaded',
+      timeout: PLAYWRIGHT_NAV_TIMEOUT_MS,
+    });
     if (response && response.status() >= 400) {
       return `HTTP ${response.status()}`;
     }
@@ -104,7 +125,9 @@ export async function preSessionWarmup(
       await throwWarmupFailure(page, '네이버 블로그 검색', blog.diagnostics, blogNavError);
     }
 
-    await page.goto(blog.urls[0]!, { waitUntil: 'domcontentloaded' });
+    if (!(await safeWarmupGoto(page, blog.urls[0]!))) {
+      await throwWarmupFailure(page, '네이버 블로그 방문', blog.diagnostics, 'blog_visit_timeout');
+    }
     await humanSleep(60000, 120000);
     await warmupStayScroll(page, randomBetween(8000, 20000));
     await page.goBack({ waitUntil: 'domcontentloaded' }).catch(() => {});

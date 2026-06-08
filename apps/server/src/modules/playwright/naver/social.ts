@@ -30,6 +30,7 @@ import {
 } from '../../../lib/modem-last-account.js';
 import { applyCrankResourceBlocking } from './crank-resource-block.js';
 import { logCrankActivity } from '../../../lib/crank-activity.js';
+import { PLAYWRIGHT_NAV_TIMEOUT_MS } from '../../../lib/playwright-nav-timeout.js';
 import { blogSearchUrl, collectNaverSearchUrls } from '../../../lib/naver-search-links.js';
 
 interface SocialCrankConfig {
@@ -98,7 +99,10 @@ async function searchNaverBlogs(
 
   const results: string[] = [];
   for (const keyword of keywords) {
-    await page.goto(blogSearchUrl(keyword));
+    await page.goto(blogSearchUrl(keyword), {
+      waitUntil: 'domcontentloaded',
+      timeout: PLAYWRIGHT_NAV_TIMEOUT_MS,
+    });
     await page.waitForLoadState('networkidle').catch(() => {});
     await scaledHumanSleep(2000, 4000, scale);
 
@@ -231,7 +235,10 @@ export async function runSocialCrank(
 
       for (const target of allTargets) {
         if (Date.now() > sessionDeadline) break;
-        await page.goto(target.url);
+        await page.goto(target.url, {
+          waitUntil: 'domcontentloaded',
+          timeout: PLAYWRIGHT_NAV_TIMEOUT_MS,
+        });
         await page.waitForLoadState('networkidle');
 
         await scrollRead(page, randomBetween(60000, 180000 * (persona.visitDurationMin / 4)));
