@@ -1,10 +1,10 @@
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto';
+import { getEncryptionKey } from './secrets.js';
 
 const ALGO = 'aes-256-gcm';
 
 function getKey(): Buffer {
-  const secret = process.env.ENCRYPTION_KEY ?? 'huma-dev-encryption-key-32chars!';
-  return scryptSync(secret, 'huma-salt', 32);
+  return scryptSync(getEncryptionKey(), 'huma-salt', 32);
 }
 
 export function encrypt(text: string): string {

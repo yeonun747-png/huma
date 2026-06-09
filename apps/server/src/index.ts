@@ -32,23 +32,56 @@ import { registerAdSenseRoutes } from './routes/adsense.js';
 import { getMissingAdSenseEnvKeys, isAdSenseConfigured } from './modules/adsense/client.js';
 
 import { setLogSocket } from './lib/log-emitter.js';
+import { verifyAdminToken } from './middleware/auth.js';
 
 import { startWorker } from './modules/queue/worker.js';
 import { initSystemPause, getSystemPaused } from './lib/system-pause.js';
 import { recoverCrankPipeline } from './lib/crank-pipeline-recovery.js';
+import { reconcileStaleCrankModemLocks } from './modules/modem/allocation.js';
+import { shutdownCaptchaHolds } from './modules/watcher/captcha-hold.js';
 import { startCrankScheduler } from './lib/crank-scheduler.js';
 import { startCafeActivityScheduler } from './lib/cafe-activity-scheduler.js';
 import { registerCrankRoutes } from './routes/crank.js';
 import { registerMonitorRoutes } from './routes/monitor.js';
 import { registerSeoRoutes } from './routes/seo.js';
+import { assertSecretsConfigured } from './lib/secrets.js';
 
 
 
 const PORT = Number(process.env.PORT) || 3100;
 
+let shuttingDown = false;
 
+function registerGracefulShutdown(
+  app: ReturnType<typeof Fastify>,
+  worker: ReturnType<typeof startWorker>,
+) {
+  const shutdown = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    app.log.warn(`${signal} 수신 — graceful shutdown 시작`);
+    try {
+      await worker.close();
+      await shutdownCaptchaHolds();
+      await reconcileStaleCrankModemLocks();
+    } catch (err) {
+      app.log.error('shutdown 정리 중 오류: %s', (err as Error).message);
+    }
+    try {
+      await app.close();
+    } catch {
+      /* ignore */
+    }
+    process.exit(0);
+  };
+
+  process.once('SIGTERM', () => void shutdown('SIGTERM'));
+  process.once('SIGINT', () => void shutdown('SIGINT'));
+}
 
 async function main() {
+
+  assertSecretsConfigured();
 
   const app = Fastify({ logger: true });
 
@@ -104,6 +137,34 @@ async function main() {
 
 
 
+  io.use((socket, next) => {
+
+    const token =
+
+      (socket.handshake.auth?.token as string | undefined) ??
+
+      (socket.handshake.query?.token as string | undefined) ??
+
+      (socket.handshake.headers['x-huma-key'] as string | undefined);
+
+    const admin = verifyAdminToken(token);
+
+    if (!admin) {
+
+      next(new Error('인증 필요'));
+
+      return;
+
+    }
+
+    socket.data.admin = admin;
+
+    next();
+
+  });
+
+
+
   setLogSocket(io);
 
 
@@ -129,11 +190,13 @@ async function main() {
     if (getSystemPaused()) {
       app.log.warn('HUMA 전체 정지 상태 — ▶ 재시작 전까지 큐·스케줄러 가동 안 함');
     }
-    startWorker();
+    const worker = startWorker();
     await recoverCrankPipeline();
     startCrankScheduler();
     startCafeActivityScheduler();
     app.log.info('BullMQ worker + crank scheduler + cafe activity scheduler started');
+
+    registerGracefulShutdown(app, worker);
 
   } catch (err) {
 

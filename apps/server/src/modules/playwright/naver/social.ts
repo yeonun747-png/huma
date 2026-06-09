@@ -252,10 +252,11 @@ export async function runSocialCrank(
         throw new Error('NO_LINKS_FOUND:session:네이버 블로그 검색');
       }
 
-      const allTargets: BlogTarget[] = [
+      // 방문 순서를 셔플 — 항상 '타 블로그 전부 → 자사 블로그' 고정 패턴은 탐지 표면.
+      const allTargets: BlogTarget[] = shuffleArray([
         ...buildBlogTargets(otherUrls, persona, false),
         ...buildBlogTargets(ourUrls, persona, true),
-      ].slice(0, maxVisits);
+      ]).slice(0, maxVisits);
 
       let likesDone = 0;
       let commentsDone = 0;
@@ -310,7 +311,8 @@ export async function runSocialCrank(
 
       await setCrankSessionProgress(jobId, '마무리');
       await updateVisitHistory(accountId, visitedUrls);
-      await updateCrankCount(accountId, allTargets.length);
+      // 계획 수가 아닌 실제 방문 수로 집계 (deadline 중단·실패 반영)
+      await updateCrankCount(accountId, visitedUrls.length);
       await clearCrankSessionProgress(jobId);
     } catch (innerErr) {
       if (

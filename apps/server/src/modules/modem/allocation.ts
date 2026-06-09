@@ -2,8 +2,8 @@ import { supabase } from '../../middleware/auth.js';
 import { redisConnection } from '../queue/producer.js';
 import {
   CRANK_PROXY_PORTS,
-  CRANK_SCHEDULED_LOCK_TTL_SEC,
-  MODEM_LOCK_TTL_SEC,
+  POSTING_LOCK_TTL_SEC,
+  CRANK_ADHOC_LOCK_TTL_SEC,
 } from '../../lib/modem-ports.js';
 import { getSchedulableCrankProxyPorts } from '../../lib/crank-modems.js';
 import { logOperation } from '../../lib/log-emitter.js';
@@ -39,7 +39,6 @@ export async function getModemProxyPort(
   accountId: string,
   opts?: { lockTtlSec?: number; preferredProxyPort?: number },
 ): Promise<number> {
-  const lockTtl = opts?.lockTtlSec ?? MODEM_LOCK_TTL_SEC;
   const { data: account } = await supabase
     .from('huma_accounts')
     .select('proxy_port, account_type')
@@ -55,14 +54,31 @@ export async function getModemProxyPort(
       throw new Error('[getModemProxyPort] posting 계정 proxy_port 미설정 (10001~10004)');
     }
     const port = account.proxy_port;
+    const postingTtl = opts?.lockTtlSec ?? POSTING_LOCK_TTL_SEC;
     const crankUsing = await redisConnection.get(crankLockKey(port));
     if (crankUsing) {
       throw new Error(`[getModemProxyPort] posting 포트 ${port} C-Rank 사용 중 (규칙 ⑬)`);
     }
-    await redisConnection.set(postingLockKey(port), accountId, 'EX', lockTtl);
+    // NX로 동일 포트(=물리 동글)에 두 번째 세션이 끼어드는 것을 차단.
+    const acquired = await redisConnection.set(
+      postingLockKey(port),
+      accountId,
+      'EX',
+      postingTtl,
+      'NX',
+    );
+    if (acquired !== 'OK') {
+      const holder = await redisConnection.get(postingLockKey(port));
+      if (holder && holder !== accountId) {
+        throw new Error(`[getModemProxyPort] posting 포트 ${port} 다른 계정 사용 중 (holder=${holder})`);
+      }
+      // 동일 계정 재진입/락 갱신 (account-lock으로 계정 단위는 이미 직렬화됨)
+      await redisConnection.set(postingLockKey(port), accountId, 'EX', postingTtl);
+    }
     return port;
   }
 
+  const crankTtl = opts?.lockTtlSec ?? CRANK_ADHOC_LOCK_TTL_SEC;
   const crankPorts = await getSchedulableCrankProxyPorts();
   const portPool =
     crankPorts.length > 0 ? crankPorts : [...CRANK_PROXY_PORTS];
@@ -73,7 +89,7 @@ export async function getModemProxyPort(
       crankLockKey(port),
       accountId,
       'EX',
-      lockTtl,
+      crankTtl,
       'NX',
     );
     if (acquired !== 'OK') return null;

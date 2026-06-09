@@ -16,6 +16,7 @@ import { getHumanEngineConfig } from '../../lib/settings.js';
 import { writeCafeReply, writeGenericCafePost } from '../playwright/naver/cafe.js';
 import { logOperation } from '../../lib/log-emitter.js';
 import { loadAccountForBrowser } from '../playwright/account-loader.js';
+import { pickSelfQAReplyAccount } from '../../lib/cafe-accounts.js';
 import type { AccountPersona } from '../playwright/persona.js';
 
 function kstTodayStart(): string {
@@ -30,6 +31,8 @@ export interface SelfQAMeta {
   phase: 'post' | 'reply';
   run_after?: string;
   account_id?: string;
+  /** 답변(reply) 단계 작성 계정 — 질문 작성 계정과 분리해 셀프 댓글 탐지 회피 */
+  reply_account_id?: string;
   product_name?: string;
 }
 
@@ -272,11 +275,14 @@ export async function executeSelfQAPhase(params: {
     });
 
     const replyDelayMin = (await getCafeViralConfig()).self_qa_delay_min || 60;
+    // 답변은 질문 작성 계정과 다른 C-Rank 계정으로 — 동일 계정 자문자답은 탐지 위험.
+    const replyAccountId = await pickSelfQAReplyAccount(params.accountId);
     const replyMeta: SelfQAMeta = {
       kind: 'self_qa',
       phase: 'reply',
       run_after: new Date(Date.now() + replyDelayMin * 60_000).toISOString(),
       account_id: params.accountId,
+      reply_account_id: replyAccountId ?? undefined,
       product_name: productName,
     };
 

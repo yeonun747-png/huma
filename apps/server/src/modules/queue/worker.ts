@@ -203,7 +203,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
 
       const humanConfig = await getHumanEngineConfig();
 
-      if (accountId && !acquireAccount(accountId)) {
+      if (accountId && !(await acquireAccount(accountId))) {
         if (scheduledCrank) {
           await deferCrankForIdleModem(job, token, humaJobId, accountId, 'ACCOUNT_BUSY');
           throw new DelayedError();
@@ -446,7 +446,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         await logOperation({ level: 'ERROR', message: (err as Error).message, job_id: humaJobId, account_id: accountId });
         throw err;
       } finally {
-        if (accountId && !skipReleaseAccount) releaseAccount(accountId);
+        if (accountId && !skipReleaseAccount) await releaseAccount(accountId);
       }
     },
     { connection: redisConnection, concurrency }

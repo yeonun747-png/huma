@@ -20,6 +20,8 @@ export interface JobRecord {
   scheduled_at?: string;
   repeat_rule?: string | null;
   bull_job_id?: string;
+  platform_schedule?: Record<string, unknown> | null;
+  video_path?: string | null;
 }
 
 export function getScheduleDelay(scheduledAt?: string | null): number | undefined {
@@ -73,6 +75,10 @@ export function buildEnqueuePayload(job: JobRecord) {
       videoPath: ['threads_reply', 'twitter_reply'].includes(job.job_type) ? undefined : job.result_url,
       caption: job.content ?? job.title,
       hashtags: job.hashtags,
+      // post_blog가 카테고리·발행 옵션을 읽을 수 있도록 전달 (이전엔 누락되어 blog_category 미적용)
+      platform_schedule: job.platform_schedule ?? undefined,
+      // post_blog 동영상 툴바 삽입용 파일 경로 (video_pipeline 산출물)
+      video_path: job.video_path ?? undefined,
       ...crankExtras,
     },
   };

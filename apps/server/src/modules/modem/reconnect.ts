@@ -130,13 +130,46 @@ export async function reconnectModem(modemId: string): Promise<ReconnectResult> 
   if (!modem) throw new Error('모뎀 없음');
 
   const slotNumber = modem.slot_number ?? proxyPortToSlot(modem.proxy_port);
+  const oldPublicIp = modem.public_ip ?? null;
+
+  const readPublicIp = async (): Promise<string | null> => {
+    const { data } = await supabase
+      .from('huma_modems')
+      .select('public_ip')
+      .eq('slot_number', slotNumber)
+      .maybeSingle();
+    return data?.public_ip ?? null;
+  };
 
   try {
-    const newIp = await reconnectModemBySlot(slotNumber);
-    const oldIp = modem.current_ip;
+    let newIp = await reconnectModemBySlot(slotNumber);
+    let newPublicIp = await readPublicIp();
+
+    // 429 재발급의 핵심은 공인 IP 교체. 사설(RNDIS) IP만 보고 성공 판단하면 안 됨.
+    // 공인 IP가 그대로면 상위 tier로 1회 더 시도.
+    if (oldPublicIp && newPublicIp && newPublicIp === oldPublicIp) {
+      await logOperation({
+        level: 'warn',
+        message: `모뎀 slot ${slotNumber} 공인 IP 미변경(${oldPublicIp}) — tier2 재시도`,
+        modem_id: modemId,
+      });
+      newIp = await reconnectModemBySlot(slotNumber, { attempt: 2 });
+      newPublicIp = await readPublicIp();
+    }
+
+    const publicRotated = !oldPublicIp || !newPublicIp || newPublicIp !== oldPublicIp;
+    if (!publicRotated) {
+      await logOperation({
+        level: 'ERROR',
+        message: `모뎀 slot ${slotNumber} 공인 IP 교체 실패 — 여전히 ${oldPublicIp}`,
+        modem_id: modemId,
+      });
+      return { success: false, oldIp: modem.current_ip, newIp, modemId, slotNumber };
+    }
+
     return {
       success: true,
-      oldIp,
+      oldIp: modem.current_ip,
       newIp,
       modemId,
       slotNumber,

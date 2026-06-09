@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { authMiddleware, getWorkspaceFilter, supabase } from '../middleware/auth.js';
+import { authMiddleware, getWorkspaceFilter, requireSuper, supabase } from '../middleware/auth.js';
 import { logOperation } from '../lib/log-emitter.js';
 import { recoverCrankPipeline } from '../lib/crank-pipeline-recovery.js';
 import { ensureTodayCrankQueue } from '../lib/crank-scheduler.js';
@@ -66,7 +66,7 @@ export async function registerSystemRoutes(app: FastifyInstance) {
     };
   });
 
-  app.post('/api/stop-all', { preHandler: authMiddleware }, async (request) => {
+  app.post('/api/stop-all', { preHandler: [authMiddleware, requireSuper] }, async (request) => {
     const body = (request.body ?? {}) as { reason?: string };
     const reason = String(body.reason ?? '').trim() || '운영자 전체 정지';
     await setSystemPaused(true, reason);
@@ -78,7 +78,7 @@ export async function registerSystemRoutes(app: FastifyInstance) {
     return { success: true, message: '전체 작업 중지됨', reason };
   });
 
-  app.post('/api/resume-all', { preHandler: authMiddleware }, async () => {
+  app.post('/api/resume-all', { preHandler: [authMiddleware, requireSuper] }, async () => {
     await setSystemPaused(false);
     await ensureTodayCrankQueue();
     await recoverCrankPipeline();

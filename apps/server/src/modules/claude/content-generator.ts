@@ -26,6 +26,8 @@ export interface ContentGenerationInput {
 
 export interface ContentGenerationOutput {
   blog_post: string;
+  /** 네이버 검색 최적화 제목 (≤32자, 핵심 키워드 앞배치). 없으면 운영자 제목 사용 */
+  seo_title?: string;
   tiktok_caption: string;
   instagram_caption: string;
   threads_text: string;
@@ -171,6 +173,7 @@ async function generateMainContent(
       type: 'text',
       text: withLongformWritingMandate(`URL 핵심:\n${urlSummary}\n\n제목: ${input.title}${synopsisGuide}${personaGuide}${typeGuide}\n${lengthGuide}\n\n순수 JSON만 (코드블록 없이):
 {
+  "seo_title": "네이버 검색 최적화 제목 32자 이내. 핵심 키워드를 앞쪽에 배치, 클릭 유도. 과장·특수문자 남발 금지",
   "blog_post": "네이버 블로그 글 ${min}~${max}자 (필수·중간 끊김 금지·완결된 글, ~요체·경험담·사람 말투). 본문 URL은 yeonun.com 만",
   "tiktok_caption": "TikTok 캡션 150자 이내",
   "instagram_caption": "Instagram 캡션 300자 이내",
@@ -191,19 +194,44 @@ async function generateMainContent(
     });
   }
 
-  const raw = await askClaudeWithModel({
-    model: (await getMainClaudeModel()) || SONNET_MODEL_FALLBACK,
-    max_tokens: 4096,
-    system: withHumanWritingSystem(SYSTEM_PROMPTS[input.workspace] ?? SYSTEM_PROMPTS.yeonun),
-    content: userParts,
-  });
+  const model = (await getMainClaudeModel()) || SONNET_MODEL_FALLBACK;
+  const system = withHumanWritingSystem(SYSTEM_PROMPTS[input.workspace] ?? SYSTEM_PROMPTS.yeonun);
 
-  if (!raw) throw new Error('Claude Sonnet 응답 없음');
+  const callOnce = async (extra?: string) => {
+    const content = extra
+      ? [...userParts, { type: 'text', text: extra }]
+      : userParts;
+    const raw = await askClaudeWithModel({ model, max_tokens: 4096, system, content });
+    if (!raw) throw new Error('Claude Sonnet 응답 없음');
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    const out = JSON.parse(jsonMatch?.[0] ?? raw) as Omit<ContentGenerationOutput, 'hashtags'>;
+    if (!out.blog_post) throw new Error('블로그 본문 생성 실패');
+    out.blog_post = finalizeBlogPost(out.blog_post);
+    return out;
+  };
 
-  const jsonMatch = raw.match(/\{[\s\S]*\}/);
-  const parsed = JSON.parse(jsonMatch?.[0] ?? raw) as Omit<ContentGenerationOutput, 'hashtags'>;
-  if (!parsed.blog_post) throw new Error('블로그 본문 생성 실패');
-  parsed.blog_post = finalizeBlogPost(parsed.blog_post);
+  let parsed = await callOnce();
+
+  // 목표 분량 검증 — 허용 범위(min*0.85 ~ max*1.25) 밖이면 1회 보정 재생성.
+  const inRange = (len: number) => len >= min * 0.85 && len <= max * 1.25;
+  if (!inRange(parsed.blog_post.length)) {
+    const cur = parsed.blog_post.length;
+    const hint =
+      cur < min
+        ? `직전 본문이 ${cur}자로 너무 짧습니다. 같은 주제·말투를 유지하되 내용을 자연스럽게 보강해 ${min}~${max}자로 다시 작성해 동일 JSON 형식으로만 출력하세요.`
+        : `직전 본문이 ${cur}자로 너무 깁니다. 핵심을 유지하며 군더더기를 줄여 ${min}~${max}자로 다시 작성해 동일 JSON 형식으로만 출력하세요.`;
+    try {
+      const retry = await callOnce(hint);
+      // 목표 범위에 더 가까운 결과 선택
+      const dist = (len: number) => (len < min ? min - len : len > max ? len - max : 0);
+      if (dist(retry.blog_post.length) < dist(parsed.blog_post.length)) {
+        parsed = retry;
+      }
+    } catch {
+      // 재생성 실패 시 1차 결과 유지
+    }
+  }
+
   parsed.blog_post_target_chars = lengthRange.tier;
   parsed.blog_post_target_min_chars = lengthRange.min;
   parsed.blog_post_target_max_chars = lengthRange.max;

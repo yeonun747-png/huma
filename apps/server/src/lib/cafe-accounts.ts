@@ -44,6 +44,29 @@ export async function pickCafeReplyCrankAccount(): Promise<string | null> {
   return eligible[0]?.id ?? null;
 }
 
+/** 자문자답 답변용 — 질문 작성 계정과 다른 C-Rank 계정 (셀프 댓글 탐지 회피) */
+export async function pickSelfQAReplyAccount(excludeAccountId: string): Promise<string | null> {
+  const { data: accounts } = await supabase
+    .from('huma_accounts')
+    .select('id, crank_count_today, warmup_day, layer4_rest_until')
+    .eq('account_type', 'crank')
+    .eq('is_active', true)
+    .neq('id', excludeAccountId)
+    .or(layer4RestSupabaseOr())
+    .order('crank_count_today', { ascending: true })
+    .limit(20);
+
+  if (!accounts?.length) return null;
+
+  const eligible = filterAccountsWithoutLayer4Rest(accounts).filter((a) => {
+    const warmup = a.warmup_day ?? 0;
+    const cap = warmup <= 7 ? 2 : 30;
+    return (a.crank_count_today ?? 0) < cap;
+  });
+
+  return eligible[0]?.id ?? null;
+}
+
 /** 카페 키워드 스캔 — crank → cafe 순 활성 계정 (posting 제외) */
 export async function pickCafeScanAccount(): Promise<string | null> {
   for (const accountType of ['crank', 'cafe'] as const) {

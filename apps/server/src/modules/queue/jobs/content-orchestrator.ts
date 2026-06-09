@@ -13,7 +13,6 @@ import {
   type PlatformSchedule,
 } from '../../claude/auto-decide.js';
 import { generateImage, type ImageModel } from '../../higgsfield/image.js';
-import { uniquifyImageFromUrl } from '../../image/uniquify.js';
 import { getPipelineModelSettings } from '../../../lib/pipeline-settings.js';
 import { resolveBlogWritingPersona } from '../../../lib/blog-writing-persona.js';
 import { patchJobPreviewProgress, type PreviewStep } from '../../claude/content-preview.js';
@@ -168,7 +167,6 @@ async function runTypeA(
   params: ContentOrchestratorInput,
   generated: Awaited<ReturnType<typeof generateAllContent>>,
   imageUrl: string,
-  uniqueImageUrl: string,
   schedule?: PlatformSchedule,
 ) {
   const { workspace, title, sourceUrl, scheduled_at, repeat_rule, auto_scheduled = true } = params;
@@ -182,9 +180,11 @@ async function runTypeA(
     workspace,
     account_id: accountId,
     job_type: 'post_blog',
-    title,
+    // 네이버 검색 노출용 SEO 제목 우선, 없으면 운영자 제목
+    title: generated.seo_title?.trim() || title,
     content: generated.blog_post,
-    image_urls: [uniqueImageUrl],
+    // 발행 직전 post-blog에서 1회 uniquify (로컬 tmp는 휘발 → 내구성 있는 https URL 저장)
+    image_urls: [imageUrl],
     link_url: blogLink,
     hashtags: generated.hashtags,
     platform: 'naver',
@@ -232,7 +232,6 @@ async function runTypeB(
   params: ContentOrchestratorInput,
   generated: Awaited<ReturnType<typeof generateAllContent>>,
   imageUrl: string,
-  uniqueImageUrl: string,
   videoModel: string,
   schedule?: PlatformSchedule,
 ) {
@@ -250,9 +249,11 @@ async function runTypeB(
     workspace,
     account_id: accountId,
     job_type: 'post_blog',
-    title,
+    // 네이버 검색 노출용 SEO 제목 우선, 없으면 운영자 제목
+    title: generated.seo_title?.trim() || title,
     content: generated.blog_post,
-    image_urls: [uniqueImageUrl],
+    // 발행 직전 post-blog에서 1회 uniquify (내구성 있는 https URL 저장)
+    image_urls: [imageUrl],
     link_url: blogLink,
     hashtags: generated.hashtags,
     platform: 'naver',
@@ -455,11 +456,6 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
     detail: imageUrl,
   };
 
-  let uniqueImageUrl = imageUrl;
-  if (!dryRun) {
-    uniqueImageUrl = await uniquifyImageFromUrl(imageUrl);
-  }
-
   if (dryRun && input.parentJobId) {
     await patchJobPreviewProgress(input.parentJobId, previewSteps, {
       image_model: imageModel,
@@ -516,9 +512,9 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
   const runInput = { ...input, scheduled_at: baseScheduledAt, auto_scheduled: autoScheduled };
 
   if (resolvedType === 'A') {
-    return runTypeA(runInput, generated, imageUrl, uniqueImageUrl, schedule);
+    return runTypeA(runInput, generated, imageUrl, schedule);
   }
-  return runTypeB(runInput, generated, imageUrl, uniqueImageUrl, videoModel, schedule);
+  return runTypeB(runInput, generated, imageUrl, videoModel, schedule);
 }
 
 type PreviewGeneratedSnapshot = Pick<
@@ -582,7 +578,6 @@ export async function promoteDryRunToPublish(parentJobId: string) {
   }
 
   const generated = resolvePreviewGenerated(job, preview);
-  const uniqueImageUrl = await uniquifyImageFromUrl(imageUrl);
   const schedule = extractPlatformSchedule(ps);
   const contentType = (job.content_type ?? 'A') as ContentType;
   const autoScheduled = job.auto_scheduled !== false;
@@ -611,7 +606,6 @@ export async function promoteDryRunToPublish(parentJobId: string) {
           runInput,
           generated as Awaited<ReturnType<typeof generateAllContent>>,
           imageUrl,
-          uniqueImageUrl,
           job.video_model ?? 'kling-3.0',
           schedule,
         )
@@ -619,7 +613,6 @@ export async function promoteDryRunToPublish(parentJobId: string) {
           runInput,
           generated as Awaited<ReturnType<typeof generateAllContent>>,
           imageUrl,
-          uniqueImageUrl,
           schedule,
         );
 

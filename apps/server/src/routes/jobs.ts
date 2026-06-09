@@ -363,6 +363,9 @@ export async function registerJobRoutes(app: FastifyInstance) {
     const { id } = request.params as { id: string };
     const body = request.body as Record<string, unknown>;
 
+    const access = await assertJobWorkspaceAccess(id, getWorkspaceFilter(request));
+    if (!access.ok) return reply.code(access.status).send({ error: access.error });
+
     const { data: existing } = await supabase.from('huma_jobs').select('*').eq('id', id).single();
     if (!existing) return reply.code(404).send({ error: '작업 없음' });
 
@@ -401,8 +404,11 @@ export async function registerJobRoutes(app: FastifyInstance) {
     return data;
   });
 
-  app.patch('/api/jobs/:id/pause', { preHandler: authMiddleware }, async (request) => {
+  app.patch('/api/jobs/:id/pause', { preHandler: authMiddleware }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const access = await assertJobWorkspaceAccess(id, getWorkspaceFilter(request));
+    if (!access.ok) return reply.code(access.status).send({ error: access.error });
+
     const { data: job } = await supabase.from('huma_jobs').select('*').eq('id', id).single();
     if (job?.bull_job_id) await removeBullJob(job.bull_job_id);
 
@@ -417,6 +423,9 @@ export async function registerJobRoutes(app: FastifyInstance) {
 
   app.patch('/api/jobs/:id/resume', { preHandler: authMiddleware }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const access = await assertJobWorkspaceAccess(id, getWorkspaceFilter(request));
+    if (!access.ok) return reply.code(access.status).send({ error: access.error });
+
     const { data: job } = await supabase.from('huma_jobs').select('*').eq('id', id).single();
     if (!job) return reply.code(404).send({ error: '작업 없음' });
 
@@ -443,6 +452,9 @@ export async function registerJobRoutes(app: FastifyInstance) {
   /** v3.27 ⏫ 스케줄 앞당기기 — 다음 실행 우선 (즉시 강제 실행 아님) */
   app.patch('/api/jobs/:id/advance', { preHandler: authMiddleware }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const access = await assertJobWorkspaceAccess(id, getWorkspaceFilter(request));
+    if (!access.ok) return reply.code(access.status).send({ error: access.error });
+
     const { data: job } = await supabase.from('huma_jobs').select('*').eq('id', id).single();
     if (!job) return reply.code(404).send({ error: '작업 없음' });
     if (!['pending', 'scheduled', 'paused'].includes(String(job.status))) {
@@ -532,6 +544,9 @@ export async function registerJobRoutes(app: FastifyInstance) {
 
   app.post('/api/jobs/:id/run-now', { preHandler: authMiddleware }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const access = await assertJobWorkspaceAccess(id, getWorkspaceFilter(request));
+    if (!access.ok) return reply.code(access.status).send({ error: access.error });
+
     const { data: job } = await supabase.from('huma_jobs').select('*').eq('id', id).single();
     if (!job) return { error: '작업 없음' };
 

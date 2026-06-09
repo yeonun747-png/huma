@@ -48,6 +48,8 @@ for iface in "${IFACES[@]}"; do
   if ! ip -4 addr show dev "$iface" 2>/dev/null | grep -q 'inet '; then
     dhclient -1 "$iface" 2>/dev/null || echo "  ⚠ ${iface} DHCP 실패"
   fi
+  # dhclient가 main table에 metric 없는 default route를 올림 → 호스트 전체가 동글 경유하는 것 방지
+  while ip route del default dev "$iface" 2>/dev/null; do :; done
 done
 
 echo ""

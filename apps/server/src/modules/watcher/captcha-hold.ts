@@ -112,6 +112,15 @@ export function listCaptchaHoldJobIds(): string[] {
   return [...holds.keys()];
 }
 
+/** graceful shutdown — 모든 hold의 브라우저·모뎀·계정 락을 해제하고 작업을 실패 처리 (좀비 방지) */
+export async function shutdownCaptchaHolds(): Promise<void> {
+  const entries = [...holds.entries()];
+  for (const [jobId, entry] of entries) {
+    await cleanupHold(jobId, entry).catch(() => {});
+    await markJobFailed(jobId, 'SERVER_RESTART_DURING_CAPTCHA').catch(() => {});
+  }
+}
+
 export async function enterCaptchaHold(
   input: CaptchaHoldInput,
   options?: CaptchaHoldOptions,

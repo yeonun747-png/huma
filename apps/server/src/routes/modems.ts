@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { authMiddleware, supabase } from '../middleware/auth.js';
+import { authMiddleware, requireSuper, supabase } from '../middleware/auth.js';
 import { reconnectModem } from '../modules/modem/reconnect.js';
 import { applyModemProxyProbe, shouldRunModemProxyProbe } from '../lib/modem-proxy-probe.js';
 import { probeModemsWithConcurrency } from '../lib/modem-socks-probe.js';
@@ -94,7 +94,7 @@ export async function registerModemRoutes(app: FastifyInstance) {
   });
 
   /** DHCP + policy routing + 3proxy 일괄 복구 (UI 「동글 네트워크 복구」) */
-  app.post('/api/modems/restore-network', { preHandler: authMiddleware }, async (_request, reply) => {
+  app.post('/api/modems/restore-network', { preHandler: [authMiddleware, requireSuper] }, async (_request, reply) => {
     const result = runRestoreDongleNetwork();
     if (!result.ok) {
       await logOperation({

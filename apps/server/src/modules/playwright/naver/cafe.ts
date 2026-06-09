@@ -65,6 +65,16 @@ export async function writeGenericCafePost(params: {
     frame.locator('.BaseButton--skinGreen, button[class*="submit"]').first(),
   );
   await params.page.waitForLoadState('networkidle');
+
+  // 게시 성공 검증 — 작성 페이지(ArticleWrite)를 벗어나야 정상. 남아 있으면 실패로 간주.
+  const stillOnWritePage = await params.page
+    .waitForFunction(() => !/ArticleWrite/i.test(location.href), { timeout: 8000 })
+    .then(() => false)
+    .catch(() => true);
+  if (stillOnWritePage) {
+    throw new Error('CAFE_POST_NOT_SUBMITTED');
+  }
+
   return { resultUrl: params.page.url() };
 }
 
@@ -102,7 +112,8 @@ export async function writeCafeReply(params: WriteCafeReplyOptions) {
     throw new Error('댓글 내용 없음 — replyContent 또는 generateComment 필요');
   }
 
-  const commentBox = params.page.locator('.CommentBox textarea, .comment_inbox textarea, .u_cbox_write_area textarea').first();
+  const commentSelector = '.CommentBox textarea, .comment_inbox textarea, .u_cbox_write_area textarea';
+  const commentBox = params.page.locator(commentSelector).first();
   await humanClickLocator(params.page, commentBox);
   await humanSleep(500, 1500);
   await humanType(params.page, commentBox, replyContent, params.humanEngine);
@@ -111,6 +122,16 @@ export async function writeCafeReply(params: WriteCafeReplyOptions) {
     params.page,
     params.page.locator('.CommentBox .BaseButton, .comment_inbox .btn_register, .u_cbox_btn_upload').first(),
   );
+
+  // 등록 성공 검증 — 네이버는 성공 시 입력창을 비운다. 남아 있으면 실패(도배·권한·오류)로 간주.
+  await humanSleep(1500, 3000);
+  const remaining = await commentBox.inputValue().catch(() => '');
+  if (remaining.trim().length > 0) {
+    const bodyText = (await params.page.locator('body').innerText().catch(() => '')).slice(0, 2000);
+    const blocked = /도배|차단|권한|제한|등업|가입.*회원/.test(bodyText);
+    throw new Error(blocked ? 'CAFE_REPLY_BLOCKED' : 'CAFE_REPLY_NOT_SUBMITTED');
+  }
+
   return { success: true, replyContent };
 }
 

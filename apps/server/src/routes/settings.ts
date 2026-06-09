@@ -2,6 +2,15 @@ import type { FastifyInstance } from 'fastify';
 import { authMiddleware, supabase } from '../middleware/auth.js';
 import { updateSetting } from '../lib/settings.js';
 
+// 전역 운영에 영향을 주는 민감 설정 키 — 슈퍼관리자만 변경 가능
+const SUPER_ONLY_SETTING_KEYS = new Set([
+  'human_engine',
+  'social_crank',
+  'system_paused',
+  'image_engine',
+  'cafe_viral',
+]);
+
 export async function registerSettingsRoutes(app: FastifyInstance) {
   app.get('/api/settings/:key', { preHandler: authMiddleware }, async (request) => {
     const { key } = request.params as { key: string };
@@ -9,8 +18,11 @@ export async function registerSettingsRoutes(app: FastifyInstance) {
     return data?.value ?? {};
   });
 
-  app.put('/api/settings/:key', { preHandler: authMiddleware }, async (request) => {
+  app.put('/api/settings/:key', { preHandler: authMiddleware }, async (request, reply) => {
     const { key } = request.params as { key: string };
+    if (SUPER_ONLY_SETTING_KEYS.has(key) && !request.admin?.isSuper) {
+      return reply.code(403).send({ error: '이 설정은 슈퍼관리자만 변경할 수 있습니다' });
+    }
     const value = request.body;
     await updateSetting(key, value);
     return { success: true, key, value };

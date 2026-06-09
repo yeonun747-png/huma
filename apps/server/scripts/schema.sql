@@ -254,10 +254,9 @@ LOOP
   EXECUTE format('CREATE POLICY "service only" ON %I FOR ALL TO service_role USING (true)', t);
 END LOOP; END $$;
 
--- ⑫ 초기 관리자 계정 (비밀번호는 bcrypt 해시 저장)
--- 연운:        yeonun        / y747sv586lon!!
--- QP 공유:     quiz_panana   / sv586lon!!
--- 슈퍼어드민:  superadmin    / sv786lon!!
+-- ⑫ 초기 관리자 계정 (비밀번호는 bcrypt 해시로만 저장)
+-- 초기 비밀번호는 저장소에 평문으로 두지 않는다. 배포 시 안전한 채널로 별도 전달하고,
+-- 최초 로그인 후 즉시 변경한다. 해시 재생성: node -e "require('bcrypt').hash(PW,10).then(console.log)"
 
 INSERT INTO huma_admins (email, pw_hash, name, workspaces, is_super) VALUES
 (

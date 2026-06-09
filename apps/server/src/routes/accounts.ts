@@ -27,6 +27,13 @@ function isValidAccountId(id: string): boolean {
   return UUID_RE.test(id.trim());
 }
 
+/** 암호화된 네이버 비밀번호는 API 응답에서 항상 제거 */
+function stripAccountSecret<T extends Record<string, unknown>>(row: T | null | undefined) {
+  if (!row) return row;
+  const { naver_pw_enc: _omit, ...rest } = row;
+  return rest;
+}
+
 async function loadAccountRow(id: string) {
   const trimmed = id.trim();
   if (!isValidAccountId(trimmed)) {
@@ -100,7 +107,8 @@ export async function registerAccountRoutes(app: FastifyInstance) {
       .select('*')
       .or(buildAccountsListOrFilter(allowedWorkspaces))
       .order('name');
-    return data ?? [];
+    // 암호화된 네이버 비밀번호는 API 응답으로 절대 내보내지 않는다 (복호화 표면 축소)
+    return (data ?? []).map(({ naver_pw_enc: _omit, ...rest }) => rest);
   });
 
   app.post('/api/accounts', { preHandler: authMiddleware }, async (request, reply) => {
@@ -134,9 +142,9 @@ export async function registerAccountRoutes(app: FastifyInstance) {
     if (data?.id) {
       await ensureAccountAntiDetect(data.id, (data.workspace as string) ?? 'yeonun');
       const { data: refreshed } = await supabase.from('huma_accounts').select('*').eq('id', data.id).single();
-      return refreshed ?? data;
+      return stripAccountSecret(refreshed ?? data);
     }
-    return data;
+    return stripAccountSecret(data);
   });
 
   app.patch('/api/accounts/:id/blog-persona', { preHandler: authMiddleware }, async (request, reply) => {
@@ -223,7 +231,7 @@ export async function registerAccountRoutes(app: FastifyInstance) {
         }
         return reply.code(400).send({ error: mapAccountDbError(msg) });
       }
-      return data;
+      return stripAccountSecret(data);
     } catch (err) {
       request.log.error(err, 'blog-persona patch failed');
       return reply.code(500).send({ error: (err as Error).message ?? '페르소나 저장 실패' });
@@ -329,7 +337,7 @@ export async function registerAccountRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: mapAccountDbError(msg) });
     }
     if (!data) return reply.code(404).send({ error: '계정 업데이트 실패' });
-    return data;
+    return stripAccountSecret(data);
     } catch (err) {
       request.log.error(err, 'account patch failed');
       return reply.code(500).send({ error: (err as Error).message ?? '계정 수정 실패' });

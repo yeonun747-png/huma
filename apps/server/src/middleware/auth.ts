@@ -2,6 +2,7 @@ import type { FastifyRequest, FastifyReply } from 'fastify';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { getJwtSecret } from '../lib/secrets.js';
 
 export interface AdminPayload {
   adminId: string;
@@ -70,7 +71,7 @@ export async function loginAdmin(loginId: string, password: string) {
       workspaces: admin.workspaces,
       isSuper: admin.is_super,
     },
-    process.env.JWT_SECRET ?? 'dev-secret',
+    getJwtSecret(),
     { expiresIn }
   );
 
@@ -103,16 +104,44 @@ export async function authMiddleware(request: FastifyRequest, reply: FastifyRepl
   }
 
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET ?? 'dev-secret') as AdminPayload;
+    const payload = jwt.verify(token, getJwtSecret()) as AdminPayload;
     request.admin = payload;
   } catch {
     return reply.code(401).send({ error: '토큰 만료 또는 무효' });
   }
 }
 
+/** 토큰 문자열(JWT 또는 HUMA_API_SECRET)을 검증해 AdminPayload 반환, 실패 시 null. WebSocket 등 미들웨어 외 경로용. */
+export function verifyAdminToken(token: string | undefined): AdminPayload | null {
+  if (!token) return null;
+  const apiSecret = process.env.HUMA_API_SECRET?.trim();
+  if (apiSecret && token === apiSecret) {
+    return {
+      adminId: 'system',
+      email: 'superadmin',
+      workspaces: ['yeonun', 'quizoasis', 'panana'],
+      isSuper: true,
+    };
+  }
+  try {
+    return jwt.verify(token, getJwtSecret()) as AdminPayload;
+  } catch {
+    return null;
+  }
+}
+
 export function getWorkspaceFilter(request: FastifyRequest): string[] {
   const admin = request.admin!;
   return admin.isSuper ? ['yeonun', 'quizoasis', 'panana'] : admin.workspaces;
+}
+
+/** 슈퍼관리자 전용 라우트 가드 (인프라 제어 등). authMiddleware 이후에 둔다. */
+export function requireSuper(request: FastifyRequest, reply: FastifyReply, done: () => void) {
+  if (!request.admin?.isSuper) {
+    reply.code(403).send({ error: '슈퍼관리자 권한이 필요합니다' });
+    return;
+  }
+  done();
 }
 
 export function requireWorkspace(workspace: string) {

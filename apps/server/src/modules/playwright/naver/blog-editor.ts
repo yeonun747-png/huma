@@ -10,8 +10,6 @@ import type { HumanEngineConfig } from '../../../lib/settings.js';
 
 import { parsePersona, type AccountPersona } from '../persona.js';
 
-import { uniquifyImageFromUrl } from '../../image/uniquify.js';
-
 import { enterBlogEditor } from './enter-blog-editor.js';
 import { humanClickLocator } from '../../human-engine/mouse.js';
 import { pasteBlogLinkWithOgPreview } from './paste-blog-link.js';
@@ -44,20 +42,21 @@ export async function postNaverBlog(params: {
   const config = mergePersonaConfig(params.humanEngine, persona);
   const scale = params.rttScale ?? 1;
 
-  await enterBlogEditor(params.page, config);
+  // 에디터는 새 탭으로 열릴 수 있으므로 실제 에디터 페이지를 받아 이후 작업에 사용.
+  const page = await enterBlogEditor(params.page, config);
 
-  const titleBox = params.page.locator('#subjectTextBox');
-  await humanClickLocator(params.page, titleBox);
-  await humanType(params.page, titleBox, params.title, config);
+  const titleBox = page.locator('#subjectTextBox');
+  await humanClickLocator(page, titleBox);
+  await humanType(page, titleBox, params.title, config);
   await scaledHumanSleep(2000, 5000, scale);
 
-  const editor = params.page.frameLocator('#mainFrame').locator('.se-content');
-  await humanClickLocator(params.page, editor);
+  const editor = page.frameLocator('#mainFrame').locator('.se-content');
+  await humanClickLocator(page, editor);
 
-  await typePostContent(params.page, editor, params.content, config);
+  await typePostContent(page, editor, params.content, config);
 
   if (params.linkUrl?.trim()) {
-    await pasteBlogLinkWithOgPreview(params.page, editor, params.linkUrl.trim(), {
+    await pasteBlogLinkWithOgPreview(page, editor, params.linkUrl.trim(), {
       workspace: params.workspace ?? 'yeonun',
       scale,
       humanConfig: config,
@@ -65,19 +64,20 @@ export async function postNaverBlog(params: {
   }
 
   if (params.imageUrls?.length) {
-    for (const url of params.imageUrls) {
-      await insertImageViaToolbar(params.page, await uniquifyImageFromUrl(url));
+    // post-blog에서 이미 uniquify된 로컬 경로 — 재처리 없이 그대로 삽입
+    for (const imagePath of params.imageUrls) {
+      await insertImageViaToolbar(page, imagePath);
       await scaledHumanSleep(1000, 3000, scale);
     }
   }
 
   if (params.videoPath?.trim()) {
-    await insertVideoViaToolbar(params.page, params.videoPath.trim());
+    await insertVideoViaToolbar(page, params.videoPath.trim());
     await scaledHumanSleep(1500, 3500, scale);
   }
 
   await scrollReview(
-    params.page,
+    page,
     calcReviewDurationMs(
       params.title.length + params.content.length + (params.linkUrl?.length ?? 0),
       config.review_duration_ms,
@@ -85,7 +85,7 @@ export async function postNaverBlog(params: {
   );
 
   await completeNaverPublishDialog({
-    page: params.page,
+    page,
     workspace: params.workspace,
     category: params.blogCategory,
     hashtags: params.hashtags,
@@ -94,5 +94,5 @@ export async function postNaverBlog(params: {
   });
 
   await humanSleep(1000, 2000);
-  return { resultUrl: params.page.url() };
+  return { resultUrl: page.url() };
 }

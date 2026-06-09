@@ -9,12 +9,18 @@ import {
   recordLastAccountOnModem,
 } from './modem-last-account.js';
 import { assertNaverAutomationAllowed } from './account-guards.js';
+import { acquireAccount, releaseAccount } from './account-lock.js';
 
 export async function withNaverBrowserSession<T>(
   accountId: string,
   run: (ctx: { context: BrowserContext; page: Page }) => Promise<T>,
 ): Promise<T> {
   await assertNaverAutomationAllowed(accountId);
+
+  // 동일 계정이 BullMQ 워커·다른 카페 작업과 동시에 같은 프로필/모뎀으로 뜨는 것을 차단.
+  if (!(await acquireAccount(accountId))) {
+    throw new Error('ACCOUNT_BUSY');
+  }
 
   let modemSession: ModemSession | undefined;
   try {
@@ -39,5 +45,6 @@ export async function withNaverBrowserSession<T>(
     }
   } finally {
     if (modemSession) await releaseModem(modemSession);
+    await releaseAccount(accountId);
   }
 }
