@@ -7,9 +7,9 @@ import { generateAllContent, type ContentGenerationOutput } from '../../claude/c
 import { fetchAndSummarizeUrl } from '../../claude/content-generator.js';
 import {
   autoDecideWithCredits,
+  resolveNaverBlogScheduledAt,
   resolvePlatformScheduledAt,
   selectImageModel,
-  toTodayDatetime,
   type PlatformSchedule,
 } from '../../claude/auto-decide.js';
 import { generateImage, type ImageModel } from '../../higgsfield/image.js';
@@ -125,6 +125,9 @@ function platformTime(
   fallback: string,
 ): string {
   if (!autoScheduled || !schedule) return fallback;
+  if (platform === 'naver_blog') {
+    return resolveNaverBlogScheduledAt(schedule.naver_blog, fallback);
+  }
   return resolvePlatformScheduledAt(platform, schedule, fallback);
 }
 
@@ -401,7 +404,7 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
   const resolvedType = contentType ?? 'A';
   const baseScheduledAt =
     autoScheduled && schedule?.naver_blog && !dryRun
-      ? (toTodayDatetime(schedule.naver_blog) ?? input.scheduled_at)
+      ? resolveNaverBlogScheduledAt(schedule.naver_blog, input.scheduled_at)
       : input.scheduled_at;
 
   const postingAccount = await pickPostingAccount(input.workspace);
@@ -591,7 +594,7 @@ export async function promoteDryRunToPublish(parentJobId: string) {
   const autoScheduled = job.auto_scheduled !== false;
   const baseScheduledAt =
     autoScheduled && schedule?.naver_blog
-      ? (toTodayDatetime(schedule.naver_blog) ?? job.scheduled_at ?? new Date().toISOString())
+      ? resolveNaverBlogScheduledAt(schedule.naver_blog, job.scheduled_at ?? new Date().toISOString())
       : (job.scheduled_at ?? new Date().toISOString());
 
   const runInput: ContentOrchestratorInput = {

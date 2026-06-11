@@ -139,6 +139,24 @@ async function openNaverHome(page: Page, timeoutMs: number): Promise<string | nu
   }
 }
 
+async function openNaverHomeWithRetry(page: Page, timeoutMs: number, maxAttempts = 3): Promise<string | null> {
+  let lastErr: string | null = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    lastErr = await openNaverHome(page, timeoutMs);
+    const url = page.url().toLowerCase();
+    if (!lastErr && url.includes('naver.com') && !url.startsWith('chrome-error://')) {
+      return null;
+    }
+    if (!lastErr && url.startsWith('chrome-error://')) {
+      lastErr = 'chrome_error_page';
+    }
+    if (attempt < maxAttempts - 1) {
+      await humanSleep(800, 1500);
+    }
+  }
+  return lastErr;
+}
+
 /** naver.com 검색창에 키워드 입력 후 Enter (URL 직접 조합 금지) */
 async function searchViaNaverHomepage(
   page: Page,
@@ -146,7 +164,7 @@ async function searchViaNaverHomepage(
   timeoutMs: number,
   humanEngine?: HumanEngineConfig,
 ): Promise<string | null> {
-  const homeErr = await openNaverHome(page, timeoutMs);
+  const homeErr = await openNaverHomeWithRetry(page, timeoutMs);
   if (homeErr) return homeErr;
 
   const searchBox = page.locator('#query, input[name="query"]').first();
@@ -193,17 +211,25 @@ async function runWarmupSearchRound(
   humanEngine?: HumanEngineConfig,
   failOnEmpty = false,
 ): Promise<void> {
-  const navError = await searchViaNaverHomepage(page, keyword, navTimeout, humanEngine);
-  if (Math.random() < 0.55) await maybeClickSearchTab(page);
+  const maxAttempts = failOnEmpty ? 2 : 1;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const navError = await searchViaNaverHomepage(page, keyword, navTimeout, humanEngine);
+    if (Math.random() < 0.55) await maybeClickSearchTab(page);
 
-  const integrated = await collectNaverSearchUrlsDetailed(page, 'integrated', 8);
-  if (navError || integrated.urls.length === 0) {
+    const integrated = await collectNaverSearchUrlsDetailed(page, 'integrated', 8);
+    if (!navError && integrated.urls.length > 0) {
+      await visitWarmupUrls(page, integrated.urls, visitCount, navTimeout, accountType);
+      return;
+    }
+    if (failOnEmpty && attempt < maxAttempts - 1) {
+      await humanSleep(1000, 2000);
+      continue;
+    }
     if (failOnEmpty) {
       await throwWarmupFailure(page, '네이버 검색 결과', integrated.diagnostics, navError);
     }
     return;
   }
-  await visitWarmupUrls(page, integrated.urls, visitCount, navTimeout, accountType);
 }
 
 export type PreSessionWarmupOptions = {

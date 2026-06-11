@@ -1,4 +1,5 @@
 import { Worker, DelayedError } from 'bullmq';
+import type { BrowserContext } from 'playwright';
 import { redisConnection } from './producer.js';
 import { supabase } from '../../middleware/auth.js';
 import {
@@ -26,6 +27,11 @@ import {
 } from '../../lib/human-engine-policy.js';
 import { pickNaverCaptchaPage, tryAutoSolveNaverCaptcha } from '../../lib/naver-captcha-vision.js';
 import { clickNaverLoginButton } from '../../lib/naver-login-fields.js';
+import {
+  isWarmupConnectionError,
+  recoverPostingDongleAfterWarmupConnection,
+} from '../../lib/warmup-dongle-recover.js';
+import { proxyPortToSlot } from '../../lib/modem-ports.js';
 import { handleLayer4Detection, isBlockError, isCaptchaError, isNaverHumanHoldError } from '../watcher/detector.js';
 import { enterCaptchaHold } from '../watcher/captcha-hold.js';
 import { acquireModem, releaseModem, type ModemSession } from '../proxy/manager.js';
@@ -315,7 +321,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
             rttScaleFactor = rttScale(rtt);
           }
 
-          let context;
+          let context: BrowserContext;
           if (accountCtx) {
             ({ context } = await createBrowserForAccount(accountCtx));
           } else {
@@ -333,9 +339,71 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
               const resumeAfterCaptcha = platformSchedule?._resumeAfterCaptcha === true;
 
               if (!resumeAfterCaptcha) {
-                const warmupPage = await acquireWorkflowPage(context);
-                await preSessionWarmup(warmupPage, persona, 'posting', humanConfig);
-                await releaseWorkflowPage(context, warmupPage);
+                const runPostingWarmup = async (ctx: BrowserContext) => {
+                  const warmupPage = await acquireWorkflowPage(ctx);
+                  try {
+                    await preSessionWarmup(warmupPage, persona, 'posting', humanConfig);
+                  } finally {
+                    await releaseWorkflowPage(ctx, warmupPage);
+                  }
+                };
+
+                const deferWarmupConnection = async (detail: string) => {
+                  await deferHumaJob(job, humaJobId, 5 * 60 * 1000, {
+                    reason: 'WARMUP_CONNECTION',
+                    accountId,
+                    token,
+                    logMessage: `[post_blog] ${detail} — 5분 후 재시도`,
+                    level: 'info',
+                  });
+                  throw new DelayedError();
+                };
+
+                try {
+                  await runPostingWarmup(context);
+                } catch (warmupErr) {
+                  if (isWarmupConnectionError(warmupErr) && modemSession && accountCtx) {
+                    const slot = proxyPortToSlot(modemSession.proxyPort);
+                    await logOperation({
+                      level: 'warn',
+                      message: `[post_blog] 워밍업 접속 실패(slot${slot}) — 동글 복구 시도`,
+                      job_id: humaJobId,
+                      account_id: accountId,
+                      modem_id: modemSession.modemId || undefined,
+                    });
+
+                    await closeBrowserContext(context);
+
+                    const recover = await recoverPostingDongleAfterWarmupConnection(
+                      modemSession.proxyPort,
+                      modemSession.modemId,
+                    );
+
+                    await logOperation({
+                      level: recover.ok ? 'info' : 'ERROR',
+                      message: `[post_blog] 동글 복구 ${recover.ok ? '성공' : '실패'} (${recover.method}: ${recover.detail})`,
+                      job_id: humaJobId,
+                      account_id: accountId,
+                      modem_id: modemSession.modemId || undefined,
+                    });
+
+                    if (!recover.ok) {
+                      await deferWarmupConnection('동글 복구 실패');
+                    }
+
+                    ({ context } = await createBrowserForAccount(accountCtx));
+                    try {
+                      await runPostingWarmup(context);
+                    } catch (retryErr) {
+                      if (isWarmupConnectionError(retryErr)) {
+                        await deferWarmupConnection('동글 복구 후 워밍업 재시도 실패');
+                      }
+                      throw retryErr;
+                    }
+                  } else {
+                    throw warmupErr;
+                  }
+                }
               }
 
               if (accountId) {
@@ -488,7 +556,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
             throw err;
           } finally {
             if (!heldForCaptcha) {
-              await closeBrowserContext(context);
+              await closeBrowserContext(context).catch(() => {});
               if (modemSession) await releaseModem(modemSession);
             }
           }

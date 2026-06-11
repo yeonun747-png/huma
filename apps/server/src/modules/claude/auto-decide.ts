@@ -1,6 +1,8 @@
 import { askClaudeWithModel } from '../../lib/anthropic-client.js';
 import { getSetting } from '../../lib/settings.js';
 import { getSubClaudeModel } from '../../lib/ai-engine.js';
+import { randomBetween } from '../../lib/utils.js';
+import { isNaverBlogOnlyMode } from '../../lib/activity-control.js';
 import { getHiggsfieldCredits } from '../higgsfield/client.js';
 import { isHaikuSubEnabled, isHiggsfieldVideoEnabled } from '../../lib/human-engine-policy.js';
 import type { ContentType } from '@huma/shared';
@@ -44,6 +46,22 @@ export function toTodayDatetime(timeStr?: string): string | undefined {
   dt.setHours(h, m, 0, 0);
   if (dt.getTime() <= Date.now()) dt.setDate(dt.getDate() + 1);
   return dt.toISOString();
+}
+
+/** post_blog — AI 생성 지연으로 창 시간이 지났으면 내일이 아니라 곧바로(2~8분) 큐 */
+export function resolveNaverBlogScheduledAt(scheduleTime: string | undefined, fallback: string): string {
+  if (isNaverBlogOnlyMode()) {
+    return new Date(Date.now() + randomBetween(2, 8) * 60_000).toISOString();
+  }
+  const fromWindow = scheduleTime ? toTodayDatetime(scheduleTime) : undefined;
+  if (fromWindow && new Date(fromWindow).getTime() > Date.now() + 60_000) {
+    return fromWindow;
+  }
+  const fb = new Date(fallback);
+  if (!Number.isNaN(fb.getTime()) && fb.getTime() > Date.now() + 60_000) {
+    return fallback;
+  }
+  return new Date(Date.now() + randomBetween(2, 8) * 60_000).toISOString();
 }
 
 /** v3.26 — Imagen 4 Fast 기본, generateImage()에서 프롬프트 기반 Haiku 판단 */
