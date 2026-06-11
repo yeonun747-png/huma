@@ -1,16 +1,20 @@
-import type { BrowserContext, Page } from 'playwright';
+import type { BrowserContext, Locator, Page } from 'playwright';
 
 import { askClaudeVision } from './anthropic-client.js';
 import { shouldAutoSolveCaptchaVision } from './human-engine-policy.js';
 import { logOperation } from './log-emitter.js';
 import { humanSleep } from '../modules/human-engine/typing.js';
-import { humanClickLocator } from '../modules/human-engine/mouse.js';
+import {
+  humanClickLocator,
+  humanDragLocatorHorizontal,
+} from '../modules/human-engine/mouse.js';
 import { randomBetween, sleep } from './utils.js';
 
 const VISION_MODEL = 'claude-sonnet-4-6';
 const MAX_ATTEMPTS = 3;
 
 export type CaptchaVisionResult = 'disabled' | 'not_visible' | 'solved' | 'failed';
+type CaptchaType = 'text' | 'grid' | 'slider';
 
 export interface NaverCaptchaVisionContext {
   accountId?: string;
@@ -18,8 +22,15 @@ export interface NaverCaptchaVisionContext {
   workspace?: string | null;
   jobType?: string;
   accountLabel?: string;
-  /** 답 입력 후 제출(로그인·발행 등) */
   resubmit?: () => Promise<void>;
+}
+
+interface VisionSolveResult {
+  type: CaptchaType;
+  answer?: string;
+  cells?: number[];
+  dragPx?: number;
+  dragPercent?: number;
 }
 
 const CAPTCHA_ROOT_SELECTORS = [
@@ -55,6 +66,45 @@ const ANSWER_INPUT_SELECTORS = [
   'input[id*="captcha"]',
 ];
 
+const SLIDER_HANDLE_SELECTORS = [
+  '[class*="captcha"] [class*="slider"] [class*="btn"]',
+  '[class*="captcha"] [class*="slide"] [class*="btn"]',
+  '[class*="captcha"] [class*="handle"]',
+  '[class*="captcha"] [class*="drag"]',
+  '#captcha [class*="slider"]',
+  '#captcha .btn_slide',
+  '#captcha_slide_btn',
+  '.captcha_slider_button',
+  '[class*="slider_btn"]',
+  '[class*="slide_btn"]',
+];
+
+const SLIDER_TRACK_SELECTORS = [
+  '[class*="captcha"] [class*="slider"]',
+  '[class*="captcha"] [class*="track"]',
+  '#captcha [class*="bar"]',
+  '.captcha_slider',
+];
+
+const GRID_CELL_SELECTORS = [
+  '#captcha ul li',
+  '#captcha [class*="img_list"] li',
+  '#captcha [class*="image"] li',
+  '[class*="captcha"] [class*="list"] li',
+  '[class*="captcha"] [class*="grid"] > *',
+  '[class*="captcha"] [class*="item"]',
+  '[class*="captcha"] [class*="cell"]',
+  '#captcha [role="button"]',
+  '[class*="captcha"] button[class*="img"]',
+];
+
+const CONFIRM_SELECTORS = [
+  '#captcha_confirm',
+  '#captcha .btn_confirm',
+  '[class*="captcha"] [class*="confirm"]',
+  '[class*="captcha"] button[type="submit"]',
+];
+
 export function pickNaverCaptchaPage(context: BrowserContext): Page | undefined {
   const pages = context.pages().filter((p) => !p.isClosed());
   return (
@@ -77,7 +127,7 @@ export async function isNaverCaptchaVisible(page: Page): Promise<boolean> {
   return iframeCount > 0;
 }
 
-async function locateCaptchaRoot(page: Page) {
+async function locateCaptchaRoot(page: Page): Promise<Locator> {
   for (const sel of CAPTCHA_ROOT_SELECTORS) {
     const loc = page.locator(sel).first();
     if (await loc.isVisible().catch(() => false)) return loc;
@@ -85,12 +135,79 @@ async function locateCaptchaRoot(page: Page) {
   return page.locator('body');
 }
 
-async function captureCaptchaImageBase64(page: Page): Promise<{ base64: string; mediaType: 'image/png' | 'image/jpeg' } | null> {
-  for (const sel of CAPTCHA_IMAGE_SELECTORS) {
-    const img = page.locator(sel).first();
-    if (await img.isVisible().catch(() => false)) {
-      const buf = await img.screenshot({ type: 'png' }).catch(() => null);
-      if (buf?.length) return { base64: buf.toString('base64'), mediaType: 'image/png' };
+async function findGridCells(root: Locator): Promise<Locator[]> {
+  for (const sel of GRID_CELL_SELECTORS) {
+    const loc = root.locator(sel);
+    const count = await loc.count().catch(() => 0);
+    if (count >= 4 && count <= 16) {
+      return Array.from({ length: count }, (_, i) => loc.nth(i));
+    }
+  }
+  return [];
+}
+
+async function findSliderHandle(page: Page, root: Locator): Promise<Locator | null> {
+  for (const sel of SLIDER_HANDLE_SELECTORS) {
+    const loc = page.locator(sel).first();
+    if (await loc.isVisible().catch(() => false)) return loc;
+  }
+  const inRoot = root.locator('[class*="btn"], [class*="handle"], [class*="slider"]').first();
+  if (await inRoot.isVisible().catch(() => false)) return inRoot;
+  return null;
+}
+
+async function getSliderTrackWidth(page: Page, root: Locator): Promise<number> {
+  for (const sel of SLIDER_TRACK_SELECTORS) {
+    const loc = page.locator(sel).first();
+    const box = await loc.boundingBox().catch(() => null);
+    if (box && box.width > 40) return box.width;
+  }
+  const rootBox = await root.boundingBox().catch(() => null);
+  return rootBox?.width ?? 300;
+}
+
+async function detectCaptchaType(page: Page): Promise<CaptchaType> {
+  const root = await locateCaptchaRoot(page);
+
+  const handle = await findSliderHandle(page, root);
+  if (handle) {
+    const rootText = (await root.textContent().catch(() => '')) ?? '';
+    if (/밀어|드래그|슬라이드|퍼즐|맞춰|이동/.test(rootText)) return 'slider';
+    const trackW = await getSliderTrackWidth(page, root);
+    if (trackW > 80) return 'slider';
+  }
+
+  const cells = await findGridCells(root);
+  if (cells.length >= 4) return 'grid';
+
+  const inputInRoot = await root
+    .locator('input[type="text"], input[type="tel"], input[type="number"]')
+    .count()
+    .catch(() => 0);
+  if (inputInRoot > 0) return 'text';
+
+  const globalInputs = await page.locator(ANSWER_INPUT_SELECTORS.join(', ')).count().catch(() => 0);
+  if (globalInputs > 0) return 'text';
+
+  if (cells.length === 0) {
+    const imgTiles = await root.locator('img').count().catch(() => 0);
+    if (imgTiles >= 4) return 'grid';
+  }
+
+  return 'text';
+}
+
+async function captureCaptchaScreenshot(
+  page: Page,
+  type: CaptchaType,
+): Promise<{ base64: string; mediaType: 'image/png' | 'image/jpeg' } | null> {
+  if (type === 'text') {
+    for (const sel of CAPTCHA_IMAGE_SELECTORS) {
+      const img = page.locator(sel).first();
+      if (await img.isVisible().catch(() => false)) {
+        const buf = await img.screenshot({ type: 'png' }).catch(() => null);
+        if (buf?.length) return { base64: buf.toString('base64'), mediaType: 'image/png' };
+      }
     }
   }
 
@@ -138,44 +255,95 @@ async function refreshCaptchaImage(page: Page): Promise<void> {
   }
 }
 
-function parseVisionAnswer(raw: string | null): string | null {
-  if (!raw?.trim()) return null;
+function extractJsonObject(raw: string): Record<string, unknown> | null {
   const trimmed = raw.trim();
   try {
-    const json = JSON.parse(trimmed) as { answer?: string };
-    if (typeof json.answer === 'string' && json.answer.trim()) return json.answer.trim();
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    if (parsed && typeof parsed === 'object') return parsed;
   } catch {
-    /* plain text */
+    /* fall through */
   }
-  const jsonMatch = trimmed.match(/"answer"\s*:\s*"([^"]+)"/);
-  if (jsonMatch?.[1]) return jsonMatch[1].trim();
-  const digitMatch = trimmed.match(/\d+/);
-  if (digitMatch) return digitMatch[0];
-  const alnum = trimmed.replace(/[^0-9a-zA-Z가-힣]/g, '');
-  return alnum.length ? alnum.slice(0, 32) : null;
+  const match = trimmed.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[0]) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function parseVisionSolveResult(raw: string | null, expectedType: CaptchaType): VisionSolveResult | null {
+  if (!raw?.trim()) return null;
+  const json = extractJsonObject(raw);
+  if (json) {
+    const type = (json.type as CaptchaType) ?? expectedType;
+    const cells = Array.isArray(json.cells)
+      ? json.cells.map((c) => Number(c)).filter((n) => Number.isFinite(n) && n >= 1)
+      : undefined;
+    const dragPx = json.dragPx != null ? Number(json.dragPx) : undefined;
+    const dragPercent = json.dragPercent != null ? Number(json.dragPercent) : undefined;
+    const answer =
+      typeof json.answer === 'string'
+        ? json.answer.trim()
+        : typeof json.answer === 'number'
+          ? String(json.answer)
+          : undefined;
+    if (type === 'grid' && cells?.length) return { type: 'grid', cells };
+    if (type === 'slider' && (dragPx != null || dragPercent != null)) {
+      return { type: 'slider', dragPx, dragPercent };
+    }
+    if (answer) return { type: 'text', answer };
+  }
+
+  if (expectedType === 'text') {
+    const digitMatch = raw.match(/\d+/);
+    if (digitMatch) return { type: 'text', answer: digitMatch[0] };
+    const alnum = raw.replace(/[^0-9a-zA-Z가-힣]/g, '');
+    if (alnum.length) return { type: 'text', answer: alnum.slice(0, 32) };
+  }
+  return null;
 }
 
 async function solveCaptchaWithVision(
   imageBase64: string,
   mediaType: 'image/png' | 'image/jpeg',
   question: string,
-): Promise<string | null> {
-  const system = `You solve Naver Korean login CAPTCHA images.
-Return ONLY JSON: {"answer":"..."} with no markdown.
+  type: CaptchaType,
+  meta: { cellCount?: number; trackWidthPx?: number },
+): Promise<VisionSolveResult | null> {
+  let system: string;
+  let prompt: string;
+
+  if (type === 'grid') {
+    system = `You solve Naver image-grid CAPTCHA. Return ONLY JSON, no markdown.
+Format: {"type":"grid","cells":[1,3,5]}
+- cells: 1-based indices left-to-right, top-to-bottom (${meta.cellCount ?? '?'} cells total).
+- Click ALL tiles matching the Korean instruction.`;
+    prompt = `Question: ${question}\nGrid has ${meta.cellCount ?? 'unknown'} clickable tiles numbered 1..N row-major.`;
+  } else if (type === 'slider') {
+    system = `You solve Naver slide-puzzle CAPTCHA. Return ONLY JSON, no markdown.
+Format: {"type":"slider","dragPx":127} OR {"type":"slider","dragPercent":0.62}
+- dragPx: pixels to drag the slider handle RIGHT to align the puzzle piece.
+- dragPercent: fraction of track width (0-1) if exact pixels unclear.
+- Slider track width ≈ ${meta.trackWidthPx ?? 300}px.`;
+    prompt = `Question: ${question}\nFind how far to drag the slider handle horizontally to complete the puzzle.`;
+  } else {
+    system = `You solve Naver Korean login CAPTCHA images. Return ONLY JSON: {"type":"text","answer":"..."}
 Rules:
-- Receipt "총 몇 개" questions: sum the quantity(개수) column only; ignore price rows and promotional lines like "3+1 행사".
-- Use digits only when the answer is numeric.
-- If multiple digit boxes are implied, return all digits without spaces (e.g. 7 or 007).`;
+- Receipt "총 몇 개": sum quantity(개수) column only; ignore "3+1 행사" promo rows.
+- Numeric answers: digits only. Multiple boxes: pad e.g. "007".`;
+    prompt = question;
+  }
 
   const raw = await askClaudeVision({
     model: VISION_MODEL,
     system,
-    question,
+    question: prompt,
     imageBase64,
     mediaType,
-    max_tokens: 128,
+    max_tokens: type === 'grid' ? 192 : 128,
   });
-  return parseVisionAnswer(raw);
+  return parseVisionSolveResult(raw, type);
 }
 
 async function fillCaptchaAnswer(page: Page, answer: string): Promise<boolean> {
@@ -203,6 +371,60 @@ async function fillCaptchaAnswer(page: Page, answer: string): Promise<boolean> {
   return true;
 }
 
+async function applyGridClicks(page: Page, cells: Locator[], indices: number[]): Promise<boolean> {
+  if (!indices.length) return false;
+  for (const idx of indices) {
+    const cell = cells[idx - 1];
+    if (!cell) continue;
+    await humanClickLocator(page, cell);
+    await humanSleep(350, 900);
+  }
+  return true;
+}
+
+async function applySliderDrag(
+  page: Page,
+  root: Locator,
+  result: VisionSolveResult,
+): Promise<boolean> {
+  const handle = await findSliderHandle(page, root);
+  if (!handle) return false;
+
+  const trackW = await getSliderTrackWidth(page, root);
+  let offsetX = result.dragPx ?? 0;
+  if (result.dragPercent != null && Number.isFinite(result.dragPercent)) {
+    offsetX = Math.round(trackW * Math.max(0, Math.min(1, result.dragPercent)));
+  }
+  if (offsetX < 8) return false;
+
+  const maxDrag = Math.max(trackW - 20, offsetX);
+  offsetX = Math.min(offsetX, maxDrag);
+
+  await humanDragLocatorHorizontal(page, handle, offsetX);
+  await humanSleep(500, 1200);
+  return true;
+}
+
+async function clickCaptchaConfirm(page: Page): Promise<void> {
+  for (const sel of CONFIRM_SELECTORS) {
+    const btn = page.locator(sel).first();
+    if (await btn.isVisible().catch(() => false)) {
+      await humanClickLocator(page, btn);
+      await sleep(randomBetween(400, 900));
+      return;
+    }
+  }
+}
+
+async function submitCaptcha(page: Page, ctx: NaverCaptchaVisionContext): Promise<void> {
+  await clickCaptchaConfirm(page);
+  if (ctx.resubmit) {
+    await ctx.resubmit();
+  } else if (page.url().includes('nidlogin')) {
+    await humanClickLocator(page, page.locator('#log\\.login'));
+  }
+}
+
 async function captchaCleared(page: Page): Promise<boolean> {
   if (!(await isNaverCaptchaVisible(page))) return true;
   const errText = await page
@@ -214,9 +436,32 @@ async function captchaCleared(page: Page): Promise<boolean> {
   return false;
 }
 
+async function applyVisionResult(
+  page: Page,
+  type: CaptchaType,
+  result: VisionSolveResult,
+): Promise<boolean> {
+  const root = await locateCaptchaRoot(page);
+
+  if (type === 'grid' && result.cells?.length) {
+    const cells = await findGridCells(root);
+    if (!cells.length) return false;
+    return applyGridClicks(page, cells, result.cells);
+  }
+
+  if (type === 'slider') {
+    return applySliderDrag(page, root, result);
+  }
+
+  if (result.answer) {
+    return fillCaptchaAnswer(page, result.answer);
+  }
+
+  return false;
+}
+
 /**
- * Claude Vision으로 네이버 CAPTCHA 자동 해결 (최대 3회).
- * 실패 시 'failed' — 호출측에서 VNC hold + Telegram(visionAutoFailed) 처리.
+ * Claude Vision으로 네이버 CAPTCHA 자동 해결 (텍스트·그리드 클릭·슬라이드 퍼즐, 최대 3회).
  */
 export async function tryAutoSolveNaverCaptcha(
   page: Page,
@@ -226,40 +471,44 @@ export async function tryAutoSolveNaverCaptcha(
   if (!(await isNaverCaptchaVisible(page))) return 'not_visible';
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    const captchaType = await detectCaptchaType(page);
+
     await logOperation({
       level: 'info',
-      message: `[captcha-vision] 자동 해결 시도 ${attempt}/${MAX_ATTEMPTS}`,
+      message: `[captcha-vision] ${captchaType} 자동 해결 시도 ${attempt}/${MAX_ATTEMPTS}`,
       job_id: ctx.humaJobId,
       account_id: ctx.accountId,
     });
 
-    const shot = await captureCaptchaImageBase64(page);
+    const shot = await captureCaptchaScreenshot(page, captchaType);
     if (!shot) break;
 
     const question = await readCaptchaQuestion(page);
-    const answer = await solveCaptchaWithVision(shot.base64, shot.mediaType, question);
-    if (!answer) {
+    const root = await locateCaptchaRoot(page);
+    const cells = captchaType === 'grid' ? await findGridCells(root) : [];
+    const trackW = captchaType === 'slider' ? await getSliderTrackWidth(page, root) : undefined;
+
+    const solved = await solveCaptchaWithVision(shot.base64, shot.mediaType, question, captchaType, {
+      cellCount: cells.length || undefined,
+      trackWidthPx: trackW,
+    });
+    if (!solved) {
       await humanSleep(3000, 7000);
       await refreshCaptchaImage(page);
       continue;
     }
 
-    const filled = await fillCaptchaAnswer(page, answer);
-    if (!filled) break;
+    const applied = await applyVisionResult(page, captchaType, solved);
+    if (!applied) break;
 
     await humanSleep(1500, 3500);
-
-    if (ctx.resubmit) {
-      await ctx.resubmit();
-    } else if (page.url().includes('nidlogin')) {
-      await humanClickLocator(page, page.locator('#log\\.login'));
-    }
+    await submitCaptcha(page, ctx);
 
     await sleep(randomBetween(2000, 4000));
     if (await captchaCleared(page)) {
       await logOperation({
         level: 'info',
-        message: `[captcha-vision] 자동 해결 성공 (시도 ${attempt})`,
+        message: `[captcha-vision] ${captchaType} 자동 해결 성공 (시도 ${attempt})`,
         job_id: ctx.humaJobId,
         account_id: ctx.accountId,
       });

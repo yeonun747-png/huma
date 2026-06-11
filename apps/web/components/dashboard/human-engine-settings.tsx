@@ -392,7 +392,7 @@ export function HumanEngineSettings() {
             }}
           />
           <div className="he-tw-sub -mt-2 mb-2 text-[11px] text-huma-t3">
-            로그인·발행 CAPTCHA — Vision 3회 실패 시 Telegram → VNC 수동
+            영수증·숫자 입력 · 이미지 그리드 클릭 · 슬라이드 퍼즐 (베지어 마우스) — 3회 실패 시 Telegram → VNC
           </div>
           <div className="he-tw">
             <span className="he-tw-label">429 이후 쿨다운</span>
