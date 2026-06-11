@@ -89,26 +89,24 @@ export async function selectCrankAccountsForToday(
   return selectCrankAccountsForDailySchedule(rested, cycleDays, dailyAccountCount);
 }
 
-async function hasDailyScheduleJobs(dateKey: string): Promise<boolean> {
-  const { count } = await supabase
+/** 당일 스케줄 job이 이미 있는 계정 (완료·삭제 제외 보충용) */
+async function getTodayCrankScheduledAccountIds(dateKey: string): Promise<Set<string>> {
+  const { data } = await supabase
     .from('huma_jobs')
-    .select('id', { count: 'exact', head: true })
+    .select('account_id')
     .eq('job_type', 'social_crank')
-    .like('title', `${DAILY_JOB_TITLE_PREFIX} ${dateKey}%`);
+    .like('title', `${DAILY_JOB_TITLE_PREFIX} ${dateKey}%`)
+    .not('account_id', 'is', null);
 
-  return (count ?? 0) > 0;
+  return new Set((data ?? []).map((r) => r.account_id as string));
 }
 
-/** 매일 00:01 KST — 당일 crank 계정 큐 + 분산 scheduled_at */
+/** 매일 00:01 KST — 당일 crank 계정 큐 + 분산 scheduled_at (누락·삭제분 보충) */
 export async function runDailyCrankScheduler(options?: { anchorFromNow?: boolean }): Promise<void> {
   if (getSystemPaused()) return;
 
   const dateKey = formatKstDateKey();
-  if (await hasDailyScheduleJobs(dateKey)) {
-    return;
-  }
-
-  await resetDailyCrankCounters();
+  const alreadyScheduled = await getTodayCrankScheduledAccountIds(dateKey);
 
   const activeModems = await countActiveCrankModems();
   const poolSize = await countActiveCrankPoolSize();
@@ -122,17 +120,26 @@ export async function runDailyCrankScheduler(options?: { anchorFromNow?: boolean
     return;
   }
 
-  const accounts = await selectCrankAccountsForToday(
+  const allAccounts = await selectCrankAccountsForToday(
     policy.cycleDays,
     policy.dailyAccountCount,
   );
 
-  if (accounts.length === 0) {
+  if (allAccounts.length === 0) {
     await logOperation({
       level: 'info',
       message: `[crank-scheduler] ${dateKey}: 주기 ${policy.cycleDays}일 — 실행 대상 계정 없음`,
     });
     return;
+  }
+
+  const accounts = allAccounts.filter((a) => !alreadyScheduled.has(a.id));
+  if (accounts.length === 0) {
+    return;
+  }
+
+  if (alreadyScheduled.size === 0) {
+    await resetDailyCrankCounters();
   }
 
   const scheduleWindow = await getCrankScheduleWindow();
@@ -146,6 +153,7 @@ export async function runDailyCrankScheduler(options?: { anchorFromNow?: boolean
 
   const serviceCounts = { yeonun: 0, panana: 0, quizoasis: 0 };
   const blogUrlCache = new Map<Workspace, string[]>();
+  let created = 0;
 
   for (let i = 0; i < accounts.length; i++) {
     const account = accounts[i];
@@ -192,12 +200,16 @@ export async function runDailyCrankScheduler(options?: { anchorFromNow?: boolean
     }
 
     await enqueueHumaJob(job as JobRecord);
+    created += 1;
   }
 
+  if (created === 0) return;
+
   const anchorNote = options?.anchorFromNow ? ' · 당일보정(현재시각~)' : '';
+  const backfillNote = alreadyScheduled.size > 0 ? ` · 보충(기등록 ${alreadyScheduled.size})` : '';
   await logOperation({
     level: 'info',
-    message: `[crank-scheduler] ${dateKey}: 동글 ${activeModems} · 주기 ${policy.cycleDays}일 · 계정 ${accounts.length}건 (연운 ${serviceCounts.yeonun}·파나나 ${serviceCounts.panana}·퀴즈 ${serviceCounts.quizoasis}) 큐 등록${anchorNote}`,
+    message: `[crank-scheduler] ${dateKey}: 동글 ${activeModems} · 주기 ${policy.cycleDays}일 · 계정 ${created}건 (연운 ${serviceCounts.yeonun}·파나나 ${serviceCounts.panana}·퀴즈 ${serviceCounts.quizoasis}) 큐 등록${anchorNote}${backfillNote}`,
   });
 }
 
@@ -348,14 +360,11 @@ function tickCrankSchedulerClock() {
   }
 }
 
-/** 서버 기동 시 오늘 큐가 없으면 보정 생성 */
+/** 서버 기동·동글 복구 시 당일 누락 계정 큐 보충 */
 export async function ensureTodayCrankQueue(): Promise<void> {
   if (getSystemPaused()) return;
-
-  const dateKey = formatKstDateKey();
-  if (!(await hasDailyScheduleJobs(dateKey))) {
-    await runDailyCrankScheduler({ anchorFromNow: true });
-  }
+  if ((await countActiveCrankModems()) === 0) return;
+  await runDailyCrankScheduler({ anchorFromNow: true });
 }
 
 export function startCrankScheduler(): void {
