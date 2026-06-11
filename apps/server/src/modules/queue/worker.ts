@@ -10,7 +10,7 @@ import {
   acquireWorkflowPage,
 } from '../playwright/browser.js';
 import { loadAccountForBrowser } from '../playwright/account-loader.js';
-import { naverLogin } from '../playwright/naver/login.js';
+import { naverLogin, ensureNaverLoggedIn } from '../playwright/naver/login.js';
 import { preSessionWarmup } from '../playwright/naver/pre-session-warmup.js';
 import { parsePersona } from '../playwright/persona.js';
 import { measureRTT, rttScale } from '../human-engine/timing.js';
@@ -48,6 +48,12 @@ import { isSlimDataCapError, scheduleSlimCapRetry } from '../../lib/slim-retry.j
 import { assertCafeNewPostAccount, assertCafeReplyAccount } from '../../lib/cafe-accounts.js';
 import { assertAccountRunnable } from '../../lib/account-guards.js';
 import { getSystemPaused } from '../../lib/system-pause.js';
+import {
+  getCrankEnabled,
+  getPostingEnabled,
+  isCrankActivityJobType,
+  isPostingActivityJobType,
+} from '../../lib/activity-control.js';
 import { isCrankCaptchaHoldSignal } from '../../lib/crank-captcha-hold.js';
 import {
   CRANK_MODEM_DEFER_MS,
@@ -127,6 +133,28 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
           accountId,
           token,
           logMessage: '[crank] 전체 정지 — 5분 후 재예약',
+          level: 'info',
+        });
+        throw new DelayedError();
+      }
+
+      if (isCrankActivityJobType(type) && !getCrankEnabled()) {
+        await deferHumaJob(job, humaJobId, CRANK_PAUSE_DEFER_MS, {
+          reason: 'CRANK_ACTIVITY_DISABLED',
+          accountId,
+          token,
+          logMessage: '[crank] 활동 OFF — 5분 후 재확인',
+          level: 'info',
+        });
+        throw new DelayedError();
+      }
+
+      if (isPostingActivityJobType(type) && !getPostingEnabled()) {
+        await deferHumaJob(job, humaJobId, CRANK_PAUSE_DEFER_MS, {
+          reason: 'POSTING_ACTIVITY_DISABLED',
+          accountId,
+          token,
+          logMessage: '[posting] 활동 OFF — 5분 후 재확인',
           level: 'info',
         });
         throw new DelayedError();
@@ -304,16 +332,21 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
               }
 
               if (accountId) {
-                await naverLogin(context, accountId, {
-                  profilePath: accountCtx?.profile_path,
-                  skipShadowWalk: resumeAfterCaptcha,
-                  captchaContext: {
-                    humaJobId,
-                    accountId,
-                    workspace: jobWorkspace,
-                    jobType: type,
-                  },
-                });
+                if (resumeAfterCaptcha) {
+                  await ensureNaverLoggedIn(context, accountId, {
+                    profilePath: accountCtx?.profile_path,
+                  });
+                } else {
+                  await naverLogin(context, accountId, {
+                    profilePath: accountCtx?.profile_path,
+                    captchaContext: {
+                      humaJobId,
+                      accountId,
+                      workspace: jobWorkspace,
+                      jobType: type,
+                    },
+                  });
+                }
               }
 
               await closeIdleBlankTabs(context);
@@ -370,13 +403,13 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
                   try {
                     let retryResultUrl = '';
                     if (type === 'post_blog') {
-                      if (captchaPage.url().includes('nidlogin') && accountCtx) {
-                        await naverLogin(context, accountId, {
+                      if (accountCtx) {
+                        await ensureNaverLoggedIn(context, accountId, {
                           profilePath: accountCtx.profile_path,
-                          captchaContext: { humaJobId, accountId, workspace: jobWorkspace, jobType: type },
                         });
                       }
-                      const retryPage = await context.newPage();
+                      await closeIdleBlankTabs(context);
+                      const retryPage = await acquireWorkflowPage(context);
                       ({ resultUrl: retryResultUrl } = await executePostBlog({
                         page: retryPage,
                         payload,

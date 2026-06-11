@@ -4,6 +4,7 @@ import { logOperation } from '../lib/log-emitter.js';
 import { recoverCrankPipeline } from '../lib/crank-pipeline-recovery.js';
 import { ensureTodayCrankQueue } from '../lib/crank-scheduler.js';
 import { getSystemPaused, setSystemPaused } from '../lib/system-pause.js';
+import { getCrankEnabled, getPostingEnabled } from '../lib/activity-control.js';
 import {
   getActiveCaptchaDrillJobId,
   isCaptchaDrillEnabled,
@@ -63,6 +64,8 @@ export async function registerSystemRoutes(app: FastifyInstance) {
       activeAccounts: activeAccounts ?? 0,
       errors: errors ?? 0,
       paused,
+      crank_enabled: getCrankEnabled(),
+      posting_enabled: getPostingEnabled(),
     };
   });
 
@@ -80,9 +83,14 @@ export async function registerSystemRoutes(app: FastifyInstance) {
 
   app.post('/api/resume-all', { preHandler: [authMiddleware, requireSuper] }, async () => {
     await setSystemPaused(false);
-    await ensureTodayCrankQueue();
-    await recoverCrankPipeline();
-    await logOperation({ level: 'INFO', message: 'HUMA 전체 재개 — 당일 C-Rank·예약 큐 보정' });
+    if (getCrankEnabled()) {
+      await ensureTodayCrankQueue();
+      await recoverCrankPipeline();
+    }
+    await logOperation({
+      level: 'INFO',
+      message: `HUMA 전체 재개 — C-Rank${getCrankEnabled() ? '·예약 큐 보정' : ' OFF'} · 포스팅${getPostingEnabled() ? ' ON' : ' OFF'}`,
+    });
     return { success: true, message: '작업 재개됨' };
   });
 

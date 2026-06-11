@@ -4,6 +4,7 @@ import { reconcileStaleCrankModemLocks } from '../modules/modem/allocation.js';
 import { formatKstDateKey } from './crank-schedule-config.js';
 import { logOperation } from './log-emitter.js';
 import { getSystemPaused } from './system-pause.js';
+import { getCrankEnabled } from './activity-control.js';
 import {
   enqueueHumaJob,
   recoverScheduledJobs,
@@ -110,6 +111,7 @@ export async function recoverOverdueBullJobs(): Promise<number> {
 /** C-Rank 파이프라인 통합 복구 — 기동·재개·주기 tick */
 export async function recoverCrankPipeline(): Promise<void> {
   if (getSystemPaused()) return;
+  if (!getCrankEnabled()) return;
 
   await reconcileStaleCrankModemLocks();
 

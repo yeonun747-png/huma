@@ -1,5 +1,6 @@
 import { enqueueHumaJob, type JobRecord } from '../../lib/job-scheduler.js';
 import { supabase } from '../../middleware/auth.js';
+import { getPostingEnabled } from '../../lib/activity-control.js';
 import { toTodayDatetime } from './auto-decide.js';
 import {
   runContentOrchestrator,
@@ -39,6 +40,9 @@ export function resolveAutoContentStartAt(autoScheduled: boolean, scheduleTime?:
 }
 
 export async function registerAutoContentJobs(body: AutoContentRequest): Promise<AutoContentResult> {
+  if (!getPostingEnabled()) {
+    throw new Error('POSTING_ACTIVITY_DISABLED');
+  }
   const contentTypeAuto = body.content_type_auto ?? body.content_type == null;
   const autoScheduled = body.auto_schedule !== false;
 

@@ -35,6 +35,12 @@ function readPageSize(): PageSize {
   return 20;
 }
 
+function isHiddenPipelineParent(job: HumaJob, allJobs: HumaJob[]): boolean {
+  if (job.job_type !== 'content_full') return false;
+  if (job.status !== 'completed' || !job.result_url) return false;
+  return allJobs.some((child) => child.id === job.result_url);
+}
+
 function jobIcon(type: string) {
   if (type === 'social_crank') return '💬';
   if (type.includes('content_full')) return '✨';
@@ -103,7 +109,9 @@ function jobSub(job: HumaJob): string {
   } else if (job.job_type === 'content_full') {
     const dryRun = (job.platform_schedule as Record<string, unknown> | undefined)?._dry_run === true;
     parts.push(dryRun ? '검증(dry_run)·네이버 미발행' : 'AI 생성·발행 분배');
-    if (['pending', 'scheduled', 'paused'].includes(job.status)) parts.push('클릭하여 수정');
+    if (job.status === 'running') parts.push('생성 중');
+    else if (job.status === 'pending' || job.status === 'scheduled') parts.push('생성 대기');
+    else if (job.status === 'paused') parts.push('클릭하여 수정');
   } else if (job.content_type) parts.push(`타입 ${job.content_type}`);
   else if (job.link_url) parts.push('AI 생성');
 
@@ -269,6 +277,10 @@ export function QueueManager() {
 
   const deletableJobs = useMemo(() => jobs.filter(isDeletableQueueJob), [jobs]);
   const staleFailedJobs = useMemo(() => jobs.filter(isStaleOrFailedQueueJob), [jobs]);
+  const visibleJobs = useMemo(
+    () => jobs.filter((job) => !isHiddenPipelineParent(job, jobs)),
+    [jobs],
+  );
   const selectedCount = selectedIds.size;
   const allDeletableSelected =
     deletableJobs.length > 0 && deletableJobs.every((j) => selectedIds.has(j.id));
@@ -534,10 +546,10 @@ export function QueueManager() {
                 </select>
               </label>
             </div>
-            {jobs.length === 0 ? (
+            {visibleJobs.length === 0 ? (
               <div className="py-6 text-center text-sm text-huma-t3">이 페이지에 표시할 작업이 없습니다</div>
             ) : (
-              jobs.map((job) => {
+              visibleJobs.map((job) => {
             const ws = (job.workspace ?? workspace) as Workspace;
             const canAdvance = ['pending', 'scheduled', 'paused'].includes(job.status);
             const deletable = isDeletableQueueJob(job);

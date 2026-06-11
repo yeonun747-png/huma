@@ -25,6 +25,7 @@ import { logOperation } from './log-emitter.js';
 import { getCrankScheduleWindow } from './human-engine-policy.js';
 import { layer4RestSupabaseOr } from './account-guards.js';
 import { getSystemPaused } from './system-pause.js';
+import { getCrankEnabled } from './activity-control.js';
 
 const DAILY_JOB_TITLE_PREFIX = 'C-Rank 스케줄';
 
@@ -117,6 +118,7 @@ async function getTodayCrankScheduledAccountIds(dateKey: string): Promise<Set<st
 /** 매일 00:01 KST — 당일 crank 계정 큐 + 분산 scheduled_at (누락·삭제분 보충) */
 export async function runDailyCrankScheduler(options?: { anchorFromNow?: boolean }): Promise<void> {
   if (getSystemPaused()) return;
+  if (!getCrankEnabled()) return;
 
   const dateKey = formatKstDateKey();
   const alreadyScheduled = await getTodayCrankScheduledAccountIds(dateKey);
@@ -376,6 +378,7 @@ function tickCrankSchedulerClock() {
 /** 서버 기동·동글 복구 시 당일 누락 계정 큐 보충 */
 export async function ensureTodayCrankQueue(): Promise<void> {
   if (getSystemPaused()) return;
+  if (!getCrankEnabled()) return;
   if ((await countActiveCrankModems()) === 0) return;
   await runDailyCrankScheduler({ anchorFromNow: true });
 }

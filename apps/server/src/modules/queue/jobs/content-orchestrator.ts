@@ -16,6 +16,7 @@ import { generateImage, type ImageModel } from '../../higgsfield/image.js';
 import { getPipelineModelSettings } from '../../../lib/pipeline-settings.js';
 import { resolveBlogWritingPersona } from '../../../lib/blog-writing-persona.js';
 import { patchJobPreviewProgress, type PreviewStep } from '../../claude/content-preview.js';
+import { isNaverBlogOnlyMode } from '../../../lib/activity-control.js';
 
 export type ContentType = 'A' | 'B';
 
@@ -197,32 +198,34 @@ async function runTypeA(
   jobsCreated += 1;
   await enqueueHumaJob(blogJob);
 
-  const socialJobs: Array<{ type: string; platform: string; content: string; imageUrl?: string; scheduleKey: keyof PlatformSchedule }> = [
-    { type: 'instagram_post', platform: 'instagram', content: generated.instagram_caption, imageUrl, scheduleKey: 'instagram' },
-    { type: 'threads_post', platform: 'threads', content: generated.threads_text, imageUrl, scheduleKey: 'threads' },
-    { type: 'twitter_post', platform: 'twitter', content: generated.x_text, imageUrl, scheduleKey: 'x' },
-  ];
+  if (!isNaverBlogOnlyMode()) {
+    const socialJobs: Array<{ type: string; platform: string; content: string; imageUrl?: string; scheduleKey: keyof PlatformSchedule }> = [
+      { type: 'instagram_post', platform: 'instagram', content: generated.instagram_caption, imageUrl, scheduleKey: 'instagram' },
+      { type: 'threads_post', platform: 'threads', content: generated.threads_text, imageUrl, scheduleKey: 'threads' },
+      { type: 'twitter_post', platform: 'twitter', content: generated.x_text, imageUrl, scheduleKey: 'x' },
+    ];
 
-  for (const social of socialJobs) {
-    const platformAccountId = await pickPlatformAccount(workspace, social.platform);
-    const socialAt = platformTime(auto_scheduled, schedule, social.scheduleKey, scheduled_at);
-    const socialJob = await insertJob({
-      workspace,
-      platform_account_id: platformAccountId,
-      job_type: social.type,
-      title: `[${social.platform}] ${title}`,
-      content: social.content,
-      image_urls: social.imageUrl ? [social.imageUrl] : undefined,
-      hashtags: generated.hashtags,
-      platform: social.platform,
-      content_type: 'A',
-      scheduled_at: socialAt,
-      repeat_rule: repeat_rule ?? null,
-      status: resolveStatus(socialAt),
-      retry_count: 0,
-    });
-    jobsCreated += 1;
-    await enqueueHumaJob(socialJob);
+    for (const social of socialJobs) {
+      const platformAccountId = await pickPlatformAccount(workspace, social.platform);
+      const socialAt = platformTime(auto_scheduled, schedule, social.scheduleKey, scheduled_at);
+      const socialJob = await insertJob({
+        workspace,
+        platform_account_id: platformAccountId,
+        job_type: social.type,
+        title: `[${social.platform}] ${title}`,
+        content: social.content,
+        image_urls: social.imageUrl ? [social.imageUrl] : undefined,
+        hashtags: generated.hashtags,
+        platform: social.platform,
+        content_type: 'A',
+        scheduled_at: socialAt,
+        repeat_rule: repeat_rule ?? null,
+        status: resolveStatus(socialAt),
+        retry_count: 0,
+      });
+      jobsCreated += 1;
+      await enqueueHumaJob(socialJob);
+    }
   }
 
   return { jobsCreated, primaryJobId: blogJob.id, video_queue_id: undefined as string | undefined };
@@ -261,9 +264,14 @@ async function runTypeB(
     video_model: videoModel,
     scheduled_at: blogAt,
     repeat_rule: repeat_rule ?? null,
-    status: 'paused',
+    status: isNaverBlogOnlyMode() ? resolveStatus(blogAt) : 'paused',
     retry_count: 0,
   });
+
+  if (isNaverBlogOnlyMode()) {
+    await enqueueHumaJob(blogJob);
+    return { jobsCreated: 1, primaryJobId: blogJob.id, video_queue_id: undefined as string | undefined };
+  }
 
   const threadsAccountId = await pickPlatformAccount(workspace, 'threads');
   const threadsJob = await insertJob({

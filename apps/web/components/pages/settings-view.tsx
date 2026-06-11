@@ -110,6 +110,11 @@ export function SettingsView() {
 
   const [watcher, setWatcher] = useState<Record<string, unknown>>({});
 
+  const [activity, setActivity] = useState<{ crank_enabled: boolean; posting_enabled: boolean }>({
+    crank_enabled: true,
+    posting_enabled: true,
+  });
+
 
 
   const load = useCallback(() => {
@@ -120,7 +125,9 @@ export function SettingsView() {
 
       api.getSetting('watcher').catch(() => ({})),
 
-    ]).then(([a, w]) => {
+      api.getSetting('activity_control').catch(() => ({ crank_enabled: true, posting_enabled: true })),
+
+    ]).then(([a, w, act]) => {
 
       const appSettings = a as Record<string, unknown>;
 
@@ -143,6 +150,12 @@ export function SettingsView() {
       setApp(appSettings);
 
       setWatcher(w as Record<string, unknown>);
+
+      const actRow = act as { crank_enabled?: boolean; posting_enabled?: boolean };
+      setActivity({
+        crank_enabled: actRow.crank_enabled !== false,
+        posting_enabled: actRow.posting_enabled !== false,
+      });
 
     });
 
@@ -180,6 +193,12 @@ export function SettingsView() {
 
   };
 
+  const patchActivity = async (key: 'crank_enabled' | 'posting_enabled', val: boolean) => {
+    const next = { ...activity, [key]: val };
+    setActivity(next);
+    await api.updateSetting('activity_control', next);
+  };
+
 
 
   return (
@@ -187,6 +206,21 @@ export function SettingsView() {
     <div className="animate-fadeIn">
 
       <MGrid cols={2}>
+
+        <MPanel title="활동">
+          <SettingsToggle
+            label="C-Rank 활동"
+            sub="OFF — 스케줄·수동 C-Rank 큐 생성·실행 중지 (전체 재개와 별도)"
+            value={activity.crank_enabled}
+            onChange={(v) => patchActivity('crank_enabled', v)}
+          />
+          <SettingsToggle
+            label="포스팅 활동"
+            sub="OFF — AI 생성·네이버 발행 큐 생성·실행 중지"
+            value={activity.posting_enabled}
+            onChange={(v) => patchActivity('posting_enabled', v)}
+          />
+        </MPanel>
 
         <MPanel title="API 연결">
 

@@ -36,6 +36,7 @@ import { verifyAdminToken } from './middleware/auth.js';
 
 import { startWorker } from './modules/queue/worker.js';
 import { initSystemPause, getSystemPaused } from './lib/system-pause.js';
+import { initActivityControl } from './lib/activity-control.js';
 import { recoverCrankPipeline } from './lib/crank-pipeline-recovery.js';
 import { reconcileStaleCrankModemLocks } from './modules/modem/allocation.js';
 import { shutdownCaptchaHolds } from './modules/watcher/captcha-hold.js';
@@ -189,6 +190,17 @@ async function main() {
 
   try {
     await initSystemPause();
+    await initActivityControl();
+    if (process.platform === 'linux' && process.env.DISPLAY === ':99') {
+      const { spawn } = await import('node:child_process');
+      const { fileURLToPath } = await import('node:url');
+      const { dirname, join } = await import('node:path');
+      const deployRoot = join(dirname(fileURLToPath(import.meta.url)), '..', 'deploy');
+      spawn('bash', [join(deployRoot, 'scripts', 'start-fcitx-xvfb.sh')], {
+        detached: true,
+        stdio: 'ignore',
+      }).unref();
+    }
     if (getSystemPaused()) {
       app.log.warn('HUMA 전체 정지 상태 — ▶ 재시작 전까지 큐·스케줄러 가동 안 함');
     }

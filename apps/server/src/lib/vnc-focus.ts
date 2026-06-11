@@ -74,6 +74,7 @@ export async function buildVncHudState(): Promise<VncHudState> {
       return `${s.hint}: ${s.label}${mark}`;
     }),
     'Ctrl+Alt+0: 분할 복귀',
+    '한/영: Ctrl+Space (fcitx)',
   ];
 
   return {

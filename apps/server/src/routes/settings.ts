@@ -1,12 +1,14 @@
 import type { FastifyInstance } from 'fastify';
 import { authMiddleware, supabase } from '../middleware/auth.js';
 import { updateSetting } from '../lib/settings.js';
+import { setActivityControl, type ActivityControlState } from '../lib/activity-control.js';
 
 // 전역 운영에 영향을 주는 민감 설정 키 — 슈퍼관리자만 변경 가능
 const SUPER_ONLY_SETTING_KEYS = new Set([
   'human_engine',
   'social_crank',
   'system_paused',
+  'activity_control',
   'image_engine',
   'cafe_viral',
 ]);
@@ -25,6 +27,9 @@ export async function registerSettingsRoutes(app: FastifyInstance) {
     }
     const value = request.body;
     await updateSetting(key, value);
+    if (key === 'activity_control' && value && typeof value === 'object') {
+      await setActivityControl(value as Partial<ActivityControlState>);
+    }
     return { success: true, key, value };
   });
 

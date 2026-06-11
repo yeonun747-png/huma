@@ -23,11 +23,17 @@ const KEYWORD_POOL: Record<string, string[]> = {
   일상: ['맛집추천', '카페투어', '주말여행', '요리레시피', '드라마추천'],
 };
 
-/** 검색 결과 링크 — 들어가자마자 스크롤, 대충 훑고 5~10초 내 이탈 */
-async function quickWarmupGlance(page: Page): Promise<void> {
-  await humanSleep(300, 900);
-  await scrollWithReverse(page, randomBetween(2000, 4500), [250, 650], [120, 400], 0.08);
-  await humanSleep(1500, 4000);
+/** 검색 결과 링크 — 3~5초 내 스크롤 후 이탈 (사람 패턴) */
+async function quickWarmupGlance(page: Page, accountType: WarmupAccountType): Promise<void> {
+  await humanSleep(accountType === 'posting' ? 800 : 300, accountType === 'posting' ? 2000 : 900);
+  await scrollWithReverse(
+    page,
+    randomBetween(accountType === 'posting' ? 1500 : 2000, accountType === 'posting' ? 3500 : 4500),
+    [200, 500],
+    accountType === 'posting' ? [300, 800] : [120, 400],
+    accountType === 'posting' ? 0.15 : 0.08,
+  );
+  await humanSleep(accountType === 'posting' ? 500 : 1500, accountType === 'posting' ? 2000 : 4000);
 }
 
 async function safeWarmupGoto(page: Page, url: string, timeoutMs: number): Promise<boolean> {
@@ -47,15 +53,16 @@ async function visitWarmupUrls(
   urls: string[],
   visitCount: number,
   navTimeoutMs: number,
+  accountType: WarmupAccountType,
 ): Promise<void> {
   let visited = 0;
   for (const url of urls) {
     if (visited >= visitCount) break;
     if (!(await safeWarmupGoto(page, url, navTimeoutMs))) continue;
     visited += 1;
-    await quickWarmupGlance(page);
+    await quickWarmupGlance(page, accountType);
     await page.goBack({ waitUntil: 'domcontentloaded', timeout: navTimeoutMs }).catch(() => {});
-    await humanSleep(1000, 2500);
+    await humanSleep(accountType === 'posting' ? 400 : 1000, accountType === 'posting' ? 1200 : 2500);
   }
 }
 
@@ -118,7 +125,7 @@ export async function preSessionWarmup(
   const expressCrank = accountType === 'crank' && options?.express === true;
   const visitCount =
     accountType === 'posting'
-      ? randomBetween(2, 3)
+      ? randomBetween(3, 4)
       : expressCrank
         ? randomBetween(1, 2)
         : randomBetween(2, 4);
@@ -128,7 +135,16 @@ export async function preSessionWarmup(
     await throwWarmupFailure(page, '네이버 검색 결과', integrated.diagnostics, navError);
   }
 
-  await visitWarmupUrls(page, integrated.urls, visitCount, navTimeout);
+  await visitWarmupUrls(page, integrated.urls, visitCount, navTimeout, accountType);
+
+  if (accountType === 'posting') {
+    const keyword2 = selectWarmupKeyword(persona);
+    const navError2 = await openSearchResults(page, integratedSearchUrl(keyword2), navTimeout);
+    const integrated2 = await collectNaverSearchUrlsDetailed(page, 'integrated', 6);
+    if (!navError2 && integrated2.urls.length > 0) {
+      await visitWarmupUrls(page, integrated2.urls, randomBetween(1, 2), navTimeout, accountType);
+    }
+  }
 
   if (accountType === 'crank' && !expressCrank) {
     const blogKeyword = selectWarmupKeyword(persona);
@@ -139,6 +155,6 @@ export async function preSessionWarmup(
       await throwWarmupFailure(page, '네이버 블로그 검색', blog.diagnostics, blogNavError);
     }
 
-    await visitWarmupUrls(page, blog.urls, randomBetween(1, 2), navTimeout);
+    await visitWarmupUrls(page, blog.urls, randomBetween(1, 2), navTimeout, accountType);
   }
 }
