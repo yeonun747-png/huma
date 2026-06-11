@@ -3,7 +3,7 @@ import { crankLabelOf, crankServiceLabelKo, sortAccountsByCrankLabel } from '@hu
 import { authMiddleware, supabase } from '../middleware/auth.js';
 import { getSetting } from '../lib/settings.js';
 import { formatKstHm } from '../lib/dashboard-period.js';
-import type { CrankActivityType } from '../lib/crank-activity.js';
+import { formatCrankDwellLabel, type CrankActivityType } from '../lib/crank-activity.js';
 import { getKstClock } from '../lib/crank-schedule-config.js';
 import { getCrankSchedulerStatus, runDailyCrankScheduler } from '../lib/crank-scheduler.js';
 import { getKstYmd } from '../lib/crank-schedule-config.js';
@@ -108,7 +108,16 @@ export async function registerCrankRoutes(app: FastifyInstance) {
       const acctRow = log.huma_accounts as { name?: string; crank_label?: string | null } | null;
       const acctKey = acctKeyOf(acctRow);
       const acctName = acctRow?.name ?? acctKey;
-      const subMeta = typeof meta?.sub === 'string' ? meta.sub : '';
+      const dwellSec =
+        typeof meta?.dwell_sec === 'number' && Number.isFinite(meta.dwell_sec)
+          ? meta.dwell_sec
+          : null;
+      const subMeta =
+        type === '방문' && dwellSec != null
+          ? formatCrankDwellLabel(dwellSec)
+          : typeof meta?.sub === 'string'
+            ? meta.sub
+            : '';
       const urlHint = log.result_url ? String(log.result_url).replace(/^https?:\/\//, '').slice(0, 40) : '';
       feed.push({
         id: `log-${log.id}`,

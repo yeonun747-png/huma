@@ -15,6 +15,7 @@ import { getBundledChromiumVersion, syncUserAgentChromeVersion } from '../../lib
 import { resolveUseOsIme, fcitxBrowserEnv } from '../human-engine/os-ime.js';
 import { logOperation } from '../../lib/log-emitter.js';
 import { PLAYWRIGHT_NAV_TIMEOUT_MS } from '../../lib/playwright-nav-timeout.js';
+import { CRANK_PROXY_PORTS, isCrankProxyPort } from '../../lib/modem-ports.js';
 
 chromium.use(StealthPlugin());
 
@@ -152,11 +153,43 @@ function applyPasswordManagerPrefs(profilePath: string): void {
   writeFileSync(prefsPath, JSON.stringify(prefs));
 }
 
+/** Xvfb(:99) 1920×1080 — 실폰 C-Rank 2세션 동시 headful 시 창 겹침 방지 (좌/우 타일) */
+function crankVncTileLaunchArgs(proxyPort: number | undefined, headless: boolean): string[] {
+  if (headless || !proxyPort || !isCrankProxyPort(proxyPort)) return [];
+
+  const vncW = Number(process.env.HUMA_VNC_WIDTH) || 1920;
+  const vncH = Number(process.env.HUMA_VNC_HEIGHT) || 1080;
+  const ports = [...CRANK_PROXY_PORTS];
+  const idx = ports.indexOf(proxyPort as (typeof ports)[number]);
+  if (idx < 0) return [];
+
+  const cols = Math.min(ports.length, 2);
+  const rows = Math.ceil(ports.length / cols);
+  const col = idx % cols;
+  const row = Math.floor(idx / cols);
+  const tileW = Math.floor(vncW / cols);
+  const tileH = Math.floor(vncH / rows);
+
+  return [
+    `--window-position=${col * tileW},${row * tileH}`,
+    `--window-size=${tileW},${tileH}`,
+  ];
+}
+
+function windowChromeLaunchArgs(
+  account: BrowserAccountContext,
+  fp: AccountFingerprint,
+  headless: boolean,
+): string[] {
+  const tile = crankVncTileLaunchArgs(account.proxy_port, headless);
+  if (tile.length > 0) return tile;
+  return [`--window-size=${fp.screenWidth},${fp.screenHeight}`];
+}
+
 function baseLaunchArgs(fp: AccountFingerprint) {
   const args = [
     '--disable-setuid-sandbox',
     '--disable-blink-features=AutomationControlled',
-    `--window-size=${fp.screenWidth},${fp.screenHeight}`,
     resolveGlLaunchArg(),
     `--font-render-hinting=${fp.fontHint}`,
     '--lang=ko-KR',
@@ -295,7 +328,7 @@ function persistentLaunchOptions(
   return {
     headless,
     ignoreDefaultArgs: [...IGNORE_AUTOMATION_ARGS],
-    args: [...baseLaunchArgs(fp), ...proxyArgs],
+    args: [...baseLaunchArgs(fp), ...windowChromeLaunchArgs(account, fp, headless), ...proxyArgs],
     userAgent: fp.userAgent,
     viewport: { width: fp.screenWidth, height: fp.screenHeight },
     locale: 'ko-KR',

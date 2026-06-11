@@ -3,6 +3,14 @@ import { supabase } from '../middleware/auth.js';
 
 export type CrankActivityType = '방문' | '공감' | '댓글' | '이웃';
 
+/** 활동 피드 — 15초 → 「0분 15초 체류」 */
+export function formatCrankDwellLabel(sec: number): string {
+  const total = Math.max(0, Math.round(sec));
+  const min = Math.floor(total / 60);
+  const s = total % 60;
+  return `${min}분 ${s}초 체류`;
+}
+
 export async function logCrankActivity(params: {
   accountId: string;
   type: CrankActivityType;
@@ -29,8 +37,8 @@ export async function logCrankActivity(params: {
           : `이웃 신청 — ${label}`;
 
   const sub =
-    params.type === '방문' && params.dwellSec
-      ? `${Math.round(params.dwellSec / 60)}분 체류`
+    params.type === '방문' && params.dwellSec != null
+      ? formatCrankDwellLabel(params.dwellSec)
       : params.targetUrl?.replace(/^https?:\/\//, '').slice(0, 48) ?? '';
 
   await logOperation({
@@ -45,6 +53,7 @@ export async function logCrankActivity(params: {
       crank_action: params.type,
       comment: params.comment,
       target_title: params.targetTitle,
+      dwell_sec: params.type === '방문' ? params.dwellSec : undefined,
       sub,
     },
   });
