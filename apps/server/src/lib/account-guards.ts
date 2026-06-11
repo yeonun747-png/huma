@@ -58,6 +58,16 @@ const NAVER_ACCOUNT_JOB_TYPES = new Set([
   'cafe_reply',
 ]);
 
+export async function isHumaJobAdvanceRequested(humaJobId?: string | null): Promise<boolean> {
+  if (!humaJobId) return false;
+  const { data } = await supabase
+    .from('huma_jobs')
+    .select('advance_requested_at')
+    .eq('id', humaJobId)
+    .maybeSingle();
+  return Boolean(data?.advance_requested_at);
+}
+
 export async function assertHumaJobRunnable(job: {
   job_type?: string;
   account_id?: string | null;
@@ -66,4 +76,11 @@ export async function assertHumaJobRunnable(job: {
   if (job.account_id && job.job_type && NAVER_ACCOUNT_JOB_TYPES.has(job.job_type)) {
     await assertTemporalNaverGates();
   }
+}
+
+/** 앞당기기 — 스케줄·야간·활동시간 게이트 우회, 계정·전체정지만 확인 */
+export async function assertHumaJobAdvanceAllowed(job: {
+  account_id?: string | null;
+}): Promise<void> {
+  await assertJobEnqueueAllowed(job.account_id);
 }

@@ -46,7 +46,7 @@ import { scheduleRepeatIfNeeded } from '../../lib/repeat-scheduler.js';
 import { activatePendingSocialReplies } from '../../lib/social-reply-chain.js';
 import { isSlimDataCapError, scheduleSlimCapRetry } from '../../lib/slim-retry.js';
 import { assertCafeNewPostAccount, assertCafeReplyAccount } from '../../lib/cafe-accounts.js';
-import { assertAccountRunnable } from '../../lib/account-guards.js';
+import { assertAccountRunnable, isHumaJobAdvanceRequested } from '../../lib/account-guards.js';
 import { getSystemPaused } from '../../lib/system-pause.js';
 import {
   getCrankEnabled,
@@ -126,6 +126,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
       };
 
       const scheduledCrank = type === 'social_crank' && isScheduledCrankPayload(payload);
+      const advanceRequested = await isHumaJobAdvanceRequested(humaJobId);
 
       if (getSystemPaused()) {
         await deferHumaJob(job, humaJobId, CRANK_PAUSE_DEFER_MS, {
@@ -160,7 +161,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         throw new DelayedError();
       }
 
-      if (PLAYWRIGHT_AND_CRANK.includes(type) && !scheduledCrank) {
+      if (PLAYWRIGHT_AND_CRANK.includes(type) && !scheduledCrank && !advanceRequested) {
         if (await isNightBanActive()) {
           await deferHumaJob(job, humaJobId, CRANK_NIGHT_DEFER_MS, {
             reason: 'NIGHT_BAN',
@@ -252,7 +253,12 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         if (humaJobId) {
           await supabase
             .from('huma_jobs')
-            .update({ status: 'running', started_at: new Date().toISOString(), error_message: null })
+            .update({
+              status: 'running',
+              started_at: new Date().toISOString(),
+              error_message: null,
+              advance_requested_at: null,
+            })
             .eq('id', humaJobId);
         }
       };

@@ -15,7 +15,7 @@ import {
 import { runContentPreview } from '../modules/claude/content-preview.js';
 import { promoteDryRunToPublish } from '../modules/queue/jobs/content-orchestrator.js';
 import { assertCafeNewPostAccount, assertCafeReplyAccount } from '../lib/cafe-accounts.js';
-import { assertHumaJobRunnable } from '../lib/account-guards.js';
+import { assertHumaJobAdvanceAllowed, assertHumaJobRunnable } from '../lib/account-guards.js';
 import { assertManualSocialCrankAllowed } from '../lib/crank-guard.js';
 import { getCrankJobSessionDetail } from '../lib/crank-job-session.js';
 import { deleteJobById, deleteJobsByIds } from '../lib/delete-job.js';
@@ -462,7 +462,7 @@ export async function registerJobRoutes(app: FastifyInstance) {
     }
 
     try {
-      await assertHumaJobRunnable(job);
+      await assertHumaJobAdvanceAllowed(job);
     } catch (err) {
       return reply.code(400).send({ error: (err as Error).message });
     }

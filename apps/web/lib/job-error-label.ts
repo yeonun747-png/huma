@@ -148,7 +148,7 @@ export function formatJobErrorLabel(message: string | null | undefined): string 
     return '야간 실행 금지 시간대 — 활동 허용 시간 이후 재시도';
   }
   if (raw.includes('ACTIVE_HOURS_BLOCKED')) {
-    return '활동 허용 시간 외 — Human Engine 스케줄 확인';
+    return '활동 허용 시간 외 — ⏫ 앞당기기로 즉시 실행하거나 Human Engine 스케줄 확인';
   }
   if (raw.includes('ACCOUNT_INACTIVE')) {
     return '비활성 계정 — 계정 관리에서 is_active 후 재시도';
