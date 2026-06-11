@@ -310,10 +310,19 @@ export async function createBrowserForAccount(account: BrowserAccountContext) {
   return { context };
 }
 
-/** 기동 시 about:blank·복원 탭 제거 — 이후 newPage()가 단일 네이버 탭만 열리게 */
+/** 기동 시 중복·복원 탭 정리 — persistent context는 마지막 탭까지 닫으면 Chromium이 종료됨 */
 export async function prepareCleanBrowserTabs(context: BrowserContext): Promise<void> {
-  for (const page of [...context.pages()]) {
+  const pages = [...context.pages()];
+  if (pages.length === 0) return;
+
+  const keeper = pages[0]!;
+  for (const page of pages.slice(1)) {
     await page.close().catch(() => {});
+  }
+
+  const url = keeper.url();
+  if (url !== 'about:blank' && url !== 'chrome://newtab/' && url !== '') {
+    await keeper.goto('about:blank').catch(() => {});
   }
 }
 
@@ -326,6 +335,19 @@ export async function acquireWorkflowPage(context: BrowserContext): Promise<Page
     return url === 'about:blank' || url === 'chrome://newtab/' || url === '';
   });
   return reusable ?? context.newPage();
+}
+
+/**
+ * persistent context — 마지막 탭 close 시 Chromium 전체 종료.
+ * 워밍업·로그인 후 탭 정리는 about:blank 로 되돌리고, 여분 탭만 close.
+ */
+export async function releaseWorkflowPage(context: BrowserContext, page: Page): Promise<void> {
+  const pages = context.pages();
+  if (pages.length > 1) {
+    await page.close().catch(() => {});
+    return;
+  }
+  await page.goto('about:blank', { waitUntil: 'domcontentloaded', timeout: 15_000 }).catch(() => {});
 }
 
 export async function closeBrowserContext(context: BrowserContext) {

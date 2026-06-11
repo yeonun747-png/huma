@@ -48,8 +48,9 @@ function QueueDatetimeLabel({ iso, suffix }: { iso: string; suffix?: string }) {
   if (!parsed) return <>—</>;
   return (
     <>
-      {parsed.date}
-      <span className={weekdayColorClass(parsed.weekday)}>({parsed.weekday})</span> {parsed.time}
+      <span className="text-inherit">{parsed.date}</span>
+      <span className={weekdayColorClass(parsed.weekday)}>({parsed.weekday})</span>{' '}
+      <span className="text-inherit">{parsed.time}</span>
       {suffix ? ` · ${suffix}` : null}
     </>
   );
@@ -121,7 +122,11 @@ function jobSub(job: HumaJob): string {
   }
 
   if (job.status === 'awaiting_captcha') {
-    parts.push(formatJobErrorLabel(job.error_message) || 'VNC → 발행 → huma 완료');
+    parts.push(
+      job.job_type === 'social_crank'
+        ? 'VNC → 로그인 → huma 활동 재개'
+        : formatJobErrorLabel(job.error_message) || 'VNC → 발행 → huma 완료',
+    );
   }
 
   if (job.status === 'failed' && job.error_message) {

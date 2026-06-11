@@ -7,6 +7,8 @@ import {
   isCaptchaError,
 } from '../modules/watcher/detector.js';
 import type { ModemSession } from '../modules/proxy/manager.js';
+import { humanClickLocator } from '../modules/human-engine/mouse.js';
+import { pickNaverCaptchaPage, tryAutoSolveNaverCaptcha } from './naver-captcha-vision.js';
 import { setCrankSessionProgress } from './crank-session-progress.js';
 
 /** worker·scheduled-session — CAPTCHA hold 진입 후 정상 종료 신호 */
@@ -44,12 +46,36 @@ export type CrankCaptchaHoldParams = {
 export async function tryEnterCrankCaptchaHold(params: CrankCaptchaHoldParams): Promise<boolean> {
   if (!params.humaJobId || !isCrankHumanHoldError(params.err)) return false;
 
+  let visionAutoFailed = false;
+  if (isCaptchaError(params.err)) {
+    const page = pickNaverCaptchaPage(params.context);
+    if (page) {
+      const vision = await tryAutoSolveNaverCaptcha(page, {
+        humaJobId: params.humaJobId,
+        accountId: params.accountId,
+        workspace: params.workspace,
+        jobType: 'social_crank',
+        resubmit: async () => {
+          if (page.url().includes('nidlogin')) {
+            await humanClickLocator(page, page.locator('#log\\.login'));
+          }
+        },
+      });
+      if (vision === 'solved') return false;
+      if (vision === 'failed') visionAutoFailed = true;
+    }
+  }
+
   await handleLayer4Detection(params.accountId, params.err, params.modemSession, {
     skipExternalNotify: true,
     workspace: params.workspace,
   });
 
-  await setCrankSessionProgress(params.humaJobId, 'CAPTCHA 대기', 'VNC 수동 해결');
+  await setCrankSessionProgress(
+    params.humaJobId,
+    'CAPTCHA 대기',
+    visionAutoFailed ? 'Vision 3회 실패 · VNC' : 'VNC 수동 해결',
+  );
 
   await enterCaptchaHold({
     jobId: params.humaJobId,
@@ -60,6 +86,7 @@ export async function tryEnterCrankCaptchaHold(params: CrankCaptchaHoldParams): 
     context: params.context,
     modemSession: params.modemSession,
     releaseAccountLock: params.releaseAccountLock ?? (() => {}),
+    visionAutoFailed,
   });
 
   return true;

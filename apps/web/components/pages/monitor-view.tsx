@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import type { HumaJob } from '@huma/shared';
 import { api } from '@/lib/api';
+import { refreshNavBadges } from '@/lib/nav-badge-events';
 import { formatScheduledAt } from '@/components/queue/job-schedule-form';
 
 type MonitorSessions = Awaited<ReturnType<typeof api.monitorSessions>>;
@@ -18,7 +19,10 @@ export function MonitorView() {
       setJobs(active.slice(0, 4));
     }).catch(() => setJobs([]));
 
-    void api.monitorSessions().then(setSessions).catch(() => setSessions(null));
+    void api.monitorSessions().then((data) => {
+      setSessions(data);
+      refreshNavBadges();
+    }).catch(() => setSessions(null));
   }, []);
 
   useEffect(() => {

@@ -8,13 +8,14 @@ import {
   acquireWorkflowPage,
   createBrowserForAccount,
   closeBrowserContext,
+  releaseWorkflowPage,
 } from '../browser.js';
 import {
   clearCrankSessionProgress,
   setCrankSessionProgress,
 } from '../../../lib/crank-session-progress.js';
 import { loadAccountForBrowser, maybeIncrementWarmupDay } from '../account-loader.js';
-import { naverLogin } from './login.js';
+import { ensureNaverLoggedIn, naverLogin } from './login.js';
 import { humanSleep, humanType } from '../../human-engine/typing.js';
 import { scrollRead, measureRTT, rttScale, scaledHumanSleep } from '../../human-engine/timing.js';
 import { humanClick, humanClickLocator } from '../../human-engine/mouse.js';
@@ -36,6 +37,7 @@ import {
   reconnectModemIfAccountSwitched,
   recordLastAccountOnModem,
 } from '../../../lib/modem-last-account.js';
+import { ensurePhoneCrankTether } from '../../../lib/modem-phone-tether.js';
 import { applyCrankResourceBlocking } from './crank-resource-block.js';
 import { logCrankActivity } from '../../../lib/crank-activity.js';
 import { CRANK_NAV_TIMEOUT_MS } from '../../../lib/playwright-nav-timeout.js';
@@ -150,7 +152,7 @@ export interface RunSocialCrankOptions {
 
 export async function runSocialCrank(
   accountId: string,
-  payload: { ourBlogUrls?: string[]; targetDate?: string },
+  payload: { ourBlogUrls?: string[]; targetDate?: string; resumeAfterCaptcha?: boolean },
   options?: RunSocialCrankOptions,
 ) {
   await maybeIncrementWarmupDay(accountId);
@@ -171,6 +173,7 @@ export async function runSocialCrank(
     // v3.33 — 계정 전환 시 reconnect 1회 → preSessionWarmup이 자연 간격(규칙⑦)
     await setCrankSessionProgress(jobId, 'IP 교체');
     await reconnectModemIfAccountSwitched(modemSession.proxyPort, accountId);
+    await ensurePhoneCrankTether(modemSession.proxyPort);
     const accountCtx = await loadAccountForBrowser(accountId, modemSession.proxyPort);
     if (accountCtx.account_type !== 'crank') {
       throw new Error('ACCOUNT_NOT_CRANK');
@@ -213,22 +216,40 @@ export async function runSocialCrank(
       scale = rttScale(rtt);
     }
 
+    const resumeAfterCaptcha = Boolean(payload.resumeAfterCaptcha);
+
     await setCrankSessionProgress(jobId, '브라우저 기동');
     context = (await createBrowserForAccount(accountCtx)).context;
 
     try {
-      const warmupPage = await acquireWorkflowPage(context);
-      await setCrankSessionProgress(
-        jobId,
-        '워밍업',
-        expressWarmup ? '익스프레스(48h 이내 성공)' : '네이버 검색·체류',
-      );
-      await preSessionWarmup(warmupPage, persona, 'crank', undefined, { express: expressWarmup });
-      await warmupPage.close();
-      await applyCrankResourceBlocking(context);
+      if (resumeAfterCaptcha) {
+        await setCrankSessionProgress(jobId, '세션 확인', 'CAPTCHA 후 재개');
+        await ensurePhoneCrankTether(modemSession.proxyPort);
+        await applyCrankResourceBlocking(context);
+        await ensureNaverLoggedIn(context, accountId, { profilePath: accountCtx.profile_path });
+      } else {
+        const warmupPage = await acquireWorkflowPage(context);
+        await setCrankSessionProgress(
+          jobId,
+          '워밍업',
+          expressWarmup ? '익스프레스(48h 이내 성공)' : '네이버 검색·체류',
+        );
+        await preSessionWarmup(warmupPage, persona, 'crank', undefined, { express: expressWarmup });
+        await releaseWorkflowPage(context, warmupPage);
+        await ensurePhoneCrankTether(modemSession.proxyPort);
+        await applyCrankResourceBlocking(context);
 
-      await setCrankSessionProgress(jobId, '로그인');
-      await naverLogin(context, accountId, { profilePath: accountCtx.profile_path });
+        await setCrankSessionProgress(jobId, '로그인');
+        await naverLogin(context, accountId, {
+          profilePath: accountCtx.profile_path,
+          captchaContext: {
+            humaJobId: jobId,
+            accountId,
+            workspace: crankWorkspace,
+            jobType: 'social_crank',
+          },
+        });
+      }
       const page = await acquireWorkflowPage(context);
 
       const visitHistory = await loadVisitHistory(accountId);

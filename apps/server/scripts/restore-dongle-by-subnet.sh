@@ -1,6 +1,9 @@
 #!/bin/bash
-# ZTE 동글 — 서브넷(192.168.{octet}.100) 기준으로 policy routing + 3proxy 자동 복구
-# eth/enx 이름이 재부팅마다 바뀌어도 동작 (고정 서브넷 → SOCKS 포트)
+# ZTE 동글 — 허브 포스팅 5대: USB 경로 순 → 슬롯1~5 (:10001~10005)
+#   슬롯1~3 연운1~3 · 슬롯4 파나나 · 슬롯5 퀴즈
+# C-Rank는 i7 직결 실폰 — 동글 슬롯6·7 미사용
+#
+# eth/enx 이름·192.168.{n}.100 서브넷이 바뀌어도 restore 시 재매핑
 #
 # Usage: sudo bash restore-dongle-by-subnet.sh
 # 사전: isc-dhcp-client (dhclient), 동글 USB 인식·LTE 연결
@@ -9,27 +12,19 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# 192.168.{3rd octet}.x → SOCKS 포트 (HUMA 고정 매핑)
-declare -A OCTET_PORT=(
-  [6]=10001
-  [5]=10002
-  [1]=10003
-  [3]=10004
-  [7]=10005
-  [2]=10006
-  [4]=10007
-)
+POSTING_PORTS=(10001 10002 10003 10004 10005)
+SLOT_LABELS=("연운1" "연운2" "연운3" "파나나" "퀴즈")
+MAX_POSTING_DONGLES=5
 
-# 슬롯 번호(물리 스티커) = 3rd octet가 아님 — conf용 역매핑
-declare -A PORT_SLOT=(
-  [10001]=1
-  [10002]=2
-  [10003]=3
-  [10004]=4
-  [10005]=5
-  [10006]=6
-  [10007]=7
-)
+dongle_usb_path() {
+  local iface="$1"
+  readlink -f "/sys/class/net/${iface}/device" 2>/dev/null || echo "zz-fallback-${iface}"
+}
+
+is_rndis_dongle_ip() {
+  local ip="$1"
+  [[ "$ip" =~ ^192\.168\.[0-9]+\.[0-9]+$ ]]
+}
 
 echo "=== 1) DHCP (eth/enx) ==="
 IFACES=()
@@ -48,7 +43,6 @@ for iface in "${IFACES[@]}"; do
   if ! ip -4 addr show dev "$iface" 2>/dev/null | grep -q 'inet '; then
     dhclient -1 "$iface" 2>/dev/null || echo "  ⚠ ${iface} DHCP 실패"
   fi
-  # dhclient가 main table에 metric 없는 default route를 올림 → 호스트 전체가 동글 경유하는 것 방지
   while ip route del default dev "$iface" 2>/dev/null; do :; done
 done
 
@@ -56,27 +50,53 @@ echo ""
 ip -br -4 a | grep -E '^(eth|enx)' || true
 
 echo ""
-echo "=== 2) 서브넷 → 인터페이스 매핑 ==="
+echo "=== 2) USB 경로 순 → 포스팅 슬롯 1~5 (:10001~10005) ==="
+SORTED_LINES=()
+for iface in "${IFACES[@]}"; do
+  ip_full=$(ip -4 addr show dev "$iface" 2>/dev/null | grep -oP '(?<=inet\s)\d+\.\d+\.\d+\.\d+' | head -1)
+  [ -z "$ip_full" ] && continue
+  if ! is_rndis_dongle_ip "$ip_full"; then
+    echo "  ⊘ ${iface} ${ip_full} — 실폰 테더(192.168 아님), 스킵"
+    continue
+  fi
+  usb=$(dongle_usb_path "$iface")
+  SORTED_LINES+=("${usb}|${iface}|${ip_full}")
+done
+
+if [ "${#SORTED_LINES[@]}" -eq 0 ]; then
+  echo "오류: 192.168.* RNDIS 동글 없음"
+  exit 1
+fi
+
+IFS=$'\n' SORTED_LINES=($(printf '%s\n' "${SORTED_LINES[@]}" | sort -t'|' -k1,1))
+unset IFS
+
+if [ "${#SORTED_LINES[@]}" -gt "$MAX_POSTING_DONGLES" ]; then
+  echo "  ⚠ 동글 ${#SORTED_LINES[@]}대 감지 — 포스팅 ${MAX_POSTING_DONGLES}대만 슬롯1~5에 배정 (C-Rank 동글은 허브에서 제거 권장)"
+fi
+
 ROUTE_ARGS=()
 CONF_LINES=()
 OK=0
 
-for iface in "${IFACES[@]}"; do
-  ip_full=$(ip -4 addr show dev "$iface" 2>/dev/null | grep -oP '(?<=inet\s)\d+\.\d+\.\d+\.\d+' | head -1)
-  [ -z "$ip_full" ] && echo "  ⚠ ${iface} — IP 없음" && continue
-
-  octet=$(echo "$ip_full" | cut -d. -f3)
-  port="${OCTET_PORT[$octet]:-}"
-  if [ -z "$port" ]; then
-    echo "  ⚠ ${iface} ${ip_full} — 알 수 없는 서브넷 (.${octet}.)"
-    continue
-  fi
-
-  slot="${PORT_SLOT[$port]}"
+for i in "${!SORTED_LINES[@]}"; do
+  [ "$i" -ge "$MAX_POSTING_DONGLES" ] && break
+  line="${SORTED_LINES[$i]}"
+  iface="${line#*|}"
+  iface="${iface%%|*}"
+  ip_full="${line##*|}"
+  port="${POSTING_PORTS[$i]}"
+  slot=$((i + 1))
+  label="${SLOT_LABELS[$i]}"
   ROUTE_ARGS+=("${iface}:${port}")
   CONF_LINES+=("${slot}=${iface}")
-  echo "  ✓ 슬롯${slot} ${iface} ${ip_full} → :${port}"
+  echo "  ✓ 슬롯${slot} ${label} ${iface} ${ip_full} → :${port}"
   OK=$((OK + 1))
+done
+
+for ((j = OK; j < MAX_POSTING_DONGLES; j++)); do
+  slot=$((j + 1))
+  echo "  ✗ 슬롯${slot} ${SLOT_LABELS[$j]} — 동글 미연결"
 done
 
 if [ "$OK" -eq 0 ]; then
@@ -84,22 +104,49 @@ if [ "$OK" -eq 0 ]; then
   exit 1
 fi
 
+PHONE_ROUTE_ARGS=()
+PHONE_CONF_LINES=()
+echo ""
+echo "=== 2b) C-Rank 직결 실폰 슬롯6~7 (:10006~:10007) ==="
+set +e
+mapfile -t PHONE_ROUTE_ARGS < <(bash "$DIR/restore-phone-crank.sh" --quiet)
+phone_rc=$?
+set -e
+if [ "$phone_rc" -ne 0 ] || [ "${#PHONE_ROUTE_ARGS[@]}" -eq 0 ]; then
+  echo "  ⚠ 실폰 미연결 — C-Rank 슬롯6·7 스킵 (포스팅만 복구)"
+  PHONE_ROUTE_ARGS=()
+else
+  for mapping in "${PHONE_ROUTE_ARGS[@]}"; do
+    [ -z "$mapping" ] && continue
+    iface="${mapping%%:*}"
+    port="${mapping##*:}"
+    case "$port" in
+      10006) PHONE_CONF_LINES+=("6=${iface}") ;;
+      10007) PHONE_CONF_LINES+=("7=${iface}") ;;
+    esac
+  done
+fi
+
+ALL_ROUTE_ARGS=("${ROUTE_ARGS[@]}" "${PHONE_ROUTE_ARGS[@]}")
+
 echo ""
 echo "=== 3) policy routing 정리 + 적용 ==="
 for tbl in 10001 10002 10003 10004 10005 10006 10007; do
   while ip rule del table "$tbl" 2>/dev/null; do :; done
 done
 
-bash "$DIR/huma-dongle-routes.sh" "${ROUTE_ARGS[@]}"
+bash "$DIR/huma-dongle-routes.sh" "${ALL_ROUTE_ARGS[@]}"
 
 echo ""
 echo "=== 4) 3proxy ==="
-bash "$DIR/setup-proxy-socks.sh" "${ROUTE_ARGS[@]}"
+bash "$DIR/setup-proxy-socks.sh" "${ALL_ROUTE_ARGS[@]}"
 
 mkdir -p /etc/huma
 {
   echo "# restore-dongle-by-subnet.sh $(date -Iseconds)"
-  printf '%s\n' "${CONF_LINES[@]}" | sort -t '=' -k1,1n
+  echo "# 슬롯1~5 포스팅 동글 · 슬롯6~7 C-Rank 직결 실폰"
+  printf '%s\n' "${CONF_LINES[@]}"
+  printf '%s\n' "${PHONE_CONF_LINES[@]}"
 } > /etc/huma/dongle-slot-interfaces.conf
 echo ""
 echo "→ /etc/huma/dongle-slot-interfaces.conf 갱신"
@@ -107,5 +154,5 @@ echo "→ /etc/huma/dongle-slot-interfaces.conf 갱신"
 echo ""
 echo "=== 5) SOCKS 테스트 ==="
 PORTS=()
-for arg in "${ROUTE_ARGS[@]}"; do PORTS+=("${arg##*:}"); done
+for arg in "${ALL_ROUTE_ARGS[@]}"; do PORTS+=("${arg##*:}"); done
 bash "$DIR/check-socks-proxy.sh" "${PORTS[@]}"

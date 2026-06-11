@@ -1,7 +1,4 @@
-import { SettingsView } from '@/components/pages/settings-view';
-
+/** 본문은 AppShell ShellContent가 렌더 — RSC 중복 마운트 방지 */
 export default function SettingsPage() {
-  return (
-    <SettingsView />
-  );
+  return null;
 }

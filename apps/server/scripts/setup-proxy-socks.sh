@@ -6,16 +6,13 @@
 #   sudo bash setup-proxy-socks.sh eth0:10001 eth1:10002 ...
 #   sudo bash setup-proxy-socks.sh   # 아래 DEFAULT_SLOTS 사용
 #
-# i7 ZTE 7동글 예:
-#   sudo bash setup-proxy-socks.sh \
-#     eth0:10001 eth1:10002 eth2:10003 eth3:10004 \
-#     eth4:10005 eth5:10006 enx344b50000000:10007
+# i7 허브 포스팅 5동글 (restore-dongle-by-subnet.sh가 iface:port 인자 전달):
+#   sudo bash setup-proxy-socks.sh eth0:10001 eth1:10002 ...
 
 set -e
 
 DEFAULT_SLOTS=(
   eth0:10001 eth1:10002 eth2:10003 eth3:10004 eth4:10005
-  eth5:10006 enx344b50000000:10007
 )
 
 if [ "$#" -gt 0 ]; then
@@ -50,6 +47,10 @@ if [ "$OK" -eq 0 ]; then
   echo "오류: 유효한 인터페이스 없음. ip -br a 로 확인 후 eth0:10001 형식으로 인자 전달"
   exit 1
 fi
+
+systemctl stop 3proxy 2>/dev/null || true
+pkill -f '[/]3proxy' 2>/dev/null || true
+sleep 1
 
 systemctl enable 3proxy 2>/dev/null || true
 systemctl restart 3proxy 2>/dev/null || service 3proxy restart

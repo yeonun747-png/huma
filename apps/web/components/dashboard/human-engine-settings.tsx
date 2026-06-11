@@ -29,6 +29,7 @@ interface HumanEngineConfig {
     auto_pause_on_detect: boolean;
     captcha_slack: boolean;
     captcha_telegram: boolean;
+    captcha_vision_auto: boolean;
     cooldown_429_hours: number;
   };
 }
@@ -75,6 +76,7 @@ const DEFAULT_HUMAN: HumanEngineConfig = {
     auto_pause_on_detect: true,
     captcha_slack: true,
     captcha_telegram: true,
+    captcha_vision_auto: false,
     cooldown_429_hours: 2,
   },
 };
@@ -377,6 +379,21 @@ export function HumanEngineSettings() {
           <HeToggle label="탐지 시 자동 일시정지" value={human.fingerprint.auto_pause_on_detect} onChange={(v) => { setHuman((h) => { const next = { ...h, fingerprint: { ...h.fingerprint, auto_pause_on_detect: v } }; humanRef.current = next; saveNow(next, imageRef.current, mediaRef.current); return next; }); }} />
           <HeToggle label="캡차 감지 → Slack 알림" value={human.fingerprint.captcha_slack} onChange={(v) => { setHuman((h) => { const next = { ...h, fingerprint: { ...h.fingerprint, captcha_slack: v } }; humanRef.current = next; saveNow(next, imageRef.current, mediaRef.current); return next; }); }} />
           <HeToggle label="캡cha 감지 → Telegram 알림" value={human.fingerprint.captcha_telegram ?? true} onChange={(v) => { setHuman((h) => { const next = { ...h, fingerprint: { ...h.fingerprint, captcha_telegram: v } }; humanRef.current = next; saveNow(next, imageRef.current, mediaRef.current); return next; }); }} />
+          <HeToggle
+            label="CAPTCHA Vision 자동 해결 (Sonnet)"
+            value={human.fingerprint.captcha_vision_auto ?? false}
+            onChange={(v) => {
+              setHuman((h) => {
+                const next = { ...h, fingerprint: { ...h.fingerprint, captcha_vision_auto: v } };
+                humanRef.current = next;
+                saveNow(next, imageRef.current, mediaRef.current);
+                return next;
+              });
+            }}
+          />
+          <div className="he-tw-sub -mt-2 mb-2 text-[11px] text-huma-t3">
+            로그인·발행 CAPTCHA — Vision 3회 실패 시 Telegram → VNC 수동
+          </div>
           <div className="he-tw">
             <span className="he-tw-label">429 이후 쿨다운</span>
             <span className="he-meta-val">{human.fingerprint.cooldown_429_hours}시간</span>

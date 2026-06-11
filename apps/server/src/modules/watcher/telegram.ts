@@ -159,6 +159,8 @@ export interface CaptchaTelegramParams {
   drill?: boolean;
   /** DRILL 등 — 설정 토글 무시하고 token+chat_id 있으면 발송 */
   force?: boolean;
+  /** Claude Vision 3회 실패 후 VNC 폴백 */
+  visionAutoFailed?: boolean;
 }
 
 export async function notifyCaptchaTelegram(
@@ -188,6 +190,10 @@ export async function notifyCaptchaTelegram(
     head = params.drill
       ? `🔔 huma · CAPTCHA 연습 재알림 (${params.remindIndex ?? '?'}/1)`
       : `🔔 huma · CAPTCHA 재알림 (${params.remindIndex ?? '?'}/3)`;
+  } else if (params.visionAutoFailed) {
+    head = params.drill
+      ? '🧪 huma · Vision 3회 실패, VNC 필요 (DRILL)'
+      : '⚠️ huma · Vision 3회 실패, VNC 필요';
   } else {
     head = params.drill
       ? '🧪 huma · CAPTCHA 연습(DRILL) — VNC 확인 후 huma에서 발행 완료'
@@ -202,11 +208,14 @@ export async function notifyCaptchaTelegram(
   ];
 
   if (!params.completed && !params.timedOut) {
+    if (params.visionAutoFailed) {
+      lines.push('', 'Claude Vision 자동 해결 3회 실패 — VNC에서 수동 해결 필요');
+    }
     if (params.jobType === 'social_crank') {
       lines.push(
         '',
         '1) VNC 접속 → 캡cha·2FA·기기인증 등 해결',
-        '2) huma 큐 → 발행 완료 (C-Rank 세션 종료 확인)',
+        '2) huma 큐 → 활동 재개 (C-Rank)',
       );
     } else {
       lines.push('', '1) VNC 접속 → 캡cha 풀기 → 발행', '2) huma 큐 → 발행 완료 (URL 선택)');

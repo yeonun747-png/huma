@@ -106,11 +106,12 @@ export function formatLogKst(iso: string | null | undefined): string {
   }
 }
 
-/** 큐 카드 · 헤더 시계 — 요일 색 (globals.css m-queue-wd-*) */
+/** 큐 카드 · 헤더 시계 — 요일 색 (평일 초록 / 토 파랑 / 일 빨강) */
 export function weekdayColorClass(weekday: string): string {
-  if (weekday === '일') return 'm-queue-wd-sun';
-  if (weekday === '토') return 'm-queue-wd-sat';
-  return 'm-queue-wd-mid';
+  const wd = weekday.replace(/\.$/, '').trim();
+  if (wd.startsWith('일')) return '!text-huma-err font-bold';
+  if (wd.startsWith('토')) return '!text-huma-blue font-bold';
+  return '!text-huma-ok font-bold';
 }
 
 /** 큐 카드 태그 — KST YYYY-MM-DD(요일) HH:mm:ss */

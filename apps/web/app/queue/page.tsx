@@ -1,10 +1,4 @@
-import { Suspense } from 'react';
-import { QueueManager } from '@/components/queue/queue-manager';
-
+/** 본문은 AppShell ShellContent가 렌더 — RSC 중복 마운트 방지 */
 export default function QueuePage() {
-  return (
-    <Suspense fallback={<div className="p-6 text-sm text-huma-t3">큐 로딩…</div>}>
-      <QueueManager />
-    </Suspense>
-  );
+  return null;
 }

@@ -13,7 +13,9 @@ const config: Config = {
   content: [
     './app/**/*.{js,ts,jsx,tsx,mdx}',
     './components/**/*.{js,ts,jsx,tsx,mdx}',
+    './lib/**/*.{js,ts,jsx,tsx,mdx}',
   ],
+  safelist: ['!text-huma-ok', '!text-huma-blue', '!text-huma-err', 'font-bold'],
   theme: {
     extend: {
       fontFamily: {

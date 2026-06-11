@@ -1,5 +1,6 @@
 import type { HumaJob, HumaAccount, HumaModem, HumaVideoQueue } from '@huma/shared';
 import { cachedFetch, invalidateApiCache } from '@/lib/api-cache';
+import { refreshNavBadges } from '@/lib/nav-badge-events';
 
 const API_BASE = process.env.NEXT_PUBLIC_HUMA_API_URL ?? 'http://localhost:3100';
 
@@ -94,6 +95,7 @@ function qs(params: Record<string, string | undefined>) {
 function refreshNavCaches() {
   invalidateApiCache('nav-badges');
   invalidateApiCache('status');
+  refreshNavBadges();
 }
 
 export const api = {

@@ -43,7 +43,7 @@ export function CaptchaCompleteModal({
 
   const submitComplete = async () => {
     const trimmed = resultUrl.trim();
-    if (!trimmed) {
+    if (!isCrank && !trimmed) {
       const ok = window.confirm(
         '발행 URL 없이 완료 처리할까요?\n\nVNC에서 발행까지 끝냈다면 OK를 누르세요. 나중에 URL은 기록에 남지 않습니다.',
       );
@@ -64,6 +64,7 @@ export function CaptchaCompleteModal({
   };
 
   const ws = WS_LABEL[job.workspace ?? ''] ?? job.workspace ?? '—';
+  const isCrank = job.job_type === 'social_crank';
   const expiresAt = holdInfo?.hold?.expiresAt;
   const vncEndpoint = holdInfo?.vnc_url ? parseVncEndpoint(holdInfo.vnc_url) : null;
   const vncViaTailscale = vncEndpoint ? isTailscaleEndpoint(vncEndpoint) : false;
@@ -80,9 +81,20 @@ export function CaptchaCompleteModal({
   return (
     <div className="m-modal-bg open z-[200] p-4" role="dialog" aria-modal="true">
       <div className="m-modal w-full max-w-md">
-        <div className="m-modal-t">캡cha — 수동 발행 완료</div>
+        <div className="m-modal-t">
+          {isCrank ? '캡cha — C-Rank 활동 재개' : '캡cha — 수동 발행 완료'}
+        </div>
         <p className="-mt-2 mb-4 text-sm text-huma-t2">
-          VNC에서 캡cha를 풀고 <strong>발행</strong>까지 한 뒤, 아래에서 huma 작업을 완료하세요.
+          {isCrank ? (
+            <>
+              VNC에서 캡cha·로그인을 마친 뒤 아래 <strong>활동 재개</strong>를 누르세요. 블로그 방문·공감·댓글이
+              자동으로 이어집니다.
+            </>
+          ) : (
+            <>
+              VNC에서 캡cha를 풀고 <strong>발행</strong>까지 한 뒤, 아래에서 huma 작업을 완료하세요.
+            </>
+          )}
         </p>
 
         <dl className="mt-4 space-y-1 text-sm">
@@ -130,16 +142,20 @@ export function CaptchaCompleteModal({
           <p className="mt-3 text-xs text-huma-t3">VNC URL — 서버 env HUMA_VNC_URL_* 설정</p>
         )}
 
-        <label className="m-modal-field block text-sm text-huma-t2">
-          <div className="m-modal-label">발행 URL <span className="text-huma-t4">(선택)</span></div>
-          <input
-            type="url"
-            className="m-modal-input"
-            placeholder="https://blog.naver.com/..."
-            value={resultUrl}
-            onChange={(e) => setResultUrl(e.target.value)}
-          />
-        </label>
+        {!isCrank ? (
+          <label className="m-modal-field block text-sm text-huma-t2">
+            <div className="m-modal-label">
+              발행 URL <span className="text-huma-t4">(선택)</span>
+            </div>
+            <input
+              type="url"
+              className="m-modal-input"
+              placeholder="https://blog.naver.com/..."
+              value={resultUrl}
+              onChange={(e) => setResultUrl(e.target.value)}
+            />
+          </label>
+        ) : null}
 
         {error ? <p className="mt-2 text-sm text-huma-err">{error}</p> : null}
 
@@ -148,7 +164,7 @@ export function CaptchaCompleteModal({
             닫기
           </button>
           <button type="button" className="btn-primary btn-sm" onClick={() => void submitComplete()} disabled={submitting}>
-            {submitting ? '처리 중…' : '발행 완료'}
+            {submitting ? '처리 중…' : isCrank ? '활동 재개' : '발행 완료'}
           </button>
         </div>
       </div>

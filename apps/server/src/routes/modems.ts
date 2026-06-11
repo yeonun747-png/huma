@@ -110,12 +110,12 @@ export async function registerModemRoutes(app: FastifyInstance) {
 
     await logOperation({
       level: 'INFO',
-      message: '[modems] 동글 네트워크 일괄 복구 완료 (restore-dongle-by-subnet)',
+      message: '[modems] 네트워크 복구 완료 (포스팅 동글 + C-Rank 실폰)',
     });
 
     return {
       success: true,
-      message: '동글 네트워크 복구 완료 — SOCKS 재검사를 실행합니다.',
+      message: '네트워크 복구 완료 (포스팅·C-Rank 실폰) — SOCKS 재검사를 실행합니다.',
       output: result.output,
     };
   });

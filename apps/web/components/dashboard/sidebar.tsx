@@ -1,15 +1,18 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useEffect } from 'react';
 import { NAV_ITEMS, SPEC_NAV_ITEMS, WS_LABEL, cn } from '@/lib/constants';
+import { prefetchShellViews } from '@/lib/shell-routes';
 import { useWorkspace } from './workspace-context';
 import { useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
+import { useShellNav } from './shell-nav-context';
+import { useSidebarBadges } from './use-sidebar-badges';
 
 export function Sidebar() {
-  const pathname = usePathname();
+  const { shellPath, navigate } = useShellNav();
   const router = useRouter();
   const {
     workspace,
@@ -18,38 +21,11 @@ export function Sidebar() {
     accessibleBusinessUnits,
   } = useWorkspace();
   const { admin, logout } = useAuth();
-  const [badges, setBadges] = useState({ queue: 0, video: 0, watcher: 0, seo: 0, scenario: 0 });
-  const [pendingJobs, setPendingJobs] = useState(0);
-  const [liveAccounts, setLiveAccounts] = useState(0);
-
-  const mergeBadges = (apiBadges: { queue: number; video: number; watcher: number }) =>
-    setBadges((prev) => ({ ...prev, queue: apiBadges.queue, video: apiBadges.video, watcher: apiBadges.watcher }));
+  const { badges, pendingJobs, liveAccounts } = useSidebarBadges(workspace, shellPath);
 
   useEffect(() => {
-    setBadges((prev) => ({ ...prev, queue: 0, video: 0, watcher: 0 }));
-    setPendingJobs(0);
-    setLiveAccounts(0);
-    const scope = { workspace };
-    const pullStatus = () =>
-      api.status(scope).then((s) => {
-        setPendingJobs(s.pendingJobs);
-        setLiveAccounts(s.liveAccounts ?? 0);
-      });
-    const pullBadges = () => api.navBadges(scope).then(mergeBadges).catch(() => {});
-    const refresh = () => {
-      void pullBadges();
-      void pullStatus();
-    };
-    refresh();
-    const onQueueUpdated = () => refresh();
-    window.addEventListener('huma:queue-updated', onQueueUpdated);
-    const pollMs = pathname === '/queue' ? 5000 : 15000;
-    const t = setInterval(refresh, pollMs);
-    return () => {
-      clearInterval(t);
-      window.removeEventListener('huma:queue-updated', onQueueUpdated);
-    };
-  }, [workspace, pathname]);
+    prefetchShellViews();
+  }, []);
 
   const commonNav = NAV_ITEMS.filter((n) => n.group === 'common');
   const systemNav = NAV_ITEMS.filter((n) => n.group === 'system');
@@ -113,10 +89,19 @@ export function Sidebar() {
       <nav className="flex-1 overflow-y-auto px-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <div className="px-2 py-2 font-mono text-[9px] uppercase tracking-[0.2em] text-huma-t3">공통</div>
         {commonNav.map((item) => {
-          const active = pathname === item.href;
+          const active = shellPath === item.href;
           const badge = getBadge(item.badgeKey);
           return (
-            <Link key={item.href} href={item.href} prefetch className={active ? 'nav-item-active' : 'nav-item'}>
+            <Link
+              key={item.href}
+              href={item.href}
+              prefetch
+              onClick={(e) => {
+                e.preventDefault();
+                navigate(item.href);
+              }}
+              className={active ? 'nav-item-active' : 'nav-item'}
+            >
               <span className="w-4 shrink-0 text-center text-[13.5px]">{item.icon}</span>
               {item.label}
               {badge !== undefined && (
@@ -130,7 +115,7 @@ export function Sidebar() {
                 </span>
               )}
               {item.live && liveAccounts > 0 && (
-                <span className="ml-auto animate-blink rounded-full bg-huma-err px-1.5 py-px font-mono text-[9px] text-white">
+                <span className="ml-auto animate-blink rounded-full bg-huma-err px-1.5 py-px font-mono text-[9px] font-semibold text-white">
                   LIVE{liveAccounts}
                 </span>
               )}
@@ -144,10 +129,19 @@ export function Sidebar() {
               {WS_LABEL[workspace] ?? workspace} 특화
             </div>
             {specNav.map((item) => {
-              const active = pathname === item.href;
+              const active = shellPath === item.href;
               const badge = getBadge(item.badgeKey);
               return (
-                <Link key={item.href} href={item.href} prefetch className={active ? 'nav-item-active' : 'nav-item'}>
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  prefetch
+                  onClick={(e) => {
+                e.preventDefault();
+                navigate(item.href);
+              }}
+                  className={active ? 'nav-item-active' : 'nav-item'}
+                >
                   <span className="w-4 shrink-0 text-center text-[13.5px]">{item.icon}</span>
                   {item.label}
                   {badge !== undefined && (
@@ -163,9 +157,18 @@ export function Sidebar() {
 
         <div className="mt-1 px-2 py-2 font-mono text-[9px] uppercase tracking-[0.2em] text-huma-t3">시스템</div>
         {systemNav.map((item) => {
-          const active = pathname === item.href;
+          const active = shellPath === item.href;
           return (
-            <Link key={item.href} href={item.href} prefetch className={active ? 'nav-item-active' : 'nav-item'}>
+            <Link
+              key={item.href}
+              href={item.href}
+              prefetch
+              onClick={(e) => {
+                e.preventDefault();
+                navigate(item.href);
+              }}
+              className={active ? 'nav-item-active' : 'nav-item'}
+            >
               <span className="w-4 shrink-0 text-center text-[13.5px]">{item.icon}</span>
               {item.label}
             </Link>

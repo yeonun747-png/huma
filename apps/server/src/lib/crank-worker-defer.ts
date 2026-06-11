@@ -85,6 +85,9 @@ export function isRetryableCrankError(msg: string): boolean {
     'Target page, context or browser has been closed',
     'host-resolver-rules',
     'Failed parsing rule',
+    'ERR_SOCKS_CONNECTION_FAILED',
+    'net::ERR_PROXY',
+    'Execution context was destroyed',
     'NIGHT_BAN',
     'ACTIVE_HOURS_BLOCKED',
   ];

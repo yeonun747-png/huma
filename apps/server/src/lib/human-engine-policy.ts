@@ -31,6 +31,8 @@ export interface HumanEngineScheduleConfig extends HumanEngineConfig {
   fingerprint?: {
     captcha_slack?: boolean;
     captcha_telegram?: boolean;
+    /** Claude Vision 자동 CAPTCHA 해결 (3회 실패 시 VNC) */
+    captcha_vision_auto?: boolean;
     cooldown_429_hours?: number;
     canvas_spoof?: boolean;
     webgl_spoof?: boolean;
@@ -234,6 +236,12 @@ export async function shouldNotifySlack(): Promise<boolean> {
   if (human.fingerprint?.captcha_slack === false) return false;
 
   return Boolean(process.env.SLACK_WEBHOOK_URL?.trim());
+}
+
+export async function shouldAutoSolveCaptchaVision(): Promise<boolean> {
+  const human = await getHumanEngineScheduleConfig();
+  if (human.fingerprint?.captcha_vision_auto !== true) return false;
+  return Boolean(process.env.ANTHROPIC_API_KEY?.trim());
 }
 
 export async function shouldNotifyTelegram(): Promise<boolean> {

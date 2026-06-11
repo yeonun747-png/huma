@@ -34,7 +34,9 @@ export function LogViewer({ tall }: { tall?: boolean }) {
     socket.on('log', (entry: LogEntry) => {
       setLogs((prev) => [entry, ...prev].slice(0, 200));
     });
-    return () => { socket.off('log'); socket.disconnect(); };
+    return () => {
+      socket.off('log');
+    };
   }, []);
 
   useEffect(() => {

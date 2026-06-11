@@ -1,7 +1,4 @@
-import { HumanEngineSettings } from '@/components/dashboard/human-engine-settings';
-
+/** 본문은 AppShell ShellContent가 렌더 — RSC 중복 마운트 방지 */
 export default function HumanEnginePage() {
-  return (
-    <HumanEngineSettings />
-  );
+  return null;
 }

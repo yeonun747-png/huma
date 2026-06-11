@@ -11,6 +11,7 @@ export interface ScheduledCrankPayload {
   sessionMinutes?: number;
   crankTrack?: number;
   preferredProxyPort?: number;
+  resumeAfterCaptcha?: boolean;
 }
 
 export interface ScheduledCrankHoldOptions {
@@ -34,12 +35,19 @@ export async function executeScheduledSocialCrank(
     });
     if (!modemSession) throw new Error('NO_MODEM');
 
-    await runSocialCrank(accountId, { ourBlogUrls: payload.ourBlogUrls ?? [] }, {
+    await runSocialCrank(
+      accountId,
+      {
+        ourBlogUrls: payload.ourBlogUrls ?? [],
+        resumeAfterCaptcha: payload.resumeAfterCaptcha,
+      },
+      {
       modemSession,
       skipModemAcquire: true,
-      humaJobId: holdOptions?.humaJobId,
-      releaseAccountLock: holdOptions?.releaseAccountLock,
-    });
+        humaJobId: holdOptions?.humaJobId,
+        releaseAccountLock: holdOptions?.releaseAccountLock,
+      },
+    );
 
     const now = new Date().toISOString();
     await supabase

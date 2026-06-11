@@ -1,4 +1,4 @@
-/** v3.24 — 포스팅 5동글(10001~10005) · C-Rank 2동글(10006~10007) · i7 7슬롯 */
+/** v3.39 — 포스팅 5동글(10001~10005) · C-Rank 직결 실폰 2(10006~10007) */
 export const POSTING_PROXY_PORTS = [10001, 10002, 10003, 10004, 10005] as const;
 export const CRANK_PROXY_PORTS = [10006, 10007] as const;
 

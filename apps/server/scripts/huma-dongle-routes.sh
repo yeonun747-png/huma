@@ -8,9 +8,9 @@
 
 set -e
 
+# i7 허브 포스팅 5동글 (C-Rank는 직결 실폰 — 슬롯6·7 미사용)
 DEFAULT_SLOTS=(
   eth0:10001 eth1:10002 eth2:10003 eth3:10004 eth4:10005
-  eth5:10006 enx344b50000000:10007
 )
 
 if [ "$#" -gt 0 ]; then
@@ -22,12 +22,35 @@ fi
 guess_gateway() {
   local iface="$1" ip="$2"
   local gw
+
   gw=$(ip route show dev "$iface" 2>/dev/null | awk '/^default/{print $3; exit}')
   if [ -n "$gw" ]; then
     echo "$gw"
     return
   fi
-  # RNDIS: 보통 서브넷 .1
+
+  # Samsung USB 테더 — 게이트웨이가 .1 이 아닌 경우가 많음 (ARP REACHABLE)
+  gw=$(
+    ip neigh show dev "$iface" 2>/dev/null | awk -v self="$ip" '
+      $1 ~ /^[0-9]+\./ && $1 != self && $NF == "REACHABLE" { print $1; exit }
+    '
+  )
+  if [ -n "$gw" ]; then
+    echo "$gw"
+    return
+  fi
+
+  gw=$(
+    ip neigh show dev "$iface" 2>/dev/null | awk -v self="$ip" '
+      $1 ~ /^[0-9]+\./ && $1 != self && /router/ && $NF != "FAILED" { print $1; exit }
+    '
+  )
+  if [ -n "$gw" ]; then
+    echo "$gw"
+    return
+  fi
+
+  # ZTE RNDIS 동글: 보통 서브넷 .1
   echo "$ip" | awk -F. '{printf "%s.%s.%s.1\n", $1, $2, $3}'
 }
 

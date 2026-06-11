@@ -9,10 +9,14 @@ export const POSTING_DONGLE_SLOTS = [
   { slot: 5, proxyPort: 10005, workspace: 'quizoasis' as Workspace, label: '퀴즈오아시스' },
 ] as const;
 
-export const CRANK_DONGLE_SLOTS = [
-  { slot: 6, proxyPort: 10006, label: 'C-Rank 6' },
-  { slot: 7, proxyPort: 10007, label: 'C-Rank 7' },
+/** i7 직결 실폰 — SOCKS :10006·:10007 (ADB 비행기모드 IP 교체) */
+export const CRANK_PHONE_SLOTS = [
+  { slot: 6, proxyPort: 10006, label: 'C-Rank 폰A' },
+  { slot: 7, proxyPort: 10007, label: 'C-Rank 폰B' },
 ] as const;
+
+/** @deprecated CRANK_PHONE_SLOTS */
+export const CRANK_DONGLE_SLOTS = CRANK_PHONE_SLOTS;
 
 export function dongleManagementIp(slotNumber: number): string {
   return `192.168.3.${slotNumber}`;

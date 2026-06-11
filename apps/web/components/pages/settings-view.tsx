@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 
 import { api } from '@/lib/api';
+import { refreshNavBadges } from '@/lib/nav-badge-events';
 
 import { cn } from '@/lib/constants';
 import { formatLogKst } from '@/lib/format-kst';
@@ -337,6 +338,7 @@ export function WatcherView() {
         setWatcher(w);
 
         setLogs(l as WatcherLogRow[]);
+        refreshNavBadges();
 
       })
 

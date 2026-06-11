@@ -1,7 +1,12 @@
 import { Worker, DelayedError } from 'bullmq';
 import { redisConnection } from './producer.js';
 import { supabase } from '../../middleware/auth.js';
-import { createBrowserForAccount, closeBrowserContext, createBrowser } from '../playwright/browser.js';
+import {
+  createBrowserForAccount,
+  closeBrowserContext,
+  createBrowser,
+  releaseWorkflowPage,
+} from '../playwright/browser.js';
 import { loadAccountForBrowser } from '../playwright/account-loader.js';
 import { naverLogin } from '../playwright/naver/login.js';
 import { preSessionWarmup } from '../playwright/naver/pre-session-warmup.js';
@@ -17,6 +22,8 @@ import {
   passesActiveHoursGate,
   passesWeekendVolumeGate,
 } from '../../lib/human-engine-policy.js';
+import { pickNaverCaptchaPage, tryAutoSolveNaverCaptcha } from '../../lib/naver-captcha-vision.js';
+import { humanClickLocator } from '../human-engine/mouse.js';
 import { handleLayer4Detection, isCaptchaError, isBlockError } from '../watcher/detector.js';
 import { enterCaptchaHold } from '../watcher/captcha-hold.js';
 import { acquireModem, releaseModem, type ModemSession } from '../proxy/manager.js';
@@ -287,9 +294,17 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
               const persona = parsePersona(accountCtx?.persona);
               const warmupPage = await context.newPage();
               await preSessionWarmup(warmupPage, persona, 'posting', humanConfig);
-              await warmupPage.close();
+              await releaseWorkflowPage(context, warmupPage);
               if (accountId) {
-                await naverLogin(context, accountId, { profilePath: accountCtx?.profile_path });
+                await naverLogin(context, accountId, {
+                  profilePath: accountCtx?.profile_path,
+                  captchaContext: {
+                    humaJobId,
+                    accountId,
+                    workspace: jobWorkspace,
+                    jobType: type,
+                  },
+                });
               }
               const page = await context.newPage();
               ({ resultUrl } = await executePostBlog({
@@ -300,7 +315,17 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
                 rttScale: rttScaleFactor,
               }));
             } else {
-              if (accountId) await naverLogin(context, accountId, { profilePath: accountCtx?.profile_path });
+              if (accountId) {
+                await naverLogin(context, accountId, {
+                  profilePath: accountCtx?.profile_path,
+                  captchaContext: {
+                    humaJobId,
+                    accountId,
+                    workspace: jobWorkspace,
+                    jobType: type,
+                  },
+                });
+              }
               const page = await context.newPage();
               if (type === 'cafe_new_post') {
                 ({ resultUrl } = await executeCafePost({ page, payload, humanConfig }));
@@ -318,6 +343,65 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
               isCaptchaError(err) &&
               POSTING_JOBS.includes(type)
             ) {
+              let visionAutoFailed = false;
+              const captchaPage = pickNaverCaptchaPage(context);
+              if (captchaPage) {
+                const vision = await tryAutoSolveNaverCaptcha(captchaPage, {
+                  humaJobId,
+                  accountId,
+                  workspace: jobWorkspace,
+                  jobType: type,
+                  resubmit: async () => {
+                    if (captchaPage.url().includes('nidlogin')) {
+                      await humanClickLocator(captchaPage, captchaPage.locator('#log\\.login'));
+                    }
+                  },
+                });
+                if (vision === 'solved') {
+                  try {
+                    let retryResultUrl = '';
+                    if (type === 'post_blog') {
+                      if (captchaPage.url().includes('nidlogin') && accountCtx) {
+                        await naverLogin(context, accountId, {
+                          profilePath: accountCtx.profile_path,
+                          captchaContext: { humaJobId, accountId, workspace: jobWorkspace, jobType: type },
+                        });
+                      }
+                      const retryPage = await context.newPage();
+                      ({ resultUrl: retryResultUrl } = await executePostBlog({
+                        page: retryPage,
+                        payload,
+                        humanConfig,
+                        persona: parsePersona(accountCtx?.persona),
+                        rttScale: rttScaleFactor,
+                      }));
+                    } else if (type === 'cafe_new_post') {
+                      const retryPage = await context.newPage();
+                      ({ resultUrl: retryResultUrl } = await executeCafePost({
+                        page: retryPage,
+                        payload,
+                        humanConfig,
+                      }));
+                    } else if (type === 'cafe_reply') {
+                      const retryPage = await context.newPage();
+                      ({ resultUrl: retryResultUrl } = await executeCafeReply({
+                        page: retryPage,
+                        payload,
+                        humanConfig,
+                      }));
+                    }
+                    if (retryResultUrl) {
+                      await completeJob(humaJobId, retryResultUrl);
+                      await incrementAccountCount(accountId, dailyCountField(type));
+                      return;
+                    }
+                  } catch {
+                    /* Vision 후 재시도 실패 → VNC hold */
+                  }
+                }
+                if (vision === 'failed') visionAutoFailed = true;
+              }
+
               await handleLayer4Detection(accountId, err, modemSession, {
                 skipExternalNotify: true,
                 workspace: jobWorkspace,
@@ -331,6 +415,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
                 context,
                 modemSession,
                 releaseAccountLock: () => releaseAccount(accountId),
+                visionAutoFailed,
               });
               heldForCaptcha = true;
               skipReleaseAccount = true;
@@ -355,6 +440,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
             scheduledCrank?: boolean;
             crankTrack?: number;
             preferredProxyPort?: number;
+            resumeAfterCaptcha?: boolean;
           };
           await markRunning();
           const crankHoldOpts =
@@ -379,7 +465,10 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
           } else {
             await executeSocialCrank(
               accountId!,
-              { ourBlogUrls: crankPayload.ourBlogUrls ?? [] },
+              {
+                ourBlogUrls: crankPayload.ourBlogUrls ?? [],
+                resumeAfterCaptcha: crankPayload.resumeAfterCaptcha,
+              },
               crankHoldOpts,
             );
           }

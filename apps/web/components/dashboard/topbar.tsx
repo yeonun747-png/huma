@@ -1,18 +1,14 @@
 'use client';
 
-import { usePathname } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { BUSINESS_UNITS } from '@/lib/admin-scope';
 import { getPageMeta } from '@/lib/page-config';
 import { useWorkspace } from './workspace-context';
 import { api } from '@/lib/api';
 import { useDashboardPeriod } from './dashboard-period-context';
-import {
-  formatLogKstTime,
-  parseQueueKstParts,
-  weekdayColorClass,
-  type QueueKstParts,
-} from '@/lib/format-kst';
+import { formatLogKstTime, parseQueueKstParts, weekdayColorClass, type QueueKstParts } from '@/lib/format-kst';
+import { KstWeekdayDatetime } from '@/components/ui/kst-weekday-datetime';
+import { useShellNav } from './shell-nav-context';
 
 type NotifItem = { type: 'err' | 'warn'; title: string; sub: string };
 
@@ -29,21 +25,9 @@ function isLogUnread(createdAt: string, dismissedAt: string | null): boolean {
   return new Date(createdAt).getTime() > new Date(dismissedAt).getTime();
 }
 
-function KstWeekdayDatetime({ iso }: { iso: string | null }) {
-  if (!iso) return <>스케줄 없음</>;
-  const parsed = parseQueueKstParts(iso);
-  if (!parsed) return <>스케줄 없음</>;
-  return (
-    <>
-      {parsed.date}
-      <span className={weekdayColorClass(parsed.weekday)}>({parsed.weekday})</span> {parsed.time}
-    </>
-  );
-}
-
 export function Topbar({ title }: { title: string }) {
-  const pathname = usePathname();
-  const meta = getPageMeta(pathname);
+  const { shellPath } = useShellNav();
+  const meta = getPageMeta(shellPath);
   const { businessUnit } = useWorkspace();
   const unitLabel = BUSINESS_UNITS.find((u) => u.id === businessUnit)?.label ?? businessUnit;
   const breadcrumb = `HUMA › ${unitLabel} › ${title}`;
@@ -130,21 +114,21 @@ export function Topbar({ title }: { title: string }) {
 
       <div className="ml-auto flex items-center gap-2">
         <div className="hidden shrink-0 items-center gap-1.5 rounded-md border border-huma-bdr2 bg-huma-bg3 px-2.5 py-1 font-mono sm:flex">
-          <span className="text-[11px] font-semibold text-huma-t2">
+          <span className="text-[11px] font-semibold">
             {clockParts ? (
               <>
-                {clockParts.date}
+                <span className="text-huma-t2">{clockParts.date}</span>
                 <span className={weekdayColorClass(clockParts.weekday)}>({clockParts.weekday})</span>{' '}
-                {clockParts.time}
+                <span className="text-huma-t2">{clockParts.time}</span>
               </>
             ) : (
-              '—'
+              <span className="text-huma-t2">—</span>
             )}
           </span>
           <span className="text-[10px] text-huma-t4">│</span>
           <span className="text-[10px] text-huma-t3">다음발행</span>
-          <span className="text-[11px] font-bold text-huma-acc">
-            <KstWeekdayDatetime iso={nextPublishAt} />
+          <span className="text-[11px]">
+            <KstWeekdayDatetime iso={nextPublishAt} tone="accent" />
           </span>
         </div>
 

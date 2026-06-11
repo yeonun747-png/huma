@@ -45,3 +45,37 @@ export async function askClaudeWithModel(params: {
 export async function askClaude(prompt: string, maxTokens = 100): Promise<string | null> {
   return askClaudeWithModel({ prompt, max_tokens: maxTokens });
 }
+
+/** Claude Sonnet Vision — CAPTCHA 이미지 해석 */
+export async function askClaudeVision(params: {
+  model?: string;
+  system?: string;
+  question: string;
+  imageBase64: string;
+  mediaType?: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+  max_tokens?: number;
+}): Promise<string | null> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return null;
+
+  const mediaType = params.mediaType ?? 'image/png';
+  return askClaudeWithModel({
+    model: params.model ?? 'claude-sonnet-4-6',
+    max_tokens: params.max_tokens ?? 256,
+    system: params.system,
+    content: [
+      {
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: mediaType,
+          data: params.imageBase64,
+        },
+      },
+      {
+        type: 'text',
+        text: params.question,
+      },
+    ],
+  });
+}

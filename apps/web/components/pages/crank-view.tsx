@@ -173,7 +173,7 @@ export function CrankView() {
   const restoreCrankNetwork = useCallback(async () => {
     if (
       !window.confirm(
-        'C-Rank 동글(6·7) 포함 전체 동글 네트워크를 복구합니다.\n1~2분 걸릴 수 있습니다.',
+        '포스팅 동글(1~5) + C-Rank 실폰(6·7) 네트워크를 복구합니다.\nADB·테더 연결 후 1~2분 걸릴 수 있습니다.',
       )
     ) {
       return;
@@ -670,7 +670,7 @@ export function CrankView() {
           </div>
         )}
         <p className="mt-2 font-mono text-[10.5px] text-huma-t3">
-          매일 00:01 KST 큐 생성 · 08:00~22:00 분산(±15분) · 세션 60분 · 동글당 일 6세션·월 2500MB ·
+          매일 00:01 KST 큐 생성 · 08:00~22:00 분산(±15분) · 세션 45분 · 실폰당 일 6세션 ·
           예비 슬롯(8~10)은 스케줄 제외 · 슬롯 6·7은 프록시 관리와 동일 SOCKS probe
           {syncingProxy ? ' (검사 중…)' : ''}
           {restoringNetwork ? ' (네트워크 복구 중…)' : ''}

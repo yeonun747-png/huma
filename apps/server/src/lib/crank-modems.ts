@@ -1,6 +1,7 @@
 import { supabase } from '../middleware/auth.js';
 import { applyModemProxyProbe, shouldRunModemProxyProbe } from './modem-proxy-probe.js';
 import { probeModemsWithConcurrency } from './modem-socks-probe.js';
+import { PHONE_CRANK_SLOTS } from './phone-crank.js';
 import {
   MODEM_MONTHLY_DATA_CAP_MB,
   MAX_CRANK_SESSIONS_PER_MODEM_PER_DAY,
@@ -35,8 +36,39 @@ function isSchedulableCrankRow(m: {
   return sessions < MAX_CRANK_SESSIONS_PER_MODEM_PER_DAY;
 }
 
+/** offline/error 실폰 — restore 후 UI probe 없이도 스케줄러가 SOCKS로 idle 복구 */
+async function refreshPhoneCrankModemsProbe(): Promise<void> {
+  if (process.platform === 'win32') return;
+
+  const { data } = await supabase
+    .from('huma_modems')
+    .select('id, slot_number, proxy_port, status, interface_name')
+    .in('slot_number', [...PHONE_CRANK_SLOTS])
+    .eq('modem_role', 'crank');
+
+  const targets = (data ?? []).filter(
+    (m) =>
+      (m.status === 'offline' || m.status === 'error') &&
+      shouldRunModemProxyProbe(m.slot_number as number, m.proxy_port as number),
+  );
+
+  if (targets.length === 0) return;
+
+  await probeModemsWithConcurrency(targets, 1, async (modem) => {
+    await applyModemProxyProbe({
+      id: modem.id as string,
+      slot_number: modem.slot_number as number,
+      proxy_port: modem.proxy_port as number,
+      status: modem.status as string,
+      interface_name: modem.interface_name as string | null | undefined,
+    });
+  });
+}
+
 /** 스케줄 대상 crank 동글 (modem_role=crank, idle/busy/reconnecting, 한도 이내) */
 export async function listSchedulableCrankModems(): Promise<CrankModemRow[]> {
+  await refreshPhoneCrankModemsProbe();
+
   const { data } = await supabase
     .from('huma_modems')
     .select(
@@ -65,7 +97,7 @@ export type CrankModemDisplayRow = CrankModemRow & {
   response_ms?: number | null;
 };
 
-/** i7 물리 C-Rank 동글 — 프록시 관리와 동일 SOCKS probe */
+/** i7 C-Rank 직결 실폰 슬롯6·7 — SOCKS :10006·:10007 probe */
 const PHYSICAL_CRANK_PROBE_SLOTS = [6, 7] as const;
 
 function classifyCrankDisplayRow(m: CrankModemRow): CrankModemDisplayRow['display_status'] {

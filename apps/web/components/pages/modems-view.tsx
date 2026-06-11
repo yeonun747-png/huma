@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { HumaAccount, HumaModem } from '@huma/shared';
 import {
-  CRANK_DONGLE_SLOTS,
+  CRANK_PHONE_SLOTS,
   POSTING_DONGLE_SLOTS,
   dongleManagementIp,
   postingSlotByPort,
@@ -72,8 +72,8 @@ const SLOT_SERVICE_LABEL: Record<number, string> = {
   3: '연운',
   4: '파나나',
   5: '퀴즈',
-  6: 'C-Rank',
-  7: 'C-Rank',
+  6: 'C-Rank 실폰',
+  7: 'C-Rank 실폰',
 };
 
 type SlotRowDef = {
@@ -90,7 +90,7 @@ const PHYSICAL_DONGLE_SLOTS: SlotRowDef[] = [
     label: s.label,
     workspace: s.workspace,
   })),
-  ...CRANK_DONGLE_SLOTS.map((s) => ({
+  ...CRANK_PHONE_SLOTS.map((s) => ({
     slot: s.slot,
     proxyPort: s.proxyPort,
     label: s.label,
@@ -112,8 +112,8 @@ function resolveModemForSlot(modems: HumaModem[], def: SlotRowDef): HumaModem {
       id: `slot-${def.slot}`,
       slot_number: def.slot,
       proxy_port: def.proxyPort,
-      current_ip: dongleManagementIp(def.slot),
-      carrier: 'KT',
+      current_ip: def.slot <= 5 ? dongleManagementIp(def.slot) : undefined,
+      carrier: def.slot <= 5 ? 'KT' : 'phone',
       status: 'idle' as const,
       created_at: '',
     }
@@ -294,8 +294,8 @@ export function ModemsView() {
     <div className="animate-fadeIn">
       <MPanel title="RESIDENTIAL PROXY · 계정별 고정 IP">
         <p className="mb-2 font-mono text-[10.5px] text-huma-t3">
-          물리 동글 1~{I7_PHYSICAL_SLOTS} · 슬롯별 SOCKS+공인IP+지역 순차 probe (슬롯당 최대 ~90초) ·
-          연운(:10001~10003) · 파나나(:10004) · 퀴즈(:10005) · C-Rank(:10006~10007)
+          허브 동글 1~5 · 직결 실폰 6~7 · 슬롯별 SOCKS+공인IP+지역 순차 probe (슬롯당 최대 ~90초) ·
+          연운(:10001~10003) · 파나나(:10004) · 퀴즈(:10005) · C-Rank 실폰(:10006~10007)
           {probingSlot != null ? (
             <span className="text-huma-accent"> · 동글 {probingSlot} 검사중</span>
           ) : null}

@@ -8,6 +8,8 @@ import { readInterfaceIp } from '../../lib/dongle-health.js';
 import { fetchModemPublicGeo } from '../../lib/modem-geo.js';
 import { setCachedAtPort } from '../../lib/dongle-at-cache.js';
 import { resetLteModem } from '../../lib/modem-lte-reset.js';
+import { resetPhoneCrank } from '../../lib/modem-phone-reset.js';
+import { isPhoneCrankSlot, resolvePhoneSerial } from '../../lib/phone-crank.js';
 import { applyDonglePolicyRoute } from '../../lib/restore-dongle-network.js';
 
 function sync3proxyExternalIp(proxyPort: number, newIp: string): void {
@@ -57,9 +59,10 @@ export async function reconnectModemBySlot(
     (!isPlaceholderInterfaceName(modem.interface_name) ? modem.interface_name : null);
 
   if (!iface) {
-    throw new Error(
-      `modem slot ${slotNumber} interface 없음 — /etc/huma/dongle-slot-interfaces.conf 에 ${slotNumber}=ethX 추가`,
-    );
+    const hint = isPhoneCrankSlot(slotNumber)
+      ? `sudo bash ~/huma/apps/server/scripts/restore-dongle-by-subnet.sh (실폰 ADB·테더 확인)`
+      : `/etc/huma/dongle-slot-interfaces.conf 에 ${slotNumber}=ethX`;
+    throw new Error(`modem slot ${slotNumber} interface 없음 — ${hint}`);
   }
 
   if (confIface && confIface !== modem.interface_name) {
@@ -75,14 +78,23 @@ export async function reconnectModemBySlot(
 
   try {
     if (process.platform !== 'win32') {
-      const tier = Math.min(3, Math.max(1, options?.attempt ?? 1));
-      const resetResult = await resetLteModem(iface, modem.proxy_port, tier, slotNumber);
-      if (resetResult.atPort) await setCachedAtPort(slotNumber, resetResult.atPort);
+      if (isPhoneCrankSlot(slotNumber)) {
+        const serial = resolvePhoneSerial(slotNumber);
+        if (!serial) {
+          throw new Error(
+            `slot${slotNumber} ADB serial 없음 — /etc/huma/phone-crank-slots.conf 또는 restore 실행`,
+          );
+        }
+        await resetPhoneCrank(serial, iface, modem.proxy_port);
+      } else {
+        const tier = Math.min(3, Math.max(1, options?.attempt ?? 1));
+        const resetResult = await resetLteModem(iface, modem.proxy_port, tier, slotNumber);
+        if (resetResult.atPort) await setCachedAtPort(slotNumber, resetResult.atPort);
+        await sleep(8000); // LTE attach·DHCP 안정화
+      }
     } else {
       await sleep(3000);
     }
-
-    await sleep(8000); // LTE attach·DHCP 안정화
     const newIp = readInterfaceIp(iface);
     if (!newIp) {
       throw new Error(`${iface} IP 재발급 실패`);

@@ -10,7 +10,12 @@ import { humanClickLocator } from '../../human-engine/mouse.js';
 import { randomBetween, sleep } from '../../../lib/utils.js';
 import { shadowWalk } from '../shadow-walk.js';
 import { hasStoredSession } from '../account-loader.js';
-import { acquireWorkflowPage } from '../browser.js';
+import { acquireWorkflowPage, releaseWorkflowPage } from '../browser.js';
+import {
+  type NaverCaptchaVisionContext,
+  tryAutoSolveNaverCaptcha,
+} from '../../../lib/naver-captcha-vision.js';
+import { shouldPreserveBrowserPageForVnc } from '../../watcher/captcha-hold.js';
 
 const NAVER_LOGIN_URL = 'https://nid.naver.com/nidlogin.login';
 const NAV_TIMEOUT_MS = 60_000;
@@ -39,8 +44,25 @@ async function typeIntoLoginField(page: Page, selector: string, value: string): 
   }
 }
 
-async function assertLoginSucceeded(page: Page): Promise<void> {
+async function resolveLoginCaptchaIfNeeded(
+  page: Page,
+  captchaCtx?: NaverCaptchaVisionContext,
+): Promise<void> {
+  await tryAutoSolveNaverCaptcha(page, {
+    ...captchaCtx,
+    resubmit: async () => {
+      await humanClickLocator(page, page.locator('#log\\.login'));
+    },
+  });
+}
+
+async function assertLoginSucceeded(
+  page: Page,
+  captchaCtx?: NaverCaptchaVisionContext,
+): Promise<void> {
   const url = page.url();
+  await resolveLoginCaptchaIfNeeded(page, captchaCtx);
+
   const captchaVisible =
     (await page.locator('#captcha, .captcha, iframe[src*="captcha"]').count().catch(() => 0)) > 0;
   if (captchaVisible) {
@@ -52,10 +74,50 @@ async function assertLoginSucceeded(page: Page): Promise<void> {
   if (code) throw new Error(code);
 }
 
+/** VNC CAPTCHA 해결 후 — 프로필 세션이 살아 있으면 로그인 폼을 건너뜀 */
+export async function ensureNaverLoggedIn(
+  context: BrowserContext,
+  accountId: string,
+  options?: { profilePath?: string; navTimeoutMs?: number },
+): Promise<void> {
+  const navTimeout = options?.navTimeoutMs ?? NAV_TIMEOUT_MS;
+  const page = await acquireWorkflowPage(context);
+  let preservePageForVnc = false;
+
+  try {
+    await page.goto('https://www.naver.com', { waitUntil: 'domcontentloaded', timeout: navTimeout });
+    await humanSleep(1500, 2500);
+    const loginVisible = await page
+      .locator('a[href*="nidlogin.login"]')
+      .first()
+      .isVisible()
+      .catch(() => false);
+    if (loginVisible) {
+      await releaseWorkflowPage(context, page);
+      await naverLogin(context, accountId, {
+        profilePath: options?.profilePath,
+        skipShadowWalk: true,
+        navTimeoutMs: navTimeout,
+      });
+      return;
+    }
+  } catch (err) {
+    if (shouldPreserveBrowserPageForVnc(err)) preservePageForVnc = true;
+    throw err;
+  } finally {
+    if (!preservePageForVnc) await releaseWorkflowPage(context, page);
+  }
+}
+
 export async function naverLogin(
   context: BrowserContext,
   accountId: string,
-  options?: { profilePath?: string; skipShadowWalk?: boolean; navTimeoutMs?: number },
+  options?: {
+    profilePath?: string;
+    skipShadowWalk?: boolean;
+    navTimeoutMs?: number;
+    captchaContext?: NaverCaptchaVisionContext;
+  },
 ) {
   const navTimeout = options?.navTimeoutMs ?? NAV_TIMEOUT_MS;
 
@@ -71,6 +133,7 @@ export async function naverLogin(
   const hasSession = profilePath ? hasStoredSession(profilePath) : false;
 
   const page = await acquireWorkflowPage(context);
+  let preservePageForVnc = false;
 
   try {
     if (!hasSession && !options?.skipShadowWalk) {
@@ -103,17 +166,25 @@ export async function naverLogin(
     await humanSleep(800, 1500);
     await humanClickLocator(page, page.locator('#log\\.login'));
 
+    const captchaCtx: NaverCaptchaVisionContext = {
+      accountId,
+      ...options?.captchaContext,
+    };
+
     try {
       await page.waitForURL((url) => !url.href.includes('nidlogin.login'), { timeout: navTimeout });
     } catch (err) {
       await page.waitForLoadState('domcontentloaded').catch(() => {});
-      await assertLoginSucceeded(page);
+      await assertLoginSucceeded(page, captchaCtx);
       throw wrapNaverLoginTimeout('redirect', err);
     }
     await humanSleep(2000, 4000);
 
-    await assertLoginSucceeded(page);
+    await assertLoginSucceeded(page, captchaCtx);
+  } catch (err) {
+    if (shouldPreserveBrowserPageForVnc(err)) preservePageForVnc = true;
+    throw err;
   } finally {
-    await page.close();
+    if (!preservePageForVnc) await releaseWorkflowPage(context, page);
   }
 }

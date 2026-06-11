@@ -95,6 +95,14 @@ export function isBlogWarmupLink(url: string): boolean {
   return url.includes('blog.naver.com');
 }
 
+function isDestroyedContextError(err: unknown): boolean {
+  const msg = String((err as Error)?.message ?? err);
+  return (
+    msg.includes('Execution context was destroyed') ||
+    msg.includes('Target page, context or browser has been closed')
+  );
+}
+
 async function collectBySelectors(
   page: Page,
   selectors: string[],
@@ -102,26 +110,35 @@ async function collectBySelectors(
   max: number,
   diagnostics: NaverSearchCollectDiagnostics,
 ): Promise<string[]> {
-  const urls: string[] = [];
-  for (const selector of selectors) {
-    const links = page.locator(selector);
-    const count = await links.count();
-    diagnostics.selectorElementCount += count;
-    for (let i = 0; i < count && urls.length < max; i++) {
-      const href = normalizeHref(await links.nth(i).getAttribute('href'));
-      if (!href) continue;
-      diagnostics.rawHrefCount += 1;
-      if (!filter(href)) {
-        diagnostics.rejectedByFilterCount += 1;
-        continue;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const urls: string[] = [];
+      for (const selector of selectors) {
+        const links = page.locator(selector);
+        const count = await links.count();
+        diagnostics.selectorElementCount += count;
+        for (let i = 0; i < count && urls.length < max; i++) {
+          const href = normalizeHref(await links.nth(i).getAttribute('href'));
+          if (!href) continue;
+          diagnostics.rawHrefCount += 1;
+          if (!filter(href)) {
+            diagnostics.rejectedByFilterCount += 1;
+            continue;
+          }
+          if (urls.includes(href)) continue;
+          diagnostics.passedFilterCount += 1;
+          urls.push(href);
+        }
+        if (urls.length >= max) break;
       }
-      if (urls.includes(href)) continue;
-      diagnostics.passedFilterCount += 1;
-      urls.push(href);
+      return urls;
+    } catch (err) {
+      if (!isDestroyedContextError(err) || attempt >= 2) throw err;
+      await page.waitForLoadState('domcontentloaded', { timeout: 20_000 }).catch(() => {});
+      await humanSleep(800, 1500);
     }
-    if (urls.length >= max) break;
   }
-  return urls;
+  return [];
 }
 
 /** 통합검색·블로그검색 결과에서 방문 URL 수집 (셀렉터 + 스크롤 재시도 + 진단) */
@@ -133,7 +150,12 @@ export async function collectNaverSearchUrlsDetailed(
   const selectors = mode === 'blog' ? BLOG_SELECTORS : INTEGRATED_SELECTORS;
   const filter = mode === 'blog' ? isBlogWarmupLink : isIntegratedWarmupLink;
   const diagnostics = emptyDiagnostics(mode);
-  diagnostics.hasMainPack = (await page.locator('#main_pack').count()) > 0;
+  try {
+    diagnostics.hasMainPack = (await page.locator('#main_pack').count()) > 0;
+  } catch (err) {
+    if (!isDestroyedContextError(err)) throw err;
+    diagnostics.hasMainPack = false;
+  }
 
   let urls = await collectBySelectors(page, selectors, filter, max, diagnostics);
   if (urls.length >= max) {

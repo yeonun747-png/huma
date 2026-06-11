@@ -5,7 +5,7 @@ import { logOperation } from '../../lib/log-emitter.js';
 import { closeBrowserContext } from '../playwright/browser.js';
 import type { ModemSession } from '../proxy/manager.js';
 import { releaseModem } from '../proxy/manager.js';
-import { recordCrankSessionOnModem } from '../../lib/crank-modems.js';
+import { resumeSocialCrankAfterCaptcha } from '../../lib/crank-captcha-resume.js';
 import { notifyCaptchaTelegram, resolveVncUrl, buildJobWebUrl } from './telegram.js';
 
 const HOLD_MS = 30 * 60 * 1000;
@@ -22,6 +22,8 @@ export interface CaptchaHoldInput {
   context: BrowserContext;
   modemSession?: ModemSession;
   releaseAccountLock: () => void;
+  /** Vision 3회 실패 후 VNC 폴백 */
+  visionAutoFailed?: boolean;
 }
 
 export interface CaptchaHoldOptions {
@@ -34,6 +36,7 @@ interface CaptchaHoldEntry extends CaptchaHoldInput {
   holdMs: number;
   isDrill: boolean;
   remindCount: number;
+  visionAutoFailed: boolean;
   timers: NodeJS.Timeout[];
 }
 
@@ -112,6 +115,33 @@ export function listCaptchaHoldJobIds(): string[] {
   return [...holds.keys()];
 }
 
+/** CAPTCHA·2FA hold — 로그인 탭을 about:blank 로 되돌리면 안 됨 */
+export function shouldPreserveBrowserPageForVnc(err: unknown): boolean {
+  const msg = (err as Error)?.message ?? '';
+  if (msg.includes('CAPTCHA') || msg.toLowerCase().includes('captcha')) return true;
+  if (msg.includes('429') || msg.includes('BLOCK') || msg.includes('Layer4')) return true;
+  if (msg.includes('NAVER_LOGIN_2FA')) return true;
+  if (msg.includes('NAVER_LOGIN_DEVICE_VERIFY')) return true;
+  if (msg.includes('reason=block_captcha')) return true;
+  if (msg.includes('NAVER_LOGIN_FAILED:redirect_stuck')) return true;
+  return false;
+}
+
+async function focusVncBrowserPage(context: BrowserContext): Promise<void> {
+  const pages = context.pages();
+  const page =
+    pages.find((p) => {
+      const u = p.url();
+      return (
+        u.includes('nid.naver.com') ||
+        u.includes('captcha') ||
+        (u.includes('naver.com') && u !== 'about:blank')
+      );
+    }) ?? pages[0];
+  if (!page) return;
+  await page.bringToFront().catch(() => {});
+}
+
 /** graceful shutdown — 모든 hold의 브라우저·모뎀·계정 락을 해제하고 작업을 실패 처리 (좀비 방지) */
 export async function shutdownCaptchaHolds(): Promise<void> {
   const entries = [...holds.entries()];
@@ -159,10 +189,12 @@ export async function enterCaptchaHold(
     holdMs,
     isDrill,
     remindCount: 0,
+    visionAutoFailed: input.visionAutoFailed === true,
     timers: [],
   };
   holds.set(input.jobId, entry);
   scheduleReminders(entry);
+  await focusVncBrowserPage(input.context);
 
   const telegram = await notifyCaptchaTelegram({
     jobId: input.jobId,
@@ -172,6 +204,7 @@ export async function enterCaptchaHold(
     jobType: input.jobType,
     drill: isDrill,
     force: isDrill,
+    visionAutoFailed: input.visionAutoFailed,
   });
 
   await logOperation({
@@ -179,7 +212,7 @@ export async function enterCaptchaHold(
     message: isDrill
       ? 'CAPTCHA DRILL — 5분 · VNC 확인 후 huma 발행 완료'
       : input.jobType === 'social_crank'
-        ? 'C-Rank CAPTCHA — 30분 세션 유지 · VNC 해결 후 huma 발행 완료'
+        ? 'C-Rank CAPTCHA — 30분 세션 유지 · VNC 해결 후 huma 활동 재개'
         : 'CAPTCHA — 30분 세션 유지 · VNC 해결 후 huma 발행 완료',
     job_id: input.jobId,
     account_id: input.accountId,
@@ -212,15 +245,36 @@ export async function completeCaptchaHold(
   if (!entry) {
     const { data: job } = await supabase
       .from('huma_jobs')
-      .select('status')
+      .select('status, job_type, account_id')
       .eq('id', jobId)
       .maybeSingle();
     if (job?.status === 'awaiting_captcha') {
+      if (job.job_type === 'social_crank' && job.account_id) {
+        await resumeSocialCrankAfterCaptcha(jobId, job.account_id);
+        await logOperation({
+          level: 'info',
+          message: 'CAPTCHA 해결 — C-Rank 활동 재개 예약 (hold 만료 후)',
+          job_id: jobId,
+          account_id: job.account_id,
+        });
+        return { ok: true };
+      }
       await completeJobRecord(jobId, resultUrl);
       return { ok: true };
     }
     return { ok: false, error: 'CAPTCHA_HOLD_NOT_FOUND' };
   }
+
+  const isCrank = entry.jobType === 'social_crank';
+  const preferredProxyPort = entry.modemSession?.proxyPort;
+  const accountId = entry.accountId;
+  const holdMeta = {
+    workspace: entry.workspace,
+    accountLabel: entry.accountLabel,
+    jobTitle: entry.jobTitle,
+    jobType: entry.jobType,
+    isDrill: entry.isDrill,
+  };
 
   clearTimers(entry);
   holds.delete(jobId);
@@ -229,34 +283,32 @@ export async function completeCaptchaHold(
   if (entry.modemSession) await releaseModem(entry.modemSession).catch(() => {});
   entry.releaseAccountLock();
 
-  await completeJobRecord(jobId, resultUrl);
-
-  if (entry.jobType === 'social_crank') {
-    const now = new Date().toISOString();
-    await supabase.from('huma_accounts').update({ last_crank_at: now }).eq('id', entry.accountId);
-    if (entry.modemSession) {
-      await recordCrankSessionOnModem(entry.modemSession.proxyPort).catch(() => {});
-    }
+  if (isCrank) {
+    await resumeSocialCrankAfterCaptcha(jobId, accountId, preferredProxyPort);
+  } else {
+    await completeJobRecord(jobId, resultUrl);
   }
 
   await notifyCaptchaTelegram({
     jobId,
-    workspace: entry.workspace,
-    accountLabel: entry.accountLabel,
-    jobTitle: entry.jobTitle,
-    jobType: entry.jobType,
+    workspace: holdMeta.workspace,
+    accountLabel: holdMeta.accountLabel,
+    jobTitle: holdMeta.jobTitle,
+    jobType: holdMeta.jobType,
     completed: true,
-    drill: entry.isDrill,
-    force: entry.isDrill,
+    drill: holdMeta.isDrill,
+    force: holdMeta.isDrill,
   });
 
   await logOperation({
     level: 'info',
-    message: resultUrl?.trim()
-      ? `CAPTCHA 수동 완료 (URL 기록)`
-      : `CAPTCHA 수동 완료 (URL 없음)`,
+    message: isCrank
+      ? 'CAPTCHA 해결 — C-Rank 블로그 방문·공감·댓글 재개 예약'
+      : resultUrl?.trim()
+        ? 'CAPTCHA 수동 완료 (URL 기록)'
+        : 'CAPTCHA 수동 완료 (URL 없음)',
     job_id: jobId,
-    account_id: entry.accountId,
+    account_id: accountId,
   });
 
   return { ok: true };
