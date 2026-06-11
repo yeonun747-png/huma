@@ -44,9 +44,9 @@ export async function enforceVncWindowBounds(
       bounds: {
         left: chrome.x,
         top: chrome.y,
-        width: chrome.width,
-        height: chrome.height,
-        windowState: 'normal',
+        width: Math.max(chrome.width, 200),
+        height: Math.max(chrome.height, 120),
+        windowState: chrome.windowState ?? 'normal',
       },
     });
   } catch {

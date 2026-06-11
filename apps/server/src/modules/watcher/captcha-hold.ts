@@ -6,7 +6,7 @@ import { closeBrowserContext } from '../playwright/browser.js';
 import type { ModemSession } from '../proxy/manager.js';
 import { releaseModem } from '../proxy/manager.js';
 import { resumeSocialCrankAfterCaptcha } from '../../lib/crank-captcha-resume.js';
-import { countActiveVncModemSessions, vncSlotLabelKo } from '../../lib/vnc-window-layout.js';
+import { vncSlotLabelKo } from '../../lib/vnc-window-layout.js';
 import { enforceVncWindowBounds } from '../../lib/vnc-window-guard.js';
 import { notifyCaptchaTelegram, resolveVncUrl, buildJobWebUrl } from './telegram.js';
 
@@ -204,9 +204,8 @@ export async function enterCaptchaHold(
   scheduleReminders(entry);
   await focusVncBrowserPage(input.context, input.modemSession?.proxyPort);
 
-  const vncSessions = await countActiveVncModemSessions();
   const vncSlotLabel = input.modemSession?.proxyPort
-    ? vncSlotLabelKo(input.modemSession.proxyPort, vncSessions)
+    ? vncSlotLabelKo(input.modemSession.proxyPort)
     : undefined;
 
   const telegram = await notifyCaptchaTelegram({

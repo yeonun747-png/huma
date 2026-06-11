@@ -1,20 +1,13 @@
-import { redisConnection } from '../modules/queue/producer.js';
+import { getVncFocusPort } from './vnc-tile-state.js';
 import {
-  CRANK_PROXY_PORTS,
-  POSTING_PROXY_PORTS,
-  isCrankProxyPort,
-  isPostingProxyPort,
-} from './modem-ports.js';
+  isVncManagedProxyPort,
+  listActiveVncTilePorts,
+  countActiveVncModemSessions,
+} from './vnc-tile-state.js';
+import { vncLabelForProxyPort } from './vnc-focus.js';
 
-const VNC_COLS = 3;
-
-function crankLockKey(port: number) {
-  return `modem_lock:${port}`;
-}
-
-function postingLockKey(port: number) {
-  return `modem_lock:posting:${port}`;
-}
+export { countActiveVncModemSessions, listActiveVncTilePorts, isVncManagedProxyPort };
+export { VNC_TILE_SLOT_ORDER } from './vnc-tile-state.js';
 
 export function resolveVncCanvas(): { w: number; h: number } {
   return {
@@ -29,71 +22,60 @@ export function isVncTilingEnabled(headless: boolean): boolean {
   return true;
 }
 
-/** Redis 기준 headful VNC에 올라온 세션 수 (동글 락) */
-export async function countActiveVncModemSessions(): Promise<{ crank: number; posting: number }> {
-  let crank = 0;
-  for (const port of CRANK_PROXY_PORTS) {
-    if (await redisConnection.get(crankLockKey(port))) crank++;
-  }
-  let posting = 0;
-  for (const port of POSTING_PROXY_PORTS) {
-    if (await redisConnection.get(postingLockKey(port))) posting++;
-  }
-  return { crank, posting };
-}
-
 export interface VncWindowChrome {
   x: number;
   y: number;
   width: number;
   height: number;
+  windowState?: 'normal' | 'minimized' | 'maximized' | 'fullscreen';
 }
 
-/**
- * Xvfb(:99) 2560×1080 고정 3열 — 최대 C-Rank 2 + 발행 1 동시 headful 겹침 방지
- * · 10006 왼쪽 · 10007 가운데 · 10001~10005 오른쪽 (발행 항상 오른쪽 열)
- */
-export function vncWindowChromeForProxyPort(
+function tiledChrome(
   proxyPort: number,
-  sessions: { crank: number; posting: number },
+  activePorts: number[],
+  w: number,
+  h: number,
 ): VncWindowChrome | null {
-  const { w, h } = resolveVncCanvas();
-  const tileW = Math.floor(w / VNC_COLS);
+  const idx = activePorts.indexOf(proxyPort);
+  if (idx < 0) return null;
 
-  if (isCrankProxyPort(proxyPort)) {
-    const idx = CRANK_PROXY_PORTS.indexOf(proxyPort as (typeof CRANK_PROXY_PORTS)[number]);
-    if (idx < 0) return null;
-    return { x: idx * tileW, y: 0, width: tileW, height: h };
+  const n = activePorts.length;
+  if (n === 1) {
+    return { x: 0, y: 0, width: w, height: h, windowState: 'normal' };
   }
 
-  if (isPostingProxyPort(proxyPort)) {
-    // 발행은 항상 오른쪽 열 — C-Rank 유무와 관계없이 위치 고정 (VNC에서 찾기 쉽게)
-    return { x: 2 * tileW, y: 0, width: w - 2 * tileW, height: h };
-  }
-
-  return null;
-}
-
-export function vncSlotLabelKo(
-  proxyPort: number,
-  sessions?: { crank: number; posting: number },
-): string {
-  if (isCrankProxyPort(proxyPort)) {
-    const idx = CRANK_PROXY_PORTS.indexOf(proxyPort as (typeof CRANK_PROXY_PORTS)[number]);
-    if (idx === 0) return 'VNC 왼쪽 열 (실폰 6)';
-    if (idx === 1) return 'VNC 가운데 열 (실폰 7)';
-  }
-  if (isPostingProxyPort(proxyPort)) {
-    return 'VNC 오른쪽 열 (발행)';
-  }
-  return 'VNC';
+  const tileW = Math.floor(w / n);
+  const x = idx * tileW;
+  const width = idx === n - 1 ? w - x : tileW;
+  return { x, y: 0, width, height: h, windowState: 'normal' };
 }
 
 export async function resolveVncChromeForProxyPort(
   proxyPort: number,
 ): Promise<VncWindowChrome | null> {
-  const sessions = await countActiveVncModemSessions();
-  return vncWindowChromeForProxyPort(proxyPort, sessions);
+  if (!isVncManagedProxyPort(proxyPort)) return null;
+
+  const { w, h } = resolveVncCanvas();
+  const focusPort = await getVncFocusPort();
+
+  if (focusPort !== null) {
+    if (proxyPort === focusPort) {
+      return { x: 0, y: 0, width: w, height: h, windowState: 'normal' };
+    }
+    return { x: 0, y: 0, width: 320, height: 240, windowState: 'minimized' };
+  }
+
+  const activePorts = await listActiveVncTilePorts();
+  const tiled = tiledChrome(proxyPort, activePorts, w, h);
+  if (tiled) return tiled;
+
+  return { x: 0, y: 0, width: w, height: h, windowState: 'normal' };
+}
+
+export function vncSlotLabelKo(proxyPort: number): string {
+  const label = vncLabelForProxyPort(proxyPort);
+  if (label) return `VNC ${label}`;
+  return 'VNC';
 }
 
 export async function vncWindowLaunchArgs(

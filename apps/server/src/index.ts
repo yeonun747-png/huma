@@ -43,6 +43,7 @@ import { startCrankScheduler } from './lib/crank-scheduler.js';
 import { startCafeActivityScheduler } from './lib/cafe-activity-scheduler.js';
 import { registerCrankRoutes } from './routes/crank.js';
 import { registerMonitorRoutes } from './routes/monitor.js';
+import { registerVncRoutes } from './routes/vnc.js';
 import { registerSeoRoutes } from './routes/seo.js';
 import { assertSecretsConfigured } from './lib/secrets.js';
 
@@ -121,6 +122,7 @@ async function main() {
   await registerAdSenseRoutes(app);
   await registerCrankRoutes(app);
   await registerMonitorRoutes(app);
+  await registerVncRoutes(app);
   await registerSeoRoutes(app);
 
   await app.listen({ port: PORT, host: '0.0.0.0' });

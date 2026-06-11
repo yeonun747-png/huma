@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>HUMA VNC HUD</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: transparent;
+      font-family: ui-monospace, 'Consolas', monospace;
+      user-select: none;
+      pointer-events: none;
+    }
+    #panel {
+      margin: 8px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      background: rgba(12, 10, 18, 0.82);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: #e8e4dc;
+      font-size: 12px;
+      line-height: 1.55;
+      min-width: 220px;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
+    }
+    #mode {
+      font-weight: 700;
+      color: #7fdbff;
+      margin-bottom: 6px;
+      font-size: 13px;
+    }
+    #mode.focus { color: #ffcc66; }
+    .line { opacity: 0.92; }
+    .line.active { color: #b8f0c8; }
+    .line.focused { color: #ffcc66; font-weight: 600; }
+    .line.idle { opacity: 0.45; }
+    .f10 { margin-top: 4px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.1); color: #c9b8ff; }
+  </style>
+</head>
+<body>
+  <div id="panel">
+    <div id="mode">—</div>
+    <div id="lines"></div>
+  </div>
+  <script>
+    const API = 'http://127.0.0.1:__HUMA_PORT__/api/vnc/hud';
+
+    function renderLine(text, cls) {
+      const el = document.createElement('div');
+      el.className = 'line ' + (cls || '');
+      el.textContent = text;
+      return el;
+    }
+
+    async function poll() {
+      try {
+        const res = await fetch(API, { cache: 'no-store' });
+        const d = await res.json();
+        const modeEl = document.getElementById('mode');
+        modeEl.textContent = d.modeLabel || '—';
+        modeEl.className = d.mode === 'focus' ? 'focus' : '';
+
+        const linesEl = document.getElementById('lines');
+        linesEl.replaceChildren();
+
+        (d.hotkeys || []).forEach((hk) => {
+          let cls = hk.active ? 'active' : 'idle';
+          if (d.focusProxyPort === hk.proxyPort) cls = 'focused';
+          linesEl.appendChild(renderLine(`${hk.id.toUpperCase()}: ${hk.label}`, cls));
+        });
+        linesEl.appendChild(renderLine('F10: 분할 복귀', 'f10'));
+      } catch {
+        document.getElementById('mode').textContent = 'HUD 연결 대기…';
+      }
+      setTimeout(poll, 1200);
+    }
+    poll();
+  </script>
+</body>
+</html>
