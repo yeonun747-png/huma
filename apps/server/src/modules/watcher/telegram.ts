@@ -161,6 +161,8 @@ export interface CaptchaTelegramParams {
   force?: boolean;
   /** Claude Vision 3회 실패 후 VNC 폴백 */
   visionAutoFailed?: boolean;
+  /** VNC 3열 타일 — 어느 창인지 */
+  vncSlotLabel?: string;
 }
 
 export async function notifyCaptchaTelegram(
@@ -204,6 +206,7 @@ export async function notifyCaptchaTelegram(
     `<b>${escapeHtml(head)}</b>`,
     `계정: ${escapeHtml(account)}`,
     `작업: ${escapeHtml(title)}`,
+    ...(params.vncSlotLabel ? [`창: ${escapeHtml(params.vncSlotLabel)}`] : []),
     `job: <code>${escapeHtml(params.jobId)}</code>`,
   ];
 

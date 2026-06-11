@@ -3,7 +3,7 @@
 set -euo pipefail
 
 DISPLAY_NUM="${HUMA_DISPLAY:-:99}"
-SCREEN="${HUMA_XVFB_SCREEN:-1920x1080x24}"
+SCREEN="${HUMA_XVFB_SCREEN:-2560x1080x24}"
 XSOCK="/tmp/.X11-unix/X${DISPLAY_NUM#:}"
 
 if pgrep -f "Xvfb ${DISPLAY_NUM} " >/dev/null 2>&1 && [[ -S "${XSOCK}" ]]; then

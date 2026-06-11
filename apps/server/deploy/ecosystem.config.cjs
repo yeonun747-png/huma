@@ -14,7 +14,7 @@ module.exports = {
       max_restarts: 10,
       env: {
         HUMA_DISPLAY: ':99',
-        HUMA_XVFB_SCREEN: '1920x1080x24',
+        HUMA_XVFB_SCREEN: '2560x1080x24',
       },
     },
     // x11vnc → systemd (huma-x11vnc.service). pm2 stdout 파이프 데드락 방지 + 재부팅 자동 기동.
@@ -33,6 +33,8 @@ module.exports = {
         NODE_ENV: 'production',
         DISPLAY: ':99',
         XVFB_AVAILABLE: 'true',
+        HUMA_VNC_WIDTH: '2560',
+        HUMA_VNC_HEIGHT: '1080',
         NODE_OPTIONS: '--dns-result-order=ipv4first',
       },
     },
