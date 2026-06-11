@@ -22,7 +22,7 @@ const API_BASE =
 
 export async function GET(request: NextRequest) {
   const token = request.headers.get('x-huma-key');
-  const upstreamUrl = `${API_BASE}/api/crank/feed`;
+  const upstreamUrl = `${API_BASE}/api/crank/feed${request.nextUrl.search}`;
 
   try {
     const upstream = await fetch(upstreamUrl, {

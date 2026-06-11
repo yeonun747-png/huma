@@ -2,16 +2,17 @@ import type { FastifyInstance } from 'fastify';
 import { crankLabelOf, crankServiceLabelKo, sortAccountsByCrankLabel } from '@huma/shared';
 import { authMiddleware, supabase } from '../middleware/auth.js';
 import { getSetting } from '../lib/settings.js';
-import { formatKstHm } from '../lib/dashboard-period.js';
-import { formatCrankDwellLabel, type CrankActivityType } from '../lib/crank-activity.js';
+import { formatKstHm, formatKstYmdHm } from '../lib/dashboard-period.js';
+import {
+  crankFeedLogLimit,
+  crankFeedPeriodDays,
+  formatCrankDwellLabel,
+  getCrankFeedRange,
+  parseCrankFeedPeriod,
+  type CrankActivityType,
+} from '../lib/crank-activity.js';
 import { getKstClock } from '../lib/crank-schedule-config.js';
 import { getCrankSchedulerStatus, runDailyCrankScheduler } from '../lib/crank-scheduler.js';
-import { getKstYmd } from '../lib/crank-schedule-config.js';
-
-function kstTodayStartIso(): string {
-  const { year, month, day } = getKstYmd();
-  return new Date(Date.UTC(year, month - 1, day, -9, 0, 0)).toISOString();
-}
 
 function normalizeFeedUrl(raw?: string | null): string | undefined {
   const u = raw?.trim();
@@ -51,24 +52,40 @@ function parseCrankAction(meta: Record<string, unknown> | null, message: string)
 }
 
 export async function registerCrankRoutes(app: FastifyInstance) {
-  app.get('/api/crank/feed', { preHandler: authMiddleware }, async () => {
-    const todayIso = kstTodayStartIso();
+  app.get('/api/crank/feed', { preHandler: authMiddleware }, async (request) => {
+    const query = request.query as { period?: string };
+    const period = parseCrankFeedPeriod(query.period);
+    const { start, end } = getCrankFeedRange(period);
+    const logLimit = crankFeedLogLimit(period);
+    const cafeLimit = period === '30d' ? 100 : period === '7d' ? 40 : 20;
+
+    let activityQuery = supabase
+      .from('huma_logs')
+      .select('id, message, created_at, account_id, result_url, metadata, huma_accounts(name, crank_label)')
+      .gte('created_at', start)
+      .eq('platform', 'naver_crank')
+      .order('created_at', { ascending: false })
+      .limit(logLimit);
+
+    if (end) {
+      activityQuery = activityQuery.lt('created_at', end);
+    }
+
+    let cafeQuery = supabase
+      .from('huma_cafe_viral_posts')
+      .select('id, post_title, post_url, reply_posted, posted_at, created_at, huma_accounts(name, crank_label)')
+      .not('reply_posted', 'is', null)
+      .gte('posted_at', start)
+      .order('posted_at', { ascending: false })
+      .limit(cafeLimit);
+
+    if (end) {
+      cafeQuery = cafeQuery.lt('posted_at', end);
+    }
 
     const [{ data: activityLogs }, { data: cafePosts }, { data: crankAccounts }] = await Promise.all([
-      supabase
-        .from('huma_logs')
-        .select('id, message, created_at, account_id, result_url, metadata, huma_accounts(name, crank_label)')
-        .gte('created_at', todayIso)
-        .eq('platform', 'naver_crank')
-        .order('created_at', { ascending: false })
-        .limit(80),
-      supabase
-        .from('huma_cafe_viral_posts')
-        .select('id, post_title, post_url, reply_posted, posted_at, created_at, huma_accounts(name, crank_label)')
-        .not('reply_posted', 'is', null)
-        .gte('posted_at', todayIso)
-        .order('posted_at', { ascending: false })
-        .limit(20),
+      activityQuery,
+      cafeQuery,
       supabase
         .from('huma_accounts')
         .select('id, name, crank_label, crank_workspace, slot_label, crank_count_today, proxy_port, is_active')
@@ -86,9 +103,15 @@ export async function registerCrankRoutes(app: FastifyInstance) {
       title: string;
       sub: string;
       time: string;
+      sortAt: string;
       targetUrl?: string;
       expand?: string;
     }> = [];
+
+    const formatFeedTime = (iso: string | null | undefined) => {
+      if (period === 'today') return formatKstHm(iso) ?? '—';
+      return formatKstYmdHm(iso) ?? '—';
+    };
 
     const acctKeyOf = (row: { name?: string; crank_label?: string | null } | null) =>
       crankLabelOf(row ?? {});
@@ -126,8 +149,9 @@ export async function registerCrankRoutes(app: FastifyInstance) {
         acctId: acctKey,
         type,
         title: message.slice(0, 100),
-        sub: subMeta || `${acctName} · ${urlHint || (formatKstHm(log.created_at) ?? '—')}`,
-        time: formatKstHm(log.created_at) ?? '—',
+        sub: subMeta || `${acctName} · ${urlHint || formatFeedTime(log.created_at)}`,
+        time: formatFeedTime(log.created_at),
+        sortAt: String(log.created_at),
         targetUrl: normalizeFeedUrl(log.result_url as string | null),
         expand: typeof meta?.comment === 'string' ? meta.comment : undefined,
       });
@@ -138,6 +162,7 @@ export async function registerCrankRoutes(app: FastifyInstance) {
       const acctKey = acctKeyOf(acctRow);
       const acct = acctRow?.name ?? acctKey;
       kpiCounts.comment++;
+      const postedAt = String(post.posted_at ?? post.created_at);
       feed.push({
         id: `cafe-${post.id}`,
         acct,
@@ -146,16 +171,18 @@ export async function registerCrankRoutes(app: FastifyInstance) {
         type: '댓글',
         title: post.post_title ?? '카페 댓글',
         sub: `${acct} · ${String(post.post_url ?? '').replace(/^https?:\/\//, '').slice(0, 40)}`,
-        time: formatKstHm(post.posted_at ?? post.created_at) ?? '—',
+        time: formatFeedTime(postedAt),
+        sortAt: postedAt,
         targetUrl: normalizeFeedUrl(post.post_url as string | null),
         expand: post.reply_posted ? String(post.reply_posted) : undefined,
       });
     }
 
-    feed.sort((a, b) => b.time.localeCompare(a.time));
+    feed.sort((a, b) => b.sortAt.localeCompare(a.sortAt));
 
     const config = await getSetting<Record<string, unknown>>('social_crank', {});
-    const visitMax = Number(config.daily_visit_limit ?? 200);
+    const periodDays = crankFeedPeriodDays(period);
+    const visitMax = Number(config.daily_visit_limit ?? 200) * periodDays;
     const accountCount = crankAccounts?.length ?? 0;
     const perAccount = Number(config.daily_limit_per_account ?? 30);
 
@@ -176,7 +203,7 @@ export async function registerCrankRoutes(app: FastifyInstance) {
           displayName: a.name,
           count:
             feed.filter((f) => f.acctKey === key && f.type === '방문').length ||
-            (a.crank_count_today ?? 0),
+            (period === 'today' ? (a.crank_count_today ?? 0) : 0),
           sub:
             (a.crank_workspace ? crankServiceLabelKo(a.crank_workspace as 'yeonun' | 'panana' | 'quizoasis') : null) ??
             (a.name !== key ? a.name : a.proxy_port ? `:${a.proxy_port}` : '풀'),
@@ -184,15 +211,21 @@ export async function registerCrankRoutes(app: FastifyInstance) {
       }),
     ];
 
+    const feedLimit = period === '30d' ? 100 : period === '7d' ? 60 : 50;
+
     return {
+      period,
       kpi: {
         visit: { current: kpiCounts.visit, max: visitMax },
         like: { current: kpiCounts.like, max: Math.round(visitMax * 0.75) },
-        comment: { current: kpiCounts.comment, max: Math.max(accountCount * 2, perAccount) },
-        neighbor: { current: kpiCounts.neighbor, max: 20 },
+        comment: {
+          current: kpiCounts.comment,
+          max: Math.max(accountCount * 2 * periodDays, perAccount * periodDays),
+        },
+        neighbor: { current: kpiCounts.neighbor, max: 20 * periodDays },
       },
       accountCards,
-      feed: feed.slice(0, 50),
+      feed: feed.slice(0, feedLimit).map(({ sortAt: _sortAt, ...row }) => row),
       keywords: (() => {
         const pools = config.keyword_pools as Record<string, string[]> | undefined;
         if (pools && typeof pools === 'object') {

@@ -99,12 +99,36 @@ function feedLinkClassName(extra?: string) {
   );
 }
 
+type CrankFeedPeriod = 'today' | 'yesterday' | '7d' | '30d';
+
+const CRANK_FEED_PERIODS: Array<{ id: CrankFeedPeriod; label: string }> = [
+  { id: 'today', label: '오늘' },
+  { id: 'yesterday', label: '어제' },
+  { id: '7d', label: '7일' },
+  { id: '30d', label: '한달' },
+];
+
+const CRANK_FEED_PERIOD_ACCOUNT_TITLE: Record<CrankFeedPeriod, string> = {
+  today: 'C-Rank 계정별 오늘 활동',
+  yesterday: 'C-Rank 계정별 어제 활동',
+  '7d': 'C-Rank 계정별 최근 7일 활동',
+  '30d': 'C-Rank 계정별 최근 한달 활동',
+};
+
+const CRANK_FEED_PERIOD_EMPTY: Record<CrankFeedPeriod, string> = {
+  today: '오늘 C-Rank 활동 기록이 없습니다. 스케줄러 또는 수동 실행 후 표시됩니다.',
+  yesterday: '어제 C-Rank 활동 기록이 없습니다.',
+  '7d': '최근 7일 C-Rank 활동 기록이 없습니다.',
+  '30d': '최근 한달 C-Rank 활동 기록이 없습니다.',
+};
+
 export function CrankView() {
   const { workspace } = useWorkspace();
   const [tab, setTab] = useState<'feed' | 'ops'>('feed');
   const [serviceFilter, setServiceFilter] = useState<'all' | Workspace>('all');
   const [acctFilter, setAcctFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
+  const [feedPeriod, setFeedPeriod] = useState<CrankFeedPeriod>('today');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [config, setConfig] = useState<Record<string, unknown>>({});
   const [targets, setTargets] = useState<Array<Record<string, unknown>>>([]);
@@ -194,7 +218,7 @@ export function CrankView() {
   const loadCrankFeed = useCallback(() => {
     setFeedLoading(true);
     void api
-      .crankFeed()
+      .crankFeed({ period: feedPeriod })
       .then((data) => {
         setCrankFeed(data);
         setFeedError(null);
@@ -204,7 +228,7 @@ export function CrankView() {
         setFeedError(e.message);
       })
       .finally(() => setFeedLoading(false));
-  }, []);
+  }, [feedPeriod]);
 
   const loadCrankAccounts = useCallback(() => {
     void api
@@ -336,7 +360,10 @@ export function CrankView() {
 
   const accountCards = useMemo(() => {
     const feed = crankFeed?.feed ?? [];
-    const totalFromAccounts = filteredCrankAccounts.reduce((s, a) => s + (a.crank_count_today ?? 0), 0);
+    const totalFromAccounts =
+      feedPeriod === 'today'
+        ? filteredCrankAccounts.reduce((s, a) => s + (a.crank_count_today ?? 0), 0)
+        : 0;
     const totalFromFeed = feed.filter((f) => f.type === '방문').length;
     const total = Math.max(totalFromAccounts, totalFromFeed);
 
@@ -354,12 +381,12 @@ export function CrankView() {
         return {
           id: key,
           label: key,
-          count: fromFeed > 0 ? fromFeed : (a.crank_count_today ?? 0),
+          count: fromFeed > 0 ? fromFeed : feedPeriod === 'today' ? (a.crank_count_today ?? 0) : 0,
           sub: svc ? crankServiceLabelKo(svc) : (a.name !== key ? a.name : a.proxy_port ? `:${a.proxy_port}` : 'CRANK'),
         };
       }),
     ];
-  }, [filteredCrankAccounts, crankFeed]);
+  }, [filteredCrankAccounts, crankFeed, feedPeriod]);
 
   const feedRows = useMemo(() => {
     const source = crankFeed?.feed ?? [];
@@ -401,6 +428,26 @@ export function CrankView() {
           {feedLoading && !crankFeed && (
             <EmptyPanel message="C-Rank 활동 데이터 로딩 중…" />
           )}
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <span className="text-[12px] text-huma-t3">기간</span>
+            <div className="flex gap-0.5 rounded-md bg-huma-bg3 p-0.5">
+              {CRANK_FEED_PERIODS.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setFeedPeriod(p.id)}
+                  className={cn(
+                    'rounded px-2.5 py-1 text-[12px] transition',
+                    feedPeriod === p.id
+                      ? 'bg-huma-acc font-bold text-white'
+                      : 'text-huma-t3 hover:text-huma-t2',
+                  )}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
           <MGrid cols={4}>
             <MProgressStat label="블로그 방문" current={kpi.visit.current} max={kpi.visit.max} />
             <MProgressStat label="공감" current={kpi.like.current} max={kpi.like.max} />
@@ -411,7 +458,7 @@ export function CrankView() {
           <MPanel
             title={
               <>
-                C-Rank 계정별 오늘 활동
+                {CRANK_FEED_PERIOD_ACCOUNT_TITLE[feedPeriod]}
                 <span className="ml-2 font-mono text-[10px] font-normal normal-case tracking-normal text-huma-t3">
                   클릭 → 해당 계정 피드만 필터
                 </span>
@@ -495,7 +542,7 @@ export function CrankView() {
             }
           >
             {feedRows.length === 0 ? (
-              <EmptyPanel message="오늘 C-Rank 활동 기록이 없습니다. 스케줄러 또는 수동 실행 후 표시됩니다." />
+              <EmptyPanel message={CRANK_FEED_PERIOD_EMPTY[feedPeriod]} />
             ) : (
               feedRows.map((row) => (
                 <div

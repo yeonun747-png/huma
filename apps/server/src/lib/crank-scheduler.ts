@@ -29,9 +29,22 @@ import { getSystemPaused } from './system-pause.js';
 const DAILY_JOB_TITLE_PREFIX = 'C-Rank 스케줄';
 
 let lastDailyRunKey = '';
+let lastDailyCounterResetKey = '';
 let lastMonthlyResetKey = '';
 let lastBackoffEnsureKey = '';
 let lastRecoverAt = 0;
+
+/** KST 날짜 변경 시 일일 카운터 초기화 — 가동 중지·큐 생성과 무관 */
+export async function ensureDailyCrankCountersReset(): Promise<void> {
+  const dailyKey = formatKstDateKey();
+  if (lastDailyCounterResetKey === dailyKey) return;
+  lastDailyCounterResetKey = dailyKey;
+  await resetDailyCrankCounters();
+  await logOperation({
+    level: 'info',
+    message: `[crank-scheduler] ${dailyKey}: crank_sessions_today · crank_count_today 일일 초기화`,
+  });
+}
 
 async function countActiveCrankPoolSize(): Promise<number> {
   const { count } = await supabase
@@ -136,10 +149,6 @@ export async function runDailyCrankScheduler(options?: { anchorFromNow?: boolean
   const accounts = allAccounts.filter((a) => !alreadyScheduled.has(a.id));
   if (accounts.length === 0) {
     return;
-  }
-
-  if (alreadyScheduled.size === 0) {
-    await resetDailyCrankCounters();
   }
 
   const scheduleWindow = await getCrankScheduleWindow();
@@ -315,6 +324,10 @@ export async function getCrankSchedulerStatus(options?: { probe?: boolean }) {
 }
 
 function tickCrankSchedulerClock() {
+  ensureDailyCrankCountersReset().catch((err) =>
+    console.error('[crank-scheduler] daily counter reset:', err),
+  );
+
   if (Date.now() - lastRecoverAt > 60_000) {
     lastRecoverAt = Date.now();
     recoverCrankPipeline().catch((err) =>
@@ -368,6 +381,9 @@ export async function ensureTodayCrankQueue(): Promise<void> {
 }
 
 export function startCrankScheduler(): void {
+  ensureDailyCrankCountersReset().catch((err) =>
+    console.error('[crank-scheduler] startup counter reset:', err),
+  );
   setInterval(tickCrankSchedulerClock, 30_000);
   tickCrankSchedulerClock();
   ensureTodayCrankQueue().catch((err) =>

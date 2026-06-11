@@ -418,8 +418,9 @@ export const api = {
         sub: string;
       }>;
     }>('/api/monitor/sessions'),
-  crankFeed: () =>
+  crankFeed: (params?: { period?: 'today' | 'yesterday' | '7d' | '30d' }) =>
     request<{
+      period?: 'today' | 'yesterday' | '7d' | '30d';
       kpi: {
         visit: { current: number; max: number };
         like: { current: number; max: number };
@@ -438,7 +439,7 @@ export const api = {
       }>;
       keywords: string[];
       hasData?: boolean;
-    }>('/api/crank/feed', {
+    }>(`/api/crank/feed${qs({ period: params?.period })}`, {
       sameOrigin: typeof window === 'undefined' ? false : true,
       cache: 'no-store',
     }),
