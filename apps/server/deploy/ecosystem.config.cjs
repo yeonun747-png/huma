@@ -31,7 +31,7 @@ module.exports = {
         PORT: '3100',
         HUMA_VNC_WIDTH: '2560',
         HUMA_VNC_HEIGHT: '1080',
-        HUMA_VNC_HUD_HEIGHT: '40',
+        HUMA_VNC_HUD_HEIGHT: '48',
       },
     },
     {
