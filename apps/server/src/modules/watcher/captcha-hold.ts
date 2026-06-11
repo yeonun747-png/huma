@@ -7,6 +7,7 @@ import type { ModemSession } from '../proxy/manager.js';
 import { releaseModem } from '../proxy/manager.js';
 import { resumeSocialCrankAfterCaptcha } from '../../lib/crank-captcha-resume.js';
 import { countActiveVncModemSessions, vncSlotLabelKo } from '../../lib/vnc-window-layout.js';
+import { enforceVncWindowBounds } from '../../lib/vnc-window-guard.js';
 import { notifyCaptchaTelegram, resolveVncUrl, buildJobWebUrl } from './telegram.js';
 
 const HOLD_MS = 30 * 60 * 1000;
@@ -128,7 +129,10 @@ export function shouldPreserveBrowserPageForVnc(err: unknown): boolean {
   return false;
 }
 
-async function focusVncBrowserPage(context: BrowserContext): Promise<void> {
+async function focusVncBrowserPage(
+  context: BrowserContext,
+  proxyPort?: number,
+): Promise<void> {
   const pages = context.pages();
   const page =
     pages.find((p) => {
@@ -141,6 +145,9 @@ async function focusVncBrowserPage(context: BrowserContext): Promise<void> {
     }) ?? pages[0];
   if (!page) return;
   await page.bringToFront().catch(() => {});
+  if (proxyPort) {
+    await enforceVncWindowBounds(context, proxyPort, false).catch(() => {});
+  }
 }
 
 /** graceful shutdown — 모든 hold의 브라우저·모뎀·계정 락을 해제하고 작업을 실패 처리 (좀비 방지) */
@@ -195,7 +202,7 @@ export async function enterCaptchaHold(
   };
   holds.set(input.jobId, entry);
   scheduleReminders(entry);
-  await focusVncBrowserPage(input.context);
+  await focusVncBrowserPage(input.context, input.modemSession?.proxyPort);
 
   const vncSessions = await countActiveVncModemSessions();
   const vncSlotLabel = input.modemSession?.proxyPort

@@ -16,6 +16,7 @@ import { resolveUseOsIme, fcitxBrowserEnv } from '../human-engine/os-ime.js';
 import { logOperation } from '../../lib/log-emitter.js';
 import { PLAYWRIGHT_NAV_TIMEOUT_MS } from '../../lib/playwright-nav-timeout.js';
 import { vncWindowLaunchArgs } from '../../lib/vnc-window-layout.js';
+import { startVncWindowGuard } from '../../lib/vnc-window-guard.js';
 
 chromium.use(StealthPlugin());
 
@@ -341,6 +342,8 @@ export async function createBrowserForAccount(account: BrowserAccountContext) {
       seedMousePosition(page);
     });
   });
+
+  startVncWindowGuard(context, account.proxy_port, resolveHeadless());
 
   return { context };
 }

@@ -51,7 +51,7 @@ export interface VncWindowChrome {
 
 /**
  * Xvfb(:99) 2560×1080 고정 3열 — 최대 C-Rank 2 + 발행 1 동시 headful 겹침 방지
- * · 10006 왼쪽 · 10007 가운데 · 10001~10005 오른쪽(또는 C-Rank 없을 때 발행 단독 전체 화면)
+ * · 10006 왼쪽 · 10007 가운데 · 10001~10005 오른쪽 (발행 항상 오른쪽 열)
  */
 export function vncWindowChromeForProxyPort(
   proxyPort: number,
@@ -67,9 +67,7 @@ export function vncWindowChromeForProxyPort(
   }
 
   if (isPostingProxyPort(proxyPort)) {
-    if (sessions.crank === 0) {
-      return { x: 0, y: 0, width: w, height: h };
-    }
+    // 발행은 항상 오른쪽 열 — C-Rank 유무와 관계없이 위치 고정 (VNC에서 찾기 쉽게)
     return { x: 2 * tileW, y: 0, width: w - 2 * tileW, height: h };
   }
 
@@ -86,10 +84,16 @@ export function vncSlotLabelKo(
     if (idx === 1) return 'VNC 가운데 열 (실폰 7)';
   }
   if (isPostingProxyPort(proxyPort)) {
-    if (sessions && sessions.crank === 0) return 'VNC 전체 화면';
     return 'VNC 오른쪽 열 (발행)';
   }
   return 'VNC';
+}
+
+export async function resolveVncChromeForProxyPort(
+  proxyPort: number,
+): Promise<VncWindowChrome | null> {
+  const sessions = await countActiveVncModemSessions();
+  return vncWindowChromeForProxyPort(proxyPort, sessions);
 }
 
 export async function vncWindowLaunchArgs(
@@ -98,8 +102,7 @@ export async function vncWindowLaunchArgs(
 ): Promise<string[]> {
   if (!isVncTilingEnabled(headless) || !proxyPort) return [];
 
-  const sessions = await countActiveVncModemSessions();
-  const chrome = vncWindowChromeForProxyPort(proxyPort, sessions);
+  const chrome = await resolveVncChromeForProxyPort(proxyPort);
   if (!chrome) return [];
 
   return [
