@@ -73,8 +73,8 @@ async function openSearchResults(
     if (response && response.status() >= 400) {
       return `HTTP ${response.status()}`;
     }
-    await page.waitForLoadState('networkidle').catch(() => {});
-    await humanSleep(1000, 2000);
+    await page.waitForLoadState('networkidle', { timeout: 4_000 }).catch(() => {});
+    await humanSleep(600, 1200);
     return null;
   } catch (err) {
     return (err as Error).message || 'navigation_failed';

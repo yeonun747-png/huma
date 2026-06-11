@@ -1,18 +1,19 @@
 import { listActiveVncTilePorts, getVncFocusPort, setVncFocusPort } from './vnc-tile-state.js';
 
-/** F1~F5 고정 슬롯 (VNC 단축키) */
+/** Ctrl+Alt+1~5 — Chromium F1(도움말)과 충돌 방지 */
 export const VNC_HOTKEY_SLOTS = [
-  { id: 'f1', label: 'Crank1', proxyPort: 10006 },
-  { id: 'f2', label: 'Crank2', proxyPort: 10007 },
-  { id: 'f3', label: '연운1', proxyPort: 10001 },
-  { id: 'f4', label: '연운2', proxyPort: 10002 },
-  { id: 'f5', label: '연운3', proxyPort: 10003 },
+  { id: '1', label: 'Crank1', proxyPort: 10006, hint: 'Ctrl+Alt+1' },
+  { id: '2', label: 'Crank2', proxyPort: 10007, hint: 'Ctrl+Alt+2' },
+  { id: '3', label: '연운1', proxyPort: 10001, hint: 'Ctrl+Alt+3' },
+  { id: '4', label: '연운2', proxyPort: 10002, hint: 'Ctrl+Alt+4' },
+  { id: '5', label: '연운3', proxyPort: 10003, hint: 'Ctrl+Alt+5' },
 ] as const;
 
 export type VncHotkeyId = (typeof VNC_HOTKEY_SLOTS)[number]['id'];
 
 export function vncHotkeySlot(id: string) {
-  return VNC_HOTKEY_SLOTS.find((s) => s.id === id.toLowerCase());
+  const key = id.toLowerCase().replace(/^f/, '');
+  return VNC_HOTKEY_SLOTS.find((s) => s.id === key || s.id === id.toLowerCase());
 }
 
 export function vncLabelForProxyPort(proxyPort: number): string | null {
@@ -70,9 +71,9 @@ export async function buildVncHudState(): Promise<VncHudState> {
     ...VNC_HOTKEY_SLOTS.map((s) => {
       const active = activePorts.includes(s.proxyPort);
       const mark = focusPort === s.proxyPort ? ' ◀' : active ? '' : ' (대기)';
-      return `${s.id.toUpperCase()}: ${s.label}${mark}`;
+      return `${s.hint}: ${s.label}${mark}`;
     }),
-    'F10: 분할 복귀',
+    'Ctrl+Alt+0: 분할 복귀',
   ];
 
   return {

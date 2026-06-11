@@ -388,6 +388,20 @@ export async function releaseWorkflowPage(context: BrowserContext, page: Page): 
   await page.goto('about:blank', { waitUntil: 'domcontentloaded', timeout: 15_000 }).catch(() => {});
 }
 
+/** about:blank·newtab 여분 탭 제거 (persistent context는 탭 1개는 유지) */
+export async function closeIdleBlankTabs(context: BrowserContext, keep?: Page): Promise<void> {
+  const pages = [...context.pages()];
+  if (pages.length <= 1) return;
+
+  for (const p of pages) {
+    if (p === keep) continue;
+    const u = p.url();
+    if (u === 'about:blank' || u === 'chrome://newtab/' || u === '') {
+      await p.close().catch(() => {});
+    }
+  }
+}
+
 export async function closeBrowserContext(context: BrowserContext) {
   await context.close();
 }

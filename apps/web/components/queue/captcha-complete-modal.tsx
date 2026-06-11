@@ -82,7 +82,7 @@ export function CaptchaCompleteModal({
     <div className="m-modal-bg open z-[200] p-4" role="dialog" aria-modal="true">
       <div className="m-modal w-full max-w-md">
         <div className="m-modal-t">
-          {isCrank ? '캡cha — C-Rank 활동 재개' : '캡cha — 수동 발행 완료'}
+          {isCrank ? '캡cha — C-Rank 활동 재개' : '캡cha — 발행 재개 / 수동 완료'}
         </div>
         <p className="-mt-2 mb-4 text-sm text-huma-t2">
           {isCrank ? (
@@ -92,7 +92,8 @@ export function CaptchaCompleteModal({
             </>
           ) : (
             <>
-              VNC에서 캡cha를 풀고 <strong>발행</strong>까지 한 뒤, 아래에서 huma 작업을 완료하세요.
+              VNC에서 캡cha를 푼 뒤 <strong>발행 재개</strong>를 누르면 자동 발행이 이어집니다. VNC에서 직접
+              발행까지 끝냈다면 URL을 넣고 <strong>수동 완료</strong>를 누르세요.
             </>
           )}
         </p>
@@ -164,7 +165,7 @@ export function CaptchaCompleteModal({
             닫기
           </button>
           <button type="button" className="btn-primary btn-sm" onClick={() => void submitComplete()} disabled={submitting}>
-            {submitting ? '처리 중…' : isCrank ? '활동 재개' : '발행 완료'}
+            {submitting ? '처리 중…' : isCrank ? '활동 재개' : resultUrl.trim() ? '수동 완료' : '발행 재개'}
           </button>
         </div>
       </div>

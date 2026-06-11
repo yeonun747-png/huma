@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# i7 Xvfb — F1~F5 VNC 포커스 · F10 분할 복귀 (xbindkeys)
+# i7 Xvfb — Ctrl+Alt+1~5 포커스 · Ctrl+Alt+0 분할 (Chromium F1 도움말 충돌 회피)
 set -euo pipefail
 
 PORT="${PORT:-3100}"
@@ -12,15 +12,15 @@ if ! command -v xbindkeys >/dev/null 2>&1; then
 fi
 
 cat > "${RC}" <<EOF
-# HUMA VNC — DISPLAY=:99 에서 동작 (SSH 세션 export DISPLAY=:99)
-"curl -fsS -X POST ${BASE}/focus/f1"  F1
-"curl -fsS -X POST ${BASE}/focus/f2"  F2
-"curl -fsS -X POST ${BASE}/focus/f3"  F3
-"curl -fsS -X POST ${BASE}/focus/f4"  F4
-"curl -fsS -X POST ${BASE}/focus/f5"  F5
-"curl -fsS -X POST ${BASE}/layout/tile"  F10
+# HUMA VNC — DISPLAY=:99 (RealVNC 접속 시 i7에서 실행)
+"curl -fsS -X POST ${BASE}/focus/1"  control+mod1 + 1
+"curl -fsS -X POST ${BASE}/focus/2"  control+mod1 + 2
+"curl -fsS -X POST ${BASE}/focus/3"  control+mod1 + 3
+"curl -fsS -X POST ${BASE}/focus/4"  control+mod1 + 4
+"curl -fsS -X POST ${BASE}/focus/5"  control+mod1 + 5
+"curl -fsS -X POST ${BASE}/layout/tile"  control+mod1 + 0
 EOF
 
 echo "Wrote ${RC}"
 echo "Run: DISPLAY=:99 xbindkeys -f ${RC}"
-echo "Persist: add to ~/.profile → DISPLAY=:99 xbindkeys -f ${RC}"
+echo "Persist: echo 'DISPLAY=:99 xbindkeys -f ${RC}' >> ~/.profile"

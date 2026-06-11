@@ -65,12 +65,13 @@
         const linesEl = document.getElementById('lines');
         linesEl.replaceChildren();
 
-        (d.hotkeys || []).forEach((hk) => {
+        const hints = ['Ctrl+Alt+1', 'Ctrl+Alt+2', 'Ctrl+Alt+3', 'Ctrl+Alt+4', 'Ctrl+Alt+5'];
+        (d.hotkeys || []).forEach((hk, i) => {
           let cls = hk.active ? 'active' : 'idle';
           if (d.focusProxyPort === hk.proxyPort) cls = 'focused';
-          linesEl.appendChild(renderLine(`${hk.id.toUpperCase()}: ${hk.label}`, cls));
+          linesEl.appendChild(renderLine(`${hints[i] ?? hk.id}: ${hk.label}`, cls));
         });
-        linesEl.appendChild(renderLine('F10: 분할 복귀', 'f10'));
+        linesEl.appendChild(renderLine('Ctrl+Alt+0: 분할 복귀', 'f10'));
       } catch {
         document.getElementById('mode').textContent = 'HUD 연결 대기…';
       }

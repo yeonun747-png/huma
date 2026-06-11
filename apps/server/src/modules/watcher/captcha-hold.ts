@@ -6,6 +6,7 @@ import { closeBrowserContext } from '../playwright/browser.js';
 import type { ModemSession } from '../proxy/manager.js';
 import { releaseModem } from '../proxy/manager.js';
 import { resumeSocialCrankAfterCaptcha } from '../../lib/crank-captcha-resume.js';
+import { resumePostingAfterCaptcha } from '../../lib/posting-captcha-resume.js';
 import { vncSlotLabelKo } from '../../lib/vnc-window-layout.js';
 import { enforceVncWindowBounds } from '../../lib/vnc-window-guard.js';
 import { notifyCaptchaTelegram, resolveVncUrl, buildJobWebUrl } from './telegram.js';
@@ -272,6 +273,14 @@ export async function completeCaptchaHold(
         });
         return { ok: true };
       }
+      if (
+        (job.job_type === 'post_blog' || job.job_type === 'cafe_new_post') &&
+        job.account_id &&
+        !resultUrl?.trim()
+      ) {
+        await resumePostingAfterCaptcha(jobId, job.account_id);
+        return { ok: true };
+      }
       await completeJobRecord(jobId, resultUrl);
       return { ok: true };
     }
@@ -298,6 +307,11 @@ export async function completeCaptchaHold(
 
   if (isCrank) {
     await resumeSocialCrankAfterCaptcha(jobId, accountId, preferredProxyPort);
+  } else if (
+    (entry.jobType === 'post_blog' || entry.jobType === 'cafe_new_post') &&
+    !resultUrl?.trim()
+  ) {
+    await resumePostingAfterCaptcha(jobId, accountId);
   } else {
     await completeJobRecord(jobId, resultUrl);
   }
@@ -317,9 +331,13 @@ export async function completeCaptchaHold(
     level: 'info',
     message: isCrank
       ? 'CAPTCHA 해결 — C-Rank 블로그 방문·공감·댓글 재개 예약'
-      : resultUrl?.trim()
-        ? 'CAPTCHA 수동 완료 (URL 기록)'
-        : 'CAPTCHA 수동 완료 (URL 없음)',
+      : entry.jobType === 'post_blog' || entry.jobType === 'cafe_new_post'
+        ? resultUrl?.trim()
+          ? 'CAPTCHA 수동 발행 완료 (URL 기록)'
+          : 'CAPTCHA 해결 — 발행 자동화 재개 예약'
+        : resultUrl?.trim()
+          ? 'CAPTCHA 수동 완료 (URL 기록)'
+          : 'CAPTCHA 수동 완료 (URL 없음)',
     job_id: jobId,
     account_id: accountId,
   });

@@ -6,6 +6,8 @@ import {
   closeBrowserContext,
   createBrowser,
   releaseWorkflowPage,
+  closeIdleBlankTabs,
+  acquireWorkflowPage,
 } from '../playwright/browser.js';
 import { loadAccountForBrowser } from '../playwright/account-loader.js';
 import { naverLogin } from '../playwright/naver/login.js';
@@ -292,12 +294,19 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
 
             if (type === 'post_blog') {
               const persona = parsePersona(accountCtx?.persona);
-              const warmupPage = await context.newPage();
-              await preSessionWarmup(warmupPage, persona, 'posting', humanConfig);
-              await releaseWorkflowPage(context, warmupPage);
+              const platformSchedule = payload.platform_schedule as Record<string, unknown> | undefined;
+              const resumeAfterCaptcha = platformSchedule?._resumeAfterCaptcha === true;
+
+              if (!resumeAfterCaptcha) {
+                const warmupPage = await acquireWorkflowPage(context);
+                await preSessionWarmup(warmupPage, persona, 'posting', humanConfig);
+                await releaseWorkflowPage(context, warmupPage);
+              }
+
               if (accountId) {
                 await naverLogin(context, accountId, {
                   profilePath: accountCtx?.profile_path,
+                  skipShadowWalk: resumeAfterCaptcha,
                   captchaContext: {
                     humaJobId,
                     accountId,
@@ -306,7 +315,9 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
                   },
                 });
               }
-              const page = await context.newPage();
+
+              await closeIdleBlankTabs(context);
+              const page = await acquireWorkflowPage(context);
               ({ resultUrl } = await executePostBlog({
                 page,
                 payload,
