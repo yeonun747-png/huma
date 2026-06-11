@@ -74,6 +74,7 @@ export async function tryEnterCrankCaptchaHold(params: CrankCaptchaHoldParams): 
   await handleLayer4Detection(params.accountId, params.err, params.modemSession, {
     skipExternalNotify: true,
     workspace: params.workspace,
+    skipAccountPause: true,
   });
 
   await setCrankSessionProgress(

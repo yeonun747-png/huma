@@ -1,7 +1,7 @@
 import { chromium } from 'playwright-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import type { BrowserContext, Page } from 'playwright';
-import { existsSync, mkdirSync, renameSync, rmSync, unlinkSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import {
   injectFingerprint,
@@ -122,6 +122,35 @@ function isBrowserLaunchCorruptionError(err: unknown): boolean {
 
 /** Playwright 기본 --enable-automation → Chrome 자동화 배너·탐지 신호 */
 const IGNORE_AUTOMATION_ARGS = ['--enable-automation'] as const;
+
+/** Chrome 「비밀번호를 저장하시겠습니까?」 팝업 — VNC·자동화 클릭 방해 방지 */
+function applyPasswordManagerPrefs(profilePath: string): void {
+  const defaultDir = join(profilePath, 'Default');
+  mkdirSync(defaultDir, { recursive: true });
+  const prefsPath = join(defaultDir, 'Preferences');
+
+  let prefs: Record<string, unknown> = {};
+  if (existsSync(prefsPath)) {
+    try {
+      prefs = JSON.parse(readFileSync(prefsPath, 'utf8')) as Record<string, unknown>;
+    } catch {
+      prefs = {};
+    }
+  }
+
+  prefs.credentials_enable_service = false;
+  prefs.credentials_enable_autosignin = false;
+
+  const profile = (prefs.profile as Record<string, unknown> | undefined) ?? {};
+  profile.password_manager_enabled = false;
+  prefs.profile = profile;
+
+  const autofill = (prefs.autofill as Record<string, unknown> | undefined) ?? {};
+  autofill.profile_enabled = false;
+  prefs.autofill = autofill;
+
+  writeFileSync(prefsPath, JSON.stringify(prefs));
+}
 
 function baseLaunchArgs(fp: AccountFingerprint) {
   const args = [
@@ -282,6 +311,7 @@ function persistentLaunchOptions(
 
 export async function createBrowserForAccount(account: BrowserAccountContext) {
   mkdirSync(account.profile_path, { recursive: true });
+  applyPasswordManagerPrefs(account.profile_path);
   clearStaleProfileLocks(account.profile_path);
   const fpConfig = await getFingerprintConfig();
   const humanCfg = await getHumanEngineConfig();

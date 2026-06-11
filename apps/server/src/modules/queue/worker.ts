@@ -403,6 +403,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
               await handleLayer4Detection(accountId, err, modemSession, {
                 skipExternalNotify: true,
                 workspace: jobWorkspace,
+                skipAccountPause: true,
               });
               await enterCaptchaHold({
                 jobId: humaJobId,

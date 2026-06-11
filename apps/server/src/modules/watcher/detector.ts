@@ -155,11 +155,25 @@ export async function handleLayer4Detection(
   accountId: string,
   err: unknown,
   session?: ModemSession,
-  options?: { skipExternalNotify?: boolean; workspace?: string | null },
+  options?: {
+    skipExternalNotify?: boolean;
+    workspace?: string | null;
+    /** VNC CAPTCHA hold — 탐지 카운트만 기록, is_active·휴식은 운영자 재개 시점까지 보류 */
+    skipAccountPause?: boolean;
+  },
 ) {
   const watcher = await getWatcherSettings();
   const human = await getHumanEngineScheduleConfig();
   const { countToday, tier } = await bumpDetectionState(accountId);
+
+  if (options?.skipAccountPause) {
+    await logOperation({
+      level: 'warn',
+      message: `Layer4 탐지 (VNC hold — 계정 pause 생략, tier ${tier}, today ${countToday})`,
+      account_id: accountId,
+    });
+    return;
+  }
 
   const autoPause =
     watcher.auto_pause !== false && human.fingerprint?.auto_pause_on_detect !== false;
