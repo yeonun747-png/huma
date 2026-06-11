@@ -7,7 +7,7 @@ import {
   isCaptchaError,
 } from '../modules/watcher/detector.js';
 import type { ModemSession } from '../modules/proxy/manager.js';
-import { humanClickLocator } from '../modules/human-engine/mouse.js';
+import { clickNaverLoginButton } from './naver-login-fields.js';
 import { pickNaverCaptchaPage, tryAutoSolveNaverCaptcha } from './naver-captcha-vision.js';
 import { setCrankSessionProgress } from './crank-session-progress.js';
 
@@ -26,6 +26,7 @@ export function isCrankHumanHoldError(err: unknown): boolean {
   if (msg.includes('NAVER_LOGIN_DEVICE_VERIFY')) return true;
   if (msg.includes('reason=block_captcha')) return true;
   if (msg.includes('NAVER_LOGIN_FAILED:redirect_stuck')) return true;
+  if (msg.includes('HUMAN_CLICK_NO_BBOX')) return true;
   return false;
 }
 
@@ -46,9 +47,15 @@ export type CrankCaptchaHoldParams = {
 export async function tryEnterCrankCaptchaHold(params: CrankCaptchaHoldParams): Promise<boolean> {
   if (!params.humaJobId || !isCrankHumanHoldError(params.err)) return false;
 
+  const errMsg = (params.err as Error)?.message ?? '';
   let visionAutoFailed = false;
-  if (isCaptchaError(params.err)) {
-    const page = pickNaverCaptchaPage(params.context);
+  const captchaPage = pickNaverCaptchaPage(params.context);
+  const shouldRetryVision =
+    isCaptchaError(params.err) ||
+    (Boolean(captchaPage) && errMsg.includes('HUMAN_CLICK_NO_BBOX'));
+
+  if (shouldRetryVision) {
+    const page = captchaPage;
     if (page) {
       const vision = await tryAutoSolveNaverCaptcha(page, {
         humaJobId: params.humaJobId,
@@ -56,9 +63,7 @@ export async function tryEnterCrankCaptchaHold(params: CrankCaptchaHoldParams): 
         workspace: params.workspace,
         jobType: 'social_crank',
         resubmit: async () => {
-          if (page.url().includes('nidlogin')) {
-            await humanClickLocator(page, page.locator('#log\\.login'));
-          }
+          if (page.url().includes('nidlogin')) await clickNaverLoginButton(page);
         },
       });
       if (vision === 'solved') return false;

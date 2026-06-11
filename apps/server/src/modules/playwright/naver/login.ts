@@ -5,14 +5,18 @@ import {
   classifyNaverLoginPage,
   wrapNaverLoginTimeout,
 } from '../../../lib/naver-login-error.js';
+import {
+  clickNaverLoginButton,
+  typeIntoNaverLoginField,
+} from '../../../lib/naver-login-fields.js';
 import { humanSleep } from '../../human-engine/typing.js';
-import { humanClickLocator } from '../../human-engine/mouse.js';
 import { randomBetween, sleep } from '../../../lib/utils.js';
 import { shadowWalk } from '../shadow-walk.js';
 import { hasStoredSession } from '../account-loader.js';
 import { acquireWorkflowPage, releaseWorkflowPage } from '../browser.js';
 import {
   type NaverCaptchaVisionContext,
+  isNaverCaptchaVisible,
   tryAutoSolveNaverCaptcha,
 } from '../../../lib/naver-captcha-vision.js';
 import { shouldPreserveBrowserPageForVnc } from '../../watcher/captcha-hold.js';
@@ -33,27 +37,24 @@ async function readNaverLoginErrorText(page: Page): Promise<string | null> {
   return null;
 }
 
-/** 사람처럼 필드 클릭→포커스 후 한 글자씩 입력 (keydown/keyup/input 이벤트 발생). */
-async function typeIntoLoginField(page: Page, selector: string, value: string): Promise<void> {
-  await humanClickLocator(page, page.locator(selector));
-  await sleep(randomBetween(150, 400));
-  for (const ch of value) {
-    await page.keyboard.type(ch, { delay: randomBetween(55, 175) });
-    // 가끔 입력 중 짧게 멈칫 (사람의 사고·확인)
-    if (Math.random() < 0.08) await sleep(randomBetween(180, 520));
-  }
-}
-
 async function resolveLoginCaptchaIfNeeded(
   page: Page,
   captchaCtx?: NaverCaptchaVisionContext,
 ): Promise<void> {
-  await tryAutoSolveNaverCaptcha(page, {
-    ...captchaCtx,
-    resubmit: async () => {
-      await humanClickLocator(page, page.locator('#log\\.login'));
-    },
-  });
+  try {
+    await tryAutoSolveNaverCaptcha(page, {
+      ...captchaCtx,
+      resubmit: async () => {
+        await clickNaverLoginButton(page);
+      },
+    });
+  } catch (err) {
+    // Vision·클릭 오류 시 캡차 화면이면 VNC hold로 넘김 (HUMAN_CLICK_NO_BBOX 등)
+    if (await isNaverCaptchaVisible(page)) {
+      throw new Error('CAPTCHA_DETECTED');
+    }
+    throw err;
+  }
 }
 
 async function assertLoginSucceeded(
@@ -160,11 +161,11 @@ export async function naverLogin(
     // 네이버 nid 로그인은 키입력 타이밍·이벤트(bvsd)를 분석한다.
     // page.fill()은 값만 즉시 주입해 keydown/keyup/input 엔트로피가 0 → 강한 봇 신호.
     // 사람처럼 필드를 클릭→포커스 후 키스트로크로 입력하고, 로그인 버튼도 마우스로 이동·클릭한다.
-    await typeIntoLoginField(page, '#id', account.naver_id);
+    await typeIntoNaverLoginField(page, '#id', account.naver_id);
     await humanSleep(500, 1200);
-    await typeIntoLoginField(page, '#pw', password);
+    await typeIntoNaverLoginField(page, '#pw', password);
     await humanSleep(800, 1500);
-    await humanClickLocator(page, page.locator('#log\\.login'));
+    await clickNaverLoginButton(page);
 
     const captchaCtx: NaverCaptchaVisionContext = {
       accountId,

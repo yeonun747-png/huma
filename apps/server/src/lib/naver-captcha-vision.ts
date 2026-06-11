@@ -2,6 +2,10 @@ import type { BrowserContext, Locator, Page } from 'playwright';
 
 import { askClaudeVision } from './anthropic-client.js';
 import { shouldAutoSolveCaptchaVision } from './human-engine-policy.js';
+import {
+  clickNaverLoginButton,
+  ensureNaverLoginCredentialsForCaptcha,
+} from './naver-login-fields.js';
 import { logOperation } from './log-emitter.js';
 import { humanSleep } from '../modules/human-engine/typing.js';
 import {
@@ -56,14 +60,24 @@ const QUESTION_SELECTORS = [
   'label[for*="captcha"]',
 ];
 
-const ANSWER_INPUT_SELECTORS = [
-  '#captcha input',
+const CAPTCHA_ANSWER_INPUT_SELECTORS = [
+  '#captcha input[type="text"]',
+  '#captcha input[type="tel"]',
+  '#captcha input[type="number"]',
+  '#captcha input[maxlength]',
+  '#captcha textarea',
+  '#captcha .captcha_input',
   '#cptch input',
+  '#cptch textarea',
+  'input[name="chptcha"]',
+  'input[name="captcha"]',
+  'textarea[name="captcha"]',
+  '.captcha_box input',
+  '.captcha_box textarea',
   '.captcha input[type="text"]',
   '.captcha input[type="tel"]',
   '.captcha input[type="number"]',
-  'input[name*="captcha"]',
-  'input[id*="captcha"]',
+  '.captcha textarea',
 ];
 
 const SLIDER_HANDLE_SELECTORS = [
@@ -181,12 +195,17 @@ async function detectCaptchaType(page: Page): Promise<CaptchaType> {
   if (cells.length >= 4) return 'grid';
 
   const inputInRoot = await root
-    .locator('input[type="text"], input[type="tel"], input[type="number"]')
+    .locator(
+      'input[type="text"], input[type="tel"], input[type="number"], textarea, input[maxlength]',
+    )
     .count()
     .catch(() => 0);
   if (inputInRoot > 0) return 'text';
 
-  const globalInputs = await page.locator(ANSWER_INPUT_SELECTORS.join(', ')).count().catch(() => 0);
+  const globalInputs = await page
+    .locator(CAPTCHA_ANSWER_INPUT_SELECTORS.join(', '))
+    .count()
+    .catch(() => 0);
   if (globalInputs > 0) return 'text';
 
   if (cells.length === 0) {
@@ -236,6 +255,16 @@ async function readCaptchaQuestion(page: Page): Promise<string> {
   return lines[0] ?? '이미지의 질문에 맞는 답을 구하세요.';
 }
 
+async function safeHumanClick(page: Page, locator: Locator): Promise<void> {
+  await locator.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+  const box = await locator.boundingBox().catch(() => null);
+  if (box && box.width > 0 && box.height > 0) {
+    await humanClickLocator(page, locator);
+    return;
+  }
+  await locator.click({ force: true, timeout: 8000 });
+}
+
 async function refreshCaptchaImage(page: Page): Promise<void> {
   const refreshSelectors = [
     '#captcha_reload',
@@ -248,7 +277,7 @@ async function refreshCaptchaImage(page: Page): Promise<void> {
   for (const sel of refreshSelectors) {
     const btn = page.locator(sel).first();
     if (await btn.isVisible().catch(() => false)) {
-      await humanClickLocator(page, btn);
+      await safeHumanClick(page, btn);
       await sleep(randomBetween(800, 1500));
       return;
     }
@@ -296,10 +325,16 @@ function parseVisionSolveResult(raw: string | null, expectedType: CaptchaType): 
   }
 
   if (expectedType === 'text') {
-    const digitMatch = raw.match(/\d+/);
-    if (digitMatch) return { type: 'text', answer: digitMatch[0] };
+    const hangul = raw.match(/[가-힣]{2,}/)?.[0];
+    if (hangul) return { type: 'text', answer: hangul };
+    const hangulShort = raw.match(/[가-힣]/)?.[0];
+    if (hangulShort && /한글|입력|이름|상품|메뉴|가게|품목/.test(raw)) {
+      return { type: 'text', answer: hangulShort };
+    }
     const alnum = raw.replace(/[^0-9a-zA-Z가-힣]/g, '');
     if (alnum.length) return { type: 'text', answer: alnum.slice(0, 32) };
+    const digitMatch = raw.match(/\d+/);
+    if (digitMatch) return { type: 'text', answer: digitMatch[0] };
   }
   return null;
 }
@@ -330,9 +365,11 @@ Format: {"type":"slider","dragPx":127} OR {"type":"slider","dragPercent":0.62}
   } else {
     system = `You solve Naver Korean login CAPTCHA images. Return ONLY JSON: {"type":"text","answer":"..."}
 Rules:
-- Receipt "총 몇 개": sum quantity(개수) column only; ignore "3+1 행사" promo rows.
-- Numeric answers: digits only. Multiple boxes: pad e.g. "007".`;
-    prompt = question;
+- Receipt "총 몇 개" / quantity questions: sum 개수 column only; ignore promo rows like "3+1". Answer: digits only.
+- Receipt "한글로 입력" / store name / item name / menu name: copy exact Korean text (가-힣) from the receipt image.
+- Multiple single-char boxes: answer is one string left-to-right (e.g. "사과" for 2 boxes, "007" for 3 digit boxes).
+- Never return only a random number when the question asks for Korean text.`;
+    prompt = `Question: ${question}`;
   }
 
   const raw = await askClaudeVision({
@@ -346,27 +383,88 @@ Rules:
   return parseVisionSolveResult(raw, type);
 }
 
-async function fillCaptchaAnswer(page: Page, answer: string): Promise<boolean> {
-  const inputs = page.locator(ANSWER_INPUT_SELECTORS.join(', '));
-  const count = await inputs.count().catch(() => 0);
-  if (count === 0) return false;
+function splitAnswerForInputs(answer: string, inputCount: number): string[] {
+  const trimmed = answer.trim();
+  if (inputCount <= 1) return [trimmed];
+  if (/^\d+$/.test(trimmed)) {
+    const padded = trimmed.padStart(inputCount, '0').slice(-inputCount);
+    return [...padded];
+  }
+  const chars = [...trimmed.replace(/\s/g, '')];
+  if (chars.length <= inputCount) return chars;
+  return chars.slice(0, inputCount);
+}
 
-  const digits = answer.replace(/\D/g, '') || answer;
-
-  if (count === 1) {
-    const input = inputs.first();
+async function humanTypeCaptchaAnswer(page: Page, input: Locator, text: string): Promise<void> {
+  await input.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+  const box = await input.boundingBox().catch(() => null);
+  if (box && box.width > 0 && box.height > 0) {
     await humanClickLocator(page, input);
-    await input.fill('');
-    await input.type(digits, { delay: randomBetween(80, 160) });
-    return true;
+  } else {
+    await input.focus().catch(() => {});
+    await sleep(randomBetween(100, 300));
   }
 
-  const padded = digits.padStart(count, '0').slice(-count);
-  for (let i = 0; i < count; i += 1) {
-    const input = inputs.nth(i);
-    await humanClickLocator(page, input);
-    await input.fill('');
-    await input.type(padded[i]!, { delay: randomBetween(80, 160) });
+  await input.fill('');
+  const hasHangul = /[가-힣]/.test(text);
+  if (hasHangul) {
+    await page.keyboard.insertText(text);
+    const val = await input.inputValue().catch(() => '');
+    if (!val?.includes(text[0] ?? '')) {
+      await input.fill(text);
+    }
+    return;
+  }
+
+  for (const ch of text) {
+    await page.keyboard.type(ch, { delay: randomBetween(80, 160) });
+  }
+}
+
+/** CAPTCHA 영역 내 보이는 입력칸만 (로그인 #id·#pw 제외). */
+async function getVisibleCaptchaInputs(page: Page): Promise<Locator[]> {
+  const root = await locateCaptchaRoot(page);
+  const candidates = [
+    root.locator(
+      'input[type="text"], input[type="tel"], input[type="number"], input[maxlength], textarea',
+    ),
+    page.locator(CAPTCHA_ANSWER_INPUT_SELECTORS.join(', ')),
+  ];
+
+  const seen = new Set<string>();
+  const visible: Locator[] = [];
+
+  for (const group of candidates) {
+    const count = await group.count().catch(() => 0);
+    for (let i = 0; i < count; i += 1) {
+      const input = group.nth(i);
+      if (!(await input.isVisible().catch(() => false))) continue;
+
+      const id = (await input.getAttribute('id').catch(() => null)) ?? '';
+      const name = (await input.getAttribute('name').catch(() => null)) ?? '';
+      if (id === 'id' || id === 'pw' || name === 'id' || name === 'pw') continue;
+
+      const key = `${id}:${name}:${i}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      visible.push(input);
+    }
+    if (visible.length > 0) break;
+  }
+
+  return visible;
+}
+
+async function fillCaptchaAnswer(page: Page, answer: string): Promise<boolean> {
+  const inputs = await getVisibleCaptchaInputs(page);
+  if (inputs.length === 0) return false;
+
+  const parts = splitAnswerForInputs(answer, inputs.length);
+  for (let i = 0; i < inputs.length; i += 1) {
+    const part = parts[i] ?? parts[0] ?? answer;
+    if (!part) continue;
+    await humanTypeCaptchaAnswer(page, inputs[i]!, part);
+    if (i < inputs.length - 1) await humanSleep(120, 350);
   }
   return true;
 }
@@ -376,7 +474,7 @@ async function applyGridClicks(page: Page, cells: Locator[], indices: number[]):
   for (const idx of indices) {
     const cell = cells[idx - 1];
     if (!cell) continue;
-    await humanClickLocator(page, cell);
+    await safeHumanClick(page, cell);
     await humanSleep(350, 900);
   }
   return true;
@@ -409,19 +507,28 @@ async function clickCaptchaConfirm(page: Page): Promise<void> {
   for (const sel of CONFIRM_SELECTORS) {
     const btn = page.locator(sel).first();
     if (await btn.isVisible().catch(() => false)) {
-      await humanClickLocator(page, btn);
-      await sleep(randomBetween(400, 900));
+      const box = await btn.boundingBox().catch(() => null);
+      if (box && box.width > 0 && box.height > 0) {
+        await safeHumanClick(page, btn);
+        await sleep(randomBetween(400, 900));
+      }
       return;
     }
   }
 }
 
 async function submitCaptcha(page: Page, ctx: NaverCaptchaVisionContext): Promise<void> {
+  if (ctx.accountId && page.url().includes('nidlogin')) {
+    await ensureNaverLoginCredentialsForCaptcha(page, ctx.accountId);
+    await humanSleep(500, 1200);
+  }
+
   await clickCaptchaConfirm(page);
+
   if (ctx.resubmit) {
     await ctx.resubmit();
   } else if (page.url().includes('nidlogin')) {
-    await humanClickLocator(page, page.locator('#log\\.login'));
+    await clickNaverLoginButton(page);
   }
 }
 
@@ -471,53 +578,66 @@ export async function tryAutoSolveNaverCaptcha(
   if (!(await isNaverCaptchaVisible(page))) return 'not_visible';
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-    const captchaType = await detectCaptchaType(page);
+    try {
+      const captchaType = await detectCaptchaType(page);
 
-    await logOperation({
-      level: 'info',
-      message: `[captcha-vision] ${captchaType} 자동 해결 시도 ${attempt}/${MAX_ATTEMPTS}`,
-      job_id: ctx.humaJobId,
-      account_id: ctx.accountId,
-    });
-
-    const shot = await captureCaptchaScreenshot(page, captchaType);
-    if (!shot) break;
-
-    const question = await readCaptchaQuestion(page);
-    const root = await locateCaptchaRoot(page);
-    const cells = captchaType === 'grid' ? await findGridCells(root) : [];
-    const trackW = captchaType === 'slider' ? await getSliderTrackWidth(page, root) : undefined;
-
-    const solved = await solveCaptchaWithVision(shot.base64, shot.mediaType, question, captchaType, {
-      cellCount: cells.length || undefined,
-      trackWidthPx: trackW,
-    });
-    if (!solved) {
-      await humanSleep(3000, 7000);
-      await refreshCaptchaImage(page);
-      continue;
-    }
-
-    const applied = await applyVisionResult(page, captchaType, solved);
-    if (!applied) break;
-
-    await humanSleep(1500, 3500);
-    await submitCaptcha(page, ctx);
-
-    await sleep(randomBetween(2000, 4000));
-    if (await captchaCleared(page)) {
       await logOperation({
         level: 'info',
-        message: `[captcha-vision] ${captchaType} 자동 해결 성공 (시도 ${attempt})`,
+        message: `[captcha-vision] ${captchaType} 자동 해결 시도 ${attempt}/${MAX_ATTEMPTS}`,
         job_id: ctx.humaJobId,
         account_id: ctx.accountId,
       });
-      return 'solved';
-    }
 
-    if (attempt < MAX_ATTEMPTS) {
-      await humanSleep(3000, 7000);
-      await refreshCaptchaImage(page);
+      const shot = await captureCaptchaScreenshot(page, captchaType);
+      if (!shot) break;
+
+      const question = await readCaptchaQuestion(page);
+      const root = await locateCaptchaRoot(page);
+      const cells = captchaType === 'grid' ? await findGridCells(root) : [];
+      const trackW = captchaType === 'slider' ? await getSliderTrackWidth(page, root) : undefined;
+
+      const solved = await solveCaptchaWithVision(shot.base64, shot.mediaType, question, captchaType, {
+        cellCount: cells.length || undefined,
+        trackWidthPx: trackW,
+      });
+      if (!solved) {
+        await humanSleep(3000, 7000);
+        await refreshCaptchaImage(page);
+        continue;
+      }
+
+      const applied = await applyVisionResult(page, captchaType, solved);
+      if (!applied) break;
+
+      await humanSleep(1500, 3500);
+      await submitCaptcha(page, ctx);
+
+      await sleep(randomBetween(2000, 4000));
+      if (await captchaCleared(page)) {
+        await logOperation({
+          level: 'info',
+          message: `[captcha-vision] ${captchaType} 자동 해결 성공 (시도 ${attempt})`,
+          job_id: ctx.humaJobId,
+          account_id: ctx.accountId,
+        });
+        return 'solved';
+      }
+
+      if (attempt < MAX_ATTEMPTS) {
+        await humanSleep(3000, 7000);
+        await refreshCaptchaImage(page);
+      }
+    } catch (err) {
+      await logOperation({
+        level: 'warn',
+        message: `[captcha-vision] 시도 ${attempt} 오류: ${(err as Error).message}`,
+        job_id: ctx.humaJobId,
+        account_id: ctx.accountId,
+      });
+      if (attempt < MAX_ATTEMPTS) {
+        await humanSleep(3000, 7000);
+        await refreshCaptchaImage(page).catch(() => {});
+      }
     }
   }
 

@@ -23,7 +23,7 @@ import {
   passesWeekendVolumeGate,
 } from '../../lib/human-engine-policy.js';
 import { pickNaverCaptchaPage, tryAutoSolveNaverCaptcha } from '../../lib/naver-captcha-vision.js';
-import { humanClickLocator } from '../human-engine/mouse.js';
+import { clickNaverLoginButton } from '../../lib/naver-login-fields.js';
 import { handleLayer4Detection, isCaptchaError, isBlockError } from '../watcher/detector.js';
 import { enterCaptchaHold } from '../watcher/captcha-hold.js';
 import { acquireModem, releaseModem, type ModemSession } from '../proxy/manager.js';
@@ -352,9 +352,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
                   workspace: jobWorkspace,
                   jobType: type,
                   resubmit: async () => {
-                    if (captchaPage.url().includes('nidlogin')) {
-                      await humanClickLocator(captchaPage, captchaPage.locator('#log\\.login'));
-                    }
+                    if (captchaPage.url().includes('nidlogin')) await clickNaverLoginButton(captchaPage);
                   },
                 });
                 if (vision === 'solved') {
