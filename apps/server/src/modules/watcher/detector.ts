@@ -27,6 +27,19 @@ export function isBlockError(err: unknown): boolean {
   return is429Error(err) || msg.includes('BLOCK') || msg.includes('Layer4');
 }
 
+/** CAPTCHA·2FA·캡cha 클릭 실패 등 VNC 수동 해결이 필요한 네이버 오류 */
+export function isNaverHumanHoldError(err: unknown): boolean {
+  const msg = (err as Error).message ?? '';
+  if (isCaptchaError(err) || isBlockError(err)) return true;
+  if (msg.includes('NAVER_LOGIN_2FA')) return true;
+  if (msg.includes('NAVER_LOGIN_DEVICE_VERIFY')) return true;
+  if (msg.includes('reason=block_captcha')) return true;
+  if (msg.includes('NAVER_LOGIN_FAILED:redirect_stuck')) return true;
+  if (msg.includes('HUMAN_CLICK_NO_BBOX')) return true;
+  if (msg.includes('HUMAN_DRAG_NO_BBOX')) return true;
+  return false;
+}
+
 function kstDateKey(): string {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
 }

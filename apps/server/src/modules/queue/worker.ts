@@ -26,7 +26,7 @@ import {
 } from '../../lib/human-engine-policy.js';
 import { pickNaverCaptchaPage, tryAutoSolveNaverCaptcha } from '../../lib/naver-captcha-vision.js';
 import { clickNaverLoginButton } from '../../lib/naver-login-fields.js';
-import { handleLayer4Detection, isCaptchaError, isBlockError } from '../watcher/detector.js';
+import { handleLayer4Detection, isBlockError, isCaptchaError, isNaverHumanHoldError } from '../watcher/detector.js';
 import { enterCaptchaHold } from '../watcher/captcha-hold.js';
 import { acquireModem, releaseModem, type ModemSession } from '../proxy/manager.js';
 import { hasIdleCrankModem } from '../modem/allocation.js';
@@ -393,12 +393,16 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
             if (
               humaJobId &&
               accountId &&
-              isCaptchaError(err) &&
+              isNaverHumanHoldError(err) &&
               POSTING_JOBS.includes(type)
             ) {
               let visionAutoFailed = false;
               const captchaPage = pickNaverCaptchaPage(context);
-              if (captchaPage) {
+              const errMsg = (err as Error).message ?? '';
+              const shouldRetryVision =
+                isCaptchaError(err) ||
+                (Boolean(captchaPage) && errMsg.includes('HUMAN_CLICK_NO_BBOX'));
+              if (shouldRetryVision && captchaPage) {
                 const vision = await tryAutoSolveNaverCaptcha(captchaPage, {
                   humaJobId,
                   accountId,
@@ -451,6 +455,8 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
                   }
                 }
                 if (vision === 'failed') visionAutoFailed = true;
+              } else if (errMsg.includes('HUMAN_CLICK_NO_BBOX') && captchaPage) {
+                visionAutoFailed = true;
               }
 
               await handleLayer4Detection(accountId, err, modemSession, {

@@ -90,11 +90,18 @@ export async function humanClickLocator(
   jitterPx?: number,
   preClickDelayMs: [number, number] = [100, 400],
 ) {
-  await locator.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
-  const box = await locator.boundingBox();
-  if (!box) {
+  let lastBox: Awaited<ReturnType<Locator['boundingBox']>> = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await locator.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+    await locator.waitFor({ state: 'visible', timeout: attempt === 0 ? 5000 : 1500 }).catch(() => {});
+    lastBox = await locator.boundingBox();
+    if (lastBox) break;
+    await sleep(randomBetween(200, 450));
+  }
+  if (!lastBox) {
     throw new Error('HUMAN_CLICK_NO_BBOX');
   }
+  const box = lastBox;
   const jitter = jitterPx ?? (await getClickJitterPx());
   const cx = box.x + box.width / 2 + randomBetween(-jitter, jitter);
   const cy = box.y + box.height / 2 + randomBetween(-jitter, jitter);
@@ -179,4 +186,4 @@ export async function humanNavigateViaLink(page: Page, locator: Locator): Promis
   }
   await page.waitForLoadState('networkidle', { timeout: 30_000 }).catch(() => {});
 }
-
+

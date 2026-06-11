@@ -150,6 +150,9 @@ export function formatJobErrorLabel(message: string | null | undefined): string 
   if (raw.includes('ACTIVE_HOURS_BLOCKED')) {
     return '활동 허용 시간 외 — ⏫ 앞당기기로 즉시 실행하거나 Human Engine 스케줄 확인';
   }
+  if (raw.includes('HUMAN_CLICK_NO_BBOX')) {
+    return '캡cha·로그인 화면 클릭 실패 — VNC에서 수동 해결 후 발행 재개';
+  }
   if (raw.includes('ACCOUNT_INACTIVE')) {
     return '비활성 계정 — 계정 관리에서 is_active 후 재시도';
   }

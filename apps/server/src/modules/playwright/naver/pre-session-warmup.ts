@@ -1,5 +1,5 @@
 import type { Page } from 'playwright';
-import { humanSleep, humanType } from '../../human-engine/typing.js';
+import { humanSleep } from '../../human-engine/typing.js';
 import { scrollWithReverse } from '../../human-engine/timing.js';
 import { randomBetween } from '../../../lib/utils.js';
 import type { HumanEngineConfig } from '../../../lib/settings.js';
@@ -157,11 +157,8 @@ async function searchViaNaverHomepage(
   await searchBox.click({ timeout: 5000 }).catch(() => {});
   await humanSleep(150, 350);
   await searchBox.fill('');
-  if (humanEngine) {
-    await humanType(page, searchBox, keyword, humanEngine);
-  } else {
-    await searchBox.pressSequentially(keyword, { delay: randomBetween(45, 95) });
-  }
+  // humanType(humanClick)는 검색창 bbox 유실 시 HUMAN_CLICK_NO_BBOX — 워밍업은 pressSequentially만
+  await searchBox.pressSequentially(keyword, { delay: randomBetween(45, 95) });
   await humanSleep(200, 450);
   await searchBox.press('Enter');
   try {

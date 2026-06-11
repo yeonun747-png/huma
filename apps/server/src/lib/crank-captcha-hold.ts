@@ -3,8 +3,8 @@ import type { BrowserContext } from 'playwright';
 import { enterCaptchaHold } from '../modules/watcher/captcha-hold.js';
 import {
   handleLayer4Detection,
-  isBlockError,
   isCaptchaError,
+  isNaverHumanHoldError,
 } from '../modules/watcher/detector.js';
 import type { ModemSession } from '../modules/proxy/manager.js';
 import { clickNaverLoginButton } from './naver-login-fields.js';
@@ -20,14 +20,7 @@ export function isCrankCaptchaHoldSignal(err: unknown): boolean {
 
 /** VNC에서 운영자가 직접 풀 수 있는 네이버 보안·인증 오류 */
 export function isCrankHumanHoldError(err: unknown): boolean {
-  const msg = (err as Error)?.message ?? '';
-  if (isCaptchaError(err) || isBlockError(err)) return true;
-  if (msg.includes('NAVER_LOGIN_2FA')) return true;
-  if (msg.includes('NAVER_LOGIN_DEVICE_VERIFY')) return true;
-  if (msg.includes('reason=block_captcha')) return true;
-  if (msg.includes('NAVER_LOGIN_FAILED:redirect_stuck')) return true;
-  if (msg.includes('HUMAN_CLICK_NO_BBOX')) return true;
-  return false;
+  return isNaverHumanHoldError(err);
 }
 
 export type CrankCaptchaHoldParams = {
