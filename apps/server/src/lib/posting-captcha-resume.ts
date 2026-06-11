@@ -13,8 +13,12 @@ export async function resumePostingAfterCaptcha(jobId: string, accountId: string
     .eq('id', accountId);
 
   const prevPs = (job.platform_schedule as Record<string, unknown> | null) ?? {};
-  const platform_schedule = { ...prevPs, _resumeAfterCaptcha: true };
+  const platform_schedule = {
+    ...prevPs,
+    _resumeAfterCaptcha: true,
+  };
 
+  const now = new Date().toISOString();
   await supabase
     .from('huma_jobs')
     .update({
@@ -23,6 +27,8 @@ export async function resumePostingAfterCaptcha(jobId: string, accountId: string
       started_at: null,
       completed_at: null,
       result_url: null,
+      scheduled_at: now,
+      advance_requested_at: now,
       platform_schedule,
     })
     .eq('id', jobId);

@@ -19,6 +19,7 @@ cat > "${RC}" <<EOF
 "curl -fsS -X POST ${BASE}/focus/4"  control+mod1 + 4
 "curl -fsS -X POST ${BASE}/focus/5"  control+mod1 + 5
 "curl -fsS -X POST ${BASE}/layout/tile"  control+mod1 + 0
+"DISPLAY=:99 fcitx-remote -t 2>/dev/null || true"  control + space
 EOF
 
 echo "Wrote ${RC}"

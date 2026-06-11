@@ -165,7 +165,7 @@ function baseLaunchArgs(fp: AccountFingerprint) {
     '--force-webrtc-ip-handling-policy',
   ];
   if (process.platform === 'linux') {
-    args.unshift('--no-sandbox', '--disable-dev-shm-usage');
+    args.unshift('--test-type', '--no-sandbox', '--disable-dev-shm-usage', '--disable-infobars');
   }
   return args;
 }

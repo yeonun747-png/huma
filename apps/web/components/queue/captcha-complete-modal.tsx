@@ -41,19 +41,11 @@ export function CaptchaCompleteModal({
     void loadHold();
   }, [loadHold]);
 
-  const submitComplete = async () => {
-    const trimmed = resultUrl.trim();
-    if (!isCrank && !trimmed) {
-      const ok = window.confirm(
-        '발행 URL 없이 완료 처리할까요?\n\nVNC에서 발행까지 끝냈다면 OK를 누르세요. 나중에 URL은 기록에 남지 않습니다.',
-      );
-      if (!ok) return;
-    }
-
+  const runComplete = async (url?: string) => {
     setSubmitting(true);
     setError(null);
     try {
-      await api.completeCaptchaJob(job.id, trimmed || undefined);
+      await api.completeCaptchaJob(job.id, url);
       onCompleted();
       onClose();
     } catch (e) {
@@ -61,6 +53,17 @@ export function CaptchaCompleteModal({
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const resumePublishing = () => void runComplete(undefined);
+
+  const manualComplete = () => {
+    const trimmed = resultUrl.trim();
+    if (!trimmed) {
+      setError('수동 완료는 발행 URL을 입력해 주세요.');
+      return;
+    }
+    void runComplete(trimmed);
   };
 
   const ws = WS_LABEL[job.workspace ?? ''] ?? job.workspace ?? '—';
@@ -82,18 +85,19 @@ export function CaptchaCompleteModal({
     <div className="m-modal-bg open z-[200] p-4" role="dialog" aria-modal="true">
       <div className="m-modal w-full max-w-md">
         <div className="m-modal-t">
-          {isCrank ? '캡cha — C-Rank 활동 재개' : '캡cha — 발행 재개 / 수동 완료'}
+          {isCrank ? '캡cha — C-Rank 활동 재개' : '캡cha — 발행 재개'}
         </div>
         <p className="-mt-2 mb-4 text-sm text-huma-t2">
           {isCrank ? (
             <>
-              VNC에서 캡cha·로그인을 마친 뒤 아래 <strong>활동 재개</strong>를 누르세요. 블로그 방문·공감·댓글이
+              VNC에서 캡cha·로그인을 마친 뒤 <strong>활동 재개</strong>를 누르세요. 블로그 방문·공감·댓글이
               자동으로 이어집니다.
             </>
           ) : (
             <>
-              VNC에서 캡cha를 푼 뒤 <strong>발행 재개</strong>를 누르면 자동 발행이 이어집니다. VNC에서 직접
-              발행까지 끝냈다면 URL을 넣고 <strong>수동 완료</strong>를 누르세요.
+              VNC에서 캡cha를 푼 뒤 <strong>발행 재개</strong>를 누르면 워밍업 없이 블로그 에디터가 열리고
+              자동 타이핑·발행이 이어집니다. VNC에서 직접 발행까지 끝냈다면 아래 URL을 넣고{' '}
+              <strong>수동 완료</strong>를 누르세요.
             </>
           )}
         </p>
@@ -146,7 +150,7 @@ export function CaptchaCompleteModal({
         {!isCrank ? (
           <label className="m-modal-field block text-sm text-huma-t2">
             <div className="m-modal-label">
-              발행 URL <span className="text-huma-t4">(선택)</span>
+              발행 URL <span className="text-huma-t4">(수동 완료 시 필수)</span>
             </div>
             <input
               type="url"
@@ -164,8 +168,23 @@ export function CaptchaCompleteModal({
           <button type="button" className="btn-ghost btn-sm" onClick={onClose} disabled={submitting}>
             닫기
           </button>
-          <button type="button" className="btn-primary btn-sm" onClick={() => void submitComplete()} disabled={submitting}>
-            {submitting ? '처리 중…' : isCrank ? '활동 재개' : resultUrl.trim() ? '수동 완료' : '발행 재개'}
+          {!isCrank ? (
+            <button
+              type="button"
+              className="btn-ghost btn-sm"
+              onClick={manualComplete}
+              disabled={submitting}
+            >
+              {submitting ? '처리 중…' : '수동 완료'}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="btn-primary btn-sm"
+            onClick={() => (isCrank ? void runComplete(undefined) : resumePublishing())}
+            disabled={submitting}
+          >
+            {submitting ? '처리 중…' : isCrank ? '활동 재개' : '발행 재개'}
           </button>
         </div>
       </div>

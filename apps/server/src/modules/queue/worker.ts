@@ -300,7 +300,8 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         }
 
         if (PLAYWRIGHT_JOBS.includes(type)) {
-          await markRunning();
+          const deferMarkRunning = type === 'post_blog';
+          if (!deferMarkRunning) await markRunning();
           let modemSession: ModemSession | undefined;
           if (accountId) modemSession = await acquireModem(accountId);
 
@@ -341,6 +342,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
                 if (resumeAfterCaptcha) {
                   await ensureNaverLoggedIn(context, accountId, {
                     profilePath: accountCtx?.profile_path,
+                    fastCheck: true,
                   });
                 } else {
                   await naverLogin(context, accountId, {
@@ -355,6 +357,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
                 }
               }
 
+              await markRunning();
               await closeIdleBlankTabs(context);
               const page = await acquireWorkflowPage(context);
               ({ resultUrl } = await executePostBlog({

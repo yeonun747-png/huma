@@ -79,7 +79,7 @@ async function assertLoginSucceeded(
 export async function ensureNaverLoggedIn(
   context: BrowserContext,
   accountId: string,
-  options?: { profilePath?: string; navTimeoutMs?: number },
+  options?: { profilePath?: string; navTimeoutMs?: number; fastCheck?: boolean },
 ): Promise<void> {
   const navTimeout = options?.navTimeoutMs ?? NAV_TIMEOUT_MS;
   const page = await acquireWorkflowPage(context);
@@ -87,7 +87,7 @@ export async function ensureNaverLoggedIn(
 
   try {
     await page.goto('https://www.naver.com', { waitUntil: 'domcontentloaded', timeout: navTimeout });
-    await humanSleep(1500, 2500);
+    await humanSleep(options?.fastCheck ? 400 : 1500, options?.fastCheck ? 800 : 2500);
     const loginVisible = await page
       .locator('a[href*="nidlogin.login"]')
       .first()
