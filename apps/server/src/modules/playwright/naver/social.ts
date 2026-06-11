@@ -17,7 +17,7 @@ import {
 import { loadAccountForBrowser, maybeIncrementWarmupDay } from '../account-loader.js';
 import { ensureNaverLoggedIn, naverLogin } from './login.js';
 import { humanSleep, humanType } from '../../human-engine/typing.js';
-import { scrollRead, measureRTT, rttScale, scaledHumanSleep } from '../../human-engine/timing.js';
+import { measureRTT, rttScale, scaledHumanSleep, scrollWithReverse } from '../../human-engine/timing.js';
 import { humanClick, humanClickLocator } from '../../human-engine/mouse.js';
 import { randomBetween, shuffleArray } from '../../../lib/utils.js';
 import { getTodayPlan, maxCrankVisitsForWarmup } from '../warmup.js';
@@ -65,6 +65,29 @@ interface BlogTarget {
  * 세션 도중 Redis 락이 만료되어 같은 동글을 다른 작업이 점유하는 사태(규칙⑬ 위반)를 막는다.
  */
 const SESSION_HARD_CAP_MS = 45 * 60 * 1000;
+const CRANK_BLOG_DWELL_MS: [number, number] = [10_000, 20_000];
+const CRANK_BLOG_GAP_MS: [number, number] = [3000, 8000];
+
+/** 블로그 글 — 들어가자마자 스크롤하며 10~20초 내 훑기 */
+async function quickBlogGlance(page: Page): Promise<number> {
+  const dwellMs = randomBetween(CRANK_BLOG_DWELL_MS[0], CRANK_BLOG_DWELL_MS[1]);
+  await humanSleep(300, 800);
+  const scrollMs = Math.round(dwellMs * 0.65);
+  await scrollWithReverse(page, scrollMs, [250, 650], [120, 380], 0.1);
+  const remainMs = Math.max(1500, dwellMs - scrollMs);
+  await humanSleep(remainMs, remainMs + 800);
+  return Math.round(dwellMs / 1000);
+}
+
+function fillVisitUrls(filtered: string[], candidates: string[], target: number): string[] {
+  const urls = [...filtered];
+  if (urls.length >= target) return urls.slice(0, target);
+  for (const href of candidates) {
+    if (!urls.includes(href)) urls.push(href);
+    if (urls.length >= target) break;
+  }
+  return urls;
+}
 
 async function getAccountCrankWorkspace(accountId: string): Promise<Workspace> {
   const { data } = await supabase
@@ -264,10 +287,16 @@ export async function runSocialCrank(
 
       await setCrankSessionProgress(jobId, '블로그 검색', `${keywords.length}개 키워드`);
       const otherCandidates = await searchNaverBlogs(page, keywords, otherTarget * 2, scale);
-      const otherUrls = filterUrlsByVisitInterval(otherCandidates, visitHistory, config.min_visit_interval_days)
-        .slice(0, otherTarget);
-      const ourUrls = filterUrlsByVisitInterval(shuffleArray(ourBlogUrls), visitHistory, config.min_visit_interval_days)
-        .slice(0, ourTarget);
+      const otherUrls = fillVisitUrls(
+        filterUrlsByVisitInterval(otherCandidates, visitHistory, config.min_visit_interval_days),
+        otherCandidates,
+        otherTarget,
+      );
+      const ourUrls = fillVisitUrls(
+        filterUrlsByVisitInterval(shuffleArray(ourBlogUrls), visitHistory, config.min_visit_interval_days),
+        shuffleArray(ourBlogUrls),
+        ourTarget,
+      );
 
       if (otherTarget > 0 && otherUrls.length === 0 && otherCandidates.length === 0) {
         throw new Error('NO_LINKS_FOUND:session:네이버 블로그 검색');
@@ -292,9 +321,9 @@ export async function runSocialCrank(
           waitUntil: 'domcontentloaded',
           timeout: CRANK_NAV_TIMEOUT_MS,
         });
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
 
-        await scrollRead(page, randomBetween(45000, 120000));
+        const dwellSec = await quickBlogGlance(page);
 
         const doLike = target.doLike && likesDone < plan.likes;
         const doComment = target.doComment && commentsDone < plan.comments;
@@ -309,7 +338,7 @@ export async function runSocialCrank(
             type: '방문',
             targetUrl: pageUrl,
             targetTitle: pageTitle.slice(0, 80),
-            dwellSec: randomBetween(45, 120),
+            dwellSec,
           });
         }
         if (actions.liked) {
@@ -327,7 +356,7 @@ export async function runSocialCrank(
           });
         }
 
-        await humanSleep(15000, 45000);
+        await humanSleep(CRANK_BLOG_GAP_MS[0], CRANK_BLOG_GAP_MS[1]);
       }
 
       await setCrankSessionProgress(jobId, '마무리');

@@ -14,8 +14,8 @@ export async function getTodayPlan(account: {
   health_score?: number;
 }): Promise<WarmupPlan> {
   const d = account.warmup_day ?? 0;
-  if (d < 7) return { blogVisits: 2, likes: 1, comments: 0 };
-  if (d < 14) return { blogVisits: 5, likes: 3, comments: 0 };
+  if (d < 7) return { blogVisits: 3, likes: 1, comments: 0 };
+  if (d < 14) return { blogVisits: 6, likes: 2, comments: 0 };
   if (d < 30) return { blogVisits: 10, likes: 7, comments: 2 };
 
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -39,7 +39,8 @@ JSON만:`,
 }
 
 export function maxCrankVisitsForWarmup(warmupDay: number): number {
-  if (warmupDay < 7) return 2;
+  if (warmupDay < 7) return 3;
+  if (warmupDay < 14) return 6;
   return 10;
 }
 
