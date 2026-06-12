@@ -10,6 +10,14 @@ import { vncFastSleepScale } from '../../../lib/vnc-session.js';
 import { PLAYWRIGHT_NAV_TIMEOUT_MS } from '../../../lib/playwright-nav-timeout.js';
 import { sleep } from '../../../lib/utils.js';
 import { supabase } from '../../../middleware/auth.js';
+import {
+  BLOG_BODY_SELECTORS,
+  BLOG_TITLE_SELECTORS,
+  findBlogTitleLocator,
+  findVisibleLocator,
+  isNaverBlogEditorInteractable,
+  isSeOneEditorShellReady,
+} from './naver-editor-locators.js';
 
 function scaledSleep(min: number, max: number): Promise<void> {
   const s = vncFastSleepScale();
@@ -31,13 +39,9 @@ const POSTWRITE_URL_RE = /postwrite|PostWriteForm|GoBlogWrite/i;
 const SMART_EDITOR_WAIT_MS = 180_000;
 const EDITOR_POLL_MS = 1_200;
 
-const CONTENT_EDITOR_SELECTORS = [
-  '.se-content',
-  '.se-text-paragraph',
-  '.se-component-content',
-  '.se-main-container',
-  '[contenteditable="true"]',
-];
+const TITLE_EDITOR_SELECTORS = BLOG_TITLE_SELECTORS;
+
+const CONTENT_EDITOR_SELECTORS = BLOG_BODY_SELECTORS;
 
 const HELP_CLOSE_SELECTORS = [
   '.se-help-panel-close-button',
@@ -72,7 +76,7 @@ async function loadBlogIdFromAccount(accountId: string): Promise<string | null> 
 }
 
 /** 이미 열린 postwrite 탭이 있으면 그 탭에서 에디터 로딩만 대기 (재네비게이션·재로그인 금지) */
-function findPostwritePage(context: BrowserContext): Page | undefined {
+export function findNaverPostwritePage(context: BrowserContext): Page | undefined {
   return context.pages().find((p) => !p.isClosed() && POSTWRITE_URL_RE.test(p.url()));
 }
 
@@ -122,31 +126,9 @@ export async function dismissNaverBlogEditorOverlays(editorPage: Page): Promise<
   }
 }
 
-async function isTitleBoxReady(editorPage: Page): Promise<boolean> {
-  return editorPage
-    .locator('#subjectTextBox, #titleArea, [placeholder*="제목"]')
-    .first()
-    .isVisible({ timeout: 800 })
-    .catch(() => false);
-}
-
-async function isContentAreaReady(editorPage: Page): Promise<boolean> {
-  const frame = editorPage.frameLocator('#mainFrame');
-  for (const sel of CONTENT_EDITOR_SELECTORS) {
-    if (await frame.locator(sel).first().isVisible({ timeout: 800 }).catch(() => false)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/** #mainFrame + (제목란 또는 본문 영역) — 도움말이 떠도 제목란만 보이면 진입 성공 */
+/** SE ONE(현행) + 구형 iframe — 제목 또는 본문 interactable */
 async function isSmartEditorInteractable(editorPage: Page): Promise<boolean> {
-  const hasFrame =
-    (await editorPage.locator('#mainFrame').count().catch(() => 0)) > 0 ||
-    POSTWRITE_URL_RE.test(editorPage.url());
-  if (!hasFrame) return false;
-  return (await isTitleBoxReady(editorPage)) || (await isContentAreaReady(editorPage));
+  return isNaverBlogEditorInteractable(editorPage);
 }
 
 async function waitForSmartEditor(editorPage: Page, timeoutMs = SMART_EDITOR_WAIT_MS): Promise<boolean> {
@@ -154,14 +136,7 @@ async function waitForSmartEditor(editorPage: Page, timeoutMs = SMART_EDITOR_WAI
 
   while (Date.now() < deadline) {
     await dismissNaverBlogEditorOverlays(editorPage);
-
-    if (await isSmartEditorInteractable(editorPage)) {
-      await dismissNaverBlogEditorOverlays(editorPage);
-      await sleep(400);
-      await dismissNaverBlogEditorOverlays(editorPage);
-      if (await isSmartEditorInteractable(editorPage)) return true;
-    }
-
+    if (await isSmartEditorInteractable(editorPage)) return true;
     await sleep(EDITOR_POLL_MS);
   }
 
@@ -194,7 +169,7 @@ export async function enterBlogEditor(
   const context = page.context();
 
   // ① 이미 postwrite 로딩 중인 탭 — goto 없이 대기만
-  const existingPostwrite = findPostwritePage(context);
+  const existingPostwrite = findNaverPostwritePage(context);
   if (existingPostwrite) {
     const ready = await tryEditorOnPage(existingPostwrite);
     if (ready) return ready;
@@ -214,7 +189,7 @@ export async function enterBlogEditor(
     ? [`https://blog.naver.com/${blogId}/postwrite`, 'https://blog.naver.com/GoBlogWrite.naver']
     : ['https://blog.naver.com/GoBlogWrite.naver'];
 
-  const workflowPage = findPostwritePage(context) ?? page;
+  const workflowPage = findNaverPostwritePage(context) ?? page;
   const startedAt = Date.now();
   const remainingMs = () => Math.max(30_000, SMART_EDITOR_WAIT_MS - (Date.now() - startedAt));
 
@@ -245,12 +220,17 @@ export async function enterBlogEditor(
     if (ready) return ready;
   }
 
-  const titleOk = existingPostwrite
-    ? await isTitleBoxReady(existingPostwrite)
-    : await isTitleBoxReady(page);
+  const failPage = existingPostwrite ?? page;
+  const titleOk = (await findBlogTitleLocator(failPage)) !== null;
+  const contentOk = (await findVisibleLocator(failPage, CONTENT_EDITOR_SELECTORS)) !== null;
+  const seOneShell = await isSeOneEditorShellReady(failPage);
   const detail = titleOk
-    ? '제목란 표시됐으나 도움말/본문 영역 미확인'
-    : '#mainFrame·제목란 미표시';
+    ? contentOk
+      ? '제목·본문 보였으나 진입 확정 실패'
+      : '제목란만 확인·본문 영역 미검출'
+    : seOneShell
+      ? 'SE ONE 발행 버튼 보임·제목 placeholder 미검출'
+      : '#mainFrame·제목란 미표시(구형)';
 
   await notifySlack(
     `블로그 에디터(SmartEditor ONE) 진입 실패 — blogId=${blogId ?? '미확인'} (${SMART_EDITOR_WAIT_MS / 1000}s, ${detail})`,

@@ -8,6 +8,7 @@ import {
 } from './naver-login-fields.js';
 import { isNaverCaptchaVisible, pickNaverCaptchaPage } from './naver-captcha-vision.js';
 import { gotoBlogPortal, waitForBlogPortalReady } from './naver-blog-portal.js';
+import { findNaverPostwritePage } from '../modules/playwright/naver/enter-blog-editor.js';
 import { sleep } from './utils.js';
 import { vncFastSleepScale } from './vnc-session.js';
 
@@ -144,8 +145,10 @@ export async function pollUntilNaverLoginRedirect(
   throw new Error('NAVER_LOGIN_TIMEOUT:redirect');
 }
 
-/** CAPTCHA hold 종료 전 — 로그인 리다이렉트 완료·blog 방문으로 프로필 쿠키 저장 */
+/** CAPTCHA hold 종료 전 — postwrite 탭이 있으면 생략(발행 재개 버튼과 동일·에디터 직행) */
 export async function persistPostingSessionBeforeHoldClose(context: BrowserContext): Promise<void> {
+  if (findNaverPostwritePage(context)) return;
+
   const page = pickNaverCaptchaPage(context) ?? pickPostingWorkflowPage(context);
   if (!page) return;
 

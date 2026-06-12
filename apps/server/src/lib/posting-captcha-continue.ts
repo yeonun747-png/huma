@@ -9,6 +9,7 @@ import { loadAccountForBrowser } from '../modules/playwright/account-loader.js';
 import { parsePersona } from '../modules/playwright/persona.js';
 import { closeBrowserContext, closeIdleBlankTabs } from '../modules/playwright/browser.js';
 import { executePostBlog } from '../modules/queue/jobs/post-blog.js';
+import { findNaverPostwritePage } from '../modules/playwright/naver/enter-blog-editor.js';
 import { releaseModem, type ModemSession } from '../modules/proxy/manager.js';
 import { pickPostingWorkflowPage } from './posting-captcha-session.js';
 import { sleep } from './utils.js';
@@ -73,7 +74,7 @@ export async function continuePostBlogFromCaptchaHold(params: {
     let lastErr: Error | undefined;
 
     for (let attempt = 1; attempt <= EDITOR_RETRY_MAX; attempt += 1) {
-      const page = pickPostingWorkflowPage(context);
+      const page = findNaverPostwritePage(context) ?? pickPostingWorkflowPage(context);
       if (!page) throw new Error('BLOG_WORKFLOW_PAGE_MISSING');
 
       try {

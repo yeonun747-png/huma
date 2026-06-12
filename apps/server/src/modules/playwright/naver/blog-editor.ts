@@ -10,7 +10,8 @@ import type { HumanEngineConfig } from '../../../lib/settings.js';
 
 import { parsePersona, type AccountPersona } from '../persona.js';
 
-import { enterBlogEditor, dismissNaverBlogEditorOverlays } from './enter-blog-editor.js';
+import { enterBlogEditor, dismissNaverBlogEditorOverlays, findNaverPostwritePage } from './enter-blog-editor.js';
+import { findBlogTitleLocator, findVisibleLocator, BLOG_BODY_SELECTORS } from './naver-editor-locators.js';
 import { humanClickLocator } from '../../human-engine/mouse.js';
 import { pasteBlogLinkWithOgPreview } from './paste-blog-link.js';
 import { insertImageViaToolbar, insertVideoViaToolbar } from './naver-editor-media.js';
@@ -47,14 +48,16 @@ export async function postNaverBlog(params: {
   const page = await enterBlogEditor(params.page, config, { accountId: params.accountId });
   await dismissNaverBlogEditorOverlays(page);
 
-  const titleBox = page.locator('#subjectTextBox, #titleArea, [placeholder*="제목"]').first();
+  const titleBox = (await findBlogTitleLocator(page)) ?? page.locator('.se-title-text, #subjectTextBox').first();
   await humanClickLocator(page, titleBox);
   await humanType(page, titleBox, params.title, config);
   await scaledHumanSleep(2000, 5000, scale);
 
   await dismissNaverBlogEditorOverlays(page);
 
-  const editor = page.frameLocator('#mainFrame').locator('.se-content, .se-text-paragraph, [contenteditable="true"]').first();
+  const editor =
+    (await findVisibleLocator(page, BLOG_BODY_SELECTORS)) ??
+    page.frameLocator('#mainFrame').locator('.se-content, .se-text-paragraph, [contenteditable="true"]').first();
   await humanClickLocator(page, editor);
 
   await typePostContent(page, editor, params.content, config);
