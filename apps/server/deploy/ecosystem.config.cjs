@@ -25,7 +25,9 @@ module.exports = {
       script: path.join(deployRoot, 'scripts/start-vnc-hud.sh'),
       interpreter: 'bash',
       autorestart: true,
-      max_restarts: 20,
+      max_restarts: 50,
+      restart_delay: 5000,
+      min_uptime: 3000,
       env: {
         DISPLAY: ':99',
         PORT: '3100',
@@ -34,6 +36,8 @@ module.exports = {
         HUMA_VNC_HUD_HEIGHT: '56',
         HUMA_VNC_HUD_WIDTH: '1180',
         HUMA_VNC_HUD_RESERVE_Y: '72',
+        HUMA_VNC_HUD_DISPLAY_WAIT_SEC: '60',
+        HUMA_VNC_HUD_WAIT_SEC: '120',
       },
     },
     {
