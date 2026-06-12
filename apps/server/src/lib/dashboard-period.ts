@@ -108,6 +108,21 @@ export function formatKstYmdHms(from: Date = new Date()): string {
   }).format(from);
 }
 
+const KST_WEEKDAY = ['일', '월', '화', '수', '목', '금', '토'] as const;
+
+/** Claude 글 작성용 — 지금 이 순간(KST)에 올릴 글처럼 쓰게 */
+export function formatKstWritingContext(from: Date = new Date()): string {
+  const kst = new Date(
+    from.toLocaleString('en-US', { timeZone: 'Asia/Seoul' }),
+  );
+  const y = kst.getFullYear();
+  const m = kst.getMonth() + 1;
+  const d = kst.getDate();
+  const wd = KST_WEEKDAY[kst.getDay()] ?? '';
+  const hms = formatKstYmdHms(from).slice(11);
+  return `${y}년 ${m}월 ${d}일(${wd}) ${hms} KST`;
+}
+
 /** KST YYYY-MM-DD HH:mm */
 export function formatKstYmdHm(iso: string | null | undefined): string | null {
   if (!iso) return null;

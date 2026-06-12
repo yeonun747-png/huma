@@ -49,10 +49,15 @@ function resolveHeadless(): boolean {
   return false;
 }
 
-/** i7 Xvfb(:99) — desktop GL 없음 → angle(egl) 필수. desktop이면 GPU process 즉시 종료 */
+/** i7 Xvfb(:99) — 실 GPU 없음. swiftshader(CPU)가 angle(EGL)보다 hang·빈화면 적음 */
 function resolveGlLaunchArg(): string {
-  if (process.platform === 'linux') return '--use-gl=angle';
-  return '--use-gl=desktop';
+  if (process.platform !== 'linux') return '--use-gl=desktop';
+  const mode = process.env.HUMA_CHROMIUM_GL?.trim().toLowerCase();
+  if (mode === 'angle') return '--use-gl=angle';
+  if (mode === 'desktop') return '--use-gl=desktop';
+  if (mode === 'swiftshader') return '--use-gl=swiftshader';
+  if (process.env.DISPLAY === ':99') return '--use-gl=swiftshader';
+  return '--use-gl=angle';
 }
 
 /** Playwright `proxy` 옵션은 ~NOTFOUND host-resolver-rules를 주입 — Chromium 131 파싱 실패 */

@@ -20,6 +20,7 @@ import {
   tryAutoSolveNaverCaptcha,
 } from '../../../lib/naver-captcha-vision.js';
 import { shouldPreserveBrowserPageForVnc } from '../../watcher/captcha-hold.js';
+import { escapeBlogHomeAfterLogin } from '../../../lib/naver-blog-portal.js';
 
 const NAVER_LOGIN_URL = 'https://nid.naver.com/nidlogin.login';
 const NAV_TIMEOUT_MS = 60_000;
@@ -79,26 +80,33 @@ async function assertLoginSucceeded(
 export async function ensureNaverLoggedIn(
   context: BrowserContext,
   accountId: string,
-  options?: { profilePath?: string; navTimeoutMs?: number; fastCheck?: boolean },
+  options?: {
+    profilePath?: string;
+    navTimeoutMs?: number;
+    fastCheck?: boolean;
+    keepSessionPage?: boolean;
+  },
 ): Promise<void> {
   const navTimeout = options?.navTimeoutMs ?? NAV_TIMEOUT_MS;
   const page = await acquireWorkflowPage(context);
   let preservePageForVnc = false;
 
   try {
-    await page.goto('https://www.naver.com', { waitUntil: 'domcontentloaded', timeout: navTimeout });
+    await page.goto('https://www.naver.com', { waitUntil: 'commit', timeout: navTimeout });
     await humanSleep(options?.fastCheck ? 400 : 1500, options?.fastCheck ? 800 : 2500);
+    await escapeBlogHomeAfterLogin(page);
     const loginVisible = await page
       .locator('a[href*="nidlogin.login"]')
       .first()
       .isVisible()
       .catch(() => false);
     if (loginVisible) {
-      await releaseWorkflowPage(context, page);
+      if (!options?.keepSessionPage) await releaseWorkflowPage(context, page);
       await naverLogin(context, accountId, {
         profilePath: options?.profilePath,
         skipShadowWalk: true,
         navTimeoutMs: navTimeout,
+        keepSessionPage: options?.keepSessionPage,
       });
       return;
     }
@@ -106,7 +114,7 @@ export async function ensureNaverLoggedIn(
     if (shouldPreserveBrowserPageForVnc(err)) preservePageForVnc = true;
     throw err;
   } finally {
-    if (!preservePageForVnc) await releaseWorkflowPage(context, page);
+    if (!preservePageForVnc && !options?.keepSessionPage) await releaseWorkflowPage(context, page);
   }
 }
 
@@ -118,6 +126,8 @@ export async function naverLogin(
     skipShadowWalk?: boolean;
     navTimeoutMs?: number;
     captchaContext?: NaverCaptchaVisionContext;
+    /** post_blog — 로그인 탭을 about:blank 로 비우고 유지 */
+    keepSessionPage?: boolean;
   },
 ) {
   const navTimeout = options?.navTimeoutMs ?? NAV_TIMEOUT_MS;
@@ -182,10 +192,13 @@ export async function naverLogin(
     await humanSleep(2000, 4000);
 
     await assertLoginSucceeded(page, captchaCtx);
+    await escapeBlogHomeAfterLogin(page);
   } catch (err) {
     if (shouldPreserveBrowserPageForVnc(err)) preservePageForVnc = true;
     throw err;
   } finally {
-    if (!preservePageForVnc) await releaseWorkflowPage(context, page);
+    if (!preservePageForVnc && !options?.keepSessionPage) {
+      await releaseWorkflowPage(context, page);
+    }
   }
 }

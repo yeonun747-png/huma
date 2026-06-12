@@ -78,6 +78,7 @@ export async function continuePostBlogFromCaptchaHold(params: {
         profilePath: accountCtx.profile_path,
         skipShadowWalk: true,
         captchaContext: captchaCtx,
+        keepSessionPage: true,
       });
     }
 
@@ -91,6 +92,7 @@ export async function continuePostBlogFromCaptchaHold(params: {
           profilePath: accountCtx.profile_path,
           skipShadowWalk: true,
           captchaContext: captchaCtx,
+          keepSessionPage: true,
         });
         ({ resultUrl } = await runPostBlog());
       } else {

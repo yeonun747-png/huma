@@ -437,6 +437,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
                       profilePath: accountCtx?.profile_path,
                       skipShadowWalk: true,
                       captchaContext: captchaCtx,
+                      keepSessionPage: true,
                     });
                     const retryPage = await acquireWorkflowPage(context);
                     const out = await executePostBlog({
@@ -457,11 +458,13 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
                   await ensureNaverLoggedIn(context, accountId, {
                     profilePath: accountCtx?.profile_path,
                     fastCheck: true,
+                    keepSessionPage: true,
                   });
                 } else {
                   await naverLogin(context, accountId, {
                     profilePath: accountCtx?.profile_path,
                     captchaContext: captchaCtx,
+                    keepSessionPage: true,
                   });
                 }
               }

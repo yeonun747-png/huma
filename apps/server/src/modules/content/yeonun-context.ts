@@ -145,15 +145,13 @@ export async function buildYeonunContextWithPrompt(sourceUrl: string): Promise<s
   let base = pageCtx ?? '';
   let characterKey: string | null = null;
 
-  if (!base && slug) {
+  if (slug) {
     const product = await fetchProductBySlug(slug);
     if (product) {
-      base = formatProductContext(product);
+      const dbCtx = formatProductContext(product);
       characterKey = product.character_key?.trim() ?? null;
+      base = base ? `${dbCtx}\n\n${pageCtx}` : dbCtx;
     }
-  } else if (slug) {
-    const product = await fetchProductBySlug(slug);
-    characterKey = product?.character_key?.trim() ?? null;
   }
 
   if (!characterKey) return base;

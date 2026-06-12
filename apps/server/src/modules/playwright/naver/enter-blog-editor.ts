@@ -8,6 +8,7 @@ import { notifySlack } from '../../watcher/detector.js';
 
 import { humanClickLocator } from '../../human-engine/mouse.js';
 import { vncFastSleepScale } from '../../../lib/vnc-session.js';
+import { gotoBlogPortal } from '../../../lib/naver-blog-portal.js';
 
 
 
@@ -24,7 +25,7 @@ function scaledSleep(min: number, max: number): Promise<void> {
 
 export async function enterBlogEditor(_page: Page, _humanEngine: HumanEngineConfig): Promise<Page> {
 
-  await _page.goto('https://blog.naver.com');
+  await gotoBlogPortal(_page);
 
   await scaledSleep(1000, 2500);
 

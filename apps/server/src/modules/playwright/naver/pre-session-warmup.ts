@@ -95,6 +95,31 @@ async function quickWarmupGlance(page: Page, accountType: WarmupAccountType): Pr
   await humanSleep(accountType === 'posting' ? 300 : 1500, accountType === 'posting' ? 1000 : 4000);
 }
 
+/** 방문 페이지에서 naver 내부 메뉴·탭 0~2회 클릭 */
+async function maybeBrowseInPageMenus(page: Page, accountType: WarmupAccountType): Promise<void> {
+  if (accountType !== 'posting') return;
+  const clicks = randomBetween(0, 2);
+  if (clicks === 0) return;
+
+  const menuLinks = page.locator(
+    'nav a[href*="naver.com"], .lnb a[href*="naver.com"], .tab_menu a, a[role="tab"]',
+  );
+  const count = await menuLinks.count().catch(() => 0);
+  if (count === 0) return;
+
+  const indices = shuffle([...Array.from({ length: Math.min(count, 12) }, (_, i) => i)]).slice(
+    0,
+    clicks,
+  );
+  for (const idx of indices) {
+    const link = menuLinks.nth(idx);
+    if (!(await link.isVisible({ timeout: 1200 }).catch(() => false))) continue;
+    await link.click({ timeout: 6000 }).catch(() => {});
+    await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => {});
+    await quickWarmupGlance(page, accountType);
+  }
+}
+
 async function safeWarmupGoto(page: Page, url: string, timeoutMs: number): Promise<boolean> {
   try {
     await page.goto(url, {
@@ -120,6 +145,7 @@ async function visitWarmupUrls(
     if (!(await safeWarmupGoto(page, url, navTimeoutMs))) continue;
     visited += 1;
     await quickWarmupGlance(page, accountType);
+    await maybeBrowseInPageMenus(page, accountType);
     await page.goBack({ waitUntil: 'domcontentloaded', timeout: navTimeoutMs }).catch(() => {});
     await humanSleep(accountType === 'posting' ? 250 : 1000, accountType === 'posting' ? 800 : 2500);
   }
@@ -215,6 +241,7 @@ async function runWarmupSearchRound(
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const navError = await searchViaNaverHomepage(page, keyword, navTimeout, humanEngine);
     if (Math.random() < 0.55) await maybeClickSearchTab(page);
+    if (accountType === 'posting' && Math.random() < 0.45) await maybeBrowseInPageMenus(page, accountType);
 
     const integrated = await collectNaverSearchUrlsDetailed(page, 'integrated', 8);
     if (!navError && integrated.urls.length > 0) {

@@ -5,6 +5,7 @@ import {
   withHumanWritingSystem,
   withLongformWritingMandate,
 } from '../../lib/ai-human-writing.js';
+import { formatKstWritingContext } from '../../lib/dashboard-period.js';
 import { buildYeonunContextWithPrompt } from '../content/yeonun-context.js';
 import {
   blogPostLengthPromptGuide,
@@ -153,9 +154,15 @@ async function generateMainContent(
 ): Promise<Omit<ContentGenerationOutput, 'hashtags'>> {
   const lengthGuide = blogPostLengthPromptGuide(lengthRange);
   const { min, max } = lengthRange;
+  const writingNow = formatKstWritingContext();
+  const sourceUrl = input.sourceUrl?.trim() || '(없음)';
   const synopsisGuide = input.synopsis
     ? `\n[운영자 시놉시스 - 반드시 참고]\n"${input.synopsis}"`
-    : '\n[시놉시스 없음 - URL과 제목을 바탕으로 자율 작성]';
+    : '\n[시놉시스 없음 — 아래 참조 URL·URL 요약을 반드시 반영해 작성]';
+
+  const datetimeGuide = `\n[현재 시각 — 글은 이 순간에 실제 발행되는 것처럼 작성]
+${writingNow}
+「지금·이번 달·오늘」 관점으로 쓸 것. 과거 회고(저번달에 봤었는데)도 현재 시각 기준 자연스럽게 허용. 날짜·시각을 본문에 그대로 밝히 쓸 필요는 없음.`;
 
   const typeGuide =
     input.content_type === 'A'
@@ -171,7 +178,15 @@ async function generateMainContent(
   const userParts: Array<Record<string, unknown>> = [
     {
       type: 'text',
-      text: withLongformWritingMandate(`URL 핵심:\n${urlSummary}\n\n제목: ${input.title}${synopsisGuide}${personaGuide}${typeGuide}\n${lengthGuide}\n\n순수 JSON만 (코드블록 없이):
+      text: withLongformWritingMandate(`[참조 URL — 반드시 내용에 반영] ${sourceUrl}
+
+${urlSummary}
+${datetimeGuide}
+
+제목: ${input.title}${synopsisGuide}${personaGuide}${typeGuide}
+${lengthGuide}
+
+순수 JSON만 (코드블록 없이):
 {
   "seo_title": "네이버 검색 최적화 제목 32자 이내. 핵심 키워드를 앞쪽에 배치, 클릭 유도. 과장·특수문자 남발 금지",
   "blog_post": "네이버 블로그 글 ${min}~${max}자 (필수·중간 끊김 금지·완결된 글, ~요체·경험담·사람 말투). 본문 URL은 yeonun.com 만",
@@ -267,11 +282,30 @@ JSON만 (코드블록 없이):
 }
 
 async function resolveSourceContext(input: ContentGenerationInput): Promise<string> {
-  if (input.workspace === 'yeonun') {
-    const yeonunCtx = await buildYeonunContextWithPrompt(input.sourceUrl.trim());
-    if (yeonunCtx.trim()) return yeonunCtx;
+  const url = input.sourceUrl?.trim();
+  if (!url) {
+    return '[참조 URL 없음] 제목만으로는 부족 — 운영자 source_url 확인 필요';
   }
-  return fetchAndSummarizeUrl(input.sourceUrl);
+
+  const blocks: string[] = [`[참조 URL] ${url}`];
+
+  if (input.workspace === 'yeonun') {
+    const yeonunCtx = await buildYeonunContextWithPrompt(url);
+    if (yeonunCtx.trim()) blocks.push(yeonunCtx);
+  }
+
+  const fetched = await fetchAndSummarizeUrl(url);
+  if (fetched.trim() && !/^URL:\s*$/i.test(fetched)) {
+    blocks.push(
+      fetched.startsWith('URL:')
+        ? `[URL fetch 실패 — 주소만 참고]\n${fetched}\n(가능하면 yeonun 상품 DB·페이지 구조를 추론)`
+        : `[URL 페이지 요약]\n${fetched}`,
+    );
+  } else if (blocks.length === 1) {
+    blocks.push(`[URL fetch 실패] ${url} — 제목·시놉시스·스크린샷(있으면)을 최대한 활용`);
+  }
+
+  return blocks.join('\n\n');
 }
 
 /** 기획서 7-0 generateAllContent */
