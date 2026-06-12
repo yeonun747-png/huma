@@ -32,6 +32,7 @@ import {
   isNaverCaptchaVisible,
   pickNaverCaptchaPage,
 } from '../lib/naver-captcha-vision.js';
+import { ensurePostingSessionAfterCaptcha } from '../lib/posting-captcha-session.js';
 import { resolveVncUrl, buildJobWebUrl } from '../modules/watcher/telegram.js';
 
 async function assertJobWorkspaceAccess(
@@ -693,7 +694,25 @@ export async function registerJobRoutes(app: FastifyInstance) {
     if (!result.filled) {
       return reply.code(409).send({ error: 'CAPTCHA 입력칸을 찾지 못했습니다' });
     }
-    return { ok: true, submitted: result.submitted, captcha_cleared: result.cleared };
+
+    let auto_resumed = false;
+    if (result.cleared && !result.pending_login && (hold.jobType === 'post_blog' || hold.jobType === 'cafe_new_post')) {
+      const ready = await ensurePostingSessionAfterCaptcha(hold.context, hold.accountId, {
+        allowAutoLoginSubmit: false,
+      }).catch(() => false);
+      if (ready) {
+        const done = await completeCaptchaHold(id);
+        auto_resumed = done.ok;
+      }
+    }
+
+    return {
+      ok: true,
+      submitted: result.submitted,
+      captcha_cleared: result.cleared,
+      pending_login: result.pending_login,
+      auto_resumed,
+    };
   });
 
   app.get('/api/jobs/:id', { preHandler: authMiddleware }, async (request, reply) => {

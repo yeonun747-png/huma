@@ -89,19 +89,44 @@ async function clickIfVisible(root: Page | ReturnType<Page['frameLocator']>, sel
   return false;
 }
 
+/** 「작성 중인 글이 있습니다」 — 확인(이어쓰기) 금지, 취소만 클릭해 새 글 작성 */
+async function dismissDraftResumePopup(editorPage: Page): Promise<boolean> {
+  const scopes: Array<Page | ReturnType<Page['frameLocator']>> = [
+    editorPage,
+    editorPage.frameLocator('#mainFrame'),
+  ];
+
+  for (const scope of scopes) {
+    const popup = scope.locator('text=작성 중인 글이 있습니다').first();
+    if (!(await popup.isVisible({ timeout: 500 }).catch(() => false))) continue;
+
+    const cancelBtn = scope.locator('button:has-text("취소")').first();
+    if (await cancelBtn.isVisible({ timeout: 800 }).catch(() => false)) {
+      await cancelBtn.click({ timeout: 4000 }).catch(() => {});
+      await sleep(450);
+      return true;
+    }
+  }
+  return false;
+}
+
 /** 도움말·임시저장·dim 등 — 에디터 입력을 가리는 오버레이 제거 (발행 전에도 재호출) */
 export async function dismissNaverBlogEditorOverlays(editorPage: Page): Promise<void> {
+  await dismissDraftResumePopup(editorPage);
+
   const frame = editorPage.frameLocator('#mainFrame');
   const scopes: Array<Page | ReturnType<Page['frameLocator']>> = [frame, editorPage];
 
   for (let round = 0; round < 4; round += 1) {
     let dismissed = false;
 
+    if (await dismissDraftResumePopup(editorPage)) dismissed = true;
+
     for (const scope of scopes) {
       if (
         await clickIfVisible(
           scope,
-          '.se-popup-button-cancel, .se_popup_btn_cancel, button:has-text("취소"), button:has-text("새로 작성")',
+          '.se-popup-button-cancel, .se_popup_btn_cancel, button:has-text("취소")',
         )
       ) {
         dismissed = true;
@@ -200,6 +225,7 @@ export async function enterBlogEditor(
       .goto(url, { waitUntil: 'domcontentloaded', timeout: PLAYWRIGHT_NAV_TIMEOUT_MS })
       .catch(() => {});
     await scaledSleep(1500, 3000);
+    await dismissDraftResumePopup(workflowPage);
 
     const ready = await tryEditorOnPage(workflowPage, remainingMs());
     if (ready) return ready;

@@ -77,7 +77,22 @@ export function CaptchaCompleteModal({
     setAnswerMsg(null);
     try {
       const r = await api.submitCaptchaAnswer(job.id, trimmed);
-      if (r.captcha_cleared) {
+      if (r.auto_resumed) {
+        setAnswerMsg({
+          ok: true,
+          text: 'CAPTCHA 통과 — 발행이 자동으로 재개되었습니다. 모니터에서 확인하세요.',
+        });
+        setCaptchaAnswer('');
+        onCompleted();
+        window.setTimeout(() => onClose(), 1500);
+      } else if (r.captcha_cleared && r.pending_login) {
+        setAnswerMsg({
+          ok: true,
+          text: 'CAPTCHA 통과 — VNC에서 로그인 버튼을 눌러 주세요. 로그인 후 자동으로 블로그 에디터로 이어집니다.',
+        });
+        setCaptchaAnswer('');
+        onCompleted();
+      } else if (r.captcha_cleared) {
         setAnswerMsg({
           ok: true,
           text: 'CAPTCHA 통과 — 발행이 자동으로 진행됩니다. 모니터에서 확인하세요.',
@@ -196,7 +211,7 @@ export function CaptchaCompleteModal({
             </div>
             <p className="mb-2 text-xs text-huma-t3">
               VNC 화면의 CAPTCHA 이미지를 보고 정답(한글·숫자)을 여기에 입력하면 서버가 직접 입력칸에
-              넣고 제출합니다. 통과되면 「발행 재개」를 누르세요.
+              넣고 제출합니다. 통과되면 로그인 버튼만 VNC에서 누르면 자동으로 에디터까지 이어집니다.
             </p>
             <div className="flex gap-2">
               <input

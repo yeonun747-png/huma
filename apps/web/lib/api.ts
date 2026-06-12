@@ -166,10 +166,17 @@ export const api = {
       web_url?: string | null;
     }>(`/api/jobs/${id}/captcha-hold`),
   submitCaptchaAnswer: (id: string, answer: string) =>
-    request<{ ok: boolean; submitted: boolean; captcha_cleared: boolean }>(
-      `/api/jobs/${id}/captcha-answer`,
-      { method: 'POST', body: JSON.stringify({ answer }), timeoutMs: 45_000 },
-    ),
+    request<{
+      ok: boolean;
+      submitted: boolean;
+      captcha_cleared: boolean;
+      pending_login?: boolean;
+      auto_resumed?: boolean;
+    }>(`/api/jobs/${id}/captcha-answer`, {
+      method: 'POST',
+      body: JSON.stringify({ answer }),
+      timeoutMs: 45_000,
+    }),
   completeCaptchaJob: async (id: string, resultUrl?: string) => {
     const res = await request<HumaJob>(`/api/jobs/${id}/captcha-complete`, {
       method: 'POST',

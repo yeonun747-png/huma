@@ -132,15 +132,36 @@ export function pickNaverCaptchaPage(context: BrowserContext): Page | undefined 
 
 export async function isNaverCaptchaVisible(page: Page): Promise<boolean> {
   const url = page.url().toLowerCase();
-  if (url.includes('captcha') || url.includes('challenge')) return true;
+  if ((url.includes('captcha') || url.includes('challenge')) && url.includes('nid')) return true;
 
-  for (const sel of CAPTCHA_ROOT_SELECTORS) {
-    const loc = page.locator(sel).first();
-    if (await loc.isVisible().catch(() => false)) return true;
+  const inputs = await getVisibleCaptchaInputs(page);
+  if (inputs.length > 0) return true;
+
+  for (const sel of CAPTCHA_IMAGE_SELECTORS) {
+    if (await page.locator(sel).first().isVisible({ timeout: 250 }).catch(() => false)) return true;
   }
 
-  const iframeCount = await page.locator('iframe[src*="captcha"]').count().catch(() => 0);
-  return iframeCount > 0;
+  if (await page.locator('iframe[src*="captcha"]').first().isVisible({ timeout: 250 }).catch(() => false)) {
+    return true;
+  }
+
+  return false;
+}
+
+/** 캡차 확인 클릭 후 DOM 잔여(#captcha 빈 껍데기)와 실제 챌린지 구분 */
+async function waitForCaptchaCleared(page: Page, timeoutMs = 10_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!(await isNaverCaptchaVisible(page))) return true;
+    await sleep(350);
+  }
+  return !(await isNaverCaptchaVisible(page));
+}
+
+export async function isNaverLoginPendingAfterCaptcha(page: Page): Promise<boolean> {
+  if (!page.url().includes('nidlogin')) return false;
+  if (await isNaverCaptchaVisible(page)) return false;
+  return true;
 }
 
 async function locateCaptchaRoot(page: Page): Promise<Locator> {
@@ -605,15 +626,16 @@ export async function applyManualCaptchaAnswer(
   page: Page,
   answer: string,
   ctx: NaverCaptchaVisionContext = {},
-): Promise<{ filled: boolean; submitted: boolean; cleared: boolean }> {
+): Promise<{ filled: boolean; submitted: boolean; cleared: boolean; pending_login: boolean }> {
   const filled = await fillCaptchaAnswer(page, answer);
-  if (!filled) return { filled: false, submitted: false, cleared: false };
+  if (!filled) return { filled: false, submitted: false, cleared: false, pending_login: false };
 
   await humanSleep(250, 600);
   await submitCaptcha(page, ctx);
-  await sleep(randomBetween(1200, 2200));
+  const cleared = await waitForCaptchaCleared(page, 12_000);
+  const pending_login = cleared ? await isNaverLoginPendingAfterCaptcha(page) : false;
 
-  return { filled: true, submitted: true, cleared: !(await isNaverCaptchaVisible(page)) };
+  return { filled: true, submitted: true, cleared, pending_login };
 }
 
 async function captchaCleared(page: Page): Promise<boolean> {
