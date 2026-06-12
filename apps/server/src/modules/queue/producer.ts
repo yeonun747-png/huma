@@ -7,10 +7,14 @@ const connection = new Redis(resolveRedisUrl(), {
 });
 export const humaQueue = new Queue('huma-jobs', { connection });
 
-export async function enqueueJob(data: Record<string, unknown>, opts?: { delay?: number; jobId?: string }) {
+export async function enqueueJob(
+  data: Record<string, unknown>,
+  opts?: { delay?: number; jobId?: string; priority?: number },
+) {
   return humaQueue.add(data.type as string, data, {
     delay: opts?.delay,
     jobId: opts?.jobId,
+    priority: opts?.priority,
     removeOnComplete: 100,
     removeOnFail: 200,
   });

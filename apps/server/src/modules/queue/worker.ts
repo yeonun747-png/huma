@@ -54,7 +54,7 @@ import { scheduleRepeatIfNeeded } from '../../lib/repeat-scheduler.js';
 import { activatePendingSocialReplies } from '../../lib/social-reply-chain.js';
 import { isSlimDataCapError, scheduleSlimCapRetry } from '../../lib/slim-retry.js';
 import { assertCafeNewPostAccount, assertCafeReplyAccount } from '../../lib/cafe-accounts.js';
-import { assertAccountRunnable, isHumaJobAdvanceRequested } from '../../lib/account-guards.js';
+import { assertAccountRunnable, resolveHumaJobAdvanceRequested } from '../../lib/account-guards.js';
 import { getSystemPaused } from '../../lib/system-pause.js';
 import {
   getCrankEnabled,
@@ -126,15 +126,18 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
   const worker = new Worker(
     'huma-jobs',
     async (job, token) => {
-      const { type, accountId, payload, humaJobId } = job.data as {
+      const { type, accountId, payload, humaJobId, advanceRequested: advanceFlag } = job.data as {
         type: string;
         accountId?: string;
         payload: Record<string, unknown>;
         humaJobId?: string;
+        advanceRequested?: boolean;
       };
 
       const scheduledCrank = type === 'social_crank' && isScheduledCrankPayload(payload);
-      const advanceRequested = await isHumaJobAdvanceRequested(humaJobId);
+      const advanceRequested = await resolveHumaJobAdvanceRequested(humaJobId, {
+        advanceRequested: advanceFlag,
+      });
 
       if (getSystemPaused()) {
         await deferHumaJob(job, humaJobId, CRANK_PAUSE_DEFER_MS, {
@@ -147,7 +150,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         throw new DelayedError();
       }
 
-      if (isCrankActivityJobType(type) && !getCrankEnabled()) {
+      if (isCrankActivityJobType(type) && !getCrankEnabled() && !advanceRequested) {
         await deferHumaJob(job, humaJobId, CRANK_PAUSE_DEFER_MS, {
           reason: 'CRANK_ACTIVITY_DISABLED',
           accountId,
@@ -158,7 +161,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         throw new DelayedError();
       }
 
-      if (isPostingActivityJobType(type) && !getPostingEnabled()) {
+      if (isPostingActivityJobType(type) && !getPostingEnabled() && !advanceRequested) {
         await deferHumaJob(job, humaJobId, CRANK_PAUSE_DEFER_MS, {
           reason: 'POSTING_ACTIVITY_DISABLED',
           accountId,
@@ -201,7 +204,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         throw new DelayedError();
       }
 
-      if (POSTING_JOBS.includes(type) && !(await passesWeekendVolumeGate())) {
+      if (POSTING_JOBS.includes(type) && !advanceRequested && !(await passesWeekendVolumeGate())) {
         await deferHumaJob(job, humaJobId, 2 * 60 * 60 * 1000, {
           reason: 'WEEKEND_VOLUME',
           accountId,
@@ -210,7 +213,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         throw new DelayedError();
       }
 
-      if (accountId && POSTING_JOBS.includes(type)) {
+      if (accountId && POSTING_JOBS.includes(type) && !advanceRequested) {
         const waitMs = await checkMinPublishInterval(accountId, type);
         if (waitMs) {
           await deferHumaJob(job, humaJobId, waitMs, { accountId, token });
@@ -250,8 +253,16 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
       const humanConfig = await getHumanEngineConfig();
 
       if (accountId && !(await acquireAccount(accountId))) {
-        if (scheduledCrank) {
-          await deferCrankForIdleModem(job, token, humaJobId, accountId, 'ACCOUNT_BUSY');
+        if (scheduledCrank || advanceRequested) {
+          await deferHumaJob(job, humaJobId, advanceRequested ? 60_000 : CRANK_MODEM_DEFER_MS, {
+            reason: 'ACCOUNT_BUSY',
+            accountId,
+            token,
+            logMessage: advanceRequested
+              ? `[${type}] 앞당기기 — 계정 사용 중 · 1분 후 재시도`
+              : `[crank] 동글 대기 — 15분 후 재예약: ACCOUNT_BUSY`,
+            level: 'info',
+          });
           throw new DelayedError();
         }
         throw new Error('ACCOUNT_BUSY');

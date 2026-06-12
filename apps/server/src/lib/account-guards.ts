@@ -68,6 +68,15 @@ export async function isHumaJobAdvanceRequested(humaJobId?: string | null): Prom
   return Boolean(data?.advance_requested_at);
 }
 
+/** Bull job data 플래그 우선 — DB 컬럼 누락·레이스에도 앞당기기 게이트 우회 유지 */
+export async function resolveHumaJobAdvanceRequested(
+  humaJobId?: string | null,
+  jobData?: { advanceRequested?: boolean },
+): Promise<boolean> {
+  if (jobData?.advanceRequested === true) return true;
+  return isHumaJobAdvanceRequested(humaJobId);
+}
+
 export async function assertHumaJobRunnable(job: {
   job_type?: string;
   account_id?: string | null;

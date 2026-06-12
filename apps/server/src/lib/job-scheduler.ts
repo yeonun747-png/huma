@@ -22,6 +22,7 @@ export interface JobRecord {
   bull_job_id?: string;
   platform_schedule?: Record<string, unknown> | null;
   video_path?: string | null;
+  advance_requested_at?: string | null;
 }
 
 export function getScheduleDelay(scheduledAt?: string | null): number | undefined {
@@ -59,6 +60,7 @@ export function buildEnqueuePayload(job: JobRecord) {
     accountId: job.account_id,
     platformAccountId: job.platform_account_id,
     humaJobId: job.id,
+    advanceRequested: Boolean(job.advance_requested_at),
     payload: {
       title: job.title,
       content: job.content,
@@ -96,10 +98,11 @@ export async function removeBullJob(bullJobId?: string | null) {
 
 export async function enqueueHumaJob(
   job: JobRecord,
-  opts?: { immediate?: boolean; jobId?: string },
+  opts?: { immediate?: boolean; jobId?: string; priority?: number },
 ) {
   const delay = opts?.immediate ? undefined : getScheduleDelay(job.scheduled_at);
   const status = delay ? 'scheduled' : 'pending';
+  const advancePriority = job.advance_requested_at ? 1_000_000 : undefined;
 
   await removeBullJob(job.bull_job_id);
   await removeBullJob(`huma-${job.id}`);
@@ -107,6 +110,7 @@ export async function enqueueHumaJob(
   const bullJob = await enqueueJob(buildEnqueuePayload(job), {
     delay,
     jobId: opts?.jobId ?? `huma-${job.id}`,
+    priority: opts?.priority ?? advancePriority,
   });
 
   await supabase

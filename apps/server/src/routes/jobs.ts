@@ -480,6 +480,8 @@ export async function registerJobRoutes(app: FastifyInstance) {
     const basePatch = {
       scheduled_at: now,
       status: 'pending' as const,
+      error_message: null,
+      started_at: null,
     };
     let updated = await supabase
       .from('huma_jobs')
@@ -498,6 +500,7 @@ export async function registerJobRoutes(app: FastifyInstance) {
     await enqueueHumaJob(data as JobRecord, {
       immediate: true,
       jobId: `huma-${id}-advance-${Date.now()}`,
+      priority: 1_000_000,
     });
     return data;
   });
