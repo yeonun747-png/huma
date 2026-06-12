@@ -15,7 +15,11 @@ import {
 import { generateImage, type ImageModel } from '../../higgsfield/image.js';
 import { getPipelineModelSettings } from '../../../lib/pipeline-settings.js';
 import { resolveBlogWritingPersona } from '../../../lib/blog-writing-persona.js';
-import { patchJobPreviewProgress, type PreviewStep } from '../../claude/content-preview.js';
+import {
+  patchJobGenerationProgress,
+  patchJobPreviewProgress,
+  type PreviewStep,
+} from '../../claude/content-preview.js';
 import { isNaverBlogOnlyMode } from '../../../lib/activity-control.js';
 
 export type ContentType = 'A' | 'B';
@@ -414,11 +418,12 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
   );
 
   const previewSteps: PreviewStep[] = [
-    { id: 'claude', label: 'Claude Sonnet', status: 'running' },
-    { id: 'imagen', label: 'Imagen 4', status: 'pending' },
+    { id: 'claude', label: 'Claude — 블로그 글·해시태그 작성', status: 'running' },
+    { id: 'imagen', label: 'Imagen — 대표 이미지 생성', status: 'pending' },
   ];
-  if (dryRun && input.parentJobId) {
-    await patchJobPreviewProgress(input.parentJobId, previewSteps);
+  if (input.parentJobId) {
+    const patch = dryRun ? patchJobPreviewProgress : patchJobGenerationProgress;
+    await patch(input.parentJobId, previewSteps);
   }
 
   const claudeStart = Date.now();
@@ -439,10 +444,13 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
     detail: `${generated.blog_post.length}자`,
   };
   previewSteps[1] = { ...previewSteps[1]!, status: 'running' };
-  if (dryRun && input.parentJobId) {
-    await patchJobPreviewProgress(input.parentJobId, previewSteps, {
+  if (input.parentJobId) {
+    const patch = dryRun ? patchJobPreviewProgress : patchJobGenerationProgress;
+    await patch(input.parentJobId, previewSteps, {
       blog_post_length: generated.blog_post.length,
     });
+  }
+  if (dryRun && input.parentJobId) {
     await supabase
       .from('huma_jobs')
       .update({
@@ -466,6 +474,13 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
     ms: Date.now() - imagenStart,
     detail: imageUrl,
   };
+
+  if (input.parentJobId && !dryRun) {
+    await patchJobGenerationProgress(input.parentJobId, previewSteps, {
+      image_model: imageModel,
+      image_url: imageUrl,
+    });
+  }
 
   if (dryRun && input.parentJobId) {
     await patchJobPreviewProgress(input.parentJobId, previewSteps, {

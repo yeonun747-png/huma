@@ -3,6 +3,36 @@ import { authMiddleware, getWorkspaceFilter, supabase } from '../middleware/auth
 import { formatKstHm } from '../lib/dashboard-period.js';
 import { getCrankSessionProgress } from '../lib/crank-session-progress.js';
 
+function contentFullPhase(job: {
+  title?: string | null;
+  content?: string | null;
+  platform_schedule?: unknown;
+  status?: string | null;
+}): { label: string; preview: string } {
+  const ps = job.platform_schedule as Record<string, unknown> | undefined;
+  const previewMeta = ps?._preview as { steps?: Array<{ id: string; status: string; detail?: string }> } | undefined;
+  const steps = previewMeta?.steps ?? [];
+  const claude = steps.find((s) => s.id === 'claude');
+  const imagen = steps.find((s) => s.id === 'imagen');
+  const running = job.status === 'running';
+
+  let label = running ? 'Claude 글 작성 중' : 'Claude 글 작성 대기';
+  if (claude?.status === 'running') label = 'Claude 글 작성 중';
+  else if (claude?.status === 'ok' && imagen?.status === 'running') label = 'Imagen 이미지 생성 중';
+  else if (claude?.status === 'ok' && imagen?.status === 'ok') label = '생성 완료 · 발행 큐 대기';
+  else if (claude?.status === 'ok') label = 'Claude 완료 · Imagen 대기';
+
+  const synopsis = job.content && job.content.length <= 120 ? job.content : null;
+  const body =
+    claude?.status === 'ok' && job.content && job.content.length > 80
+      ? job.content.slice(0, 200)
+      : synopsis
+        ? `${label}\n요약: ${synopsis.slice(0, 100)}`
+        : `${label}\n${job.title ?? ''}`.trim();
+
+  return { label, preview: body };
+}
+
 function estimatePostingProgress(content: string | null | undefined, wpm: number, startedAt: string | null) {
   const total = (content ?? '').length || 1200;
   const started = startedAt ? new Date(startedAt).getTime() : Date.now();
@@ -37,7 +67,7 @@ export async function registerMonitorRoutes(app: FastifyInstance) {
     ] = await Promise.all([
       supabase
         .from('huma_jobs')
-        .select('id, title, job_type, workspace, platform, status, content, started_at, account_id, huma_accounts(name, wpm)')
+        .select('id, title, job_type, workspace, platform, status, content, started_at, account_id, platform_schedule, huma_accounts(name, wpm)')
         .in('workspace', workspaces)
         .in('status', ['running', 'awaiting_captcha'])
         .order('started_at', { ascending: false })
@@ -95,6 +125,26 @@ export async function registerMonitorRoutes(app: FastifyInstance) {
             crankPhase: phase,
             crankDetail: detail,
             preview: detail ? `${phase} — ${detail}` : phase,
+          };
+        }
+
+        if (job.job_type === 'content_full') {
+          const gen = contentFullPhase(job);
+          const ps = job.platform_schedule as Record<string, unknown> | undefined;
+          const steps =
+            (ps?._preview as { steps?: Array<{ id: string; status: string }> } | undefined)?.steps ?? [];
+          const claudeDone = steps.find((s) => s.id === 'claude')?.status === 'ok';
+          const bodyLen = claudeDone ? (job.content?.length ?? 0) : 0;
+          return {
+            ...base,
+            kind: 'generating' as const,
+            phaseLabel: gen.label,
+            preview: gen.preview,
+            chars: bodyLen,
+            totalChars: bodyLen,
+            wpm: 0,
+            typos: 0,
+            eta: '—',
           };
         }
 

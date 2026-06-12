@@ -7,9 +7,9 @@ import type { ModemSession } from '../proxy/manager.js';
 import { releaseModem } from '../proxy/manager.js';
 import { resumeSocialCrankAfterCaptcha } from '../../lib/crank-captcha-resume.js';
 import { resumePostingAfterCaptcha } from '../../lib/posting-captcha-resume.js';
+import { continuePostBlogFromCaptchaHold } from '../../lib/posting-captcha-continue.js';
 import {
-  isBlogWriteReady,
-  persistPostingSessionBeforeHoldClose,
+  ensurePostingSessionAfterCaptcha,
 } from '../../lib/posting-captcha-session.js';
 import { isNaverCaptchaVisible, pickNaverCaptchaPage } from '../../lib/naver-captcha-vision.js';
 import { vncSlotLabelKo } from '../../lib/vnc-window-layout.js';
@@ -31,6 +31,8 @@ export interface CaptchaHoldInput {
   context: BrowserContext;
   modemSession?: ModemSession;
   releaseAccountLock: () => void;
+  /** post_blog 재개 시 executePostBlog payload (동일 브라우저 세션) */
+  payload?: Record<string, unknown>;
   /** Vision 3회 실패 후 VNC 폴백 */
   visionAutoFailed?: boolean;
 }
@@ -46,6 +48,7 @@ interface CaptchaHoldEntry extends CaptchaHoldInput {
   isDrill: boolean;
   remindCount: number;
   visionAutoFailed: boolean;
+  resumingInProgress: boolean;
   timers: NodeJS.Timeout[];
 }
 
@@ -127,36 +130,18 @@ function scheduleReminders(entry: CaptchaHoldEntry): void {
 }
 
 async function tryAutoResumePostingCaptcha(entry: CaptchaHoldEntry): Promise<void> {
-  if (!holds.has(entry.jobId)) return;
+  if (!holds.has(entry.jobId) || entry.resumingInProgress) return;
 
   const page = pickNaverCaptchaPage(entry.context);
   if (!page || page.isClosed()) return;
   if (await isNaverCaptchaVisible(page)) return;
 
-  let ready = false;
-  if (page.url().includes('blog.naver.com')) {
-    ready = await isBlogWriteReady(page);
-  } else if (!page.url().includes('nidlogin.login')) {
-    ready = await isBlogWriteReady(page).catch(() => false);
-    if (!ready) {
-      await page.goto('https://blog.naver.com', { waitUntil: 'domcontentloaded', timeout: 45_000 }).catch(() => {});
-      ready = await isBlogWriteReady(page);
-    }
-  } else {
-    await page
-      .waitForURL((url) => !url.href.includes('nidlogin.login'), { timeout: 5000 })
-      .catch(() => {});
-    if (!page.url().includes('nidlogin.login')) {
-      await page.goto('https://blog.naver.com', { waitUntil: 'domcontentloaded', timeout: 45_000 }).catch(() => {});
-      ready = await isBlogWriteReady(page);
-    }
-  }
-
-  if (!ready) return;
+  const sessionReady = await ensurePostingSessionAfterCaptcha(entry.context, entry.accountId);
+  if (!sessionReady) return;
 
   await logOperation({
     level: 'info',
-    message: '[post_blog] CAPTCHA 해결 감지 — 발행 자동 재개',
+    message: '[post_blog] CAPTCHA 해결·로그인 확인 — 발행 자동 재개',
     job_id: entry.jobId,
     account_id: entry.accountId,
   });
@@ -252,6 +237,7 @@ export async function enterCaptchaHold(
     isDrill,
     remindCount: 0,
     visionAutoFailed: input.visionAutoFailed === true,
+    resumingInProgress: false,
     timers: [],
   };
   holds.set(input.jobId, entry);
@@ -351,29 +337,72 @@ export async function completeCaptchaHold(
     isDrill: entry.isDrill,
   };
 
+  if (entry.resumingInProgress) {
+    return { ok: false, error: 'CAPTCHA_RESUME_IN_PROGRESS' };
+  }
+  entry.resumingInProgress = true;
   clearTimers(entry);
   holds.delete(jobId);
 
-  if (
-    (entry.jobType === 'post_blog' || entry.jobType === 'cafe_new_post') &&
-    !resultUrl?.trim()
-  ) {
-    await persistPostingSessionBeforeHoldClose(entry.context).catch(() => {});
-  }
+  let resumeOk = true;
+  let resumeError: string | undefined;
 
-  await closeBrowserContext(entry.context).catch(() => {});
-  if (entry.modemSession) await releaseModem(entry.modemSession).catch(() => {});
-  entry.releaseAccountLock();
-
-  if (isCrank) {
+  if (resultUrl?.trim()) {
+    await closeBrowserContext(entry.context).catch(() => {});
+    if (entry.modemSession) await releaseModem(entry.modemSession).catch(() => {});
+    entry.releaseAccountLock();
+    await completeJobRecord(jobId, resultUrl);
+  } else if (isCrank) {
+    await closeBrowserContext(entry.context).catch(() => {});
+    if (entry.modemSession) await releaseModem(entry.modemSession).catch(() => {});
+    entry.releaseAccountLock();
     await resumeSocialCrankAfterCaptcha(jobId, accountId, preferredProxyPort);
-  } else if (
-    (entry.jobType === 'post_blog' || entry.jobType === 'cafe_new_post') &&
-    !resultUrl?.trim()
-  ) {
+  } else if (entry.jobType === 'post_blog' && entry.payload) {
+    const sessionOk = await ensurePostingSessionAfterCaptcha(entry.context, entry.accountId).catch(
+      () => false,
+    );
+    if (!sessionOk) {
+      entry.resumingInProgress = false;
+      holds.set(jobId, entry);
+      scheduleReminders(entry);
+      return { ok: false, error: 'CAPTCHA_LOGIN_NOT_READY' };
+    }
+
+    const cont = await continuePostBlogFromCaptchaHold({
+      jobId,
+      accountId,
+      context: entry.context,
+      modemSession: entry.modemSession,
+      payload: entry.payload,
+      releaseAccountLock: entry.releaseAccountLock,
+      workspace: entry.workspace,
+    });
+    resumeOk = cont.ok;
+    resumeError = cont.error;
+  } else if (entry.jobType === 'post_blog' || entry.jobType === 'cafe_new_post') {
+    await closeBrowserContext(entry.context).catch(() => {});
+    if (entry.modemSession) await releaseModem(entry.modemSession).catch(() => {});
+    entry.releaseAccountLock();
     await resumePostingAfterCaptcha(jobId, accountId);
   } else {
+    await closeBrowserContext(entry.context).catch(() => {});
+    if (entry.modemSession) await releaseModem(entry.modemSession).catch(() => {});
+    entry.releaseAccountLock();
     await completeJobRecord(jobId, resultUrl);
+  }
+
+  if (!resumeOk) {
+    await notifyCaptchaTelegram({
+      jobId,
+      workspace: holdMeta.workspace,
+      accountLabel: holdMeta.accountLabel,
+      jobTitle: holdMeta.jobTitle,
+      jobType: holdMeta.jobType,
+      timedOut: false,
+      drill: holdMeta.isDrill,
+      force: holdMeta.isDrill,
+    }).catch(() => {});
+    return { ok: false, error: resumeError ?? 'CAPTCHA_RESUME_FAILED' };
   }
 
   await notifyCaptchaTelegram({
@@ -391,13 +420,19 @@ export async function completeCaptchaHold(
     level: 'info',
     message: isCrank
       ? 'CAPTCHA 해결 — C-Rank 블로그 방문·공감·댓글 재개 예약'
-      : entry.jobType === 'post_blog' || entry.jobType === 'cafe_new_post'
+      : entry.jobType === 'post_blog'
         ? resultUrl?.trim()
           ? 'CAPTCHA 수동 발행 완료 (URL 기록)'
-          : 'CAPTCHA 해결 — 발행 자동화 재개 예약'
-        : resultUrl?.trim()
-          ? 'CAPTCHA 수동 완료 (URL 기록)'
-          : 'CAPTCHA 수동 완료 (URL 없음)',
+          : entry.payload
+            ? 'CAPTCHA 해결 — 동일 세션에서 블로그 발행 완료'
+            : 'CAPTCHA 해결 — 발행 자동화 재개 예약'
+        : entry.jobType === 'cafe_new_post'
+          ? resultUrl?.trim()
+            ? 'CAPTCHA 수동 발행 완료 (URL 기록)'
+            : 'CAPTCHA 해결 — 발행 자동화 재개 예약'
+          : resultUrl?.trim()
+            ? 'CAPTCHA 수동 완료 (URL 기록)'
+            : 'CAPTCHA 수동 완료 (URL 없음)',
     job_id: jobId,
     account_id: accountId,
   });

@@ -56,8 +56,8 @@ async function loadAccountBlogPersona(workspace: string, accountId?: string) {
 export async function runContentPreview(input: ContentPreviewInput): Promise<ContentPreviewResult> {
   const started = Date.now();
   const steps: PreviewStep[] = [
-    { id: 'claude', label: 'Claude Sonnet — 블로그·캡션·image_prompt', status: 'pending' },
-    { id: 'imagen', label: 'Google Imagen 4 — 이미지 생성', status: 'pending' },
+    { id: 'claude', label: 'Claude — 블로그 글·해시태그 작성', status: 'pending' },
+    { id: 'imagen', label: 'Imagen — 대표 이미지 생성', status: 'pending' },
   ];
 
   const { blogWritingPersona } = await loadAccountBlogPersona(input.workspace, input.account_id);
@@ -139,6 +139,25 @@ export async function patchJobPreviewProgress(
       platform_schedule: {
         ...prev,
         _dry_run: true,
+        _preview: { steps, ...extra, updated_at: new Date().toISOString() },
+      },
+    })
+    .eq('id', jobId);
+}
+
+/** content_full 실행 중 — dry_run 플래그 없이 발행 모니터·큐 단계만 갱신 */
+export async function patchJobGenerationProgress(
+  jobId: string,
+  steps: PreviewStep[],
+  extra?: Record<string, unknown>,
+) {
+  const { data: job } = await supabase.from('huma_jobs').select('platform_schedule').eq('id', jobId).maybeSingle();
+  const prev = (job?.platform_schedule as Record<string, unknown> | null) ?? {};
+  await supabase
+    .from('huma_jobs')
+    .update({
+      platform_schedule: {
+        ...prev,
         _preview: { steps, ...extra, updated_at: new Date().toISOString() },
       },
     })

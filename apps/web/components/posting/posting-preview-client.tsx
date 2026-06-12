@@ -26,14 +26,14 @@ function stepsFromJob(job: HumaJob | null): PreviewStep[] {
   if (preview?.steps?.length) return preview.steps;
   if (job?.status === 'running') {
     return [
-      { id: 'claude', label: 'Claude Sonnet', status: 'running' },
-      { id: 'imagen', label: 'Imagen 4', status: 'pending' },
+      { id: 'claude', label: 'Claude — 블로그 글 작성', status: 'running' },
+      { id: 'imagen', label: 'Imagen — 대표 이미지', status: 'pending' },
     ];
   }
   return [
-    { id: 'claude', label: 'Claude Sonnet', status: 'pending' },
-    { id: 'imagen', label: 'Imagen 4', status: 'pending' },
-    { id: 'typing', label: '네이버 타이핑 시뮬', status: 'pending' },
+    { id: 'claude', label: 'Claude — 블로그 글 작성', status: 'pending' },
+    { id: 'imagen', label: 'Imagen — 대표 이미지', status: 'pending' },
+    { id: 'typing', label: '네이버 에디터 타이핑 (발행 단계)', status: 'pending' },
   ];
 }
 
@@ -241,7 +241,9 @@ export function PostingPreviewClient({ jobId }: { jobId: string }) {
 
         {!readyForTyping && (
           <>
-            <h1 className="mb-2 text-lg font-semibold text-[#333]">{job?.title ?? '콘텐츠 생성 중…'}</h1>
+            <h1 className="mb-2 text-lg font-semibold text-[#333]">
+              {job?.status === 'running' ? 'Claude가 블로그 글 작성 중…' : (job?.title ?? '콘텐츠 생성 대기')}
+            </h1>
             {job?.link_url && (
               <a
                 href={job.link_url}
@@ -254,7 +256,7 @@ export function PostingPreviewClient({ jobId }: { jobId: string }) {
             )}
 
             <div className="m-panel mt-4">
-              <div className="panel-title mb-3">생성 단계</div>
+              <div className="panel-title mb-3">AI 생성 단계 (발행 전)</div>
               <ul className="space-y-2">
                 {steps.map((step) => (
                   <li key={step.id} className="flex items-start gap-2 text-[13px]">

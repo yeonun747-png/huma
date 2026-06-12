@@ -108,9 +108,17 @@ function jobSub(job: HumaJob): string {
     parts.push(`약 ${payload.sessionMinutes ?? 45}분`);
   } else if (job.job_type === 'content_full') {
     const dryRun = (job.platform_schedule as Record<string, unknown> | undefined)?._dry_run === true;
-    parts.push(dryRun ? '검증(dry_run)·네이버 미발행' : 'AI 생성·발행 분배');
-    if (job.status === 'running') parts.push('생성 중');
-    else if (job.status === 'pending' || job.status === 'scheduled') parts.push('생성 대기');
+    const ps = job.platform_schedule as Record<string, unknown> | undefined;
+    const steps = (ps?._preview as { steps?: Array<{ id: string; status: string }> } | undefined)?.steps;
+    const claude = steps?.find((s) => s.id === 'claude');
+    const imagen = steps?.find((s) => s.id === 'imagen');
+    parts.push(dryRun ? '검증(dry_run)' : 'Claude 글·Imagen 생성');
+    if (job.status === 'running') {
+      if (claude?.status === 'running') parts.push('Claude 작성 중');
+      else if (imagen?.status === 'running') parts.push('Imagen 생성 중');
+      else if (claude?.status === 'ok') parts.push('Claude 완료');
+      else parts.push('생성 중');
+    } else if (job.status === 'pending' || job.status === 'scheduled') parts.push('생성 대기');
     else if (job.status === 'paused') parts.push('클릭하여 수정');
   } else if (job.content_type) parts.push(`타입 ${job.content_type}`);
   else if (job.link_url) parts.push('AI 생성');
@@ -149,8 +157,10 @@ function jobSub(job: HumaJob): string {
     parts.push(`재예약 · ${formatJobErrorLabel(job.error_message)}`);
   }
 
-  if (job.status === 'running' && job.job_type !== 'social_crank' && job.content) {
-    parts.push(`${job.content.length}자`);
+  if (job.status === 'running' && job.job_type === 'post_blog' && job.content) {
+    parts.push(`${job.content.length}자 타이핑`);
+  } else if (job.status === 'running' && job.job_type === 'content_full' && job.content) {
+    parts.push(`본문 ${job.content.length}자`);
   }
 
   return parts.join(' · ');

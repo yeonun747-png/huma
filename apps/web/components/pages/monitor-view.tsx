@@ -41,30 +41,58 @@ export function MonitorView() {
     .filter((j) => !shownJobIds.has(j.id))
     .map((job) => {
       const live = job.status === 'running';
+      const generating = job.job_type === 'content_full';
+      const ps = job.platform_schedule as Record<string, unknown> | undefined;
+      const steps = (ps?._preview as { steps?: Array<{ id: string; status: string }> } | undefined)?.steps;
+      const claudeRunning = steps?.find((s) => s.id === 'claude')?.status === 'running';
+      const imagenRunning = steps?.find((s) => s.id === 'imagen')?.status === 'running';
+      const phaseLabel = claudeRunning
+        ? 'Claude 글 작성 중'
+        : imagenRunning
+          ? 'Imagen 생성 중'
+          : generating
+            ? 'AI 콘텐츠 생성'
+            : live
+              ? '네이버 타이핑'
+              : '대기 중';
       return (
         <div key={job.id} className="m-pub-card" style={{ opacity: live ? 1 : 0.5 }}>
           <div className="m-pub-top">
             {live ? <div className="m-pub-live-dot" /> : <div className="m-pub-idle-dot" />}
             <span className={live ? 'text-[10.5px] font-bold text-huma-err' : 'text-[10.5px] text-huma-t3'}>
-              {live ? 'LIVE' : '대기 중'}
+              {live ? (generating ? 'AI' : 'LIVE') : '대기'}
             </span>
             <span className="ml-1.5 font-mono text-[11px] text-huma-t3">
-              {job.title ?? job.job_type} · {job.workspace} · {job.platform ?? 'naver'}
+              {job.title ?? job.job_type} · {job.workspace} · {generating ? 'Claude/Imagen' : job.platform ?? 'naver'}
             </span>
-            {live && <span className="ml-auto font-mono text-[11px] text-huma-t3">WPM —</span>}
+            {live && !generating && <span className="ml-auto font-mono text-[11px] text-huma-t3">WPM —</span>}
           </div>
           {live ? (
             <>
               <div className="m-live-box">
-                {job.title ?? job.job_type}
-                <br />
-                <br />
-                {(job.content ?? '').slice(0, 120)}
+                {generating ? (
+                  <>
+                    <span className="text-huma-acc">{phaseLabel}</span>
+                    <br />
+                    <br />
+                    {(job.content ?? '').length > 80
+                      ? (job.content ?? '').slice(0, 120)
+                      : (job.title ?? '제목 입력됨 · 본문 생성 중…')}
+                  </>
+                ) : (
+                  <>
+                    {job.title ?? job.job_type}
+                    <br />
+                    <br />
+                    {(job.content ?? '').slice(0, 120)}
+                  </>
+                )}
                 <span className="m-cursor-blink" />
               </div>
               <div className="m-pub-meta">
                 <span className="m-pub-m">
-                  <span>{(job.content ?? '').length}</span>자
+                  <span>{generating ? phaseLabel : `${(job.content ?? '').length}자`}</span>
+                  {!generating ? ' 타이핑' : ''}
                 </span>
                 <span className="m-pub-m">
                   상태 <span>{job.status}</span>
@@ -97,7 +125,11 @@ export function MonitorView() {
                 {m.account} · {m.platform}
               </span>
               <span className="ml-auto font-mono text-[11px] text-huma-t3">
-                {m.kind === 'crank' ? 'C-Rank' : `${m.wpm} WPM`}
+                {m.kind === 'crank'
+                  ? 'C-Rank'
+                  : m.kind === 'generating'
+                    ? 'AI 생성'
+                    : `${m.wpm} WPM`}
               </span>
             </div>
             <div className="m-live-box whitespace-pre-line">
@@ -110,6 +142,13 @@ export function MonitorView() {
                       <span className="text-huma-t3">{m.crankDetail}</span>
                     </>
                   ) : null}
+                </>
+              ) : m.kind === 'generating' ? (
+                <>
+                  <span className="text-huma-acc">{m.phaseLabel ?? 'Claude 작성 중'}</span>
+                  <br />
+                  <br />
+                  {m.preview}
                 </>
               ) : (
                 m.preview
@@ -127,6 +166,18 @@ export function MonitorView() {
                   </span>
                   <span className="m-pub-m text-huma-ok">
                     상태 <span>{m.jobStatus === 'awaiting_captcha' ? 'VNC 대기' : '진행'}</span>
+                  </span>
+                </>
+              ) : m.kind === 'generating' ? (
+                <>
+                  <span className="m-pub-m">
+                    단계 <span>{m.phaseLabel ?? 'Claude'}</span>
+                  </span>
+                  <span className="m-pub-m">
+                    경과 <span>{m.elapsedMin}</span>분
+                  </span>
+                  <span className="m-pub-m text-huma-ok">
+                    상태 <span>{m.jobStatus === 'awaiting_captcha' ? 'VNC 대기' : 'AI 생성'}</span>
                   </span>
                 </>
               ) : (

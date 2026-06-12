@@ -11,7 +11,7 @@ import {
   acquireWorkflowPage,
 } from '../playwright/browser.js';
 import { loadAccountForBrowser } from '../playwright/account-loader.js';
-import { naverLogin } from '../playwright/naver/login.js';
+import { ensureNaverLoggedIn, naverLogin } from '../playwright/naver/login.js';
 import { preSessionWarmup } from '../playwright/naver/pre-session-warmup.js';
 import { parsePersona } from '../playwright/persona.js';
 import { measureRTT, rttScale } from '../human-engine/timing.js';
@@ -452,11 +452,18 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
                 }
               };
 
-              if (accountId && !resumeAfterCaptcha) {
-                await naverLogin(context, accountId, {
-                  profilePath: accountCtx?.profile_path,
-                  captchaContext: captchaCtx,
-                });
+              if (accountId) {
+                if (resumeAfterCaptcha) {
+                  await ensureNaverLoggedIn(context, accountId, {
+                    profilePath: accountCtx?.profile_path,
+                    fastCheck: true,
+                  });
+                } else {
+                  await naverLogin(context, accountId, {
+                    profilePath: accountCtx?.profile_path,
+                    captchaContext: captchaCtx,
+                  });
+                }
               }
 
               resultUrl = await runPostBlog!();
@@ -552,6 +559,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
                 jobType: type,
                 context,
                 modemSession,
+                payload: type === 'post_blog' ? payload : undefined,
                 releaseAccountLock: () => releaseAccount(accountId),
                 visionAutoFailed,
               });
