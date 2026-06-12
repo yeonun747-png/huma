@@ -16,6 +16,14 @@ export function resolveVncCanvas(): { w: number; h: number } {
   };
 }
 
+/** VNC HUD 오버레이 높이 — 워크플로우 Chromium은 이 아래부터 배치 */
+export function resolveVncHudReserveY(): number {
+  const explicit = Number(process.env.HUMA_VNC_HUD_RESERVE_Y);
+  if (Number.isFinite(explicit) && explicit > 0) return Math.round(explicit);
+  const hudH = Number(process.env.HUMA_VNC_HUD_HEIGHT) || 56;
+  return hudH + 16;
+}
+
 export function isVncTilingEnabled(headless: boolean): boolean {
   if (headless || process.platform !== 'linux') return false;
   if (process.env.HUMA_VNC_LAYOUT === 'off') return false;
@@ -35,19 +43,21 @@ function tiledChrome(
   activePorts: number[],
   w: number,
   h: number,
+  top: number,
 ): VncWindowChrome | null {
   const idx = activePorts.indexOf(proxyPort);
   if (idx < 0) return null;
 
+  const workH = Math.max(h - top, 200);
   const n = activePorts.length;
   if (n === 1) {
-    return { x: 0, y: 0, width: w, height: h, windowState: 'normal' };
+    return { x: 0, y: top, width: w, height: workH, windowState: 'normal' };
   }
 
   const tileW = Math.floor(w / n);
   const x = idx * tileW;
   const width = idx === n - 1 ? w - x : tileW;
-  return { x, y: 0, width, height: h, windowState: 'normal' };
+  return { x, y: top, width, height: workH, windowState: 'normal' };
 }
 
 export async function resolveVncChromeForProxyPort(
@@ -56,20 +66,22 @@ export async function resolveVncChromeForProxyPort(
   if (!isVncManagedProxyPort(proxyPort)) return null;
 
   const { w, h } = resolveVncCanvas();
+  const top = resolveVncHudReserveY();
+  const workH = Math.max(h - top, 200);
   const focusPort = await getVncFocusPort();
 
   if (focusPort !== null) {
     if (proxyPort === focusPort) {
-      return { x: 0, y: 0, width: w, height: h, windowState: 'normal' };
+      return { x: 0, y: top, width: w, height: workH, windowState: 'normal' };
     }
     return { x: 0, y: 0, width: 320, height: 240, windowState: 'minimized' };
   }
 
   const activePorts = await listActiveVncTilePorts();
-  const tiled = tiledChrome(proxyPort, activePorts, w, h);
+  const tiled = tiledChrome(proxyPort, activePorts, w, h, top);
   if (tiled) return tiled;
 
-  return { x: 0, y: 0, width: w, height: h, windowState: 'normal' };
+  return { x: 0, y: top, width: w, height: workH, windowState: 'normal' };
 }
 
 export function vncSlotLabelKo(proxyPort: number): string {

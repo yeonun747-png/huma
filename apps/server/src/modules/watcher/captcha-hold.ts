@@ -19,7 +19,7 @@ import { notifyCaptchaTelegram, resolveVncUrl, buildJobWebUrl } from './telegram
 const HOLD_MS = 30 * 60 * 1000;
 const REMIND_MS = 5 * 60 * 1000;
 const MAX_REMINDS = 3;
-const CAPTCHA_AUTO_RESUME_MS = 3000;
+const CAPTCHA_AUTO_RESUME_MS = 10_000;
 
 export interface CaptchaHoldInput {
   jobId: string;
@@ -136,16 +136,25 @@ async function tryAutoResumePostingCaptcha(entry: CaptchaHoldEntry): Promise<voi
   if (!page || page.isClosed()) return;
   if (await isNaverCaptchaVisible(page)) return;
 
-  const sessionReady = await ensurePostingSessionAfterCaptcha(entry.context, entry.accountId);
-  if (!sessionReady) return;
+  const url = page.url();
+  if (url === 'about:blank' || url === '') return;
 
-  await logOperation({
-    level: 'info',
-    message: '[post_blog] CAPTCHA 해결·로그인 확인 — 발행 자동 재개',
-    job_id: entry.jobId,
-    account_id: entry.accountId,
-  });
-  await completeCaptchaHold(entry.jobId);
+  entry.resumingInProgress = true;
+  try {
+    const sessionReady = await ensurePostingSessionAfterCaptcha(entry.context, entry.accountId);
+    if (!sessionReady) return;
+
+    await logOperation({
+      level: 'info',
+      message: '[post_blog] CAPTCHA 해결·로그인 확인 — 발행 자동 재개',
+      job_id: entry.jobId,
+      account_id: entry.accountId,
+    });
+    await completeCaptchaHold(entry.jobId);
+  } finally {
+    const live = holds.get(entry.jobId);
+    if (live) live.resumingInProgress = false;
+  }
 }
 
 export function getCaptchaHold(jobId: string): CaptchaHoldEntry | undefined {

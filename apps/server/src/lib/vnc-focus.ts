@@ -74,7 +74,7 @@ export async function buildVncHudState(): Promise<VncHudState> {
       return `${s.hint}: ${s.label}${mark}`;
     }),
     'Ctrl+Alt+0: 분할 복귀',
-    '한/영: Ctrl+Space (fcitx)',
+    '한/영: VNC HUD 「한/영」 클릭 (단축키는 RealVNC에서 안 될 수 있음)',
   ];
 
   return {

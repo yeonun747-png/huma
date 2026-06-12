@@ -41,4 +41,6 @@ exec "${X11VNC}" \
   -listen 0.0.0.0 \
   -rfbport "${RFB_PORT}" \
   -noxdamage \
+  -modtweak \
+  -clear_mods \
   -quiet

@@ -13,6 +13,7 @@ import type { AccountPersona } from './persona.js';
 import { getFingerprintConfig, getHumanEngineConfig } from '../../lib/settings.js';
 import { getBundledChromiumVersion, syncUserAgentChromeVersion } from '../../lib/chromium-version.js';
 import { resolveUseOsIme, fcitxBrowserEnv } from '../human-engine/os-ime.js';
+import { readFcitxSessionEnv } from '../../lib/vnc-ime.js';
 import { logOperation } from '../../lib/log-emitter.js';
 import { PLAYWRIGHT_NAV_TIMEOUT_MS } from '../../lib/playwright-nav-timeout.js';
 import { vncWindowLaunchArgs } from '../../lib/vnc-window-layout.js';
@@ -203,9 +204,9 @@ async function applyClientHintPlatformSpoof(context: BrowserContext): Promise<vo
 
 /**
  * Chromium subprocess env.
- * - 기본(useOsIme=false): fcitx GTK 모듈·invalid DBUS 상속 금지 (DBus 크래시 방지). 합성 IME 사용.
- * - useOsIme=true: fcitx 모듈 + 실제 DBus 세션을 주입해야 OS IME 한글 조합이 동작.
- *   (둘은 상호 배타 — env를 입력 방식과 정합시킨다.)
+ * - headless: env 미주입 (Playwright 기본).
+ * - headed(VNC): fcitx GTK 모듈 활성 — VNC 수동 한글 입력(CAPTCHA 등). 자동화는 합성 composition 유지.
+ * - useOsIme=true: 자동화도 OS IME 물리키 경로.
  */
 function buildBrowserEnv(headless: boolean, useOsIme: boolean): Record<string, string> | undefined {
   if (headless) return undefined;
@@ -219,15 +220,23 @@ function buildBrowserEnv(headless: boolean, useOsIme: boolean): Record<string, s
     LC_CTYPE: 'ko_KR.UTF-8',
   };
 
-  if (useOsIme) {
-    const dbus = process.env.DBUS_SESSION_BUS_ADDRESS;
-    if (dbus?.startsWith('unix:')) {
-      env.DBUS_SESSION_BUS_ADDRESS = dbus;
-    }
+  const vncManualIme = process.env.HUMA_VNC_MANUAL_IME !== 'false';
+  const needFcitx = useOsIme || vncManualIme;
+
+  if (needFcitx) {
+    const session = readFcitxSessionEnv();
+    const dbus =
+      session.DBUS_SESSION_BUS_ADDRESS?.startsWith('unix:')
+        ? session.DBUS_SESSION_BUS_ADDRESS
+        : process.env.DBUS_SESSION_BUS_ADDRESS?.startsWith('unix:')
+          ? process.env.DBUS_SESSION_BUS_ADDRESS
+          : undefined;
+    if (dbus) env.DBUS_SESSION_BUS_ADDRESS = dbus;
+    else delete env.DBUS_SESSION_BUS_ADDRESS;
+    delete env.DBUS_SYSTEM_BUS_ADDRESS;
     return fcitxBrowserEnv(env);
   }
 
-  // SSH/PM2의 잘못된 DBUS(예: disabled:) → bus.cc 파싱 크래시. 합성 IME 경로에서는 DBUS 제거.
   delete env.DBUS_SESSION_BUS_ADDRESS;
   delete env.DBUS_SYSTEM_BUS_ADDRESS;
   for (const key of ['GTK_IM_MODULE', 'QT_IM_MODULE', 'XMODIFIERS', 'INPUT_METHOD']) {

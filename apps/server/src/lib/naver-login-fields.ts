@@ -41,6 +41,7 @@ export async function typeIntoNaverLoginField(
 export async function ensureNaverLoginCredentialsForCaptcha(
   page: Page,
   accountId: string,
+  options?: { fast?: boolean },
 ): Promise<void> {
   if (!page.url().includes('nidlogin')) return;
 
@@ -55,6 +56,13 @@ export async function ensureNaverLoginCredentialsForCaptcha(
   const pw = page.locator('#pw');
   await pw.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
   await pw.fill('').catch(() => {});
+
+  if (options?.fast) {
+    await pw.fill(password);
+    await humanSleep(120, 280);
+    return;
+  }
+
   await typeIntoNaverLoginField(page, '#pw', password);
   await humanSleep(400, 900);
 }

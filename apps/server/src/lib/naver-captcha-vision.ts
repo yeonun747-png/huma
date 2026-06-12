@@ -216,15 +216,20 @@ async function detectCaptchaType(page: Page): Promise<CaptchaType> {
   return 'text';
 }
 
+function isReceiptLikeCaptcha(question: string): boolean {
+  return /영수증|잘린|절취|가격|개수|총합|품목|물건|메뉴|용량|ml|빈\s*칸|위치|구매한|가게|마켓|주소|상호|한글|개당|합계|\[\?\]/.test(
+    question,
+  );
+}
+
 async function captureCaptchaScreenshot(
   page: Page,
   type: CaptchaType,
   question = '',
 ): Promise<{ base64: string; mediaType: 'image/png' | 'image/jpeg' } | null> {
-  const receiptLike = /영수증|잘린|절취|총\s*\d|메뉴|가게|상호|품목|한글로\s*입력|개수|합계/.test(question);
+  const root = await locateCaptchaRoot(page);
 
-  if (type === 'text' && receiptLike) {
-    const root = await locateCaptchaRoot(page);
+  if (type === 'text' && (isReceiptLikeCaptcha(question) || page.url().includes('nidlogin'))) {
     const buf = await root.screenshot({ type: 'png' }).catch(() => null);
     if (buf?.length) return { base64: buf.toString('base64'), mediaType: 'image/png' };
   }
@@ -239,7 +244,6 @@ async function captureCaptchaScreenshot(
     }
   }
 
-  const root = await locateCaptchaRoot(page);
   const buf = await root.screenshot({ type: 'png' }).catch(() => null);
   if (!buf?.length) return null;
   return { base64: buf.toString('base64'), mediaType: 'image/png' };
@@ -339,10 +343,11 @@ function parseVisionSolveResult(
 
   if (expectedType === 'text') {
     const asksKoreanText =
-      /이름|한글|가게|메뉴|품목|물건|상호|무엇입니까|무엇인가요|입력/.test(question) &&
-      !/가격은\s*얼마|몇\s*개|총합|합계|개당\s*가격|한\s*개\s*당/.test(question);
+      (/이름|한글|가게|메뉴|품목|물건|상호|무엇입니까|무엇인가요|입력|빈\s*칸|위치/.test(question) &&
+        !/가격은\s*얼마|몇\s*개|총합|합계|개당\s*가격|한\s*개\s*당\s*가격|용량|ml/.test(question)) ||
+      /\[\?\]/.test(question);
     const asksNumber =
-      /가격|얼마|몇\s*개|총|합계|개당|담당|숫자|원/.test(question) && !asksKoreanText;
+      /가격|얼마|몇\s*개|총|합계|개당|담당|숫자|원|용량|ml|하나\s*당/.test(question) && !asksKoreanText;
 
     if (asksKoreanText) {
       const hangul = raw.match(/[가-힣]{2,}/)?.[0];
@@ -388,33 +393,33 @@ Format: {"type":"slider","dragPx":127} OR {"type":"slider","dragPercent":0.62}
 - Slider track width ≈ ${meta.trackWidthPx ?? 300}px.`;
     prompt = `Question: ${question}\nFind how far to drag the slider handle horizontally to complete the puzzle.`;
   } else {
-    const receiptLike = /영수증|잘린|절취|가격|개수|총합|품목|물건|메뉴|한글|개당/.test(question);
+    const receiptLike = isReceiptLikeCaptcha(question);
     system = receiptLike
-      ? `You solve Naver login CAPTCHA with torn virtual receipt images (2-3 horizontal photo strips in ONE screenshot).
-Layout (stitch left→right mentally):
-- LEFT strip: product names, one item per row (Korean text).
-- RIGHT strip: table with columns 가격 | 개수 | 총합 — row N on left matches row N on right.
-Rules:
-1. Read the green Korean question at the bottom EXACTLY.
-2. Question → answer mapping:
-   - "가장 가격이 싼 물건의 한 개 당 가격" / "한 개당 가격" → MINIMUM value in the 가격 column ONLY (never 총합, never 개수). Example: 가격 100,900,500,700 → answer "100".
-   - "가장 가격이 싼 물건의 이름" / "이름은 무엇" → LEFT-strip Korean name on the row with minimum 가격. Example: min 가격 400 → "종이팩 오렌지주스".
-   - "총합이 가장 큰/작은" → use 총합 column.
-   - "개수" / "몇 개" → use 개수 column (ignore promo rows: 증정, 무료, 3+1).
-3. Return ONLY JSON: {"type":"text","answer":"..."}
-   - Numbers: digits only, no commas/units.
-   - Names: EXACT Korean from receipt (가-힣), character-for-character.
-4. NEVER return unrelated numbers (e.g. 21) when the question asks for a product name.
-5. Verify: 가격 × 개수 should equal 총합 for each row before picking the answer row.`
+      ? `You solve Naver login CAPTCHA with virtual receipt/store images in ONE screenshot.
+Layout (stitch left→right if torn strips):
+- LEFT: product names OR store address lines (Korean).
+- RIGHT (if present): table 가격 | 개수 | 총합 — row N left matches row N right.
+Rules — read the green Korean question EXACTLY:
+1. Price/name/quantity (split receipt):
+   - "한 개 당 가격" / minimum price → MIN in 가격 column only (e.g. 100).
+   - "가장 가격이 싼 물건의 이름" → Korean product name on min-price row.
+   - "개수" / "몇 개" → 개수 column.
+2. Capacity/volume (single receipt image):
+   - "용량" / "몇 ml" / "하나 당 용량" → read ml from product text e.g. "토마토즙 (용량 100ml)" → "100". NOT from price table.
+   - Example: "구매한 토마토즙 하나 당 용량은 몇 ml" → "100".
+3. Address blank fill:
+   - "가게 위치" / "빈 칸" / "[?]" in address → missing Korean road/street between 시·군·구 and number.
+   - Example: "원주시 평창군 [?] 397" with receipt showing "원주시 평창군 솔뫼로 397" → "솔뫼로".
+4. Return ONLY JSON: {"type":"text","answer":"..."}
+   - Numbers: digits only (no ml, no commas).
+   - Korean text: exact characters from receipt (가-힣).`
       : `You solve Naver Korean login CAPTCHA images. Return ONLY JSON: {"type":"text","answer":"..."}
 Rules:
-- Torn/cut receipt (2-3 strips in one image): mentally stitch fragments left-to-right; read ONLY the line the question targets.
-- Receipt "총 몇 개" / quantity: sum the 개수 column for paid items only; ignore promo rows like "3+1", "증정", "무료", "할인".
-- Receipt "한글로 입력" / store·menu·item name: copy EXACT Korean (가-힣) from the receipt — character-for-character, no synonyms.
-- If multiple similar names appear, pick the one the question explicitly asks for (가게명 vs 메뉴명 vs 품목명).
-- Multiple single-char boxes: one string left-to-right (e.g. "사과", "007").
-- Never return only a random number when the question asks for Korean text.
-- Digits-only answers only when the question clearly asks for a number/count/amount.`;
+- Store address blank [?]: fill missing Korean road name from receipt address line.
+- Product capacity ml: extract number from parentheses e.g. "(용량 100ml)" → "100".
+- Torn receipt: stitch fragments; match question to correct column or product line.
+- Korean names: copy EXACT from image (가-힣).
+- Digits only when question asks for number/count/amount/capacity.`;
     prompt = receiptLike
       ? `Question (green text): ${question}
 Read ALL receipt strips and column headers in the screenshot. Return JSON with the single correct answer.`
@@ -455,6 +460,13 @@ async function humanTypeCaptchaAnswer(page: Page, input: Locator, text: string):
   }
 
   await input.fill('');
+  if (/^\d+$/.test(text)) {
+    await page.keyboard.insertText(text);
+    const val = await input.inputValue().catch(() => '');
+    if (val !== text) await input.fill(text);
+    return;
+  }
+
   const hasHangul = /[가-힣]/.test(text);
   if (hasHangul) {
     await page.keyboard.insertText(text);
@@ -568,8 +580,8 @@ async function clickCaptchaConfirm(page: Page): Promise<void> {
 
 async function submitCaptcha(page: Page, ctx: NaverCaptchaVisionContext): Promise<void> {
   if (ctx.accountId && page.url().includes('nidlogin')) {
-    await ensureNaverLoginCredentialsForCaptcha(page, ctx.accountId);
-    await humanSleep(500, 1200);
+    await ensureNaverLoginCredentialsForCaptcha(page, ctx.accountId, { fast: true });
+    await humanSleep(150, 350);
   }
 
   await clickCaptchaConfirm(page);
@@ -628,11 +640,6 @@ export async function tryAutoSolveNaverCaptcha(
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     try {
-      if (ctx.accountId && page.url().includes('nidlogin')) {
-        await ensureNaverLoginCredentialsForCaptcha(page, ctx.accountId);
-        await humanSleep(400, 900);
-      }
-
       const captchaType = await detectCaptchaType(page);
       const question = await readCaptchaQuestion(page);
 
@@ -655,7 +662,7 @@ export async function tryAutoSolveNaverCaptcha(
         trackWidthPx: trackW,
       });
       if (!solved) {
-        await humanSleep(3000, 7000);
+        await humanSleep(1200, 2500);
         await refreshCaptchaImage(page);
         continue;
       }
@@ -663,10 +670,10 @@ export async function tryAutoSolveNaverCaptcha(
       const applied = await applyVisionResult(page, captchaType, solved);
       if (!applied) break;
 
-      await humanSleep(1500, 3500);
+      await humanSleep(300, 700);
       await submitCaptcha(page, ctx);
 
-      await sleep(randomBetween(2000, 4000));
+      await sleep(randomBetween(800, 1500));
       if (await captchaCleared(page)) {
         await logOperation({
           level: 'info',
@@ -678,7 +685,7 @@ export async function tryAutoSolveNaverCaptcha(
       }
 
       if (attempt < MAX_ATTEMPTS) {
-        await humanSleep(3000, 7000);
+        await humanSleep(1200, 2500);
         await refreshCaptchaImage(page);
       }
     } catch (err) {
@@ -689,7 +696,7 @@ export async function tryAutoSolveNaverCaptcha(
         account_id: ctx.accountId,
       });
       if (attempt < MAX_ATTEMPTS) {
-        await humanSleep(3000, 7000);
+        await humanSleep(1200, 2500);
         await refreshCaptchaImage(page).catch(() => {});
       }
     }

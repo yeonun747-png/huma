@@ -80,14 +80,33 @@
       color: #c9b8ff;
       font-size: 13px;
     }
-    #ime {
+    #ime-btn {
       flex: 0 0 auto;
-      font-size: 12px;
+      pointer-events: auto;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: 1px solid rgba(127, 219, 255, 0.45);
+      background: rgba(20, 40, 60, 0.85);
       color: #a8d4ff;
-      max-width: 280px;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      margin: 0;
     }
+    #ime-btn:hover {
+      background: rgba(40, 70, 100, 0.95);
+      border-color: rgba(127, 219, 255, 0.75);
+    }
+    #ime-btn.hangul {
+      color: #b8f0c8;
+      border-color: rgba(120, 220, 160, 0.55);
+      background: rgba(20, 50, 35, 0.9);
+    }
+    #ime-btn.english {
+      color: #ffcc66;
+      border-color: rgba(255, 200, 100, 0.45);
+    }
+    #ime-btn.busy { opacity: 0.55; pointer-events: none; }
   </style>
 </head>
 <body>
@@ -105,13 +124,47 @@
       <span class="sep">|</span>
       <span id="tile">Ctrl+Alt+0 분할</span>
       <span class="sep">|</span>
-      <span id="ime">한/영 Ctrl+Space</span>
+      <button type="button" id="ime-btn" title="클릭으로 한/영 전환 (VNC 단축키 대체)">한/영 …</button>
     </div>
   </div>
   <script>
-    const API = 'http://127.0.0.1:__HUMA_PORT__/api/vnc/hud';
+    const PORT = '__HUMA_PORT__';
+    const API = `http://127.0.0.1:${PORT}/api/vnc/hud`;
+    const IME_TOGGLE = `http://127.0.0.1:${PORT}/api/vnc/ime/toggle`;
     const HINTS = ['Ctrl+Alt+1', 'Ctrl+Alt+2', 'Ctrl+Alt+3', 'Ctrl+Alt+4', 'Ctrl+Alt+5'];
     const SLOT_DESC = ['Crank1(실폰)', 'Crank2(실폰)', '연운1', '연운2', '연운3'];
+    const imeBtn = document.getElementById('ime-btn');
+    let imeBusy = false;
+
+    function renderIme(ime) {
+      if (!ime) {
+        imeBtn.textContent = '한/영 …';
+        imeBtn.className = '';
+        return;
+      }
+      const hangul = ime.mode === 'hangul';
+      imeBtn.textContent = hangul ? '한글 ▼' : ime.mode === 'english' ? '영문 ▼' : '한/영 ▼';
+      imeBtn.className = hangul ? 'hangul' : ime.mode === 'english' ? 'english' : '';
+      imeBtn.title = ime.hint || '클릭으로 한/영 전환';
+    }
+
+    imeBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (imeBusy) return;
+      imeBusy = true;
+      imeBtn.classList.add('busy');
+      try {
+        const res = await fetch(IME_TOGGLE, { method: 'POST', cache: 'no-store' });
+        const ime = await res.json();
+        renderIme(ime);
+      } catch {
+        imeBtn.textContent = 'IME 오류';
+      } finally {
+        imeBusy = false;
+        imeBtn.classList.remove('busy');
+      }
+    });
 
     async function poll() {
       try {
@@ -135,6 +188,7 @@
           el.innerHTML = `<span class="slot-key">${hint}</span><span class="slot-label">${desc}</span>`;
           slotsEl.appendChild(el);
         });
+        renderIme(d.ime);
       } catch {
         document.getElementById('mode').textContent = 'HUD 연결 대기…';
       }

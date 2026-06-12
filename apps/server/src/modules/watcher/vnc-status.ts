@@ -73,9 +73,9 @@ export async function getVncRuntimeStatus(): Promise<{
   } else if (!listening || !x11vnc) {
     hint = 'x11vnc 미기동 — sudo systemctl restart huma-x11vnc';
   } else if (viaTailscale) {
-    hint = `5900 OK — RealVNC Direct ${endpoint} (Tailscale · 집 밖 가능). 평소 검정=정상, DRILL 중 흰 화면.`;
+    hint = `5900 OK — ${endpoint} (Tailscale). 한/영: VNC 화면 상단 HUD 「한/영」 클릭. 숫자패드: PC NumLock ON.`;
   } else {
-    hint = `5900 OK — RealVNC Direct ${endpoint} (LAN만). 집 밖: bash apps/server/deploy/setup-tailscale.sh`;
+    hint = `5900 OK — ${endpoint} (LAN). 한/영: VNC HUD 「한/영」 클릭 (단축키는 RealVNC에서 전달 안 될 수 있음).`;
   }
 
   return {

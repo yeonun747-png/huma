@@ -33,6 +33,7 @@ module.exports = {
         HUMA_VNC_HEIGHT: '1080',
         HUMA_VNC_HUD_HEIGHT: '56',
         HUMA_VNC_HUD_WIDTH: '1180',
+        HUMA_VNC_HUD_RESERVE_Y: '72',
       },
     },
     {
@@ -51,6 +52,8 @@ module.exports = {
         XVFB_AVAILABLE: 'true',
         HUMA_VNC_WIDTH: '2560',
         HUMA_VNC_HEIGHT: '1080',
+        HUMA_VNC_HUD_HEIGHT: '56',
+        HUMA_VNC_HUD_RESERVE_Y: '72',
         NODE_OPTIONS: '--dns-result-order=ipv4first',
       },
     },

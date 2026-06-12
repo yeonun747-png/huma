@@ -27,8 +27,8 @@ function contentFullPhase(job: {
     claude?.status === 'ok' && job.content && job.content.length > 80
       ? job.content.slice(0, 200)
       : synopsis
-        ? `${label}\n요약: ${synopsis.slice(0, 100)}`
-        : `${label}\n${job.title ?? ''}`.trim();
+        ? `요약: ${synopsis.slice(0, 150)}`
+        : (job.title ?? '').trim() || label;
 
   return { label, preview: body };
 }

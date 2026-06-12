@@ -2,6 +2,12 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { join } from 'path';
 import { readFileSync } from 'fs';
 import { buildVncHudState, clearVncFocus, focusVncByHotkey } from '../lib/vnc-focus.js';
+import {
+  getVncImeStatus,
+  setVncImeEnglish,
+  setVncImeHangul,
+  toggleVncIme,
+} from '../lib/vnc-ime.js';
 
 const PORT = Number(process.env.PORT) || 3100;
 
@@ -19,7 +25,29 @@ function assertVncLocal(request: FastifyRequest) {
 export async function registerVncRoutes(app: FastifyInstance) {
   app.get('/api/vnc/hud', async (request, reply) => {
     assertVncLocal(request);
-    return buildVncHudState();
+    const hud = await buildVncHudState();
+    const ime = await getVncImeStatus();
+    return { ...hud, ime };
+  });
+
+  app.get('/api/vnc/ime', async (request) => {
+    assertVncLocal(request);
+    return getVncImeStatus();
+  });
+
+  app.post('/api/vnc/ime/toggle', async (request) => {
+    assertVncLocal(request);
+    return toggleVncIme();
+  });
+
+  app.post('/api/vnc/ime/hangul', async (request) => {
+    assertVncLocal(request);
+    return setVncImeHangul();
+  });
+
+  app.post('/api/vnc/ime/english', async (request) => {
+    assertVncLocal(request);
+    return setVncImeEnglish();
   });
 
   app.post<{ Params: { slot: string } }>('/api/vnc/focus/:slot', async (request, reply) => {
