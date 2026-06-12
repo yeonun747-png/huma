@@ -13,8 +13,13 @@ import {
   ensurePostingSessionAfterCaptcha,
   isPostingAutoResumeBlocked,
   persistPostingSessionBeforeHoldClose,
+  pickPostingWorkflowPage,
 } from '../../lib/posting-captcha-session.js';
-import { isNaverCaptchaVisible, pickNaverCaptchaPage } from '../../lib/naver-captcha-vision.js';
+import {
+  isNaverCaptchaVisible,
+  isNaverLoginPendingAfterCaptcha,
+  pickNaverCaptchaPage,
+} from '../../lib/naver-captcha-vision.js';
 import { vncSlotLabelKo } from '../../lib/vnc-window-layout.js';
 import { enforceVncWindowBounds } from '../../lib/vnc-window-guard.js';
 import { notifyCaptchaTelegram, resolveVncUrl, buildJobWebUrl } from './telegram.js';
@@ -143,7 +148,7 @@ function scheduleReminders(entry: CaptchaHoldEntry): void {
 async function tryAutoResumePostingCaptcha(entry: CaptchaHoldEntry): Promise<void> {
   if (!holds.has(entry.jobId) || entry.resumingInProgress || entry.autoResumeFiring) return;
 
-  const page = pickNaverCaptchaPage(entry.context);
+  const page = pickPostingWorkflowPage(entry.context) ?? pickNaverCaptchaPage(entry.context);
   if (!page || page.isClosed()) return;
   if (await isNaverCaptchaVisible(page)) return;
 
@@ -415,13 +420,26 @@ export async function completeCaptchaHold(
         .then(({ data }) => (data ? buildPostBlogPayloadFromJob(data) : undefined)));
 
     if (postPayload) {
+      const wfPage = pickPostingWorkflowPage(entry.context) ?? pickNaverCaptchaPage(entry.context);
+      if (wfPage && !wfPage.isClosed() && (await isNaverCaptchaVisible(wfPage))) {
+        entry.resumingInProgress = false;
+        holds.set(jobId, entry);
+        scheduleReminders(entry);
+        return { ok: false, error: 'CAPTCHA_STILL_VISIBLE' };
+      }
+
       const sessionOk = await ensurePostingSessionAfterCaptcha(entry.context, entry.accountId, {
         allowAutoLoginSubmit: false,
+        loginWaitMs: 30_000,
       }).catch(() => false);
       if (!sessionOk) {
         entry.resumingInProgress = false;
         holds.set(jobId, entry);
         scheduleReminders(entry);
+        const nidPage = pickNaverCaptchaPage(entry.context);
+        if (nidPage?.url().includes('nidlogin') && (await isNaverLoginPendingAfterCaptcha(nidPage))) {
+          return { ok: false, error: 'CAPTCHA_PENDING_LOGIN' };
+        }
         return { ok: false, error: 'CAPTCHA_LOGIN_NOT_READY' };
       }
       await persistPostingSessionBeforeHoldClose(entry.context).catch(() => {});

@@ -116,7 +116,11 @@ const GRID_CELL_SELECTORS = [
 
 const CONFIRM_SELECTORS = [
   '#captcha_confirm',
+  'a#captcha_confirm',
   '#captcha .btn_confirm',
+  '#captcha a.btn_confirm',
+  '#captcha button.btn_confirm',
+  '#captcha button:has-text("확인")',
   '[class*="captcha"] [class*="confirm"]',
   '[class*="captcha"] button[type="submit"]',
 ];
@@ -130,16 +134,49 @@ export function pickNaverCaptchaPage(context: BrowserContext): Page | undefined 
   );
 }
 
+/** 보이는 캡차 루트 안에 실제 챌린지(입력·이미지·슬라이더·그리드)가 있을 때만 */
+async function locateActiveCaptchaRoot(page: Page): Promise<Locator | null> {
+  for (const sel of CAPTCHA_ROOT_SELECTORS) {
+    const loc = page.locator(sel).first();
+    if (!(await loc.isVisible({ timeout: 300 }).catch(() => false))) continue;
+
+    const inputs = loc.locator(
+      'input[type="text"], input[type="tel"], input[type="number"], input[maxlength], textarea',
+    );
+    const inputCount = await inputs.count().catch(() => 0);
+    for (let i = 0; i < inputCount; i += 1) {
+      const input = inputs.nth(i);
+      if (!(await input.isVisible().catch(() => false))) continue;
+      const id = (await input.getAttribute('id').catch(() => null)) ?? '';
+      const name = (await input.getAttribute('name').catch(() => null)) ?? '';
+      if (id === 'id' || id === 'pw' || name === 'id' || name === 'pw') continue;
+      const box = await input.boundingBox().catch(() => null);
+      if (box && box.width > 8 && box.height > 8) return loc;
+    }
+
+    const img = loc.locator('#captchaimg, img').first();
+    if (await img.isVisible({ timeout: 200 }).catch(() => false)) {
+      const box = await img.boundingBox().catch(() => null);
+      if (box && box.width > 24 && box.height > 24) return loc;
+    }
+
+    const slider = loc.locator('[class*="slider"], [class*="slide"], #captcha_slide_btn').first();
+    if (await slider.isVisible({ timeout: 200 }).catch(() => false)) {
+      const box = await slider.boundingBox().catch(() => null);
+      if (box && box.width > 16 && box.height > 16) return loc;
+    }
+
+    const gridCount = await loc.locator('ul li, [role="button"]').count().catch(() => 0);
+    if (gridCount >= 4) return loc;
+  }
+  return null;
+}
+
 export async function isNaverCaptchaVisible(page: Page): Promise<boolean> {
   const url = page.url().toLowerCase();
-  if ((url.includes('captcha') || url.includes('challenge')) && url.includes('nid')) return true;
+  if (url.includes('nid') && (url.includes('/captcha') || url.includes('challenge'))) return true;
 
-  const inputs = await getVisibleCaptchaInputs(page);
-  if (inputs.length > 0) return true;
-
-  for (const sel of CAPTCHA_IMAGE_SELECTORS) {
-    if (await page.locator(sel).first().isVisible({ timeout: 250 }).catch(() => false)) return true;
-  }
+  if (await locateActiveCaptchaRoot(page)) return true;
 
   if (await page.locator('iframe[src*="captcha"]').first().isVisible({ timeout: 250 }).catch(() => false)) {
     return true;
@@ -507,13 +544,14 @@ async function humanTypeCaptchaAnswer(page: Page, input: Locator, text: string):
 
 /** CAPTCHA 영역 내 보이는 입력칸만 (로그인 #id·#pw 제외). */
 async function getVisibleCaptchaInputs(page: Page): Promise<Locator[]> {
-  const root = await locateCaptchaRoot(page);
-  const candidates = [
-    root.locator(
-      'input[type="text"], input[type="tel"], input[type="number"], input[maxlength], textarea',
-    ),
-    page.locator(CAPTCHA_ANSWER_INPUT_SELECTORS.join(', ')),
-  ];
+  const activeRoot = await locateActiveCaptchaRoot(page);
+  const candidates = activeRoot
+    ? [
+        activeRoot.locator(
+          'input[type="text"], input[type="tel"], input[type="number"], input[maxlength], textarea',
+        ),
+      ]
+    : [page.locator(CAPTCHA_ANSWER_INPUT_SELECTORS.join(', '))];
 
   const seen = new Set<string>();
   const visible: Locator[] = [];
@@ -587,18 +625,17 @@ async function applySliderDrag(
   return true;
 }
 
-async function clickCaptchaConfirm(page: Page): Promise<void> {
+async function clickCaptchaConfirm(page: Page): Promise<boolean> {
   for (const sel of CONFIRM_SELECTORS) {
     const btn = page.locator(sel).first();
-    if (await btn.isVisible().catch(() => false)) {
-      const box = await btn.boundingBox().catch(() => null);
-      if (box && box.width > 0 && box.height > 0) {
-        await safeHumanClick(page, btn);
-        await sleep(randomBetween(400, 900));
-      }
-      return;
-    }
+    if (!(await btn.isVisible().catch(() => false))) continue;
+    const box = await btn.boundingBox().catch(() => null);
+    if (!box || box.width <= 0 || box.height <= 0) continue;
+    await safeHumanClick(page, btn);
+    await sleep(randomBetween(400, 900));
+    return true;
   }
+  return false;
 }
 
 async function submitCaptcha(page: Page, ctx: NaverCaptchaVisionContext): Promise<void> {
@@ -607,7 +644,11 @@ async function submitCaptcha(page: Page, ctx: NaverCaptchaVisionContext): Promis
     await humanSleep(150, 350);
   }
 
-  await clickCaptchaConfirm(page);
+  const confirmed = await clickCaptchaConfirm(page);
+  if (!confirmed) {
+    await page.keyboard.press('Enter').catch(() => {});
+    await sleep(randomBetween(350, 700));
+  }
 
   if (ctx.autoLoginSubmit === true) {
     if (ctx.resubmit) {
@@ -632,8 +673,13 @@ export async function applyManualCaptchaAnswer(
 
   await humanSleep(250, 600);
   await submitCaptcha(page, ctx);
-  const cleared = await waitForCaptchaCleared(page, 12_000);
-  const pending_login = cleared ? await isNaverLoginPendingAfterCaptcha(page) : false;
+  let cleared = await waitForCaptchaCleared(page, 15_000);
+  let pending_login = cleared ? await isNaverLoginPendingAfterCaptcha(page) : false;
+
+  if (!cleared && (await isNaverLoginPendingAfterCaptcha(page))) {
+    cleared = true;
+    pending_login = true;
+  }
 
   return { filled: true, submitted: true, cleared, pending_login };
 }

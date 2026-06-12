@@ -6,7 +6,7 @@ import {
   clickNaverLoginButton,
   ensureNaverLoginCredentialsForCaptcha,
 } from './naver-login-fields.js';
-import { isNaverCaptchaVisible, pickNaverCaptchaPage } from './naver-captcha-vision.js';
+import { isNaverCaptchaVisible, isNaverLoginPendingAfterCaptcha, pickNaverCaptchaPage } from './naver-captcha-vision.js';
 import { gotoBlogPortal, waitForBlogPortalReady } from './naver-blog-portal.js';
 import { findNaverPostwritePage } from '../modules/playwright/naver/enter-blog-editor.js';
 import { sleep } from './utils.js';
@@ -149,7 +149,7 @@ export async function pollUntilNaverLoginRedirect(
 export async function persistPostingSessionBeforeHoldClose(context: BrowserContext): Promise<void> {
   if (findNaverPostwritePage(context)) return;
 
-  const page = pickNaverCaptchaPage(context) ?? pickPostingWorkflowPage(context);
+  const page = pickPostingWorkflowPage(context) ?? pickNaverCaptchaPage(context);
   if (!page) return;
 
   if (await isNaverCaptchaVisible(page)) return;
@@ -191,6 +191,14 @@ export function buildPostBlogPayloadFromJob(job: {
   };
 }
 
+/** 컨텍스트 내 로그인 완료 탭 탐색 */
+async function findLoggedInPostingPage(context: BrowserContext): Promise<Page | undefined> {
+  for (const page of context.pages().filter((p) => !p.isClosed())) {
+    if (await isNaverLoggedInOnPage(page)) return page;
+  }
+  return undefined;
+}
+
 /**
  * CAPTCHA 해결 후 — 로그인 제출을 끝내고 로그인 상태만 확인한다.
  * (에디터 진입은 continuePostBlog → enterBlogEditor 가 직접 URL로 처리)
@@ -198,10 +206,18 @@ export function buildPostBlogPayloadFromJob(job: {
 export async function ensurePostingSessionAfterCaptcha(
   context: BrowserContext,
   accountId: string,
-  options?: { allowAutoLoginSubmit?: boolean },
+  options?: { allowAutoLoginSubmit?: boolean; loginWaitMs?: number },
 ): Promise<boolean> {
   const allowAutoLoginSubmit = options?.allowAutoLoginSubmit === true;
-  const page = pickNaverCaptchaPage(context) ?? pickPostingWorkflowPage(context);
+  const loginWaitMs = options?.loginWaitMs ?? 25_000;
+
+  const loggedIn = await findLoggedInPostingPage(context);
+  if (loggedIn) {
+    await persistPostingSessionBeforeHoldClose(context);
+    return true;
+  }
+
+  let page = pickPostingWorkflowPage(context) ?? pickNaverCaptchaPage(context);
   if (!page || page.isClosed()) return false;
 
   const url = page.url();
@@ -219,7 +235,18 @@ export async function ensurePostingSessionAfterCaptcha(
     if (page.url().includes('nidlogin.login')) return false;
     await humanSleep(...scaleMs(800, 1500));
   } else if (page.url().includes('nidlogin')) {
-    return false;
+    const nidPage = pickNaverCaptchaPage(context) ?? page;
+    if (nidPage && (await isNaverLoginPendingAfterCaptcha(nidPage))) {
+      await nidPage
+        .waitForURL((u) => !u.href.includes('nidlogin'), { timeout: loginWaitMs })
+        .catch(() => {});
+      const afterLogin = await findLoggedInPostingPage(context);
+      if (afterLogin) {
+        await persistPostingSessionBeforeHoldClose(context);
+        return true;
+      }
+    }
+    if (page.url().includes('nidlogin')) return false;
   }
 
   const probe = pickPostingWorkflowPage(context) ?? page;

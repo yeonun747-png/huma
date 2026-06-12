@@ -53,10 +53,23 @@ export function CaptchaCompleteModal({
       onClose();
     } catch (e) {
       const msg = (e as Error).message;
-      // 이미 자동 재개가 진행 중이면 정상 — 모달 닫고 모니터에서 확인
       if (msg.includes('CAPTCHA_RESUME_IN_PROGRESS')) {
         onCompleted();
         onClose();
+        return;
+      }
+      if (msg.includes('CAPTCHA_STILL_VISIBLE')) {
+        setError('CAPTCHA가 아직 화면에 있습니다. VNC에서 정답을 다시 확인하거나 정답 제출을 눌러 주세요.');
+        return;
+      }
+      if (msg.includes('CAPTCHA_PENDING_LOGIN')) {
+        setError('CAPTCHA는 통과됐습니다. VNC에서 로그인 버튼을 누른 뒤 발행 재개를 다시 눌러 주세요.');
+        return;
+      }
+      if (msg.includes('CAPTCHA_LOGIN_NOT_READY')) {
+        setError(
+          '네이버 로그인이 확인되지 않습니다. VNC에서 로그인을 완료한 뒤(www.naver.com MY 영역) 발행 재개를 눌러 주세요.',
+        );
         return;
       }
       setError(msg);
