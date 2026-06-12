@@ -7,7 +7,7 @@ import {
   ensureNaverLoginCredentialsForCaptcha,
 } from './naver-login-fields.js';
 import { isNaverCaptchaVisible, pickNaverCaptchaPage } from './naver-captcha-vision.js';
-import { ensureBlogWriteEntry, findBlogWriteEntry, gotoBlogPortal } from './naver-blog-portal.js';
+import { gotoBlogPortal } from './naver-blog-portal.js';
 import { vncFastSleepScale } from './vnc-session.js';
 
 function scaleMs(min: number, max: number): [number, number] {
@@ -45,17 +45,21 @@ export function pickPostingWorkflowPage(context: BrowserContext): Page | undefin
 }
 
 /**
- * 글쓰기 가능 상태 — 로그인 링크가 없고 글쓰기 진입점이 보이면 OK.
- * BlogHome(section.blog)도 렌더만 끝나면 글쓰기 버튼이 있으므로 정상 상태로 취급한다.
+ * 발행 재개 가능 상태 — 로그인만 확인한다.
+ * 에디터 진입은 enterBlogEditor 가 공식 글쓰기 URL(blog.naver.com/{id}/postwrite)로
+ * 직접 이동하므로, 여기서는 "캡차·로그인 화면이 아니고 네이버에 로그인된 상태"인지만 본다.
  */
 export async function isBlogWriteReady(page: Page): Promise<boolean> {
   const url = page.url();
-  if (url.includes('nidlogin')) return false;
+  if (url.includes('nidlogin') || url === 'about:blank' || url === '') return false;
+  if (!url.includes('naver.com')) return false;
+
+  if (await isNaverCaptchaVisible(page)) return false;
 
   const loginLink = page.locator('a[href*="nidlogin.login"], a.link_login').first();
   if (await loginLink.isVisible({ timeout: 1000 }).catch(() => false)) return false;
 
-  return (await findBlogWriteEntry(page, 3000)) !== null;
+  return true;
 }
 
 /** CAPTCHA hold 종료 전 — 로그인 리다이렉트 완료·blog 방문으로 프로필 쿠키 저장 */
@@ -76,8 +80,8 @@ export async function persistPostingSessionBeforeHoldClose(context: BrowserConte
 }
 
 /**
- * CAPTCHA 해결 후 — 로그인 제출 완료 + 글쓰기 진입점 확인.
- * BlogHome 은 탈출하지 않고 렌더 대기 후 진입점을 찾는다 (무한 네비게이션 금지).
+ * CAPTCHA 해결 후 — 로그인 제출을 끝내고 로그인 상태만 확인한다.
+ * (에디터 진입은 continuePostBlog → enterBlogEditor 가 직접 URL로 처리)
  */
 export async function ensurePostingSessionAfterCaptcha(
   context: BrowserContext,
@@ -104,9 +108,10 @@ export async function ensurePostingSessionAfterCaptcha(
   const probe = pickPostingWorkflowPage(context) ?? page;
   if (await isBlogWriteReady(probe)) return true;
 
-  const blogUrl = await loadAccountBlogUrl(accountId).catch(() => undefined);
-  const entry = await ensureBlogWriteEntry(probe, blogUrl);
-  return entry !== null;
+  // 로그인 직후 about:blank/포털 미정착이면 1회 포털로 정착시킨 뒤 재확인
+  await gotoBlogPortal(probe).catch(() => {});
+  await humanSleep(...scaleMs(600, 1200));
+  return isBlogWriteReady(probe);
 }
 
 /** VNC CAPTCHA 해결 직후 — blog.naver.com 글쓰기 가능 여부만 확인 */

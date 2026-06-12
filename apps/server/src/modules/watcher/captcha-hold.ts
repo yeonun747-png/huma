@@ -49,6 +49,8 @@ interface CaptchaHoldEntry extends CaptchaHoldInput {
   remindCount: number;
   visionAutoFailed: boolean;
   resumingInProgress: boolean;
+  /** 자동 재개 인터벌 틱 중복 실행 방지 (resumingInProgress 와 별개 — completeCaptchaHold 가 후자를 소유) */
+  autoResumeFiring: boolean;
   timers: NodeJS.Timeout[];
 }
 
@@ -130,7 +132,7 @@ function scheduleReminders(entry: CaptchaHoldEntry): void {
 }
 
 async function tryAutoResumePostingCaptcha(entry: CaptchaHoldEntry): Promise<void> {
-  if (!holds.has(entry.jobId) || entry.resumingInProgress) return;
+  if (!holds.has(entry.jobId) || entry.resumingInProgress || entry.autoResumeFiring) return;
 
   const page = pickNaverCaptchaPage(entry.context);
   if (!page || page.isClosed()) return;
@@ -139,7 +141,7 @@ async function tryAutoResumePostingCaptcha(entry: CaptchaHoldEntry): Promise<voi
   const url = page.url();
   if (url === 'about:blank' || url === '') return;
 
-  entry.resumingInProgress = true;
+  entry.autoResumeFiring = true;
   try {
     const sessionReady = await ensurePostingSessionAfterCaptcha(entry.context, entry.accountId);
     if (!sessionReady) return;
@@ -150,10 +152,11 @@ async function tryAutoResumePostingCaptcha(entry: CaptchaHoldEntry): Promise<voi
       job_id: entry.jobId,
       account_id: entry.accountId,
     });
+    // completeCaptchaHold 가 resumingInProgress·clearTimers·holds.delete 를 직접 관리한다.
     await completeCaptchaHold(entry.jobId);
   } finally {
     const live = holds.get(entry.jobId);
-    if (live) live.resumingInProgress = false;
+    if (live) live.autoResumeFiring = false;
   }
 }
 
@@ -247,6 +250,7 @@ export async function enterCaptchaHold(
     remindCount: 0,
     visionAutoFailed: input.visionAutoFailed === true,
     resumingInProgress: false,
+    autoResumeFiring: false,
     timers: [],
   };
   holds.set(input.jobId, entry);

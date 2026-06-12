@@ -52,7 +52,14 @@ export function CaptchaCompleteModal({
       onCompleted();
       onClose();
     } catch (e) {
-      setError((e as Error).message);
+      const msg = (e as Error).message;
+      // 이미 자동 재개가 진행 중이면 정상 — 모달 닫고 모니터에서 확인
+      if (msg.includes('CAPTCHA_RESUME_IN_PROGRESS')) {
+        onCompleted();
+        onClose();
+        return;
+      }
+      setError(msg);
     } finally {
       setSubmitting(false);
     }
@@ -71,8 +78,13 @@ export function CaptchaCompleteModal({
     try {
       const r = await api.submitCaptchaAnswer(job.id, trimmed);
       if (r.captcha_cleared) {
-        setAnswerMsg({ ok: true, text: 'CAPTCHA 통과 — 「발행 재개」를 누르면 에디터로 진행합니다.' });
+        setAnswerMsg({
+          ok: true,
+          text: 'CAPTCHA 통과 — 발행이 자동으로 진행됩니다. 모니터에서 확인하세요.',
+        });
         setCaptchaAnswer('');
+        onCompleted();
+        window.setTimeout(() => onClose(), 1800);
       } else {
         setAnswerMsg({
           ok: false,
