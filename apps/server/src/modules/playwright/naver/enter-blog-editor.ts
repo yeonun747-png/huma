@@ -1,4 +1,4 @@
-import type { Page } from 'playwright';
+import type { BrowserContext, Page } from 'playwright';
 
 import { humanSleep } from '../../human-engine/typing.js';
 
@@ -9,6 +9,7 @@ import { notifySlack } from '../../watcher/detector.js';
 import { vncFastSleepScale } from '../../../lib/vnc-session.js';
 import { PLAYWRIGHT_NAV_TIMEOUT_MS } from '../../../lib/playwright-nav-timeout.js';
 import { sleep } from '../../../lib/utils.js';
+import { supabase } from '../../../middleware/auth.js';
 
 function scaledSleep(min: number, max: number): Promise<void> {
   const s = vncFastSleepScale();
@@ -24,6 +25,10 @@ const RESERVED_BLOG_PATHS = new Set([
   'PostView',
   'section',
 ]);
+const POSTWRITE_URL_RE = /postwrite|PostWriteForm|GoBlogWrite/i;
+
+/** VNC/Xvfb — SmartEditor ONE 초기 로딩이 느릴 수 있음 */
+const SMART_EDITOR_WAIT_MS = 90_000;
 
 function blogIdFromUrl(url: string): string | null {
   if (url.includes('section.blog') || /BlogHome/i.test(url)) return null;
@@ -32,36 +37,23 @@ function blogIdFromUrl(url: string): string | null {
   return id;
 }
 
-/** 로그인된 계정의 블로그ID 확보 — 현재 URL → 포털 리다이렉트 → 「내 블로그」 링크 순 */
-async function resolveBlogId(page: Page): Promise<string | null> {
-  const direct = blogIdFromUrl(page.url());
-  if (direct) return direct;
-
-  await page
-    .goto('https://blog.naver.com', { waitUntil: 'domcontentloaded', timeout: PLAYWRIGHT_NAV_TIMEOUT_MS })
-    .catch(() => {});
-  await sleep(1500);
-
-  const afterRedirect = blogIdFromUrl(page.url());
-  if (afterRedirect) return afterRedirect;
-
-  const myBlog = page
-    .locator('a[href*="blog.naver.com/"]:not([href*="section.blog"]):not([href*="BlogHome"])')
-    .first();
-  const href = await myBlog.getAttribute('href').catch(() => null);
-  if (href) {
-    const id = href.match(BLOG_ID_RE)?.[1];
-    if (id && !RESERVED_BLOG_PATHS.has(id)) return id;
-  }
-  return null;
+async function loadBlogIdFromAccount(accountId: string): Promise<string | null> {
+  const { data } = await supabase
+    .from('huma_accounts')
+    .select('naver_id, blog_url')
+    .eq('id', accountId)
+    .maybeSingle();
+  const fromUrl = (data?.blog_url as string | undefined)?.match(BLOG_ID_RE)?.[1];
+  if (fromUrl && !RESERVED_BLOG_PATHS.has(fromUrl)) return fromUrl;
+  const nid = (data?.naver_id as string | undefined)?.trim();
+  return nid || null;
 }
 
-/**
- * SmartEditor ONE 진입 직후 뜨는 레이어 정리:
- * - "작성 중이던 글이 있습니다" 복구 팝업 → 취소(새 글로 시작)
- * - 도움말/가이드 오버레이 → 닫기
- * 팝업은 #mainFrame 안에 렌더된다.
- */
+/** 이미 열린 postwrite 탭이 있으면 그 탭에서 에디터 로딩만 대기 (재네비게이션·재로그인 금지) */
+function findPostwritePage(context: BrowserContext): Page | undefined {
+  return context.pages().find((p) => !p.isClosed() && POSTWRITE_URL_RE.test(p.url()));
+}
+
 async function dismissEditorOverlays(editorPage: Page): Promise<void> {
   const frame = editorPage.frameLocator('#mainFrame');
 
@@ -82,56 +74,94 @@ async function dismissEditorOverlays(editorPage: Page): Promise<void> {
   }
 }
 
-async function waitForSmartEditor(editorPage: Page): Promise<boolean> {
+async function waitForSmartEditor(editorPage: Page, timeoutMs = SMART_EDITOR_WAIT_MS): Promise<boolean> {
   try {
-    await editorPage.waitForSelector('#mainFrame', { state: 'attached', timeout: 30_000 });
+    await editorPage.waitForSelector('#mainFrame', { state: 'attached', timeout: timeoutMs });
     await editorPage
       .frameLocator('#mainFrame')
       .locator('.se-content')
-      .waitFor({ state: 'visible', timeout: 30_000 });
+      .waitFor({ state: 'visible', timeout: timeoutMs });
     return true;
   } catch {
     return false;
   }
 }
 
+async function tryEditorOnPage(page: Page): Promise<Page | null> {
+  await page.bringToFront().catch(() => {});
+  await page.waitForLoadState('domcontentloaded').catch(() => {});
+  await dismissEditorOverlays(page);
+  if (await waitForSmartEditor(page)) {
+    await dismissEditorOverlays(page);
+    return page;
+  }
+  return null;
+}
+
 /**
- * 블로그 글쓰기 에디터 진입 — 공식 직접 URL 사용.
- * 네이버 개인 블로그의 「글쓰기」 버튼 클릭은 목록/뷰어로 빠지는 경우가 많아,
- * 로그인 상태에서 SmartEditor ONE을 바로 여는 blog.naver.com/{id}/postwrite 로 이동한다.
- * (실패 시 GoBlogWrite.naver 폴백.) 반환값: 에디터가 떠 있는 Page.
+ * 블로그 글쓰기 에디터 진입.
+ * CAPTCHA 직후에는 재로그인·새 탭 금지 — 기존 postwrite 탭 로딩을 최대 90초 대기한다.
  */
-export async function enterBlogEditor(page: Page, _humanEngine: HumanEngineConfig): Promise<Page> {
-  const blogId = await resolveBlogId(page);
+export async function enterBlogEditor(
+  page: Page,
+  _humanEngine: HumanEngineConfig,
+  options?: { accountId?: string },
+): Promise<Page> {
+  const context = page.context();
+
+  // ① 이미 postwrite 로딩 중인 탭 — goto 없이 대기만
+  const existingPostwrite = findPostwritePage(context);
+  if (existingPostwrite) {
+    const ready = await tryEditorOnPage(existingPostwrite);
+    if (ready) return ready;
+  }
+
+  if (POSTWRITE_URL_RE.test(page.url())) {
+    const ready = await tryEditorOnPage(page);
+    if (ready) return ready;
+  }
+
+  // ② 계정 DB에서 blogId 확보 (blog.naver.com 재이동으로 세션 꼬임 방지)
+  const blogId =
+    (options?.accountId ? await loadBlogIdFromAccount(options.accountId) : null) ??
+    blogIdFromUrl(page.url());
 
   const writeUrls = blogId
     ? [`https://blog.naver.com/${blogId}/postwrite`, 'https://blog.naver.com/GoBlogWrite.naver']
     : ['https://blog.naver.com/GoBlogWrite.naver'];
 
+  const workflowPage = findPostwritePage(context) ?? page;
+
   for (const url of writeUrls) {
-    await page
+    if (POSTWRITE_URL_RE.test(workflowPage.url())) break;
+
+    await workflowPage
       .goto(url, { waitUntil: 'domcontentloaded', timeout: PLAYWRIGHT_NAV_TIMEOUT_MS })
       .catch(() => {});
-    await scaledSleep(1200, 2500);
+    await scaledSleep(1500, 3000);
 
-    // 글쓰기는 동일 탭에서 열리지만, 일부 경로는 새 탭(팝업)을 띄운다.
-    const popup = page
-      .context()
-      .pages()
-      .find((p) => p !== page && /postwrite|PostWriteForm|GoBlogWrite/i.test(p.url()));
-    const editorPage = popup ?? page;
+    const ready = await tryEditorOnPage(workflowPage);
+    if (ready) return ready;
 
-    await editorPage.waitForLoadState('domcontentloaded').catch(() => {});
-    await dismissEditorOverlays(editorPage);
-
-    if (await waitForSmartEditor(editorPage)) {
-      await dismissEditorOverlays(editorPage);
-      return editorPage;
+    // 일부 경로는 팝업 탭 — 기존 탭만 사용, 새 로그인 탭 생성 금지
+    const popup = context.pages().find(
+      (p) => p !== workflowPage && !p.isClosed() && POSTWRITE_URL_RE.test(p.url()),
+    );
+    if (popup) {
+      const popupReady = await tryEditorOnPage(popup);
+      if (popupReady) return popupReady;
     }
   }
 
+  // ③ 마지막 — 열린 모든 postwrite 탭에서 재대기 (로딩 지연)
+  for (const p of context.pages()) {
+    if (p.isClosed() || !POSTWRITE_URL_RE.test(p.url())) continue;
+    const ready = await tryEditorOnPage(p);
+    if (ready) return ready;
+  }
+
   await notifySlack(
-    `블로그 에디터(SmartEditor ONE) 진입 실패 — blogId=${blogId ?? '미확인'} (postwrite/GoBlogWrite 모두 #mainFrame/.se-content 미표시)`,
+    `블로그 에디터(SmartEditor ONE) 진입 실패 — blogId=${blogId ?? '미확인'} (${SMART_EDITOR_WAIT_MS / 1000}s 대기 후에도 #mainFrame/.se-content 미표시)`,
   );
   throw new Error('BLOG_EDITOR_NOT_READY');
 }

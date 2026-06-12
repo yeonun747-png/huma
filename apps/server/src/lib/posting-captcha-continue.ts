@@ -6,19 +6,13 @@ import { logOperation } from './log-emitter.js';
 import { scheduleRepeatIfNeeded } from './repeat-scheduler.js';
 import type { JobRecord } from './job-scheduler.js';
 import { loadAccountForBrowser } from '../modules/playwright/account-loader.js';
-import { naverLogin } from '../modules/playwright/naver/login.js';
 import { parsePersona } from '../modules/playwright/persona.js';
-import {
-  acquireWorkflowPage,
-  closeBrowserContext,
-  closeIdleBlankTabs,
-} from '../modules/playwright/browser.js';
+import { closeBrowserContext, closeIdleBlankTabs } from '../modules/playwright/browser.js';
 import { executePostBlog } from '../modules/queue/jobs/post-blog.js';
 import { releaseModem, type ModemSession } from '../modules/proxy/manager.js';
-import {
-  ensurePostingSessionAfterCaptcha,
-  pickPostingWorkflowPage,
-} from './posting-captcha-session.js';
+import { pickPostingWorkflowPage } from './posting-captcha-session.js';
+import { sleep } from './utils.js';
+import { shouldPreserveBrowserPageForVnc } from '../modules/watcher/captcha-hold.js';
 
 async function incrementPostCount(accountId: string): Promise<void> {
   const { data } = await supabase.from('huma_accounts').select('post_count_today').eq('id', accountId).single();
@@ -26,7 +20,13 @@ async function incrementPostCount(accountId: string): Promise<void> {
   await supabase.from('huma_accounts').update({ post_count_today: current + 1 }).eq('id', accountId);
 }
 
-/** CAPTCHA hold — 브라우저·로그인 세션 유지한 채 post_blog 이어하기 (재큐·재브라우저 금지) */
+const EDITOR_RETRY_MAX = 3;
+const EDITOR_RETRY_DELAY_MS = 8_000;
+
+/**
+ * CAPTCHA hold — 동일 브라우저·로그인 세션 유지한 채 post_blog 이어하기.
+ * 재로그인(naverLogin) 금지 — 새 탭+캡차 재발생 원인.
+ */
 export async function continuePostBlogFromCaptchaHold(params: {
   jobId: string;
   accountId: string;
@@ -35,8 +35,22 @@ export async function continuePostBlogFromCaptchaHold(params: {
   payload: Record<string, unknown>;
   releaseAccountLock: () => void;
   workspace?: string | null;
-}): Promise<{ ok: boolean; resultUrl?: string; error?: string }> {
-  const { jobId, accountId, context, modemSession, payload, releaseAccountLock, workspace } = params;
+  accountLabel?: string;
+  jobTitle?: string;
+}): Promise<{ ok: boolean; resultUrl?: string; error?: string; reHeld?: boolean }> {
+  const {
+    jobId,
+    accountId,
+    context,
+    modemSession,
+    payload,
+    releaseAccountLock,
+    workspace,
+    accountLabel,
+    jobTitle,
+  } = params;
+
+  let preserveBrowserSession = false;
 
   try {
     await supabase
@@ -52,53 +66,73 @@ export async function continuePostBlogFromCaptchaHold(params: {
     const humanConfig = await getHumanEngineConfig();
     const accountCtx = await loadAccountForBrowser(accountId, modemSession?.proxyPort);
     const persona = parsePersona(accountCtx.persona);
-    const captchaCtx = {
-      humaJobId: jobId,
-      accountId,
-      workspace,
-      jobType: 'post_blog',
-    };
 
     await closeIdleBlankTabs(context);
 
-    const runPostBlog = async () => {
-      const page = pickPostingWorkflowPage(context) ?? (await acquireWorkflowPage(context));
-      return executePostBlog({
-        page,
-        payload,
-        humanConfig,
-        persona,
-        rttScale: 1,
-      });
-    };
+    let resultUrl = '';
+    let lastErr: Error | undefined;
 
-    const sessionOk = await ensurePostingSessionAfterCaptcha(context, accountId);
-    if (!sessionOk) {
-      await naverLogin(context, accountId, {
-        profilePath: accountCtx.profile_path,
-        skipShadowWalk: true,
-        captchaContext: captchaCtx,
-        keepSessionPage: true,
-      });
-    }
+    for (let attempt = 1; attempt <= EDITOR_RETRY_MAX; attempt += 1) {
+      const page = pickPostingWorkflowPage(context);
+      if (!page) throw new Error('BLOG_WORKFLOW_PAGE_MISSING');
 
-    let resultUrl: string;
-    try {
-      ({ resultUrl } = await runPostBlog());
-    } catch (postErr) {
-      const msg = (postErr as Error).message ?? '';
-      if (msg.includes('BLOG_WRITE_BTN_NOT_FOUND') || msg.includes('BLOG_EDITOR_NOT_READY')) {
-        await naverLogin(context, accountId, {
-          profilePath: accountCtx.profile_path,
-          skipShadowWalk: true,
-          captchaContext: captchaCtx,
-          keepSessionPage: true,
-        });
-        ({ resultUrl } = await runPostBlog());
-      } else {
+      try {
+        ({ resultUrl } = await executePostBlog({
+          page,
+          payload,
+          humanConfig,
+          persona,
+          rttScale: 1,
+          accountId,
+        }));
+        lastErr = undefined;
+        break;
+      } catch (postErr) {
+        lastErr = postErr as Error;
+        const msg = lastErr.message ?? '';
+
+        if (shouldPreserveBrowserPageForVnc(postErr)) {
+          preserveBrowserSession = true;
+          const { enterCaptchaHold } = await import('../modules/watcher/captcha-hold.js');
+          await logOperation({
+            level: 'warn',
+            message: `[post_blog] CAPTCHA 후 발행 중 캡차 재발 — hold 재진입 (시도 ${attempt})`,
+            job_id: jobId,
+            account_id: accountId,
+          });
+          await enterCaptchaHold({
+            jobId,
+            accountId,
+            workspace,
+            accountLabel,
+            jobTitle,
+            jobType: 'post_blog',
+            context,
+            modemSession,
+            releaseAccountLock,
+            payload,
+          });
+          return { ok: true, reHeld: true };
+        }
+
+        if (
+          attempt < EDITOR_RETRY_MAX &&
+          (msg.includes('BLOG_EDITOR_NOT_READY') || msg.includes('BLOG_WRITE_BTN_NOT_FOUND'))
+        ) {
+          await logOperation({
+            level: 'warn',
+            message: `[post_blog] 에디터 로딩 대기 재시도 ${attempt}/${EDITOR_RETRY_MAX} (재로그인 없음)`,
+            job_id: jobId,
+            account_id: accountId,
+          });
+          await sleep(EDITOR_RETRY_DELAY_MS);
+          continue;
+        }
         throw postErr;
       }
     }
+
+    if (lastErr) throw lastErr;
 
     const { data: job } = await supabase.from('huma_jobs').select('*').eq('id', jobId).single();
     await supabase
@@ -135,8 +169,10 @@ export async function continuePostBlogFromCaptchaHold(params: {
     });
     return { ok: false, error: message };
   } finally {
-    await closeBrowserContext(context).catch(() => {});
-    if (modemSession) await releaseModem(modemSession).catch(() => {});
-    releaseAccountLock();
+    if (!preserveBrowserSession) {
+      await closeBrowserContext(context).catch(() => {});
+      if (modemSession) await releaseModem(modemSession).catch(() => {});
+      releaseAccountLock();
+    }
   }
 }

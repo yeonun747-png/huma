@@ -55,6 +55,8 @@ interface CaptchaHoldEntry extends CaptchaHoldInput {
 }
 
 const holds = new Map<string, CaptchaHoldEntry>();
+/** completeCaptchaHold 동시 호출 방지 — 이중 재개·재큐 방지 */
+const completingHold = new Set<string>();
 
 function clearTimers(entry: CaptchaHoldEntry) {
   for (const t of entry.timers) clearTimeout(t);
@@ -307,6 +309,10 @@ export async function completeCaptchaHold(
   jobId: string,
   resultUrl?: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (completingHold.has(jobId)) {
+    return { ok: true };
+  }
+
   const entry = holds.get(jobId);
   if (!entry) {
     const { data: job } = await supabase
@@ -314,6 +320,9 @@ export async function completeCaptchaHold(
       .select('status, job_type, account_id')
       .eq('id', jobId)
       .maybeSingle();
+    if (job?.status === 'running') {
+      return { ok: true };
+    }
     if (job?.status === 'awaiting_captcha') {
       if (job.job_type === 'social_crank' && job.account_id) {
         await resumeSocialCrankAfterCaptcha(jobId, job.account_id);
@@ -353,6 +362,8 @@ export async function completeCaptchaHold(
   if (entry.resumingInProgress) {
     return { ok: false, error: 'CAPTCHA_RESUME_IN_PROGRESS' };
   }
+  completingHold.add(jobId);
+  try {
   entry.resumingInProgress = true;
   clearTimers(entry);
   holds.delete(jobId);
@@ -389,7 +400,12 @@ export async function completeCaptchaHold(
       payload: entry.payload,
       releaseAccountLock: entry.releaseAccountLock,
       workspace: entry.workspace,
+      accountLabel: entry.accountLabel,
+      jobTitle: entry.jobTitle,
     });
+    if (cont.reHeld) {
+      return { ok: true };
+    }
     resumeOk = cont.ok;
     resumeError = cont.error;
   } else if (entry.jobType === 'post_blog' || entry.jobType === 'cafe_new_post') {
@@ -451,6 +467,9 @@ export async function completeCaptchaHold(
   });
 
   return { ok: true };
+  } finally {
+    completingHold.delete(jobId);
+  }
 }
 
 export async function expireCaptchaHold(jobId: string): Promise<void> {

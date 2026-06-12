@@ -37,13 +37,14 @@ export async function postNaverBlog(params: {
   humanEngine: HumanEngineConfig;
   persona?: AccountPersona;
   rttScale?: number;
+  accountId?: string;
 }) {
   const persona = parsePersona(params.persona);
   const config = mergePersonaConfig(params.humanEngine, persona);
   const scale = params.rttScale ?? 1;
 
   // 에디터는 새 탭으로 열릴 수 있으므로 실제 에디터 페이지를 받아 이후 작업에 사용.
-  const page = await enterBlogEditor(params.page, config);
+  const page = await enterBlogEditor(params.page, config, { accountId: params.accountId });
 
   const titleBox = page.locator('#subjectTextBox');
   await humanClickLocator(page, titleBox);

@@ -12,6 +12,7 @@ export async function executePostBlog(params: {
   humanConfig: HumanEngineConfig;
   persona?: AccountPersona;
   rttScale?: number;
+  accountId?: string;
 }) {
   const workspace = String(params.payload.workspace ?? 'yeonun');
   const { content, linkUrl } = prepareBlogPostForPlaywright(
@@ -40,5 +41,6 @@ export async function executePostBlog(params: {
     humanEngine: params.humanConfig,
     persona: params.persona,
     rttScale: params.rttScale,
+    accountId: params.accountId,
   });
 }

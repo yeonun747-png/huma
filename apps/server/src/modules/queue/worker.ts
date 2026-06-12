@@ -10,6 +10,8 @@ import {
   closeIdleBlankTabs,
   acquireWorkflowPage,
 } from '../playwright/browser.js';
+import { pickPostingWorkflowPage } from '../../lib/posting-captcha-session.js';
+import { sleep } from '../../lib/utils.js';
 import { loadAccountForBrowser } from '../playwright/account-loader.js';
 import { ensureNaverLoggedIn, naverLogin } from '../playwright/naver/login.js';
 import { preSessionWarmup } from '../playwright/naver/pre-session-warmup.js';
@@ -417,40 +419,33 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
               runPostBlog = async (): Promise<string> => {
                 await markRunning();
                 await closeIdleBlankTabs(context);
-                const page = await acquireWorkflowPage(context);
-                try {
-                  const out = await executePostBlog({
-                    page,
-                    payload,
-                    humanConfig,
-                    persona,
-                    rttScale: rttScaleFactor,
-                  });
-                  return out.resultUrl;
-                } catch (postErr) {
-                  const msg = (postErr as Error).message ?? '';
-                  if (
-                    accountId &&
-                    (msg.includes('BLOG_WRITE_BTN_NOT_FOUND') || msg.includes('BLOG_EDITOR_NOT_READY'))
-                  ) {
-                    await naverLogin(context, accountId, {
-                      profilePath: accountCtx?.profile_path,
-                      skipShadowWalk: true,
-                      captchaContext: captchaCtx,
-                      keepSessionPage: true,
-                    });
-                    const retryPage = await acquireWorkflowPage(context);
+                let lastErr: Error | undefined;
+                for (let attempt = 1; attempt <= 3; attempt += 1) {
+                  const page = pickPostingWorkflowPage(context) ?? (await acquireWorkflowPage(context));
+                  try {
                     const out = await executePostBlog({
-                      page: retryPage,
+                      page,
                       payload,
                       humanConfig,
                       persona,
                       rttScale: rttScaleFactor,
+                      accountId,
                     });
                     return out.resultUrl;
+                  } catch (postErr) {
+                    lastErr = postErr as Error;
+                    const msg = lastErr.message ?? '';
+                    if (
+                      attempt < 3 &&
+                      (msg.includes('BLOG_WRITE_BTN_NOT_FOUND') || msg.includes('BLOG_EDITOR_NOT_READY'))
+                    ) {
+                      await sleep(8000);
+                      continue;
+                    }
+                    throw postErr;
                   }
-                  throw postErr;
                 }
+                throw lastErr ?? new Error('BLOG_EDITOR_NOT_READY');
               };
 
               if (accountId) {
