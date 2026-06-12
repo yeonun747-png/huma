@@ -62,6 +62,16 @@ export async function isBlogWriteReady(page: Page): Promise<boolean> {
   return true;
 }
 
+/** nid 로그인 화면 — 캡차는 풀렸지만 로그인 버튼 미클릭(VNC 수동 제출 대기) */
+export async function isNaverLoginPagePendingSubmit(page: Page): Promise<boolean> {
+  if (page.url().includes('nidlogin')) return true;
+
+  const loginBtn = page
+    .locator('#log\\.login, button.btn_login, input.btn_login, .btn_login, button[type="submit"]')
+    .first();
+  return loginBtn.isVisible({ timeout: 500 }).catch(() => false);
+}
+
 /** CAPTCHA hold 종료 전 — 로그인 리다이렉트 완료·blog 방문으로 프로필 쿠키 저장 */
 export async function persistPostingSessionBeforeHoldClose(context: BrowserContext): Promise<void> {
   const page = pickNaverCaptchaPage(context) ?? pickPostingWorkflowPage(context);

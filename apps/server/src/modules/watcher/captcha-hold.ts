@@ -10,6 +10,7 @@ import { resumePostingAfterCaptcha } from '../../lib/posting-captcha-resume.js';
 import { continuePostBlogFromCaptchaHold } from '../../lib/posting-captcha-continue.js';
 import {
   ensurePostingSessionAfterCaptcha,
+  isNaverLoginPagePendingSubmit,
 } from '../../lib/posting-captcha-session.js';
 import { isNaverCaptchaVisible, pickNaverCaptchaPage } from '../../lib/naver-captcha-vision.js';
 import { vncSlotLabelKo } from '../../lib/vnc-window-layout.js';
@@ -142,6 +143,9 @@ async function tryAutoResumePostingCaptcha(entry: CaptchaHoldEntry): Promise<voi
 
   const url = page.url();
   if (url === 'about:blank' || url === '') return;
+
+  // 캡차만 풀고 로그인 버튼은 VNC에서 누르는 구간 — 자동 재개 금지 (조기 completeCaptchaHold·브라우저 종료 방지)
+  if (await isNaverLoginPagePendingSubmit(page)) return;
 
   entry.autoResumeFiring = true;
   try {
