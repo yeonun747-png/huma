@@ -10,7 +10,7 @@ import type { HumanEngineConfig } from '../../../lib/settings.js';
 
 import { parsePersona, type AccountPersona } from '../persona.js';
 
-import { enterBlogEditor } from './enter-blog-editor.js';
+import { enterBlogEditor, dismissNaverBlogEditorOverlays } from './enter-blog-editor.js';
 import { humanClickLocator } from '../../human-engine/mouse.js';
 import { pasteBlogLinkWithOgPreview } from './paste-blog-link.js';
 import { insertImageViaToolbar, insertVideoViaToolbar } from './naver-editor-media.js';
@@ -45,13 +45,16 @@ export async function postNaverBlog(params: {
 
   // 에디터는 새 탭으로 열릴 수 있으므로 실제 에디터 페이지를 받아 이후 작업에 사용.
   const page = await enterBlogEditor(params.page, config, { accountId: params.accountId });
+  await dismissNaverBlogEditorOverlays(page);
 
-  const titleBox = page.locator('#subjectTextBox');
+  const titleBox = page.locator('#subjectTextBox, #titleArea, [placeholder*="제목"]').first();
   await humanClickLocator(page, titleBox);
   await humanType(page, titleBox, params.title, config);
   await scaledHumanSleep(2000, 5000, scale);
 
-  const editor = page.frameLocator('#mainFrame').locator('.se-content');
+  await dismissNaverBlogEditorOverlays(page);
+
+  const editor = page.frameLocator('#mainFrame').locator('.se-content, .se-text-paragraph, [contenteditable="true"]').first();
   await humanClickLocator(page, editor);
 
   await typePostContent(page, editor, params.content, config);

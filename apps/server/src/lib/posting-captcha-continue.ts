@@ -20,8 +20,8 @@ async function incrementPostCount(accountId: string): Promise<void> {
   await supabase.from('huma_accounts').update({ post_count_today: current + 1 }).eq('id', accountId);
 }
 
-const EDITOR_RETRY_MAX = 4;
-const EDITOR_RETRY_DELAY_MS = 10_000;
+const EDITOR_RETRY_MAX = 5;
+const EDITOR_RETRY_DELAY_MS = 15_000;
 
 /**
  * CAPTCHA hold — 동일 브라우저·로그인 세션 유지한 채 post_blog 이어하기.

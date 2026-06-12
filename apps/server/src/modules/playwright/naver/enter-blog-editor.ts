@@ -27,8 +27,30 @@ const RESERVED_BLOG_PATHS = new Set([
 ]);
 const POSTWRITE_URL_RE = /postwrite|PostWriteForm|GoBlogWrite/i;
 
-/** VNC/Xvfb — SmartEditor ONE 초기 로딩이 느릴 수 있음 */
-const SMART_EDITOR_WAIT_MS = 120_000;
+/** VNC/Xvfb — SmartEditor ONE 초기 로딩·도움말 오버레이 대기 */
+const SMART_EDITOR_WAIT_MS = 180_000;
+const EDITOR_POLL_MS = 1_200;
+
+const CONTENT_EDITOR_SELECTORS = [
+  '.se-content',
+  '.se-text-paragraph',
+  '.se-component-content',
+  '.se-main-container',
+  '[contenteditable="true"]',
+];
+
+const HELP_CLOSE_SELECTORS = [
+  '.se-help-panel-close-button',
+  'button.se-help-panel-close-button',
+  '.btn_close_help',
+  '.se-help-panel button[aria-label="닫기"]',
+  '.se-help-panel button[class*="close"]',
+  '.se-guide-close-button',
+  '.se-onboarding-close-button',
+  'button:has-text("닫기")',
+  'button:has-text("그만보기")',
+  'button:has-text("다시 보지 않기")',
+];
 
 function blogIdFromUrl(url: string): string | null {
   if (url.includes('section.blog') || /BlogHome/i.test(url)) return null;
@@ -54,73 +76,115 @@ function findPostwritePage(context: BrowserContext): Page | undefined {
   return context.pages().find((p) => !p.isClosed() && POSTWRITE_URL_RE.test(p.url()));
 }
 
-async function dismissEditorOverlays(editorPage: Page): Promise<void> {
+async function clickIfVisible(root: Page | ReturnType<Page['frameLocator']>, selector: string): Promise<boolean> {
+  const loc = root.locator(selector).first();
+  if (await loc.isVisible({ timeout: 600 }).catch(() => false)) {
+    await loc.click({ timeout: 4000 }).catch(() => {});
+    return true;
+  }
+  return false;
+}
+
+/** 도움말·임시저장·dim 등 — 에디터 입력을 가리는 오버레이 제거 (발행 전에도 재호출) */
+export async function dismissNaverBlogEditorOverlays(editorPage: Page): Promise<void> {
   const frame = editorPage.frameLocator('#mainFrame');
+  const scopes: Array<Page | ReturnType<Page['frameLocator']>> = [frame, editorPage];
 
-  const cancelDraft = frame
-    .locator(
-      '.se-popup-button-cancel, .se_popup_btn_cancel, button:has-text("취소"), button:has-text("새로 작성")',
-    )
-    .first();
-  if (await cancelDraft.isVisible({ timeout: 4000 }).catch(() => false)) {
-    await cancelDraft.click({ timeout: 5000 }).catch(() => {});
-    await sleep(600);
-  }
+  for (let round = 0; round < 4; round += 1) {
+    let dismissed = false;
 
-  const closeHelp = frame
-    .locator(
-      '.se-help-panel-close-button, button.se-help-panel-close-button, .btn_close_help, .se-help-panel button[aria-label="닫기"]',
-    )
-    .first();
-  if (await closeHelp.isVisible({ timeout: 1500 }).catch(() => false)) {
-    await closeHelp.click({ timeout: 4000 }).catch(() => {});
-    await sleep(300);
-  }
+    for (const scope of scopes) {
+      if (
+        await clickIfVisible(
+          scope,
+          '.se-popup-button-cancel, .se_popup_btn_cancel, button:has-text("취소"), button:has-text("새로 작성")',
+        )
+      ) {
+        dismissed = true;
+      }
+      for (const sel of HELP_CLOSE_SELECTORS) {
+        if (await clickIfVisible(scope, sel)) dismissed = true;
+      }
+      if (
+        await clickIfVisible(scope, '.se-popup-dim, .se_dim, .layer_popup .btn_close, .se-popup-dim-button')
+      ) {
+        dismissed = true;
+      }
+    }
 
-  const dimDismiss = frame
-    .locator('.se-popup-dim, .se_dim, .layer_popup .btn_close, button:has-text("닫기")')
-    .first();
-  if (await dimDismiss.isVisible({ timeout: 1200 }).catch(() => false)) {
-    await dimDismiss.click({ timeout: 4000 }).catch(() => {});
-    await sleep(250);
-  }
+    if (await clickIfVisible(editorPage, '#cookie_close, .cookie_btn_close, button:has-text("동의")')) {
+      dismissed = true;
+    }
 
-  const cookieClose = editorPage
-    .locator('#cookie_close, .cookie_btn_close, button:has-text("동의")')
-    .first();
-  if (await cookieClose.isVisible({ timeout: 1000 }).catch(() => false)) {
-    await cookieClose.click({ timeout: 3000 }).catch(() => {});
-    await sleep(200);
+    await editorPage.keyboard.press('Escape').catch(() => {});
+    if (!dismissed) break;
+    await sleep(350);
   }
+}
+
+async function isTitleBoxReady(editorPage: Page): Promise<boolean> {
+  return editorPage
+    .locator('#subjectTextBox, #titleArea, [placeholder*="제목"]')
+    .first()
+    .isVisible({ timeout: 800 })
+    .catch(() => false);
+}
+
+async function isContentAreaReady(editorPage: Page): Promise<boolean> {
+  const frame = editorPage.frameLocator('#mainFrame');
+  for (const sel of CONTENT_EDITOR_SELECTORS) {
+    if (await frame.locator(sel).first().isVisible({ timeout: 800 }).catch(() => false)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** #mainFrame + (제목란 또는 본문 영역) — 도움말이 떠도 제목란만 보이면 진입 성공 */
+async function isSmartEditorInteractable(editorPage: Page): Promise<boolean> {
+  const hasFrame =
+    (await editorPage.locator('#mainFrame').count().catch(() => 0)) > 0 ||
+    POSTWRITE_URL_RE.test(editorPage.url());
+  if (!hasFrame) return false;
+  return (await isTitleBoxReady(editorPage)) || (await isContentAreaReady(editorPage));
 }
 
 async function waitForSmartEditor(editorPage: Page, timeoutMs = SMART_EDITOR_WAIT_MS): Promise<boolean> {
-  try {
-    await editorPage.waitForSelector('#mainFrame', { state: 'attached', timeout: timeoutMs });
-    await editorPage
-      .frameLocator('#mainFrame')
-      .locator('.se-content')
-      .waitFor({ state: 'visible', timeout: timeoutMs });
-    return true;
-  } catch {
-    return false;
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    await dismissNaverBlogEditorOverlays(editorPage);
+
+    if (await isSmartEditorInteractable(editorPage)) {
+      await dismissNaverBlogEditorOverlays(editorPage);
+      await sleep(400);
+      await dismissNaverBlogEditorOverlays(editorPage);
+      if (await isSmartEditorInteractable(editorPage)) return true;
+    }
+
+    await sleep(EDITOR_POLL_MS);
   }
+
+  return false;
 }
 
-async function tryEditorOnPage(page: Page): Promise<Page | null> {
+async function tryEditorOnPage(page: Page, waitBudgetMs = SMART_EDITOR_WAIT_MS): Promise<Page | null> {
   await page.bringToFront().catch(() => {});
   await page.waitForLoadState('domcontentloaded').catch(() => {});
-  await dismissEditorOverlays(page);
-  if (await waitForSmartEditor(page)) {
-    await dismissEditorOverlays(page);
-    return page;
+
+  if (POSTWRITE_URL_RE.test(page.url()) || (await page.locator('#mainFrame').count().catch(() => 0)) > 0) {
+    if (await waitForSmartEditor(page, waitBudgetMs)) {
+      await dismissNaverBlogEditorOverlays(page);
+      return page;
+    }
   }
+
   return null;
 }
 
 /**
  * 블로그 글쓰기 에디터 진입.
- * CAPTCHA 직후에는 재로그인·새 탭 금지 — 기존 postwrite 탭 로딩을 최대 90초 대기한다.
+ * CAPTCHA 직후에는 재로그인·새 탭 금지 — 기존 postwrite 탭 로딩을 최대 180초 대기한다.
  */
 export async function enterBlogEditor(
   page: Page,
@@ -151,6 +215,8 @@ export async function enterBlogEditor(
     : ['https://blog.naver.com/GoBlogWrite.naver'];
 
   const workflowPage = findPostwritePage(context) ?? page;
+  const startedAt = Date.now();
+  const remainingMs = () => Math.max(30_000, SMART_EDITOR_WAIT_MS - (Date.now() - startedAt));
 
   for (const url of writeUrls) {
     if (POSTWRITE_URL_RE.test(workflowPage.url())) break;
@@ -160,28 +226,34 @@ export async function enterBlogEditor(
       .catch(() => {});
     await scaledSleep(1500, 3000);
 
-    const ready = await tryEditorOnPage(workflowPage);
+    const ready = await tryEditorOnPage(workflowPage, remainingMs());
     if (ready) return ready;
 
-    // 일부 경로는 팝업 탭 — 기존 탭만 사용, 새 로그인 탭 생성 금지
     const popup = context.pages().find(
       (p) => p !== workflowPage && !p.isClosed() && POSTWRITE_URL_RE.test(p.url()),
     );
     if (popup) {
-      const popupReady = await tryEditorOnPage(popup);
+      const popupReady = await tryEditorOnPage(popup, remainingMs());
       if (popupReady) return popupReady;
     }
   }
 
-  // ③ 마지막 — 열린 모든 postwrite 탭에서 재대기 (로딩 지연)
+  // ③ 마지막 — 열린 모든 postwrite 탭에서 재대기 (로딩 지연·도움말 지연)
   for (const p of context.pages()) {
     if (p.isClosed() || !POSTWRITE_URL_RE.test(p.url())) continue;
-    const ready = await tryEditorOnPage(p);
+    const ready = await tryEditorOnPage(p, remainingMs());
     if (ready) return ready;
   }
 
+  const titleOk = existingPostwrite
+    ? await isTitleBoxReady(existingPostwrite)
+    : await isTitleBoxReady(page);
+  const detail = titleOk
+    ? '제목란 표시됐으나 도움말/본문 영역 미확인'
+    : '#mainFrame·제목란 미표시';
+
   await notifySlack(
-    `블로그 에디터(SmartEditor ONE) 진입 실패 — blogId=${blogId ?? '미확인'} (${SMART_EDITOR_WAIT_MS / 1000}s 대기 후에도 #mainFrame/.se-content 미표시)`,
+    `블로그 에디터(SmartEditor ONE) 진입 실패 — blogId=${blogId ?? '미확인'} (${SMART_EDITOR_WAIT_MS / 1000}s, ${detail})`,
   );
   throw new Error('BLOG_EDITOR_NOT_READY');
 }
