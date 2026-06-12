@@ -6,8 +6,10 @@ import { api } from '@/lib/api';
 import {
   calcReviewDurationMs,
   DEFAULT_HUMAN_ENGINE_SIM,
+  formatPasteTypeRatio,
   LiveTextBuffer,
   mergeHumanEngineSim,
+  randomBetween,
   plantReviewTypos,
   POSTING_PHASE_LABELS,
   simulateTypoReview,
@@ -121,8 +123,10 @@ export const PlaywrightPostingReplay = memo(function PlaywrightPostingReplay({
   const [keyHint, setKeyHint] = useState<string | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [activeToolbar, setActiveToolbar] = useState<NaverSimTarget | null>(null);
-  const [tagPreview, setTagPreview] = useState('');
+  const [tagChips, setTagChips] = useState<string[]>([]);
+  const [tagTyping, setTagTyping] = useState('');
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  const [reviewCaret, setReviewCaret] = useState<{ x: number; y: number; height: number } | null>(null);
 
   const chromeRef = useRef<NaverEditorChromeHandle>(null);
   const titleHostRef = useRef<HTMLDivElement>(null);
@@ -224,7 +228,9 @@ export const PlaywrightPostingReplay = memo(function PlaywrightPostingReplay({
     setPublishOpen(false);
     setLinkDialogOpen(false);
     setActiveToolbar(null);
-    setTagPreview('');
+    setTagChips([]);
+    setTagTyping('');
+    setReviewCaret(null);
 
     if (titleHostRef.current) titleHostRef.current.textContent = '';
     if (bodyTextHostRef.current) bodyTextHostRef.current.textContent = '';
@@ -293,7 +299,9 @@ export const PlaywrightPostingReplay = memo(function PlaywrightPostingReplay({
 
       setPhase('body');
       setCursor('body');
-      if (statusRef.current) statusRef.current.textContent = 'typePostContent · 복붙30% / 타이핑70%';
+      if (statusRef.current) {
+        statusRef.current.textContent = `typePostContent · ${formatPasteTypeRatio(cfg.paste_ratio)}`;
+      }
       if (bodyTextHostRef.current) bodyBufferRef.current = new LiveTextBuffer(bodyTextHostRef.current);
       await typePostContentSim(simBody, bodyBufferRef.current!, cfg, cancelled, followBody, {
         onPaste: () => {
@@ -395,9 +403,11 @@ export const PlaywrightPostingReplay = memo(function PlaywrightPostingReplay({
               setKeyHint(key);
               window.setTimeout(() => setKeyHint(null), 600);
             },
+            onCaretAt: (point) => setReviewCaret(point),
           },
         );
       }
+      setReviewCaret(null);
       if (cancelled()) return;
       markDone('review');
       setReviewSec(null);
@@ -417,7 +427,7 @@ export const PlaywrightPostingReplay = memo(function PlaywrightPostingReplay({
       markDone('publish_dialog');
 
       setPhase('publish_tags');
-      if (statusRef.current) statusRef.current.textContent = 'typePublishTags() · 태그마다 humanType → Space/Enter';
+      if (statusRef.current) statusRef.current.textContent = 'typePublishTags() · # + humanType → Space/Enter';
       const tags = (hashtags ?? [])
         .map((t) => t.replace(/^#/, '').trim())
         .filter(Boolean);
@@ -425,20 +435,18 @@ export const PlaywrightPostingReplay = memo(function PlaywrightPostingReplay({
         await clickTarget('tag-input', 400);
         const completed: string[] = [];
         for (const tag of tags) {
-          const tagHost = chromeRef.current?.getTarget('tag-input');
-          if (tagHost) {
-            tagHost.replaceChildren();
-            for (const done of completed) {
-              const chip = document.createElement('span');
-              chip.className =
-                'mr-1 inline-block rounded bg-[#eefaf3] px-1.5 py-0.5 text-[11px] text-[#03c75a]';
-              chip.textContent = `#${done}`;
-              tagHost.appendChild(chip);
-            }
-            const typingSpan = document.createElement('span');
-            typingSpan.className = 'text-[#333]';
-            tagHost.appendChild(typingSpan);
-            await humanTypeSim(tag, new LiveTextBuffer(typingSpan), cfg, cancelled);
+          setTagTyping('');
+          const tagText = `#${tag}`;
+          for (let i = 0; i < tagText.length; i++) {
+            if (cancelled()) return;
+            setTagTyping(tagText.slice(0, i + 1));
+            await sleepMs(
+              randomBetween(
+                Math.round(60000 / (cfg.wpm_mean * 5) * 0.6),
+                Math.round(60000 / (cfg.wpm_mean * 5) * 1.4),
+              ),
+              cancelled,
+            );
           }
           await sleepMs(200 + Math.random() * 350, cancelled);
           const confirmKey = Math.random() < 0.75 ? 'Space' : 'Enter';
@@ -446,17 +454,8 @@ export const PlaywrightPostingReplay = memo(function PlaywrightPostingReplay({
           await sleepMs(350 + Math.random() * 400, cancelled);
           setKeyHint(null);
           completed.push(tag);
-          setTagPreview(completed.map((t) => `#${t}`).join(' '));
-          if (tagHost) {
-            tagHost.replaceChildren();
-            for (const done of completed) {
-              const chip = document.createElement('span');
-              chip.className =
-                'mr-1 inline-block rounded bg-[#eefaf3] px-1.5 py-0.5 text-[11px] text-[#03c75a]';
-              chip.textContent = `#${done}`;
-              tagHost.appendChild(chip);
-            }
-          }
+          setTagChips([...completed]);
+          setTagTyping('');
         }
         await sleepMs(500, cancelled);
       }
@@ -503,6 +502,17 @@ export const PlaywrightPostingReplay = memo(function PlaywrightPostingReplay({
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-huma-bdr bg-huma-bg2 shadow-lg">
+      {reviewCaret && (
+        <span
+          className="naver-editor-cursor pointer-events-none fixed z-[9998]"
+          style={{
+            left: reviewCaret.x,
+            top: reviewCaret.y,
+            height: reviewCaret.height,
+          }}
+          aria-hidden
+        />
+      )}
       {mousePos && (
         <div
           className="pointer-events-none fixed z-[9999] h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#111] bg-white shadow-md"
@@ -548,7 +558,8 @@ export const PlaywrightPostingReplay = memo(function PlaywrightPostingReplay({
             publishOpen={publishOpen}
             linkDialogOpen={linkDialogOpen}
             activeToolbar={activeToolbar}
-            tagPreview={tagPreview}
+            tagChips={tagChips}
+            tagTyping={tagTyping}
             viewportLabel={viewportLabel}
             titleSlot={
               <>

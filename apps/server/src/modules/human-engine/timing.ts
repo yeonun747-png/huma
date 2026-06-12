@@ -89,7 +89,8 @@ export async function typePostContent(
 
     if (pasteIndices.has(i)) {
       const plan = planParagraphPaste(para);
-      for (const seg of plan.segments) {
+      const segments = plan.hasPaste ? plan.segments : [{ kind: 'paste' as const, text: para }];
+      for (const seg of segments) {
         if (seg.kind === 'paste') {
           await humanPasteIntoElement(page, element, seg.text);
           focused = true;

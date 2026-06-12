@@ -298,7 +298,12 @@ export function pickPasteIndices(total: number, ratio = 0.55): Set<number> {
   return indices;
 }
 
-/** typePostContent — 단락 30% 인용·문어체 구간 복붙 · 70% 타이핑 */
+export function formatPasteTypeRatio(ratio = 0.55): string {
+  const pastePct = Math.round(ratio * 100);
+  return `복붙${pastePct}%·OS IME/타이핑${100 - pastePct}%`;
+}
+
+/** typePostContent — paste_ratio(기본55%) 단락 복붙 · 나머지 IME 타이핑 */
 export async function typePostContentSim(
   content: string,
   buffer: LiveTextBuffer,
@@ -319,7 +324,8 @@ export async function typePostContentSim(
 
     if (pasteIndices.has(i)) {
       const plan = planParagraphPaste(para);
-      for (const seg of plan.segments) {
+      const segments = plan.hasPaste ? plan.segments : [{ kind: 'paste' as const, text: para }];
+      for (const seg of segments) {
         if (cancelled()) return;
         if (seg.kind === 'paste') {
           callbacks?.onPaste?.();
@@ -482,7 +488,50 @@ export type ReviewCursorCallbacks = {
   onMouseMove?: (x: number, y: number) => void;
   onMouseClick?: () => void;
   onKeyNav?: (key: string) => void;
+  /** 본문 글자 앞/뒤 캐럿 화면 좌표 — null이면 숨김 */
+  onCaretAt?: (point: { x: number; y: number; height: number } | null) => void;
 };
+
+/** Range API로 본문 텍스트 노드의 캐럿 화면 좌표 측정 */
+export function measureTextCaretPoint(
+  bodyHost: HTMLElement,
+  index: number,
+  side: 'before' | 'after' = 'before',
+): { x: number; y: number; height: number } | null {
+  const textNode = [...bodyHost.childNodes].find((n) => n.nodeType === Node.TEXT_NODE);
+  if (!textNode || textNode.nodeType !== Node.TEXT_NODE) return null;
+
+  const len = textNode.textContent?.length ?? 0;
+  const offset = side === 'before' ? Math.min(index, len) : Math.min(index + 1, len);
+  const range = document.createRange();
+  range.setStart(textNode, offset);
+  range.setEnd(textNode, offset);
+
+  let rect = range.getClientRects()[0] ?? range.getBoundingClientRect();
+  if ((!rect.width && !rect.height) && offset > 0) {
+    range.setStart(textNode, offset - 1);
+    range.setEnd(textNode, offset);
+    rect = range.getBoundingClientRect();
+    return { x: rect.right, y: rect.top, height: rect.height || 18 };
+  }
+
+  return { x: rect.left, y: rect.top, height: rect.height || 18 };
+}
+
+function scrollToCaret(
+  scrollContainer: HTMLElement,
+  bodyHost: HTMLElement,
+  index: number,
+): void {
+  const point = measureTextCaretPoint(bodyHost, index, 'before');
+  if (!point) return;
+  const scrollRect = scrollContainer.getBoundingClientRect();
+  const relY = point.y - scrollRect.top + scrollContainer.scrollTop;
+  scrollContainer.scrollTop = Math.max(
+    0,
+    Math.min(scrollContainer.scrollHeight, relY - scrollContainer.clientHeight / 3),
+  );
+}
 
 function bezierPoint(t: number, p0: number, p1: number, p2: number, p3: number): number {
   const u = 1 - t;
@@ -510,19 +559,23 @@ async function moveMouseBezier(
   }
 }
 
-function estimateCharPosition(bodyHost: HTMLElement, index: number): { x: number; y: number } {
-  const rect = bodyHost.getBoundingClientRect();
-  const text = bodyHost.textContent ?? '';
-  const lineLen = Math.max(28, Math.floor(rect.width / 15));
-  const line = Math.floor(index / lineLen);
-  const col = index % lineLen;
+function caretClickPoint(
+  bodyHost: HTMLElement,
+  index: number,
+): { x: number; y: number; height: number; caretIndex: number } | null {
+  const side: 'before' | 'after' = Math.random() < 0.5 ? 'before' : 'after';
+  const caretIndex = side === 'before' ? index : index + 1;
+  const point = measureTextCaretPoint(bodyHost, index, side);
+  if (!point) return null;
   return {
-    x: rect.left + 24 + col * 14 + randomBetween(-4, 4),
-    y: rect.top + 32 + line * 30 + randomBetween(-3, 3),
+    x: point.x + randomBetween(-1, 1),
+    y: point.y + point.height / 2 + randomBetween(-1, 1),
+    height: point.height,
+    caretIndex,
   };
 }
 
-/** 발행 전 검토 — 오탈자 찾아 마우스·키보드로 수정 */
+/** 발행 전 검토 — 오탈자 위치에 마우스 클릭 · 캐럿 깜박임 · 글자 수정 */
 export async function simulateTypoReview(
   scrollContainer: HTMLElement,
   bodyHost: HTMLElement,
@@ -537,55 +590,75 @@ export async function simulateTypoReview(
   callbacks?.onMouseMove?.(mouse.x, mouse.y);
 
   const fixQueue = [...fixes];
+  let lastFixAt = 0;
+
+  const showCaret = (caretIndex: number) => {
+    const pt = measureTextCaretPoint(bodyHost, caretIndex, 'before');
+    callbacks?.onCaretAt?.(pt ? { x: pt.x, y: pt.y, height: pt.height } : null);
+  };
 
   while (Date.now() - start < durationMs) {
     if (cancelled()) return;
     const remaining = Math.ceil((durationMs - (Date.now() - start)) / 1000);
     callbacks?.onProgress?.(remaining);
 
-    if (fixQueue.length > 0 && Math.random() < 0.55) {
-      const fix = fixQueue.shift()!;
-      scrollContainer.scrollTop = Math.max(
-        0,
-        Math.min(
-          scrollContainer.scrollHeight,
-          Math.floor(fix.index / 28) * 30 - scrollContainer.clientHeight / 3,
-        ),
-      );
-      await sleepMs(randomBetween(400, 900), cancelled);
+    const elapsedSinceFix = Date.now() - lastFixAt;
+    const shouldFix =
+      fixQueue.length > 0 &&
+      (elapsedSinceFix > randomBetween(2500, 6000) || (fixQueue.length === fixes.length && elapsedSinceFix > 1200));
 
-      const target = estimateCharPosition(bodyHost, fix.index);
-      await moveMouseBezier(mouse, target, randomBetween(18, 32), (x, y) => {
-        mouse = { x, y };
-        callbacks?.onMouseMove?.(x, y);
-      }, cancelled);
+    if (shouldFix) {
+      const fix = fixQueue[0]!;
+      scrollToCaret(scrollContainer, bodyHost, fix.index);
+      await sleepMs(randomBetween(350, 700), cancelled);
+
+      const clickTarget = caretClickPoint(bodyHost, fix.index);
+      if (!clickTarget) {
+        await sleepMs(randomBetween(300, 500), cancelled);
+        continue;
+      }
+      fixQueue.shift()!;
+
+      let caretIndex = clickTarget.caretIndex;
+      if (caretIndex > fix.index) {
+        callbacks?.onKeyNav?.('ArrowLeft');
+        await sleepMs(randomBetween(80, 150), cancelled);
+        caretIndex = fix.index;
+      }
+
+      await moveMouseBezier(
+        mouse,
+        { x: clickTarget.x, y: clickTarget.y },
+        randomBetween(20, 34),
+        (x, y) => {
+          mouse = { x, y };
+          callbacks?.onMouseMove?.(x, y);
+        },
+        cancelled,
+      );
 
       callbacks?.onMouseClick?.();
-      await sleepMs(randomBetween(120, 280), cancelled);
-
-      if (Math.random() < 0.4) {
-        callbacks?.onKeyNav?.('PageDown');
-        await sleepMs(randomBetween(200, 500), cancelled);
-        for (let k = 0; k < randomBetween(2, 6); k++) {
-          callbacks?.onKeyNav?.('ArrowLeft');
-          await sleepMs(randomBetween(80, 160), cancelled);
-        }
-      }
+      showCaret(caretIndex);
+      await sleepMs(randomBetween(280, 520), cancelled);
 
       const wrongChar = buffer.text[fix.index] ?? fix.wrong;
 
       if (isHangul(wrongChar)) {
         const jamos = decomposeHangul(wrongChar);
         for (let j = jamos.length - 1; j >= 0; j--) {
+          callbacks?.onKeyNav?.('Backspace');
           if (j === 0) {
             buffer.deleteCharAt(fix.index);
           } else {
             buffer.replaceCharAt(fix.index, composeDisplay(jamos.slice(0, j)));
           }
+          showCaret(fix.index);
           await sleepMs(randomBetween(140, 320), cancelled);
         }
       } else {
+        callbacks?.onKeyNav?.('Backspace');
         buffer.deleteCharAt(fix.index);
+        showCaret(fix.index);
         await sleepMs(randomBetween(200, 450), cancelled);
       }
 
@@ -598,14 +671,20 @@ export async function simulateTypoReview(
           } else {
             buffer.replaceCharAt(fix.index, partial);
           }
+          showCaret(fix.index + 1);
           await sleepMs(randomBetween(90, 200), cancelled);
         }
       } else {
         buffer.insertAt(fix.index, fix.correct);
+        showCaret(fix.index + 1);
+        await sleepMs(randomBetween(120, 240), cancelled);
       }
 
-      await sleepMs(randomBetween(800, 2000), cancelled);
+      lastFixAt = Date.now();
+      await sleepMs(randomBetween(600, 1400), cancelled);
+      callbacks?.onCaretAt?.(null);
     } else {
+      callbacks?.onCaretAt?.(null);
       scrollContainer.scrollTop = Math.min(
         scrollContainer.scrollHeight,
         scrollContainer.scrollTop + randomBetween(40, 100),
@@ -614,6 +693,7 @@ export async function simulateTypoReview(
     }
   }
 
+  callbacks?.onCaretAt?.(null);
   callbacks?.onProgress?.(0);
 }
 
@@ -645,8 +725,8 @@ export const POSTING_PHASE_LABELS: Record<PostingPhase, string> = {
   review: '발행 전 검토 (오탈자 수정)',
   publish: '상단 발행 버튼 humanClick',
   publish_dialog: '2차 패널 카테고리 선택',
-  publish_tags: '태그 humanType → Space/Enter 칩 완성',
-  publish_confirm: '우하단 최종 발행 humanClick',
+  publish_tags: '태그 # + humanType → Space/Enter 칩 완성',
+  publish_confirm: '우하단 최종 발행 humanClick (검증: 자동 클릭·실제 미발행)',
   done: '완료 (검증 모드 — 실제 발행 없음)',
 };
 

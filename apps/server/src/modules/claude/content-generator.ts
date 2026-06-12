@@ -8,6 +8,11 @@ import {
 import { formatKstWritingContext } from '../../lib/dashboard-period.js';
 import { buildYeonunContextWithPrompt } from '../content/yeonun-context.js';
 import {
+  defaultWorkspaceHashtags,
+  sanitizeHashtags,
+  urlContextForHashtags,
+} from '../../lib/hashtag-sanitize.js';
+import {
   blogPostLengthPromptGuide,
   pickBlogPostLengthRange,
   type BlogPostLengthRange,
@@ -143,7 +148,7 @@ function fallbackContent(
     x_text: `${short.slice(0, 220)} ${input.sourceUrl}`.slice(0, 280),
     image_prompt: `Cinematic vertical 9:16 image about ${input.title}, moody lighting, high detail`,
     video_prompt: `Cinematic 9:16 vertical video about ${input.title}, smooth camera motion`,
-    hashtags: [wsTag, '#AI', '#콘텐츠'],
+    hashtags: sanitizeHashtags([wsTag.replace(/^#/, ''), 'AI', '콘텐츠'], input.workspace),
   };
 }
 
@@ -253,31 +258,50 @@ ${lengthGuide}
   return parsed;
 }
 
-async function generateSubContent(
-  title: string,
-  urlSummary: string,
-  workspace: string,
-): Promise<{ hashtags: string[] }> {
+async function generateSubContent(params: {
+  title: string;
+  synopsis?: string;
+  blogExcerpt: string;
+  workspace: string;
+  urlSummary: string;
+}): Promise<{ hashtags: string[] }> {
+  const synopsisBlock = params.synopsis?.trim()
+    ? `[운영자 시놉시스 — 최우선]\n${params.synopsis.trim()}`
+    : '[시놉시스 없음 — 제목·본문 요약 기준]';
+  const urlHint = urlContextForHashtags(params.urlSummary);
+  const urlBlock = urlHint ? `\n[참고 URL·상품 정보 — 주제 태그 보조만, 로딩·오류 문구 무시]\n${urlHint}` : '';
+
   const raw = await askClaudeWithModel({
     model: (await getSubClaudeModel()) || HAIKU_MODEL_FALLBACK,
     max_tokens: 300,
-    prompt: `서비스: ${workspace}, 제목: ${title}
-내용 요약: ${urlSummary.slice(0, 500)}
+    prompt: `네이버 블로그·SNS용 해시태그 8~15개 (JSON만, # 접두사 없이 태그명만).
 
-JSON만 (코드블록 없이):
-{"hashtags":["태그1", "...최대 20개"]}`,
+서비스: ${params.workspace}
+제목: ${params.title}
+${synopsisBlock}
+[생성된 본문 앞부분 — 주제 파악용]
+${params.blogExcerpt.slice(0, 700)}${urlBlock}
+
+규칙:
+- 제목·시놉시스·본문 주제 키워드만 (검색·발견에 유리한 한국어)
+- URL fetch·로딩·오류·기술 메시지에서 태그 추출 금지
+- 절대 금지: 로딩중, 웹페이지오류, 콘텐츠없음, 재로딩필요, error, 404, undefined, 새로고침, 오류발생 등
+- 마케팅·AI·콘텐츠 같은 범용 태그만으로 채우지 말 것
+
+{"hashtags":["태그1","태그2"]}`,
   });
 
-  if (!raw) return { hashtags: ['#AI', '#콘텐츠'] };
+  const fallback = defaultWorkspaceHashtags(params.workspace);
+  if (!raw) return { hashtags: fallback };
 
   try {
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     const parsed = JSON.parse(jsonMatch?.[0] ?? raw) as { hashtags?: string[] };
     return {
-      hashtags: parsed.hashtags?.length ? parsed.hashtags : ['#AI', '#콘텐츠'],
+      hashtags: sanitizeHashtags(parsed.hashtags ?? [], params.workspace),
     };
   } catch {
-    return { hashtags: ['#AI', '#콘텐츠'] };
+    return { hashtags: fallback };
   }
 }
 
@@ -314,10 +338,14 @@ export async function generateAllContent(input: ContentGenerationInput): Promise
   const lengthRange = pickBlogPostLengthRange();
 
   try {
-    const [mainContent, subContent] = await Promise.all([
-      generateMainContent(input, urlSummary, lengthRange),
-      generateSubContent(input.title, urlSummary, input.workspace),
-    ]);
+    const mainContent = await generateMainContent(input, urlSummary, lengthRange);
+    const subContent = await generateSubContent({
+      title: input.title,
+      synopsis: input.synopsis,
+      blogExcerpt: mainContent.blog_post,
+      workspace: input.workspace,
+      urlSummary,
+    });
     return { ...mainContent, ...subContent };
   } catch (mainErr) {
     if (!process.env.ANTHROPIC_API_KEY) {
@@ -335,7 +363,13 @@ export async function generateAllContent(input: ContentGenerationInput): Promise
       const jsonMatch = retryRaw?.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]) as Omit<ContentGenerationOutput, 'hashtags'>;
-        const sub = await generateSubContent(input.title, urlSummary, input.workspace);
+        const sub = await generateSubContent({
+          title: input.title,
+          synopsis: input.synopsis,
+          blogExcerpt: parsed.blog_post,
+          workspace: input.workspace,
+          urlSummary,
+        });
         if (parsed.blog_post) {
           parsed.blog_post = finalizeBlogPost(parsed.blog_post);
           parsed.blog_post_target_chars = lengthRange.tier;

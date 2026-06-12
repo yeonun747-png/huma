@@ -43,7 +43,8 @@ type Props = {
   publishOpen: boolean;
   linkDialogOpen: boolean;
   activeToolbar?: NaverSimTarget | null;
-  tagPreview?: string;
+  tagChips?: string[];
+  tagTyping?: string;
   categoryLabel?: string;
   viewportLabel?: string;
 };
@@ -58,7 +59,8 @@ export const NaverSmartEditorChrome = forwardRef<NaverEditorChromeHandle, Props>
       publishOpen,
       linkDialogOpen,
       activeToolbar,
-      tagPreview,
+      tagChips,
+      tagTyping,
       categoryLabel = '포스팅',
       viewportLabel = '1920×1080',
     },
@@ -223,7 +225,21 @@ export const NaverSmartEditorChrome = forwardRef<NaverEditorChromeHandle, Props>
                   data-naver-target="tag-input"
                   className="min-h-[36px] rounded border border-[#ddd] bg-[#fafafa] px-3 py-2 text-[12px] text-[#333]"
                 >
-                  {tagPreview || <span className="text-[#bbb]">#태그 입력 (최대 30개)</span>}
+                  {tagChips?.length || tagTyping ? (
+                    <>
+                      {tagChips?.map((tag) => (
+                        <span
+                          key={tag}
+                          className="mr-1 inline-block rounded bg-[#eefaf3] px-1.5 py-0.5 text-[11px] text-[#03c75a]"
+                        >
+                          #{tag}
+                        </span>
+                      ))}
+                      {tagTyping ? <span className="text-[#333]">{tagTyping}</span> : null}
+                    </>
+                  ) : (
+                    <span className="text-[#bbb]">#태그 입력 (최대 30개)</span>
+                  )}
                 </div>
               </div>
 

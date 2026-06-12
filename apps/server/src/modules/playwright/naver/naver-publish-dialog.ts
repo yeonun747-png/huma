@@ -123,7 +123,7 @@ export async function typePublishTags(
   await humanClickLocator(page, input);
 
   for (let i = 0; i < tags.length; i++) {
-    await humanType(page, input, tags[i]!, humanConfig);
+    await humanType(page, input, `#${tags[i]!}`, humanConfig);
     await scaledHumanSleep(200, 550, scale);
     const confirmKey = Math.random() < 0.75 ? 'Space' : 'Enter';
     await page.keyboard.press(confirmKey);
