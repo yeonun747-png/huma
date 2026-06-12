@@ -21,7 +21,7 @@ import {
 } from '../../../lib/naver-captcha-vision.js';
 import { shouldPreserveBrowserPageForVnc } from '../../watcher/captcha-hold.js';
 import { escapeBlogHomeAfterLogin } from '../../../lib/naver-blog-portal.js';
-import { isNaverAuthChallengePage } from '../../../lib/posting-captcha-session.js';
+import { isNaverAuthChallengePage, pollUntilNaverLoginRedirect } from '../../../lib/posting-captcha-session.js';
 
 const NAVER_LOGIN_URL = 'https://nid.naver.com/nidlogin.login';
 const NAV_TIMEOUT_MS = 60_000;
@@ -188,13 +188,10 @@ export async function naverLogin(
       ...options?.captchaContext,
     };
 
-    try {
-      await page.waitForURL((url) => !url.href.includes('nidlogin.login'), { timeout: navTimeout });
-    } catch (err) {
-      await page.waitForLoadState('domcontentloaded').catch(() => {});
-      await assertLoginSucceeded(page, captchaCtx);
-      throw wrapNaverLoginTimeout('redirect', err);
-    }
+    await pollUntilNaverLoginRedirect(page, {
+      timeoutMs: navTimeout,
+      assertOk: (p) => assertLoginSucceeded(p, captchaCtx),
+    });
     await humanSleep(2000, 4000);
 
     await assertLoginSucceeded(page, captchaCtx);

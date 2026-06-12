@@ -7,8 +7,15 @@ import {
   ensureNaverLoginCredentialsForCaptcha,
 } from './naver-login-fields.js';
 import { isNaverCaptchaVisible, pickNaverCaptchaPage } from './naver-captcha-vision.js';
-import { gotoBlogPortal } from './naver-blog-portal.js';
+import { gotoBlogPortal, waitForBlogPortalReady } from './naver-blog-portal.js';
+import { sleep } from './utils.js';
 import { vncFastSleepScale } from './vnc-session.js';
+
+/** CAPTCHA hold — VNC 수동 로그인 클릭 직후 감지 주기 */
+export const POSTING_LOGIN_POLL_MS = 800;
+
+const LOGGED_IN_CSS =
+  'a[href*="nidlogout"], a[href*="nidlogin.logout"], .gnb_my, #account, [class*="MyView"]';
 
 function scaleMs(min: number, max: number): [number, number] {
   const s = vncFastSleepScale();
@@ -50,23 +57,46 @@ export async function isNaverAuthChallengePage(page: Page): Promise<boolean> {
   return /2단계|인증번호|새로운 기기|기기 등록|휴대폰 인증|본인 확인/.test(body);
 }
 
+/** 로그인 완료 — 긍정 지표(로그아웃·MY·글쓰기) 확인. 로딩 중 오판 방지 */
+export async function isNaverLoggedInOnPage(page: Page): Promise<boolean> {
+  const url = page.url();
+  if (url === 'about:blank' || url === '' || !url.includes('naver.com')) return false;
+  if (url.includes('nidlogin')) return false;
+
+  if (await isNaverCaptchaVisible(page)) return false;
+  if (await isNaverAuthChallengePage(page)) return false;
+
+  if (await page.locator(LOGGED_IN_CSS).first().isVisible({ timeout: 600 }).catch(() => false)) {
+    return true;
+  }
+
+  if (url.includes('blog.naver.com') || url.includes('section.blog')) {
+    const state = await waitForBlogPortalReady(page, 4000);
+    return state === 'write_ready';
+  }
+
+  if (url.includes('www.naver.com')) {
+    await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => {});
+    if (await page.locator(LOGGED_IN_CSS).first().isVisible({ timeout: 1000 }).catch(() => false)) {
+      return true;
+    }
+    const loginLink = page.locator('a[href*="nidlogin.login"], a.link_login').first();
+    if (await loginLink.isVisible({ timeout: 800 }).catch(() => false)) return false;
+    return false;
+  }
+
+  const loginLink = page.locator('a[href*="nidlogin.login"], a.link_login').first();
+  if (await loginLink.isVisible({ timeout: 500 }).catch(() => false)) return false;
+  return false;
+}
+
 /**
  * 발행 재개 가능 상태 — 로그인만 확인한다.
  * 에디터 진입은 enterBlogEditor 가 공식 글쓰기 URL(blog.naver.com/{id}/postwrite)로
  * 직접 이동하므로, 여기서는 "캡차·로그인 화면이 아니고 네이버에 로그인된 상태"인지만 본다.
  */
 export async function isBlogWriteReady(page: Page): Promise<boolean> {
-  const url = page.url();
-  if (url.includes('nidlogin') || url === 'about:blank' || url === '') return false;
-  if (!url.includes('naver.com')) return false;
-
-  if (await isNaverCaptchaVisible(page)) return false;
-  if (await isNaverAuthChallengePage(page)) return false;
-
-  const loginLink = page.locator('a[href*="nidlogin.login"], a.link_login').first();
-  if (await loginLink.isVisible({ timeout: 1000 }).catch(() => false)) return false;
-
-  return true;
+  return isNaverLoggedInOnPage(page);
 }
 
 /** nid 로그인 화면 — 캡차는 풀렸지만 로그인 버튼 미클릭(VNC 수동 제출 대기) */
@@ -80,12 +110,38 @@ export async function isNaverLoginPagePendingSubmit(page: Page): Promise<boolean
   return loginBtn.isVisible({ timeout: 500 }).catch(() => false);
 }
 
-/** 10초 폴링 자동 재개 차단 조건 */
+/** CAPTCHA hold 폴링 — 캡차·nid·로그인 미완료(메인 로딩) 시 재개 차단 */
 export async function isPostingAutoResumeBlocked(page: Page): Promise<boolean> {
   if (await isNaverCaptchaVisible(page)) return true;
   if (await isNaverLoginPagePendingSubmit(page)) return true;
   if (await isNaverAuthChallengePage(page)) return true;
+  const url = page.url();
+  if (url.includes('naver.com') && !url.includes('nidlogin') && !(await isNaverLoggedInOnPage(page))) {
+    return true;
+  }
   return false;
+}
+
+/** naverLogin — nid 이탈 또는 캡차 즉시 감지 (VNC 수동 로그인 대기 포함) */
+export async function pollUntilNaverLoginRedirect(
+  page: Page,
+  options: { timeoutMs: number; assertOk?: (page: Page) => Promise<void> },
+): Promise<void> {
+  const deadline = Date.now() + options.timeoutMs;
+  while (Date.now() < deadline) {
+    if (!page.url().includes('nidlogin.login')) {
+      if (options.assertOk) await options.assertOk(page);
+      return;
+    }
+    if (await isNaverCaptchaVisible(page)) {
+      throw new Error('CAPTCHA_DETECTED');
+    }
+    await sleep(POSTING_LOGIN_POLL_MS);
+  }
+  await page.waitForLoadState('domcontentloaded').catch(() => {});
+  if (options.assertOk) await options.assertOk(page);
+  if (!page.url().includes('nidlogin.login')) return;
+  throw new Error('NAVER_LOGIN_TIMEOUT:redirect');
 }
 
 /** CAPTCHA hold 종료 전 — 로그인 리다이렉트 완료·blog 방문으로 프로필 쿠키 저장 */

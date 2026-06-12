@@ -35,6 +35,7 @@ export function isNaverHumanHoldError(err: unknown): boolean {
   if (msg.includes('NAVER_LOGIN_DEVICE_VERIFY')) return true;
   if (msg.includes('reason=block_captcha')) return true;
   if (msg.includes('NAVER_LOGIN_FAILED:redirect_stuck')) return true;
+  if (msg.includes('NAVER_LOGIN_TIMEOUT:redirect')) return true;
   if (msg.includes('HUMAN_CLICK_NO_BBOX')) return true;
   if (msg.includes('HUMAN_DRAG_NO_BBOX')) return true;
   return false;

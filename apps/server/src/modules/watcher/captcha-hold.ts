@@ -22,7 +22,7 @@ import { notifyCaptchaTelegram, resolveVncUrl, buildJobWebUrl } from './telegram
 const HOLD_MS = 30 * 60 * 1000;
 const REMIND_MS = 5 * 60 * 1000;
 const MAX_REMINDS = 3;
-const CAPTCHA_AUTO_RESUME_MS = 10_000;
+const CAPTCHA_AUTO_RESUME_MS = 1_500;
 
 export interface CaptchaHoldInput {
   jobId: string;
@@ -128,6 +128,10 @@ function scheduleReminders(entry: CaptchaHoldEntry): void {
       void tryAutoResumePostingCaptcha(entry);
     }, CAPTCHA_AUTO_RESUME_MS);
     entry.timers.push(autoResume);
+    const firstResume = setTimeout(() => {
+      void tryAutoResumePostingCaptcha(entry);
+    }, 600);
+    entry.timers.push(firstResume);
   }
 
   const timeout = setTimeout(() => {
@@ -186,6 +190,7 @@ export function shouldPreserveBrowserPageForVnc(err: unknown): boolean {
   if (msg.includes('NAVER_LOGIN_DEVICE_VERIFY')) return true;
   if (msg.includes('reason=block_captcha')) return true;
   if (msg.includes('NAVER_LOGIN_FAILED:redirect_stuck')) return true;
+  if (msg.includes('NAVER_LOGIN_TIMEOUT:redirect')) return true;
   return false;
 }
 
