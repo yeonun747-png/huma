@@ -23,8 +23,14 @@ import { downloadHumaMedia, parseHumaMediaStoragePath } from '../lib/huma-media-
 import { resolveJobPreviewImageUrl } from '../lib/resolve-job-preview-image.js';
 import {
   completeCaptchaHold,
+  getCaptchaHold,
   getCaptchaHoldPublicInfo,
 } from '../modules/watcher/captcha-hold.js';
+import {
+  applyManualCaptchaAnswer,
+  isNaverCaptchaVisible,
+  pickNaverCaptchaPage,
+} from '../lib/naver-captcha-vision.js';
 import { resolveVncUrl, buildJobWebUrl } from '../modules/watcher/telegram.js';
 
 async function assertJobWorkspaceAccess(
@@ -636,6 +642,42 @@ export async function registerJobRoutes(app: FastifyInstance) {
 
     const { data: updated } = await supabase.from('huma_jobs').select('*').eq('id', id).single();
     return updated;
+  });
+
+  /** 캡차 정답 원격 입력 — VNC 한글 IME 불필요 (웹에서 입력 → Playwright insertText 주입) */
+  app.post('/api/jobs/:id/captcha-answer', { preHandler: authMiddleware }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const allowedWorkspaces = getWorkspaceFilter(request);
+    const access = await assertJobWorkspaceAccess(id, allowedWorkspaces);
+    if (!access.ok) return reply.code(access.status).send({ error: access.error });
+
+    const body = (request.body ?? {}) as { answer?: string };
+    const answer = body.answer?.trim();
+    if (!answer) return reply.code(400).send({ error: '정답을 입력해 주세요' });
+
+    const hold = getCaptchaHold(id);
+    if (!hold) return reply.code(404).send({ error: 'CAPTCHA 세션이 없습니다 (만료·종료됨)' });
+
+    const page = pickNaverCaptchaPage(hold.context);
+    if (!page || page.isClosed()) {
+      return reply.code(409).send({ error: '브라우저 페이지가 닫혔습니다' });
+    }
+    if (!(await isNaverCaptchaVisible(page))) {
+      return reply
+        .code(409)
+        .send({ error: 'CAPTCHA 화면이 아닙니다 — 이미 해결됐다면 발행 재개를 누르세요' });
+    }
+
+    const result = await applyManualCaptchaAnswer(page, answer, {
+      accountId: hold.accountId,
+      humaJobId: id,
+      workspace: hold.workspace,
+      jobType: hold.jobType,
+    });
+    if (!result.filled) {
+      return reply.code(409).send({ error: 'CAPTCHA 입력칸을 찾지 못했습니다' });
+    }
+    return { ok: true, submitted: result.submitted, captcha_cleared: result.cleared };
   });
 
   app.get('/api/jobs/:id', { preHandler: authMiddleware }, async (request, reply) => {

@@ -27,6 +27,9 @@ export function CaptchaCompleteModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [vncCopied, setVncCopied] = useState(false);
+  const [captchaAnswer, setCaptchaAnswer] = useState('');
+  const [sendingAnswer, setSendingAnswer] = useState(false);
+  const [answerMsg, setAnswerMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const loadHold = useCallback(async () => {
     try {
@@ -56,6 +59,32 @@ export function CaptchaCompleteModal({
   };
 
   const resumePublishing = () => void runComplete(undefined);
+
+  const sendCaptchaAnswer = async () => {
+    const trimmed = captchaAnswer.trim();
+    if (!trimmed) {
+      setAnswerMsg({ ok: false, text: '정답을 입력해 주세요.' });
+      return;
+    }
+    setSendingAnswer(true);
+    setAnswerMsg(null);
+    try {
+      const r = await api.submitCaptchaAnswer(job.id, trimmed);
+      if (r.captcha_cleared) {
+        setAnswerMsg({ ok: true, text: 'CAPTCHA 통과 — 「발행 재개」를 누르면 에디터로 진행합니다.' });
+        setCaptchaAnswer('');
+      } else {
+        setAnswerMsg({
+          ok: false,
+          text: '제출했으나 CAPTCHA가 남아 있습니다. VNC에서 이미지를 다시 확인하고 재입력하세요.',
+        });
+      }
+    } catch (e) {
+      setAnswerMsg({ ok: false, text: (e as Error).message });
+    } finally {
+      setSendingAnswer(false);
+    }
+  };
 
   const manualComplete = () => {
     const trimmed = resultUrl.trim();
@@ -147,6 +176,47 @@ export function CaptchaCompleteModal({
         ) : (
           <p className="mt-3 text-xs text-huma-t3">VNC URL — 서버 env HUMA_VNC_URL_* 설정</p>
         )}
+
+        {!isCrank ? (
+          <div className="m-modal-field rounded-md border border-huma-bdr2 bg-huma-bg3 px-3 py-2.5">
+            <div className="m-modal-label text-huma-t2">
+              CAPTCHA 정답 원격 입력 <span className="text-huma-t4">(VNC 한글 입력 불필요)</span>
+            </div>
+            <p className="mb-2 text-xs text-huma-t3">
+              VNC 화면의 CAPTCHA 이미지를 보고 정답(한글·숫자)을 여기에 입력하면 서버가 직접 입력칸에
+              넣고 제출합니다. 통과되면 「발행 재개」를 누르세요.
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                className="m-modal-input flex-1"
+                placeholder="예: 솔뫼로 / 100"
+                value={captchaAnswer}
+                onChange={(e) => setCaptchaAnswer(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void sendCaptchaAnswer();
+                  }
+                }}
+                disabled={sendingAnswer}
+              />
+              <button
+                type="button"
+                className="btn-primary btn-sm shrink-0"
+                onClick={() => void sendCaptchaAnswer()}
+                disabled={sendingAnswer}
+              >
+                {sendingAnswer ? '제출 중…' : '정답 제출'}
+              </button>
+            </div>
+            {answerMsg ? (
+              <p className={`mt-2 text-xs ${answerMsg.ok ? 'text-huma-ok' : 'text-huma-err'}`}>
+                {answerMsg.text}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
 
         {!isCrank ? (
           <label className="m-modal-field block text-sm text-huma-t2">

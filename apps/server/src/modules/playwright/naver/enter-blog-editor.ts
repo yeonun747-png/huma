@@ -8,38 +8,31 @@ import { notifySlack } from '../../watcher/detector.js';
 
 import { humanClickLocator } from '../../human-engine/mouse.js';
 import { vncFastSleepScale } from '../../../lib/vnc-session.js';
-import { gotoBlogPortal } from '../../../lib/naver-blog-portal.js';
-
-
+import { ensureBlogWriteEntry } from '../../../lib/naver-blog-portal.js';
 
 function scaledSleep(min: number, max: number): Promise<void> {
   const s = vncFastSleepScale();
   return humanSleep(Math.round(min * s), Math.round(max * s));
 }
+
 /**
  * v3.25 ㉒ — blog.naver.com/write 직접 접속 금지.
- * 글쓰기 버튼이 새 탭(팝업)으로 에디터를 여는 경우를 처리하고,
- * SmartEditor ONE의 #mainFrame·.se-content가 실제로 준비될 때까지 대기한다.
+ * BlogHome(section.blog) 렌더를 기다린 뒤 프로필 카드 「글쓰기」 또는 개인 블로그
+ * .btn_write 를 클릭한다. 글쓰기는 새 탭(팝업)으로 열릴 수 있으며,
+ * SmartEditor ONE 의 #mainFrame·.se-content 가 실제로 준비될 때까지 대기한다.
  * 반환값: 에디터가 떠 있는 Page (팝업이면 팝업, 아니면 동일 페이지).
  */
-
 export async function enterBlogEditor(_page: Page, _humanEngine: HumanEngineConfig): Promise<Page> {
+  const writeBtn = await ensureBlogWriteEntry(_page);
 
-  await gotoBlogPortal(_page);
-
-  await scaledSleep(1000, 2500);
-
-  const writeBtn = _page.locator('.btn_write, [class*="write"]').first();
-
-  if (!(await writeBtn.count())) {
-
-    const message = '블로그 글쓰기 버튼을 찾을 수 없습니다 (write URL 직접 접속 금지)';
-
+  if (!writeBtn) {
+    const message =
+      '블로그 글쓰기 진입점을 찾을 수 없습니다 (BlogHome 렌더 실패 또는 로그아웃 상태)';
     await notifySlack(message);
-
     throw new Error('BLOG_WRITE_BTN_NOT_FOUND');
-
   }
+
+  await scaledSleep(800, 2000);
 
   // 클릭 시 새 탭으로 에디터가 열릴 수 있으므로 팝업을 함께 감시한다.
   const popupPromise = _page.context().waitForEvent('page', { timeout: 8000 }).catch(() => null);
@@ -62,7 +55,4 @@ export async function enterBlogEditor(_page: Page, _humanEngine: HumanEngineConf
   }
 
   return editorPage;
-
 }
-
-

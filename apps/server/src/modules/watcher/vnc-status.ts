@@ -73,9 +73,9 @@ export async function getVncRuntimeStatus(): Promise<{
   } else if (!listening || !x11vnc) {
     hint = 'x11vnc 미기동 — sudo systemctl restart huma-x11vnc';
   } else if (viaTailscale) {
-    hint = `5900 OK — ${endpoint} (Tailscale). 한/영: VNC 화면 상단 HUD 「한/영」 클릭. 숫자패드: PC NumLock ON.`;
+    hint = `5900 OK — ${endpoint} (Tailscale). 한글 CAPTCHA는 웹 큐 「CAPTCHA 정답 원격 입력」 권장(VNC 한/영 불필요).`;
   } else {
-    hint = `5900 OK — ${endpoint} (LAN). 한/영: VNC HUD 「한/영」 클릭 (단축키는 RealVNC에서 전달 안 될 수 있음).`;
+    hint = `5900 OK — ${endpoint} (LAN). 한글 CAPTCHA는 웹 큐 「CAPTCHA 정답 원격 입력」 권장(VNC 한/영 불필요).`;
   }
 
   return {

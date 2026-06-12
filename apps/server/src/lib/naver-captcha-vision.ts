@@ -593,6 +593,25 @@ async function submitCaptcha(page: Page, ctx: NaverCaptchaVisionContext): Promis
   }
 }
 
+/**
+ * 웹 대시보드에서 받은 수동 정답 — VNC 한글 IME 없이 Playwright insertText 로
+ * 캡차 입력칸에 직접 주입 후 제출한다 (한글·숫자 모두 IME 불필요).
+ */
+export async function applyManualCaptchaAnswer(
+  page: Page,
+  answer: string,
+  ctx: NaverCaptchaVisionContext = {},
+): Promise<{ filled: boolean; submitted: boolean; cleared: boolean }> {
+  const filled = await fillCaptchaAnswer(page, answer);
+  if (!filled) return { filled: false, submitted: false, cleared: false };
+
+  await humanSleep(250, 600);
+  await submitCaptcha(page, ctx);
+  await sleep(randomBetween(1200, 2200));
+
+  return { filled: true, submitted: true, cleared: !(await isNaverCaptchaVisible(page)) };
+}
+
 async function captchaCleared(page: Page): Promise<boolean> {
   if (!(await isNaverCaptchaVisible(page))) return true;
   const errText = await page
