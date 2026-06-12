@@ -43,6 +43,15 @@ export async function releaseAccount(accountId: string): Promise<void> {
   }
 }
 
+/** 운영자 강제 중단 — 소유 프로세스 무관하게 계정 락 해제 */
+export async function forceReleaseAccount(accountId: string): Promise<void> {
+  try {
+    await redisConnection.del(lockKey(accountId));
+  } catch {
+    /* ignore */
+  }
+}
+
 export async function isAccountBusy(accountId: string): Promise<boolean> {
   return (await redisConnection.exists(lockKey(accountId))) === 1;
 }

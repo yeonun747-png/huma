@@ -73,8 +73,9 @@ export async function buildVncHudState(): Promise<VncHudState> {
       const mark = focusPort === s.proxyPort ? ' ◀' : active ? '' : ' (대기)';
       return `${s.hint}: ${s.label}${mark}`;
     }),
-    'Ctrl+Alt+0: 분할 복귀',
-    '한/영: VNC HUD 「한/영」 클릭 (단축키는 RealVNC에서 안 될 수 있음)',
+    'Ctrl+Alt+0: 분할 복귀 (HUD 「분할」 클릭 가능)',
+    '슬롯 클릭 또는 Ctrl+Alt+1~5: 포커스 (RealVNC가 Ctrl+Alt를 먹으면 클릭 사용)',
+    '한/영: VNC HUD 「한/영」 클릭',
   ];
 
   return {

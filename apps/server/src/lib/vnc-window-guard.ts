@@ -7,6 +7,37 @@ import {
 
 const GUARD_INTERVAL_MS = 2000;
 
+type GuardedContext = {
+  context: BrowserContext;
+  proxyPort: number;
+  headless: boolean;
+};
+
+const guardedContexts = new Set<GuardedContext>();
+
+function registerVncGuardedContext(
+  context: BrowserContext,
+  proxyPort: number,
+  headless: boolean,
+): void {
+  const entry: GuardedContext = { context, proxyPort, headless };
+  guardedContexts.add(entry);
+  context.on('close', () => {
+    guardedContexts.delete(entry);
+  });
+}
+
+/** Ctrl+Alt 포커스·분할 API 직후 모든 Playwright 창 geometry 즉시 반영 */
+export async function refreshAllVncWindowLayouts(): Promise<number> {
+  let n = 0;
+  for (const { context, proxyPort, headless } of guardedContexts) {
+    if (context.pages().every((p) => p.isClosed())) continue;
+    await enforceVncWindowBounds(context, proxyPort, headless).catch(() => {});
+    n += 1;
+  }
+  return n;
+}
+
 async function windowIdForPage(page: Page): Promise<number | null> {
   const cdp = await page.context().newCDPSession(page);
   try {
@@ -70,6 +101,8 @@ export function startVncWindowGuard(
 
   void tick();
   const timer = setInterval(tick, GUARD_INTERVAL_MS);
+
+  registerVncGuardedContext(context, proxyPort, headless);
 
   context.on('page', tick);
   context.on('close', () => {

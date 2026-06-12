@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { join } from 'path';
 import { readFileSync } from 'fs';
 import { buildVncHudState, clearVncFocus, focusVncByHotkey } from '../lib/vnc-focus.js';
+import { refreshAllVncWindowLayouts } from '../lib/vnc-window-guard.js';
 import {
   getVncImeStatus,
   setVncImeEnglish,
@@ -56,13 +57,15 @@ export async function registerVncRoutes(app: FastifyInstance) {
     if (!result) {
       return reply.code(400).send({ error: 'unknown slot', slot: request.params.slot });
     }
-    return { ok: true, ...result, hud: await buildVncHudState() };
+    const windows = await refreshAllVncWindowLayouts();
+    return { ok: true, ...result, windows, hud: await buildVncHudState() };
   });
 
   app.post('/api/vnc/layout/tile', async (request, reply) => {
     assertVncLocal(request);
     await clearVncFocus();
-    return { ok: true, hud: await buildVncHudState() };
+    const windows = await refreshAllVncWindowLayouts();
+    return { ok: true, windows, hud: await buildVncHudState() };
   });
 
   app.get('/vnc-hud', async (request, reply) => {

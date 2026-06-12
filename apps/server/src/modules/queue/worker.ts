@@ -28,7 +28,7 @@ import {
   passesWeekendVolumeGate,
 } from '../../lib/human-engine-policy.js';
 import { pickNaverCaptchaPage, tryAutoSolveNaverCaptcha } from '../../lib/naver-captcha-vision.js';
-import { clickNaverLoginButton } from '../../lib/naver-login-fields.js';
+import { isNaverLoginPagePendingSubmit } from '../../lib/posting-captcha-session.js';
 import {
   isWarmupConnectionError,
   recoverPostingDongleAfterWarmupConnection,
@@ -518,11 +518,10 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
                   accountId,
                   workspace: jobWorkspace,
                   jobType: type,
-                  resubmit: async () => {
-                    if (captchaPage.url().includes('nidlogin')) await clickNaverLoginButton(captchaPage);
-                  },
                 });
                 if (vision === 'solved') {
+                  const pendingLogin = await isNaverLoginPagePendingSubmit(captchaPage);
+                  if (!pendingLogin) {
                   try {
                     let retryResultUrl = '';
                     if (type === 'post_blog' && runPostBlog) {
@@ -549,6 +548,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
                     }
                   } catch {
                     /* Vision 후 재시도 실패 → VNC hold */
+                  }
                   }
                 }
                 if (vision === 'failed') visionAutoFailed = true;

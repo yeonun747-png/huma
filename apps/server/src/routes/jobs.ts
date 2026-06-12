@@ -19,6 +19,7 @@ import { assertHumaJobAdvanceAllowed, assertHumaJobRunnable } from '../lib/accou
 import { assertManualSocialCrankAllowed } from '../lib/crank-guard.js';
 import { getCrankJobSessionDetail } from '../lib/crank-job-session.js';
 import { deleteJobById, deleteJobsByIds } from '../lib/delete-job.js';
+import { abortHumaJobById } from '../lib/abort-job.js';
 import { downloadHumaMedia, parseHumaMediaStoragePath } from '../lib/huma-media-storage.js';
 import { resolveJobPreviewImageUrl } from '../lib/resolve-job-preview-image.js';
 import {
@@ -503,6 +504,18 @@ export async function registerJobRoutes(app: FastifyInstance) {
       priority: 1_000_000,
     });
     return data;
+  });
+
+  /** 고착 LIVE·CAPTCHA — 세션·락 해제 후 failed 또는 삭제 */
+  app.post<{ Params: { id: string } }>('/api/jobs/:id/abort', { preHandler: authMiddleware }, async (request, reply) => {
+    const { id } = request.params;
+    const access = await assertJobWorkspaceAccess(id, getWorkspaceFilter(request));
+    if (!access.ok) return reply.code(access.status).send({ error: access.error });
+
+    const body = (request.body ?? {}) as { delete?: boolean };
+    const result = await abortHumaJobById(id, { deleteAfter: body.delete === true });
+    if (!result.ok) return reply.code(400).send({ error: result.error });
+    return { success: true, deleted: result.deleted };
   });
 
   app.delete('/api/jobs/:id', { preHandler: authMiddleware }, async (request, reply) => {

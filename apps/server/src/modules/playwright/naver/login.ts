@@ -46,9 +46,6 @@ async function resolveLoginCaptchaIfNeeded(
   try {
     await tryAutoSolveNaverCaptcha(page, {
       ...captchaCtx,
-      resubmit: async () => {
-        await clickNaverLoginButton(page);
-      },
     });
   } catch (err) {
     // Vision·클릭 오류 시 캡차 화면이면 VNC hold로 넘김 (HUMAN_CLICK_NO_BBOX 등)

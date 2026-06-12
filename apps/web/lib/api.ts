@@ -217,6 +217,14 @@ export const api = {
     }>(`/api/jobs/${jobId}/publish-from-preview`, { method: 'POST' }),
   pauseJob: (id: string) => request(`/api/jobs/${id}/pause`, { method: 'PATCH' }),
   resumeJob: (id: string) => request(`/api/jobs/${id}/resume`, { method: 'PATCH' }),
+  abortJob: async (id: string, opts?: { delete?: boolean }) => {
+    const res = await request<{ success: boolean; deleted: boolean }>(`/api/jobs/${id}/abort`, {
+      method: 'POST',
+      body: JSON.stringify(opts ?? {}),
+    });
+    refreshNavCaches();
+    return res;
+  },
   deleteJob: async (id: string) => {
     const res = await request(`/api/jobs/${id}`, { method: 'DELETE' });
     refreshNavCaches();

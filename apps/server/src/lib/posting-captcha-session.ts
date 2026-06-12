@@ -141,7 +141,7 @@ export async function ensurePostingSessionAfterCaptcha(
   accountId: string,
   options?: { allowAutoLoginSubmit?: boolean },
 ): Promise<boolean> {
-  const allowAutoLoginSubmit = options?.allowAutoLoginSubmit !== false;
+  const allowAutoLoginSubmit = options?.allowAutoLoginSubmit === true;
   const page = pickNaverCaptchaPage(context) ?? pickPostingWorkflowPage(context);
   if (!page || page.isClosed()) return false;
 

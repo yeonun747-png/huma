@@ -43,10 +43,18 @@ else
   DISPLAY="${DISPLAY}" fcitx-remote -s hangul 2>/dev/null || true
 fi
 
-# VNC 한/영 전환 — xbindkeys (RealVNC가 한/영키를 안 보낼 때 대비)
+# VNC 단축키·한/영 — xbindkeys (RealVNC가 Ctrl+Alt·한/영을 클라이언트에서 먹을 수 있음 → HUD 클릭 대체)
 if command -v xbindkeys >/dev/null 2>&1; then
+  PORT="${PORT:-3100}"
+  BASE="http://127.0.0.1:${PORT}/api/vnc"
   RC="${HOME}/.huma-vnc-xbindkeysrc"
   cat > "${RC}" <<EOF
+"curl -fsS -X POST ${BASE}/focus/1"  control+mod1 + 1
+"curl -fsS -X POST ${BASE}/focus/2"  control+mod1 + 2
+"curl -fsS -X POST ${BASE}/focus/3"  control+mod1 + 3
+"curl -fsS -X POST ${BASE}/focus/4"  control+mod1 + 4
+"curl -fsS -X POST ${BASE}/focus/5"  control+mod1 + 5
+"curl -fsS -X POST ${BASE}/layout/tile"  control+mod1 + 0
 "DISPLAY=${DISPLAY} fcitx-remote -t 2>/dev/null || true"  control + space
 "DISPLAY=${DISPLAY} fcitx-remote -t 2>/dev/null || true"  Alt_R
 "DISPLAY=${DISPLAY} fcitx-remote -t 2>/dev/null || true"  Hangul

@@ -69,7 +69,10 @@
       text-align: center;
       border-right: 1px solid rgba(255, 255, 255, 0.08);
       font-size: 13px;
+      pointer-events: auto;
+      cursor: pointer;
     }
+    .slot:hover { background: rgba(255, 255, 255, 0.06); border-radius: 4px; }
     .slot:last-child { border-right: none; }
     .slot.active { color: #b8f0c8; }
     .slot.focused { color: #ffcc66; font-weight: 700; }
@@ -79,7 +82,12 @@
       flex: 0 0 auto;
       color: #c9b8ff;
       font-size: 13px;
+      pointer-events: auto;
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 4px;
     }
+    #tile:hover { background: rgba(255, 255, 255, 0.06); }
     #ime-btn {
       flex: 0 0 auto;
       pointer-events: auto;
@@ -131,6 +139,8 @@
     const PORT = '__HUMA_PORT__';
     const API = `http://127.0.0.1:${PORT}/api/vnc/hud`;
     const IME_TOGGLE = `http://127.0.0.1:${PORT}/api/vnc/ime/toggle`;
+    const FOCUS = (slot) => `http://127.0.0.1:${PORT}/api/vnc/focus/${slot}`;
+    const TILE = `http://127.0.0.1:${PORT}/api/vnc/layout/tile`;
     const HINTS = ['Ctrl+Alt+1', 'Ctrl+Alt+2', 'Ctrl+Alt+3', 'Ctrl+Alt+4', 'Ctrl+Alt+5'];
     const SLOT_DESC = ['Crank1(실폰)', 'Crank2(실폰)', '연운1', '연운2', '연운3'];
     const imeBtn = document.getElementById('ime-btn');
@@ -166,6 +176,15 @@
       }
     });
 
+    document.getElementById('tile').addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        await fetch(TILE, { method: 'POST', cache: 'no-store' });
+        poll();
+      } catch { /* ignore */ }
+    });
+
     async function poll() {
       try {
         const res = await fetch(API, { cache: 'no-store' });
@@ -186,6 +205,15 @@
           if (!hk.active) cls += ' idle';
           el.className = cls;
           el.innerHTML = `<span class="slot-key">${hint}</span><span class="slot-label">${desc}</span>`;
+          el.title = hk.active ? `${desc} 클릭 — 전체(포커스)` : `${desc} (세션 없음)`;
+          el.addEventListener('click', async (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            try {
+              await fetch(FOCUS(hk.id), { method: 'POST', cache: 'no-store' });
+              poll();
+            } catch { /* ignore */ }
+          });
           slotsEl.appendChild(el);
         });
         renderIme(d.ime);

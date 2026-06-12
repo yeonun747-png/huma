@@ -7,8 +7,8 @@ import {
   isNaverHumanHoldError,
 } from '../modules/watcher/detector.js';
 import type { ModemSession } from '../modules/proxy/manager.js';
-import { clickNaverLoginButton } from './naver-login-fields.js';
 import { pickNaverCaptchaPage, tryAutoSolveNaverCaptcha } from './naver-captcha-vision.js';
+import { isNaverLoginPagePendingSubmit } from './posting-captcha-session.js';
 import { setCrankSessionProgress } from './crank-session-progress.js';
 
 /** worker·scheduled-session — CAPTCHA hold 진입 후 정상 종료 신호 */
@@ -55,11 +55,8 @@ export async function tryEnterCrankCaptchaHold(params: CrankCaptchaHoldParams): 
         accountId: params.accountId,
         workspace: params.workspace,
         jobType: 'social_crank',
-        resubmit: async () => {
-          if (page.url().includes('nidlogin')) await clickNaverLoginButton(page);
-        },
       });
-      if (vision === 'solved') return false;
+      if (vision === 'solved' && !(await isNaverLoginPagePendingSubmit(page))) return false;
       if (vision === 'failed') visionAutoFailed = true;
     }
   }

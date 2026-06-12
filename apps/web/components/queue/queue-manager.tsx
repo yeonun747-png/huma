@@ -16,6 +16,7 @@ import { QueueAutoContentModal, type AutoContentFormValues } from './queue-auto-
 import { buildScheduledAt } from '@/lib/queue-repeat';
 import { formatJobErrorLabel } from '@/lib/job-error-label';
 import {
+  isAbortableQueueJob,
   isDeletableQueueJob,
   isPausableQueueJob,
   isStaleOrFailedQueueJob,
@@ -316,6 +317,15 @@ export function QueueManager() {
     setSelectedIds(new Set(staleFailedJobs.filter(isDeletableQueueJob).map((j) => j.id)));
   };
 
+  const handleAbortJob = (job: HumaJob) => {
+    const msg = `「${job.title ?? job.job_type}」 LIVE 작업을 강제 중단할까요?\n브라우저·동글·계정 락을 해제하고 큐에서 제거합니다.`;
+    if (!window.confirm(msg)) return;
+    api
+      .abortJob(job.id, { delete: true })
+      .then(() => load())
+      .catch((e) => alert((e as Error).message));
+  };
+
   const handleDeleteJob = (job: HumaJob) => {
     const drill = isCaptchaDrillJob(job);
     const captchaHold = job.status === 'awaiting_captcha';
@@ -534,7 +544,7 @@ export function QueueManager() {
                   </button>
                 ) : (
                   <span className="text-[11px] text-huma-t3">
-                    LIVE만 삭제 불가 · CAPTCHA·실패·지연·완료 선택 삭제 가능
+                    LIVE는 ■ 강제 중단 · CAPTCHA·실패·지연·완료는 선택 삭제 가능
                   </span>
                 )}
               </div>
@@ -562,6 +572,7 @@ export function QueueManager() {
               visibleJobs.map((job) => {
             const ws = (job.workspace ?? workspace) as Workspace;
             const canAdvance = ['pending', 'scheduled', 'paused'].includes(job.status);
+            const abortable = isAbortableQueueJob(job);
             const deletable = isDeletableQueueJob(job);
             const pausable = isPausableQueueJob(job);
             return (
@@ -612,11 +623,14 @@ export function QueueManager() {
                     : undefined
                 }
                 onStop={
-                  pausable
-                    ? () =>
-                        (job.status === 'paused' ? api.resumeJob(job.id) : api.pauseJob(job.id)).then(load)
-                    : undefined
+                  abortable
+                    ? () => handleAbortJob(job)
+                    : pausable
+                      ? () =>
+                          (job.status === 'paused' ? api.resumeJob(job.id) : api.pauseJob(job.id)).then(load)
+                      : undefined
                 }
+                stopTitle={abortable ? 'LIVE 강제 중단·삭제' : undefined}
                 onDelete={deletable ? () => handleDeleteJob(job) : undefined}
               />
             );

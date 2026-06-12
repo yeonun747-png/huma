@@ -136,6 +136,7 @@ export function MQueueItem({
   onAdvance,
   onStop,
   onDelete,
+  stopTitle,
   selectable,
   checked,
   onSelectChange,
@@ -151,6 +152,7 @@ export function MQueueItem({
   onAdvance?: () => void;
   onStop?: () => void;
   onDelete?: () => void;
+  stopTitle?: string;
   selectable?: boolean;
   checked?: boolean;
   onSelectChange?: (checked: boolean) => void;
@@ -213,7 +215,7 @@ export function MQueueItem({
           <button
             type="button"
             className="m-q-btn stop"
-            title="일시정지/재개"
+            title={stopTitle ?? '일시정지/재개'}
             onClick={(e) => {
               e.stopPropagation();
               onStop();

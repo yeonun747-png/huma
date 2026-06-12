@@ -27,6 +27,8 @@ export interface NaverCaptchaVisionContext {
   jobType?: string;
   accountLabel?: string;
   resubmit?: () => Promise<void>;
+  /** true일 때만 캡차 확인 후 nid 로그인 버튼 자동 클릭 (기본 false — VNC 관리자 수동) */
+  autoLoginSubmit?: boolean;
 }
 
 interface VisionSolveResult {
@@ -586,10 +588,12 @@ async function submitCaptcha(page: Page, ctx: NaverCaptchaVisionContext): Promis
 
   await clickCaptchaConfirm(page);
 
-  if (ctx.resubmit) {
-    await ctx.resubmit();
-  } else if (page.url().includes('nidlogin')) {
-    await clickNaverLoginButton(page);
+  if (ctx.autoLoginSubmit === true) {
+    if (ctx.resubmit) {
+      await ctx.resubmit();
+    } else if (page.url().includes('nidlogin')) {
+      await clickNaverLoginButton(page);
+    }
   }
 }
 
