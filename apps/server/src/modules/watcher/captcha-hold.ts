@@ -9,8 +9,10 @@ import { resumeSocialCrankAfterCaptcha } from '../../lib/crank-captcha-resume.js
 import { resumePostingAfterCaptcha } from '../../lib/posting-captcha-resume.js';
 import { continuePostBlogFromCaptchaHold } from '../../lib/posting-captcha-continue.js';
 import {
+  buildPostBlogPayloadFromJob,
   ensurePostingSessionAfterCaptcha,
-  isNaverLoginPagePendingSubmit,
+  isPostingAutoResumeBlocked,
+  persistPostingSessionBeforeHoldClose,
 } from '../../lib/posting-captcha-session.js';
 import { isNaverCaptchaVisible, pickNaverCaptchaPage } from '../../lib/naver-captcha-vision.js';
 import { vncSlotLabelKo } from '../../lib/vnc-window-layout.js';
@@ -144,12 +146,13 @@ async function tryAutoResumePostingCaptcha(entry: CaptchaHoldEntry): Promise<voi
   const url = page.url();
   if (url === 'about:blank' || url === '') return;
 
-  // 캡차만 풀고 로그인 버튼은 VNC에서 누르는 구간 — 자동 재개 금지 (조기 completeCaptchaHold·브라우저 종료 방지)
-  if (await isNaverLoginPagePendingSubmit(page)) return;
+  if (await isPostingAutoResumeBlocked(page)) return;
 
   entry.autoResumeFiring = true;
   try {
-    const sessionReady = await ensurePostingSessionAfterCaptcha(entry.context, entry.accountId);
+    const sessionReady = await ensurePostingSessionAfterCaptcha(entry.context, entry.accountId, {
+      allowAutoLoginSubmit: false,
+    });
     if (!sessionReady) return;
 
     await logOperation({
@@ -343,6 +346,17 @@ export async function completeCaptchaHold(
         job.account_id &&
         !resultUrl?.trim()
       ) {
+        if (job.job_type === 'post_blog') {
+          const { data: jobRow } = await supabase.from('huma_jobs').select('*').eq('id', jobId).maybeSingle();
+          if (jobRow) {
+            await logOperation({
+              level: 'warn',
+              message: '[post_blog] CAPTCHA hold 소실 — DB payload로 재큐 (브라우저 세션 없음)',
+              job_id: jobId,
+              account_id: job.account_id,
+            });
+          }
+        }
         await resumePostingAfterCaptcha(jobId, job.account_id);
         return { ok: true };
       }
@@ -385,34 +399,52 @@ export async function completeCaptchaHold(
     if (entry.modemSession) await releaseModem(entry.modemSession).catch(() => {});
     entry.releaseAccountLock();
     await resumeSocialCrankAfterCaptcha(jobId, accountId, preferredProxyPort);
-  } else if (entry.jobType === 'post_blog' && entry.payload) {
-    const sessionOk = await ensurePostingSessionAfterCaptcha(entry.context, entry.accountId).catch(
-      () => false,
-    );
-    if (!sessionOk) {
-      entry.resumingInProgress = false;
-      holds.set(jobId, entry);
-      scheduleReminders(entry);
-      return { ok: false, error: 'CAPTCHA_LOGIN_NOT_READY' };
-    }
+  } else if (entry.jobType === 'post_blog') {
+    const postPayload =
+      entry.payload ??
+      (await supabase
+        .from('huma_jobs')
+        .select('title, content, image_urls, link_url, hashtags, workspace, content_type, platform_schedule, video_path')
+        .eq('id', jobId)
+        .maybeSingle()
+        .then(({ data }) => (data ? buildPostBlogPayloadFromJob(data) : undefined)));
 
-    const cont = await continuePostBlogFromCaptchaHold({
-      jobId,
-      accountId,
-      context: entry.context,
-      modemSession: entry.modemSession,
-      payload: entry.payload,
-      releaseAccountLock: entry.releaseAccountLock,
-      workspace: entry.workspace,
-      accountLabel: entry.accountLabel,
-      jobTitle: entry.jobTitle,
-    });
-    if (cont.reHeld) {
-      return { ok: true };
+    if (postPayload) {
+      const sessionOk = await ensurePostingSessionAfterCaptcha(entry.context, entry.accountId, {
+        allowAutoLoginSubmit: false,
+      }).catch(() => false);
+      if (!sessionOk) {
+        entry.resumingInProgress = false;
+        holds.set(jobId, entry);
+        scheduleReminders(entry);
+        return { ok: false, error: 'CAPTCHA_LOGIN_NOT_READY' };
+      }
+      await persistPostingSessionBeforeHoldClose(entry.context).catch(() => {});
+
+      const cont = await continuePostBlogFromCaptchaHold({
+        jobId,
+        accountId,
+        context: entry.context,
+        modemSession: entry.modemSession,
+        payload: postPayload,
+        releaseAccountLock: entry.releaseAccountLock,
+        workspace: entry.workspace,
+        accountLabel: entry.accountLabel,
+        jobTitle: entry.jobTitle,
+      });
+      if (cont.reHeld) {
+        return { ok: true };
+      }
+      resumeOk = cont.ok;
+      resumeError = cont.error;
+    } else {
+      await persistPostingSessionBeforeHoldClose(entry.context).catch(() => {});
+      await closeBrowserContext(entry.context).catch(() => {});
+      if (entry.modemSession) await releaseModem(entry.modemSession).catch(() => {});
+      entry.releaseAccountLock();
+      await resumePostingAfterCaptcha(jobId, accountId);
     }
-    resumeOk = cont.ok;
-    resumeError = cont.error;
-  } else if (entry.jobType === 'post_blog' || entry.jobType === 'cafe_new_post') {
+  } else if (entry.jobType === 'cafe_new_post') {
     await closeBrowserContext(entry.context).catch(() => {});
     if (entry.modemSession) await releaseModem(entry.modemSession).catch(() => {});
     entry.releaseAccountLock();

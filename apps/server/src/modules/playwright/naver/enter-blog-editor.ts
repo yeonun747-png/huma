@@ -28,7 +28,7 @@ const RESERVED_BLOG_PATHS = new Set([
 const POSTWRITE_URL_RE = /postwrite|PostWriteForm|GoBlogWrite/i;
 
 /** VNC/Xvfb — SmartEditor ONE 초기 로딩이 느릴 수 있음 */
-const SMART_EDITOR_WAIT_MS = 90_000;
+const SMART_EDITOR_WAIT_MS = 120_000;
 
 function blogIdFromUrl(url: string): string | null {
   if (url.includes('section.blog') || /BlogHome/i.test(url)) return null;
@@ -58,7 +58,9 @@ async function dismissEditorOverlays(editorPage: Page): Promise<void> {
   const frame = editorPage.frameLocator('#mainFrame');
 
   const cancelDraft = frame
-    .locator('.se-popup-button-cancel, .se_popup_btn_cancel, button:has-text("취소")')
+    .locator(
+      '.se-popup-button-cancel, .se_popup_btn_cancel, button:has-text("취소"), button:has-text("새로 작성")',
+    )
     .first();
   if (await cancelDraft.isVisible({ timeout: 4000 }).catch(() => false)) {
     await cancelDraft.click({ timeout: 5000 }).catch(() => {});
@@ -66,11 +68,29 @@ async function dismissEditorOverlays(editorPage: Page): Promise<void> {
   }
 
   const closeHelp = frame
-    .locator('.se-help-panel-close-button, button.se-help-panel-close-button, .btn_close_help')
+    .locator(
+      '.se-help-panel-close-button, button.se-help-panel-close-button, .btn_close_help, .se-help-panel button[aria-label="닫기"]',
+    )
     .first();
   if (await closeHelp.isVisible({ timeout: 1500 }).catch(() => false)) {
     await closeHelp.click({ timeout: 4000 }).catch(() => {});
     await sleep(300);
+  }
+
+  const dimDismiss = frame
+    .locator('.se-popup-dim, .se_dim, .layer_popup .btn_close, button:has-text("닫기")')
+    .first();
+  if (await dimDismiss.isVisible({ timeout: 1200 }).catch(() => false)) {
+    await dimDismiss.click({ timeout: 4000 }).catch(() => {});
+    await sleep(250);
+  }
+
+  const cookieClose = editorPage
+    .locator('#cookie_close, .cookie_btn_close, button:has-text("동의")')
+    .first();
+  if (await cookieClose.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await cookieClose.click({ timeout: 3000 }).catch(() => {});
+    await sleep(200);
   }
 }
 

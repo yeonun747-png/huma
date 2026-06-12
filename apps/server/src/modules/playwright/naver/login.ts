@@ -21,6 +21,7 @@ import {
 } from '../../../lib/naver-captcha-vision.js';
 import { shouldPreserveBrowserPageForVnc } from '../../watcher/captcha-hold.js';
 import { escapeBlogHomeAfterLogin } from '../../../lib/naver-blog-portal.js';
+import { isNaverAuthChallengePage } from '../../../lib/posting-captcha-session.js';
 
 const NAVER_LOGIN_URL = 'https://nid.naver.com/nidlogin.login';
 const NAV_TIMEOUT_MS = 60_000;
@@ -69,6 +70,14 @@ async function assertLoginSucceeded(
     (await page.locator('#captcha, .captcha, iframe[src*="captcha"]').count().catch(() => 0)) > 0;
   if (captchaVisible) {
     throw new Error('CAPTCHA_DETECTED');
+  }
+
+  if (await isNaverAuthChallengePage(page)) {
+    const url = page.url().toLowerCase();
+    if (url.includes('device') || url.includes('new_env')) {
+      throw new Error('NAVER_LOGIN_DEVICE_VERIFY');
+    }
+    throw new Error('NAVER_LOGIN_2FA');
   }
 
   const errText = await readNaverLoginErrorText(page);

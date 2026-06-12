@@ -1,4 +1,4 @@
-import { mkdirSync } from 'fs';
+import { existsSync, mkdirSync, statSync } from 'fs';
 import { join } from 'path';
 import { supabase } from '../../middleware/auth.js';
 import { generateFingerprint, type AccountFingerprint } from './fingerprint.js';
@@ -12,8 +12,22 @@ export function getProfilePath(accountId: string, stored?: string | null): strin
   return join(PROFILES_ROOT, accountId);
 }
 
+/** Chrome 프로필에 네이버 세션 쿠키가 실제로 있는지 확인 */
 export function hasStoredSession(profilePath: string): boolean {
-  return Boolean(profilePath);
+  if (!profilePath?.trim()) return false;
+  const cookiePaths = [
+    join(profilePath, 'Default', 'Cookies'),
+    join(profilePath, 'Default', 'Network', 'Cookies'),
+    join(profilePath, 'Cookies'),
+  ];
+  for (const p of cookiePaths) {
+    try {
+      if (existsSync(p) && statSync(p).size > 512) return true;
+    } catch {
+      /* ignore */
+    }
+  }
+  return false;
 }
 
 export async function ensureAccountAntiDetect(accountId: string, workspace: string): Promise<void> {

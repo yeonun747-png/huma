@@ -95,11 +95,10 @@ async function quickWarmupGlance(page: Page, accountType: WarmupAccountType): Pr
   await humanSleep(accountType === 'posting' ? 300 : 1500, accountType === 'posting' ? 1000 : 4000);
 }
 
-/** 방문 페이지에서 naver 내부 메뉴·탭 0~2회 클릭 */
+/** 방문 페이지에서 naver 내부 메뉴·탭 클릭 (posting: 1~2회 필수) */
 async function maybeBrowseInPageMenus(page: Page, accountType: WarmupAccountType): Promise<void> {
   if (accountType !== 'posting') return;
-  const clicks = randomBetween(0, 2);
-  if (clicks === 0) return;
+  const clicks = randomBetween(1, 2);
 
   const menuLinks = page.locator(
     'nav a[href*="naver.com"], .lnb a[href*="naver.com"], .tab_menu a, a[role="tab"]',
@@ -241,7 +240,7 @@ async function runWarmupSearchRound(
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const navError = await searchViaNaverHomepage(page, keyword, navTimeout, humanEngine);
     if (Math.random() < 0.55) await maybeClickSearchTab(page);
-    if (accountType === 'posting' && Math.random() < 0.45) await maybeBrowseInPageMenus(page, accountType);
+    if (accountType === 'posting') await maybeBrowseInPageMenus(page, accountType);
 
     const integrated = await collectNaverSearchUrlsDetailed(page, 'integrated', 8);
     if (!navError && integrated.urls.length > 0) {
@@ -294,7 +293,7 @@ export async function preSessionWarmup(
     return;
   }
 
-  const keywords = selectWarmupKeywords(persona, roundCount + 1);
+  const keywords = selectWarmupKeywords(persona, Math.max(roundCount, 1));
   const visitPerRound =
     accountType === 'posting'
       ? randomBetween(2, 3)
@@ -310,7 +309,7 @@ export async function preSessionWarmup(
       accountType,
       visitPerRound,
       humanEngine,
-      i === 0,
+      accountType === 'posting',
     );
     if (i < roundCount - 1) {
       await openNaverHome(page, navTimeout).catch(() => null);
@@ -318,21 +317,7 @@ export async function preSessionWarmup(
     }
   }
 
-  if (accountType === 'posting') {
-    const blogKeyword = keywords[roundCount] ?? selectWarmupKeyword(persona);
-    const navError = await searchViaNaverHomepage(page, blogKeyword, navTimeout, humanEngine);
-    await maybeClickSearchTab(page);
-    const blogTab = page.locator('.tab_menu a, a[role="tab"]').filter({ hasText: '블로그' }).first();
-    if (await blogTab.isVisible({ timeout: 1500 }).catch(() => false)) {
-      await blogTab.click({ timeout: 5000 }).catch(() => {});
-      await page.waitForLoadState('domcontentloaded', { timeout: navTimeout }).catch(() => {});
-      await humanSleep(350, 700);
-    }
-    const blog = await collectNaverSearchUrlsDetailed(page, 'blog', 4);
-    if (!navError && blog.urls.length > 0) {
-      await visitWarmupUrls(page, blog.urls, randomBetween(1, 2), navTimeout, accountType);
-    }
-  } else if (accountType === 'crank' && !expressCrank) {
+  if (accountType === 'crank' && !expressCrank) {
     const blogKeyword = keywords[roundCount] ?? selectWarmupKeyword(persona);
     await runWarmupSearchRound(page, blogKeyword, navTimeout, accountType, randomBetween(1, 2), humanEngine, false);
   }

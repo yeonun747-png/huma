@@ -409,6 +409,8 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
                 }
               }
 
+              await markRunning();
+
               const captchaCtx = {
                 humaJobId,
                 accountId,
@@ -417,10 +419,9 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
               };
 
               runPostBlog = async (): Promise<string> => {
-                await markRunning();
                 await closeIdleBlankTabs(context);
                 let lastErr: Error | undefined;
-                for (let attempt = 1; attempt <= 3; attempt += 1) {
+                for (let attempt = 1; attempt <= 4; attempt += 1) {
                   const page = pickPostingWorkflowPage(context) ?? (await acquireWorkflowPage(context));
                   try {
                     const out = await executePostBlog({
@@ -436,10 +437,10 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
                     lastErr = postErr as Error;
                     const msg = lastErr.message ?? '';
                     if (
-                      attempt < 3 &&
+                      attempt < 4 &&
                       (msg.includes('BLOG_WRITE_BTN_NOT_FOUND') || msg.includes('BLOG_EDITOR_NOT_READY'))
                     ) {
-                      await sleep(8000);
+                      await sleep(10_000);
                       continue;
                     }
                     throw postErr;
