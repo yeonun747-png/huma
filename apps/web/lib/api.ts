@@ -400,6 +400,24 @@ export const api = {
             crankDetail?: string;
             preview: string;
           }
+        | {
+            kind: 'generating';
+            jobId: string;
+            account: string;
+            platform: string;
+            workspace: string;
+            title: string;
+            jobType: string;
+            jobStatus: string;
+            elapsedMin: number;
+            phaseLabel?: string;
+            preview: string;
+            chars: number;
+            totalChars: number;
+            wpm: number;
+            typos: number;
+            eta: string;
+          }
       >;
       idle: {
         jobId: string;
