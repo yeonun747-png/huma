@@ -11,7 +11,7 @@ import {
   acquireWorkflowPage,
 } from '../playwright/browser.js';
 import { loadAccountForBrowser } from '../playwright/account-loader.js';
-import { naverLogin, ensureNaverLoggedIn } from '../playwright/naver/login.js';
+import { naverLogin } from '../playwright/naver/login.js';
 import { preSessionWarmup } from '../playwright/naver/pre-session-warmup.js';
 import { parsePersona } from '../playwright/persona.js';
 import { measureRTT, rttScale } from '../human-engine/timing.js';
@@ -329,6 +329,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
           }
 
           let heldForCaptcha = false;
+          let runPostBlog: (() => Promise<string>) | null = null;
 
           try {
             let resultUrl = '';
@@ -406,35 +407,59 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
                 }
               }
 
-              if (accountId) {
-                if (resumeAfterCaptcha) {
-                  await ensureNaverLoggedIn(context, accountId, {
-                    profilePath: accountCtx?.profile_path,
-                    fastCheck: true,
+              const captchaCtx = {
+                humaJobId,
+                accountId,
+                workspace: jobWorkspace,
+                jobType: type,
+              };
+
+              runPostBlog = async (): Promise<string> => {
+                await markRunning();
+                await closeIdleBlankTabs(context);
+                const page = await acquireWorkflowPage(context);
+                try {
+                  const out = await executePostBlog({
+                    page,
+                    payload,
+                    humanConfig,
+                    persona,
+                    rttScale: rttScaleFactor,
                   });
-                } else {
-                  await naverLogin(context, accountId, {
-                    profilePath: accountCtx?.profile_path,
-                    captchaContext: {
-                      humaJobId,
-                      accountId,
-                      workspace: jobWorkspace,
-                      jobType: type,
-                    },
-                  });
+                  return out.resultUrl;
+                } catch (postErr) {
+                  const msg = (postErr as Error).message ?? '';
+                  if (
+                    accountId &&
+                    (msg.includes('BLOG_WRITE_BTN_NOT_FOUND') || msg.includes('BLOG_EDITOR_NOT_READY'))
+                  ) {
+                    await naverLogin(context, accountId, {
+                      profilePath: accountCtx?.profile_path,
+                      skipShadowWalk: true,
+                      captchaContext: captchaCtx,
+                    });
+                    const retryPage = await acquireWorkflowPage(context);
+                    const out = await executePostBlog({
+                      page: retryPage,
+                      payload,
+                      humanConfig,
+                      persona,
+                      rttScale: rttScaleFactor,
+                    });
+                    return out.resultUrl;
+                  }
+                  throw postErr;
                 }
+              };
+
+              if (accountId && !resumeAfterCaptcha) {
+                await naverLogin(context, accountId, {
+                  profilePath: accountCtx?.profile_path,
+                  captchaContext: captchaCtx,
+                });
               }
 
-              await markRunning();
-              await closeIdleBlankTabs(context);
-              const page = await acquireWorkflowPage(context);
-              ({ resultUrl } = await executePostBlog({
-                page,
-                payload,
-                humanConfig,
-                persona,
-                rttScale: rttScaleFactor,
-              }));
+              resultUrl = await runPostBlog!();
             } else {
               if (accountId) {
                 await naverLogin(context, accountId, {
@@ -483,21 +508,8 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
                 if (vision === 'solved') {
                   try {
                     let retryResultUrl = '';
-                    if (type === 'post_blog') {
-                      if (accountCtx) {
-                        await ensureNaverLoggedIn(context, accountId, {
-                          profilePath: accountCtx.profile_path,
-                        });
-                      }
-                      await closeIdleBlankTabs(context);
-                      const retryPage = await acquireWorkflowPage(context);
-                      ({ resultUrl: retryResultUrl } = await executePostBlog({
-                        page: retryPage,
-                        payload,
-                        humanConfig,
-                        persona: parsePersona(accountCtx?.persona),
-                        rttScale: rttScaleFactor,
-                      }));
+                    if (type === 'post_blog' && runPostBlog) {
+                      retryResultUrl = await runPostBlog();
                     } else if (type === 'cafe_new_post') {
                       const retryPage = await context.newPage();
                       ({ resultUrl: retryResultUrl } = await executeCafePost({

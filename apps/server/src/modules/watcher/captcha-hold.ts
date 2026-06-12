@@ -7,6 +7,11 @@ import type { ModemSession } from '../proxy/manager.js';
 import { releaseModem } from '../proxy/manager.js';
 import { resumeSocialCrankAfterCaptcha } from '../../lib/crank-captcha-resume.js';
 import { resumePostingAfterCaptcha } from '../../lib/posting-captcha-resume.js';
+import {
+  isBlogWriteReady,
+  persistPostingSessionBeforeHoldClose,
+} from '../../lib/posting-captcha-session.js';
+import { isNaverCaptchaVisible, pickNaverCaptchaPage } from '../../lib/naver-captcha-vision.js';
 import { vncSlotLabelKo } from '../../lib/vnc-window-layout.js';
 import { enforceVncWindowBounds } from '../../lib/vnc-window-guard.js';
 import { notifyCaptchaTelegram, resolveVncUrl, buildJobWebUrl } from './telegram.js';
@@ -14,6 +19,7 @@ import { notifyCaptchaTelegram, resolveVncUrl, buildJobWebUrl } from './telegram
 const HOLD_MS = 30 * 60 * 1000;
 const REMIND_MS = 5 * 60 * 1000;
 const MAX_REMINDS = 3;
+const CAPTCHA_AUTO_RESUME_MS = 3000;
 
 export interface CaptchaHoldInput {
   jobId: string;
@@ -104,10 +110,57 @@ function scheduleReminders(entry: CaptchaHoldEntry): void {
     entry.timers.push(t);
   }
 
+  if (
+    !entry.isDrill &&
+    (entry.jobType === 'post_blog' || entry.jobType === 'cafe_new_post')
+  ) {
+    const autoResume = setInterval(() => {
+      void tryAutoResumePostingCaptcha(entry);
+    }, CAPTCHA_AUTO_RESUME_MS);
+    entry.timers.push(autoResume);
+  }
+
   const timeout = setTimeout(() => {
     void expireCaptchaHold(entry.jobId);
   }, entry.holdMs);
   entry.timers.push(timeout);
+}
+
+async function tryAutoResumePostingCaptcha(entry: CaptchaHoldEntry): Promise<void> {
+  if (!holds.has(entry.jobId)) return;
+
+  const page = pickNaverCaptchaPage(entry.context);
+  if (!page || page.isClosed()) return;
+  if (await isNaverCaptchaVisible(page)) return;
+
+  let ready = false;
+  if (page.url().includes('blog.naver.com')) {
+    ready = await isBlogWriteReady(page);
+  } else if (!page.url().includes('nidlogin.login')) {
+    ready = await isBlogWriteReady(page).catch(() => false);
+    if (!ready) {
+      await page.goto('https://blog.naver.com', { waitUntil: 'domcontentloaded', timeout: 45_000 }).catch(() => {});
+      ready = await isBlogWriteReady(page);
+    }
+  } else {
+    await page
+      .waitForURL((url) => !url.href.includes('nidlogin.login'), { timeout: 5000 })
+      .catch(() => {});
+    if (!page.url().includes('nidlogin.login')) {
+      await page.goto('https://blog.naver.com', { waitUntil: 'domcontentloaded', timeout: 45_000 }).catch(() => {});
+      ready = await isBlogWriteReady(page);
+    }
+  }
+
+  if (!ready) return;
+
+  await logOperation({
+    level: 'info',
+    message: '[post_blog] CAPTCHA 해결 감지 — 발행 자동 재개',
+    job_id: entry.jobId,
+    account_id: entry.accountId,
+  });
+  await completeCaptchaHold(entry.jobId);
 }
 
 export function getCaptchaHold(jobId: string): CaptchaHoldEntry | undefined {
@@ -300,6 +353,13 @@ export async function completeCaptchaHold(
 
   clearTimers(entry);
   holds.delete(jobId);
+
+  if (
+    (entry.jobType === 'post_blog' || entry.jobType === 'cafe_new_post') &&
+    !resultUrl?.trim()
+  ) {
+    await persistPostingSessionBeforeHoldClose(entry.context).catch(() => {});
+  }
 
   await closeBrowserContext(entry.context).catch(() => {});
   if (entry.modemSession) await releaseModem(entry.modemSession).catch(() => {});

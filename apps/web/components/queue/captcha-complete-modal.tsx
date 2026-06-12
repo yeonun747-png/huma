@@ -95,9 +95,10 @@ export function CaptchaCompleteModal({
             </>
           ) : (
             <>
-              VNC에서 캡cha를 푼 뒤 <strong>발행 재개</strong>를 누르면 워밍업 없이 블로그 에디터가 열리고
-              자동 타이핑·발행이 이어집니다. VNC에서 직접 발행까지 끝냈다면 아래 URL을 넣고{' '}
-              <strong>수동 완료</strong>를 누르세요.
+              VNC에서 캡cha를 푼 뒤 <strong>자동으로 발행 재개</strong>됩니다(글쓰기 버튼 확인 시). 필요하면{' '}
+              <strong>발행 재개</strong>를 눌러도 됩니다. 워밍업·naver.com 홈 없이 블로그 에디터로 바로
+              이어집니다. VNC에서 직접 발행까지 끝냈다면 아래 URL을 넣고 <strong>수동 완료</strong>를
+              누르세요.
             </>
           )}
         </p>

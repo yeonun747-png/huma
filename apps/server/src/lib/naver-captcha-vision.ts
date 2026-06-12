@@ -579,6 +579,11 @@ export async function tryAutoSolveNaverCaptcha(
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     try {
+      if (ctx.accountId && page.url().includes('nidlogin')) {
+        await ensureNaverLoginCredentialsForCaptcha(page, ctx.accountId);
+        await humanSleep(400, 900);
+      }
+
       const captchaType = await detectCaptchaType(page);
 
       await logOperation({

@@ -36,7 +36,7 @@ export async function typeIntoNaverLoginField(
 }
 
 /**
- * CAPTCHA 화면 전환 시 네이버가 비밀번호(때로 ID)를 비우는 경우가 있음 — 제출 전 재입력.
+ * CAPTCHA 화면 전환 시 네이버가 비밀번호만 비우는 경우가 많음 — ID는 유지, PW만 재입력.
  */
 export async function ensureNaverLoginCredentialsForCaptcha(
   page: Page,
@@ -46,23 +46,17 @@ export async function ensureNaverLoginCredentialsForCaptcha(
 
   const { data: account } = await supabase
     .from('huma_accounts')
-    .select('naver_id, naver_pw_enc')
+    .select('naver_pw_enc')
     .eq('id', accountId)
     .single();
   if (!account) return;
 
-  const idVal = await page.locator('#id').inputValue().catch(() => '');
-  if (!idVal?.trim()) {
-    await typeIntoNaverLoginField(page, '#id', account.naver_id);
-    await humanSleep(300, 700);
-  }
-
-  const pwVal = await page.locator('#pw').inputValue().catch(() => '');
-  if (!pwVal?.trim()) {
-    const password = decrypt(account.naver_pw_enc);
-    await typeIntoNaverLoginField(page, '#pw', password);
-    await humanSleep(400, 900);
-  }
+  const password = decrypt(account.naver_pw_enc);
+  const pw = page.locator('#pw');
+  await pw.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+  await pw.fill('').catch(() => {});
+  await typeIntoNaverLoginField(page, '#pw', password);
+  await humanSleep(400, 900);
 }
 
 /** 로그인 버튼 — bbox 없을 때 force click 폴백. */

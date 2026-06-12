@@ -237,6 +237,13 @@ export type PreSessionWarmupOptions = {
   express?: boolean;
 };
 
+function resolvePostingWarmupRounds(): number {
+  const roll = Math.random();
+  if (roll < 0.8) return 0;
+  if (roll < 0.95) return randomBetween(1, 2);
+  return randomBetween(2, 3);
+}
+
 export async function preSessionWarmup(
   page: Page,
   persona: AccountPersona,
@@ -248,12 +255,17 @@ export async function preSessionWarmup(
     accountType === 'crank' ? CRANK_NAV_TIMEOUT_MS : PLAYWRIGHT_NAV_TIMEOUT_MS;
   const expressCrank = accountType === 'crank' && options?.express === true;
 
+  /** post_blog — 80% 생략 · 15% 1~2회 · 5% 2~3회 (블로거는 바로 발행하는 경우가 많음) */
   const roundCount =
     accountType === 'posting'
-      ? randomBetween(2, 3)
+      ? resolvePostingWarmupRounds()
       : expressCrank
         ? 1
         : randomBetween(2, 3);
+
+  if (accountType === 'posting' && roundCount === 0) {
+    return;
+  }
 
   const keywords = selectWarmupKeywords(persona, roundCount + 1);
   const visitPerRound =

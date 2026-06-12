@@ -7,9 +7,14 @@ import type { HumanEngineConfig } from '../../../lib/settings.js';
 import { notifySlack } from '../../watcher/detector.js';
 
 import { humanClickLocator } from '../../human-engine/mouse.js';
+import { vncFastSleepScale } from '../../../lib/vnc-session.js';
 
 
 
+function scaledSleep(min: number, max: number): Promise<void> {
+  const s = vncFastSleepScale();
+  return humanSleep(Math.round(min * s), Math.round(max * s));
+}
 /**
  * v3.25 ㉒ — blog.naver.com/write 직접 접속 금지.
  * 글쓰기 버튼이 새 탭(팝업)으로 에디터를 여는 경우를 처리하고,
@@ -21,7 +26,7 @@ export async function enterBlogEditor(_page: Page, _humanEngine: HumanEngineConf
 
   await _page.goto('https://blog.naver.com');
 
-  await humanSleep(1000, 2500);
+  await scaledSleep(1000, 2500);
 
   const writeBtn = _page.locator('.btn_write, [class*="write"]').first();
 
