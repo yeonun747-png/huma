@@ -1,5 +1,6 @@
 import type { BrowserContext, Page } from 'playwright';
 
+import { humanClickLocator } from '../../human-engine/mouse.js';
 import { humanSleep } from '../../human-engine/typing.js';
 
 import type { HumanEngineConfig } from '../../../lib/settings.js';
@@ -91,19 +92,49 @@ async function clickIfVisible(root: Page | ReturnType<Page['frameLocator']>, sel
 
 /** 「작성 중인 글이 있습니다」 — 확인(이어쓰기) 금지, 취소만 클릭해 새 글 작성 */
 async function dismissDraftResumePopup(editorPage: Page): Promise<boolean> {
-  const scopes: Array<Page | ReturnType<Page['frameLocator']>> = [
-    editorPage,
-    editorPage.frameLocator('#mainFrame'),
+  const scopes: Array<Page | ReturnType<Page['frameLocator']>> = [editorPage];
+  if ((await editorPage.locator('#mainFrame').count().catch(() => 0)) > 0) {
+    scopes.push(editorPage.frameLocator('#mainFrame'));
+  }
+
+  const popupLocators = (scope: Page | ReturnType<Page['frameLocator']>) => [
+    scope.locator('text=작성 중인 글이 있습니다').first(),
+    scope.locator('text=작성중인 글이 있습니다').first(),
+    scope.getByText(/작성\s*중인\s*글이/).first(),
+  ];
+
+  const cancelSelectors = [
+    '.se-popup-button-cancel',
+    'button.se-popup-button-cancel',
+    '.se_popup_btn_cancel',
+    '[class*="popup"] button[class*="cancel"]',
+    'button:has-text("취소")',
   ];
 
   for (const scope of scopes) {
-    const popup = scope.locator('text=작성 중인 글이 있습니다').first();
-    if (!(await popup.isVisible({ timeout: 500 }).catch(() => false))) continue;
+    let hasPopup = false;
+    for (const popup of popupLocators(scope)) {
+      if (await popup.isVisible({ timeout: 600 }).catch(() => false)) {
+        hasPopup = true;
+        break;
+      }
+    }
+    if (!hasPopup) continue;
 
-    const cancelBtn = scope.locator('button:has-text("취소")').first();
-    if (await cancelBtn.isVisible({ timeout: 800 }).catch(() => false)) {
-      await cancelBtn.click({ timeout: 4000 }).catch(() => {});
-      await sleep(450);
+    for (const sel of cancelSelectors) {
+      const btn = scope.locator(sel).first();
+      if (!(await btn.isVisible({ timeout: 1000 }).catch(() => false))) continue;
+      await humanClickLocator(editorPage, btn).catch(() => btn.click({ timeout: 4000 }).catch(() => {}));
+      await sleep(500);
+      return true;
+    }
+
+    const cancelRole = scope.getByRole('button', { name: '취소' }).first();
+    if (await cancelRole.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await humanClickLocator(editorPage, cancelRole).catch(() =>
+        cancelRole.click({ timeout: 4000 }).catch(() => {}),
+      );
+      await sleep(500);
       return true;
     }
   }
@@ -172,7 +203,11 @@ async function tryEditorOnPage(page: Page, waitBudgetMs = SMART_EDITOR_WAIT_MS):
   await page.bringToFront().catch(() => {});
   await page.waitForLoadState('domcontentloaded').catch(() => {});
 
-  if (POSTWRITE_URL_RE.test(page.url()) || (await page.locator('#mainFrame').count().catch(() => 0)) > 0) {
+  if (
+    POSTWRITE_URL_RE.test(page.url()) ||
+    (await page.locator('#mainFrame').count().catch(() => 0)) > 0 ||
+    (await isSeOneEditorShellReady(page))
+  ) {
     if (await waitForSmartEditor(page, waitBudgetMs)) {
       await dismissNaverBlogEditorOverlays(page);
       return page;

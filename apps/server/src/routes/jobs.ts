@@ -695,15 +695,18 @@ export async function registerJobRoutes(app: FastifyInstance) {
       return reply.code(409).send({ error: 'CAPTCHA 입력칸을 찾지 못했습니다' });
     }
 
-    let auto_resumed = false;
-    if (result.cleared && !result.pending_login && (hold.jobType === 'post_blog' || hold.jobType === 'cafe_new_post')) {
-      const ready = await ensurePostingSessionAfterCaptcha(hold.context, hold.accountId, {
-        allowAutoLoginSubmit: false,
-      }).catch(() => false);
-      if (ready) {
-        const done = await completeCaptchaHold(id);
-        auto_resumed = done.ok;
-      }
+    // 발행 재개는 백그라운드 — HTTP 응답을 막지 않음(타임아웃 방지)
+    if (
+      result.cleared &&
+      !result.pending_login &&
+      (hold.jobType === 'post_blog' || hold.jobType === 'cafe_new_post')
+    ) {
+      void (async () => {
+        const ready = await ensurePostingSessionAfterCaptcha(hold.context, hold.accountId, {
+          allowAutoLoginSubmit: false,
+        }).catch(() => false);
+        if (ready) await completeCaptchaHold(id);
+      })();
     }
 
     return {
@@ -711,7 +714,7 @@ export async function registerJobRoutes(app: FastifyInstance) {
       submitted: result.submitted,
       captcha_cleared: result.cleared,
       pending_login: result.pending_login,
-      auto_resumed,
+      auto_resumed: false,
     };
   });
 

@@ -56,8 +56,9 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       err instanceof Error &&
       (err.name === 'AbortError' || err.name === 'TimeoutError');
     if (isTimeout) {
+      const sec = timeoutMs != null ? Math.round(timeoutMs / 1000) : 20;
       throw new Error(
-        `요청 시간 초과(20초). ${target}${hint}`,
+        `요청 시간 초과(${sec}초). ${target}${hint}`,
       );
     }
     throw new Error(

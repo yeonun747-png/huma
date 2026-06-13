@@ -20,6 +20,7 @@ import {
   isNaverLoginPendingAfterCaptcha,
   pickNaverCaptchaPage,
 } from '../../lib/naver-captcha-vision.js';
+import { ensureNaverLoginCredentialsForCaptcha } from '../../lib/naver-login-fields.js';
 import { vncSlotLabelKo } from '../../lib/vnc-window-layout.js';
 import { enforceVncWindowBounds } from '../../lib/vnc-window-guard.js';
 import { notifyCaptchaTelegram, resolveVncUrl, buildJobWebUrl } from './telegram.js';
@@ -275,6 +276,13 @@ export async function enterCaptchaHold(
   holds.set(input.jobId, entry);
   scheduleReminders(entry);
   await focusVncBrowserPage(input.context, input.modemSession?.proxyPort);
+
+  const captchaPage = pickNaverCaptchaPage(input.context);
+  if (captchaPage && !captchaPage.isClosed() && captchaPage.url().includes('nidlogin')) {
+    await ensureNaverLoginCredentialsForCaptcha(captchaPage, input.accountId, { fast: true }).catch(
+      () => {},
+    );
+  }
 
   const vncSlotLabel = input.modemSession?.proxyPort
     ? vncSlotLabelKo(input.modemSession.proxyPort)

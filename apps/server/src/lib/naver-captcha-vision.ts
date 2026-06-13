@@ -673,7 +673,7 @@ export async function applyManualCaptchaAnswer(
 
   await humanSleep(250, 600);
   await submitCaptcha(page, ctx);
-  let cleared = await waitForCaptchaCleared(page, 15_000);
+  let cleared = await waitForCaptchaCleared(page, 8_000);
   let pending_login = cleared ? await isNaverLoginPendingAfterCaptcha(page) : false;
 
   if (!cleared && (await isNaverLoginPendingAfterCaptcha(page))) {

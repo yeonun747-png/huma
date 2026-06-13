@@ -221,7 +221,12 @@ export async function notifyCaptchaTelegram(
         '2) huma 큐 → 활동 재개 (C-Rank)',
       );
     } else {
-      lines.push('', '1) VNC 접속 → 캡cha 풀기 → 발행', '2) huma 큐 → 발행 완료 (URL 선택)');
+      lines.push(
+        '',
+        '비밀번호는 서버가 VNC 로그인 폼에 자동 재입력했습니다.',
+        '1) VNC 접속 → CAPTCHA 풀기(또는 huma 정답 원격 입력) → 로그인',
+        '2) huma 큐 → 발행 재개',
+      );
     }
   }
 
