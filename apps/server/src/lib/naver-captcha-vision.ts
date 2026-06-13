@@ -802,9 +802,21 @@ export async function tryAutoSolveNaverCaptcha(
   return 'failed';
 }
 
-/** CAPTCHA hold·텔레그램·웹 UI용 PNG — #captchaimg → 활성 루트 → 로그인 패널 → 뷰포트 전체 */
+/** CAPTCHA hold·텔레그램·웹 UI용 PNG — nidlogin #captcha 전체 → #captchaimg → 활성 루트 → 로그인 패널 → 뷰포트 */
 export async function captureNaverCaptchaPng(page: Page): Promise<Buffer | null> {
   await page.bringToFront().catch(() => {});
+
+  const isNidLogin = page.url().includes('nidlogin') || page.url().includes('nid.naver.com');
+  if (isNidLogin) {
+    for (const sel of ['#captcha', '#cptch', '.captcha_wrap']) {
+      const captcha = page.locator(sel).first();
+      if (!(await captcha.isVisible({ timeout: 500 }).catch(() => false))) continue;
+      const box = await captcha.boundingBox().catch(() => null);
+      if (!box || box.width < 100 || box.height < 60) continue;
+      const buf = await captcha.screenshot({ type: 'png', animations: 'disabled' }).catch(() => null);
+      if (buf && buf.length > 1200) return buf;
+    }
+  }
 
   for (const sel of ['#captchaimg', '#captcha img', 'img[id*="captcha"]', 'img[src*="captcha"]']) {
     const img = page.locator(sel).first();

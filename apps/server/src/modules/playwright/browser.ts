@@ -416,6 +416,15 @@ export async function closeIdleBlankTabs(context: BrowserContext, keep?: Page): 
   }
 }
 
+/** 워밍업·검색 중 열린 dict·지식iN 등 여분 탭 제거 — keep 탭만 유지 */
+export async function closeExtraTabsExcept(context: BrowserContext, keep: Page): Promise<void> {
+  for (const p of context.pages()) {
+    if (p === keep || p.isClosed()) continue;
+    await p.close().catch(() => {});
+  }
+  await keep.bringToFront().catch(() => {});
+}
+
 export async function closeBrowserContext(context: BrowserContext) {
   await context.close();
 }

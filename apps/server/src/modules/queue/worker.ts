@@ -6,8 +6,8 @@ import {
   createBrowserForAccount,
   closeBrowserContext,
   createBrowser,
-  releaseWorkflowPage,
   closeIdleBlankTabs,
+  closeExtraTabsExcept,
   acquireWorkflowPage,
 } from '../playwright/browser.js';
 import { pickPostingWorkflowPage } from '../../lib/posting-captcha-session.js';
@@ -363,7 +363,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
                   try {
                     await preSessionWarmup(warmupPage, persona, 'posting', humanConfig);
                   } finally {
-                    await releaseWorkflowPage(ctx, warmupPage);
+                    await closeExtraTabsExcept(ctx, warmupPage);
                   }
                 };
 

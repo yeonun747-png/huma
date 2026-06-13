@@ -8,7 +8,7 @@ import {
   acquireWorkflowPage,
   createBrowserForAccount,
   closeBrowserContext,
-  releaseWorkflowPage,
+  closeExtraTabsExcept,
 } from '../browser.js';
 import {
   clearCrankSessionProgress,
@@ -258,7 +258,7 @@ export async function runSocialCrank(
           expressWarmup ? '익스프레스(48h 이내 성공)' : '네이버 검색·체류',
         );
         await preSessionWarmup(warmupPage, persona, 'crank', undefined, { express: expressWarmup });
-        await releaseWorkflowPage(context, warmupPage);
+        await closeExtraTabsExcept(context, warmupPage);
         await ensurePhoneCrankTether(modemSession.proxyPort);
         await applyCrankResourceBlocking(context);
 

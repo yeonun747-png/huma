@@ -14,6 +14,7 @@ import { supabase } from '../../../middleware/auth.js';
 import {
   BLOG_BODY_SELECTORS,
   BLOG_TITLE_SELECTORS,
+  dismissSeOneMaterialPopup,
   findBlogTitleLocator,
   findVisibleLocator,
   isDraftResumePopupVisible,
@@ -192,6 +193,7 @@ export async function dismissNaverBlogEditorOverlays(editorPage: Page): Promise<
 export async function prepareSeOneEditorSurface(editorPage: Page, maxMs = 25_000): Promise<void> {
   await waitAndDismissDraftResumePopup(editorPage, maxMs);
   await dismissNaverBlogEditorOverlays(editorPage);
+  await dismissSeOneMaterialPopup(editorPage);
   await waitAndDismissDraftResumePopup(editorPage, 5_000);
   if (await isDraftResumePopupVisible(editorPage)) {
     throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');

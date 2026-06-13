@@ -1,6 +1,6 @@
 import type { FrameLocator, Locator, Page } from 'playwright';
 
-import { humanClickLocator } from '../../human-engine/mouse.js';
+import { humanClickLocator, humanMouseMove } from '../../human-engine/mouse.js';
 import { sleep } from '../../../lib/utils.js';
 
 export function editorFrame(page: Page): FrameLocator {
@@ -96,23 +96,102 @@ async function isLocatorInTitleSection(loc: Locator): Promise<boolean> {
     .catch(() => false);
 }
 
-/** 본문란 — 제목·documentTitle 제외 */
+async function isLocatorInEditorChrome(loc: Locator): Promise<boolean> {
+  return loc
+    .evaluate((el) => {
+      if (
+        el.closest(
+          'button, [role="button"], [class*="floating"], [class*="dock"], [class*="toolbar"], [class*="material-kit"], .se-sidebar, .se-help-panel',
+        )
+      ) {
+        return true;
+      }
+      const tag = el.tagName.toLowerCase();
+      if (tag === 'button' || el.getAttribute('role') === 'button') return true;
+      return false;
+    })
+    .catch(() => false);
+}
+
+/** 제목 바로 아래 본문 — 하단 글감 독·툴바 제외 */
+async function isLocatorMainEditorBody(page: Page, loc: Locator): Promise<boolean> {
+  if (await isLocatorInTitleSection(loc)) return false;
+  if (await isLocatorInEditorChrome(loc)) return false;
+
+  const box = await loc.boundingBox().catch(() => null);
+  if (!box || box.height < 16 || box.width < 80) return false;
+
+  const vp = page.viewportSize();
+  if (vp && box.y > vp.height * 0.82) return false;
+
+  return loc
+    .evaluate((el) => {
+      const editable =
+        el.matches('[contenteditable="true"]') || !!el.querySelector('[contenteditable="true"]');
+      if (!editable) return false;
+      const ph = (el.textContent ?? '').trim();
+      if (ph === '글감' && el.closest('[class*="floating"], [class*="dock"], [class*="toolbar"]')) {
+        return false;
+      }
+      return true;
+    })
+    .catch(() => false);
+}
+
+/** 글감 검색 팝업 — 본문 포커스 전 닫기 */
+export async function dismissSeOneMaterialPopup(page: Page): Promise<void> {
+  const popup = page
+    .locator('[class*="se-popup"], [class*="popup"]')
+    .filter({ hasText: /검색 결과가 없습니다|글감/ })
+    .first();
+  if (await popup.isVisible({ timeout: 250 }).catch(() => false)) {
+    const closeBtn = popup
+      .locator('button[aria-label*="닫"], .btn_close, button:has-text("닫기")')
+      .first();
+    if (await closeBtn.isVisible({ timeout: 200 }).catch(() => false)) {
+      await closeBtn.click({ timeout: 3000 }).catch(() => {});
+    } else {
+      await page.keyboard.press('Escape').catch(() => {});
+    }
+    await sleep(200);
+  }
+}
+
+async function pickMainBodyParagraph(page: Page, scope: Page | FrameLocator): Promise<Locator | null> {
+  const candidates = scope.locator(
+    '.se-components-wrap .se-section-text .se-text-paragraph[contenteditable="true"], .se-section-text:not(.se-section-documentTitle) .se-text-paragraph[contenteditable="true"]',
+  );
+  const count = await candidates.count().catch(() => 0);
+  for (let i = 0; i < count; i += 1) {
+    const loc = candidates.nth(i);
+    if (!(await loc.isVisible({ timeout: 400 }).catch(() => false))) continue;
+    if (await isLocatorMainEditorBody(page, loc)) return loc;
+  }
+  return null;
+}
+
+/** 본문란 — 제목·documentTitle·하단 글감 독 제외 */
 export async function findBlogBodyLocator(page: Page): Promise<Locator | null> {
+  await dismissSeOneMaterialPopup(page);
+
   try {
-    const ph = page.getByPlaceholder(/본문|일상|글감/).first();
+    const ph = page.getByPlaceholder(/본문|일상을 기록|나의 일상/).first();
     if ((await ph.count()) > 0 && (await ph.isVisible({ timeout: 800 }).catch(() => false))) {
-      if (!(await isLocatorInTitleSection(ph))) return ph;
+      if (await isLocatorMainEditorBody(page, ph)) return ph;
     }
   } catch {
     /* ignore */
   }
 
   for (const scope of [page, editorFrame(page)] as Array<Page | FrameLocator>) {
+    const mainParagraph = await pickMainBodyParagraph(page, scope);
+    if (mainParagraph) return mainParagraph;
+
     for (const sel of BLOG_BODY_SELECTORS) {
       const loc = scope.locator(sel).first();
       try {
         if ((await loc.count()) > 0 && (await loc.isVisible().catch(() => false))) {
-          if (!(await isLocatorInTitleSection(loc))) return loc;
+          if (await isLocatorMainEditorBody(page, loc)) return loc;
         }
       } catch {
         /* ignore */
@@ -126,7 +205,7 @@ export async function findBlogBodyLocator(page: Page): Promise<Locator | null> {
       .locator('.se-content, .se-text-paragraph, [contenteditable="true"]')
       .first();
     if ((await legacy.count()) > 0 && (await legacy.isVisible().catch(() => false))) {
-      return legacy;
+      if (await isLocatorMainEditorBody(page, legacy)) return legacy;
     }
   }
 
@@ -248,13 +327,29 @@ export async function focusBlogBodyField(page: Page, bodyLoc: Locator, maxAttemp
       await sleep(200);
       continue;
     }
+    await dismissSeOneMaterialPopup(page);
     await bodyLoc.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
-    await bodyLoc.focus().catch(() => {});
-    await humanClickLocator(page, bodyLoc);
+    await humanClickBodyParagraph(page, bodyLoc);
     await sleep(randomBetweenTitleFocus());
     if (await hasBodyFieldFocus(page, bodyLoc)) return;
   }
-  throw new Error('BLOG_BODY_FOCUS_FAILED');
+}
+
+/** 본문 상단 1/4 지점 클릭 — 하단 글감 독·툴바 오클릭 방지 */
+async function humanClickBodyParagraph(page: Page, bodyLoc: Locator): Promise<void> {
+  await bodyLoc.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+  const box = await bodyLoc.boundingBox().catch(() => null);
+  if (!box || box.width < 8 || box.height < 8) {
+    await humanClickLocator(page, bodyLoc);
+    return;
+  }
+
+  const jitter = 6 + Math.floor(Math.random() * 6);
+  const x = box.x + box.width / 2 + Math.floor(Math.random() * jitter * 2) - jitter;
+  const y = box.y + Math.min(Math.max(box.height * 0.22, 24), 72) + Math.floor(Math.random() * 10);
+  await humanMouseMove(page, x, y);
+  await sleep(100 + Math.floor(Math.random() * 200));
+  await page.mouse.click(x, y);
 }
 
 function randomBetweenTitleFocus(): number {

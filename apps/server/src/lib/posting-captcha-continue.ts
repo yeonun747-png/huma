@@ -7,7 +7,7 @@ import { scheduleRepeatIfNeeded } from './repeat-scheduler.js';
 import type { JobRecord } from './job-scheduler.js';
 import { loadAccountForBrowser } from '../modules/playwright/account-loader.js';
 import { parsePersona } from '../modules/playwright/persona.js';
-import { closeBrowserContext, closeIdleBlankTabs } from '../modules/playwright/browser.js';
+import { closeBrowserContext, closeIdleBlankTabs, closeExtraTabsExcept } from '../modules/playwright/browser.js';
 import { executePostBlog } from '../modules/queue/jobs/post-blog.js';
 import { findNaverPostwritePage } from '../modules/playwright/naver/enter-blog-editor.js';
 import { releaseModem, type ModemSession } from '../modules/proxy/manager.js';
@@ -69,6 +69,10 @@ export async function continuePostBlogFromCaptchaHold(params: {
     const persona = parsePersona(accountCtx.persona);
 
     await closeIdleBlankTabs(context);
+    const workflowPage = pickPostingWorkflowPage(context) ?? findNaverPostwritePage(context);
+    if (workflowPage) {
+      await closeExtraTabsExcept(context, workflowPage);
+    }
 
     let resultUrl = '';
     let lastErr: Error | undefined;
