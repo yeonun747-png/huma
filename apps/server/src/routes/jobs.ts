@@ -22,19 +22,13 @@ import { deleteJobById, deleteJobsByIds } from '../lib/delete-job.js';
 import { abortHumaJobById } from '../lib/abort-job.js';
 import { downloadHumaMedia, parseHumaMediaStoragePath } from '../lib/huma-media-storage.js';
 import { resolveJobPreviewImageUrl } from '../lib/resolve-job-preview-image.js';
+import { readCaptchaHoldScreenshot } from '../lib/captcha-hold-screenshot.js';
+import { submitCaptchaAnswerForJob } from '../lib/captcha-answer-submit.js';
 import {
   completeCaptchaHold,
   getCaptchaHold,
   getCaptchaHoldPublicInfo,
-  syncCaptchaHoldState,
 } from '../modules/watcher/captcha-hold.js';
-import { readCaptchaHoldScreenshot } from '../lib/captcha-hold-screenshot.js';
-import {
-  applyManualCaptchaAnswer,
-  isNaverCaptchaVisible,
-  pickNaverCaptchaPage,
-} from '../lib/naver-captcha-vision.js';
-import { ensurePostingSessionAfterCaptcha } from '../lib/posting-captcha-session.js';
 import { resolveVncUrl, buildJobWebUrl } from '../modules/watcher/telegram.js';
 
 async function assertJobWorkspaceAccess(
@@ -695,60 +689,19 @@ export async function registerJobRoutes(app: FastifyInstance) {
     const answer = body.answer?.trim();
     if (!answer) return reply.code(400).send({ error: '정답을 입력해 주세요' });
 
-    const hold = getCaptchaHold(id);
-    if (!hold) return reply.code(404).send({ error: 'CAPTCHA 세션이 없습니다 (만료·종료됨)' });
-
-    const page = pickNaverCaptchaPage(hold.context);
-    if (!page || page.isClosed()) {
-      return reply.code(409).send({ error: '브라우저 페이지가 닫혔습니다' });
-    }
-    if (!(await isNaverCaptchaVisible(page))) {
-      return reply
-        .code(409)
-        .send({ error: 'CAPTCHA 화면이 아닙니다 — 이미 해결됐다면 발행 재개를 누르세요' });
-    }
-
-    const result = await applyManualCaptchaAnswer(page, answer, {
-      accountId: hold.accountId,
-      humaJobId: id,
-      workspace: hold.workspace,
-      jobType: hold.jobType,
-    });
-    if (!result.filled) {
-      return reply.code(409).send({ error: 'CAPTCHA 입력칸을 찾지 못했습니다' });
-    }
-
-    if (await isNaverCaptchaVisible(page)) {
-      await syncCaptchaHoldState(hold, page, {
-        treatAsSecondRound: !result.cleared,
-        captureScreenshot: true,
-        refillPassword: true,
-      });
+    const result = await submitCaptchaAnswerForJob(id, answer);
+    if (!result.ok) {
+      return reply.code(409).send({ error: result.error });
     }
 
     const holdInfo = getCaptchaHoldPublicInfo(id);
-    const captchaStillVisible = await isNaverCaptchaVisible(page);
-
-    // 발행 재개는 백그라운드 — HTTP 응답을 막지 않음(타임아웃 방지)
-    if (
-      result.cleared &&
-      !result.pending_login &&
-      (hold.jobType === 'post_blog' || hold.jobType === 'cafe_new_post')
-    ) {
-      void (async () => {
-        const ready = await ensurePostingSessionAfterCaptcha(hold.context, hold.accountId, {
-          allowAutoLoginSubmit: false,
-        }).catch(() => false);
-        if (ready) await completeCaptchaHold(id);
-      })();
-    }
 
     return {
       ok: true,
       submitted: result.submitted,
-      captcha_cleared: result.cleared,
+      captcha_cleared: result.captcha_cleared,
       pending_login: result.pending_login,
-      captcha_still_visible: captchaStillVisible,
+      captcha_still_visible: result.captcha_still_visible,
       auto_resumed: false,
       hold: holdInfo,
     };

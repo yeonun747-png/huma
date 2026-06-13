@@ -28,6 +28,8 @@ import {
   isFocusInTitleArea,
   readBlogTitleText,
   waitForBlogTitleSectionReady,
+  recoverBlogTitleSection,
+  isBlogTitleSectionReady,
 } from './naver-editor-locators.js';
 import {
   extractPublishedPostUrl,
@@ -56,14 +58,18 @@ async function assertTitleStable(page: Page, titleLoc: Locator, expected: string
 
 /** SE ONE 제목 — 이미 입력됐으면 스킵(CAPTCHA 재개·재시도 중복 방지) */
 async function typeBlogTitle(page: Page, titleLoc: Locator, title: string): Promise<void> {
-  await prepareSeOneEditorSurface(page, 15_000);
-  await waitForBlogTitleSectionReady(page, 30_000);
+  if (!(await isBlogTitleSectionReady(page))) {
+    await recoverBlogTitleSection(page);
+  }
 
   const existing = await readBlogTitleText(titleLoc);
   if (isBlogTitleWritten(existing, title)) return;
 
   const freshTitleLoc = (await findBlogTitleLocator(page)) ?? titleLoc;
-  await waitForBlogTitleSectionReady(page, 15_000);
+  if (!(await isBlogTitleSectionReady(page))) {
+    await recoverBlogTitleSection(page);
+    await waitForBlogTitleSectionReady(page, 12_000);
+  }
 
   const titleEditable = page
     .locator(

@@ -24,10 +24,8 @@ import { ensureNaverLoginCredentialsForCaptcha } from '../../lib/naver-login-fie
 import { vncSlotLabelKo } from '../../lib/vnc-window-layout.js';
 import { enforceVncWindowBounds } from '../../lib/vnc-window-guard.js';
 import { notifyCaptchaTelegram, resolveVncUrl, buildJobWebUrl } from './telegram.js';
-import {
-  deleteCaptchaHoldScreenshot,
-  saveCaptchaHoldScreenshot,
-} from '../../lib/captcha-hold-screenshot.js';
+import { deleteCaptchaHoldScreenshot, saveCaptchaHoldScreenshot } from '../../lib/captcha-hold-screenshot.js';
+import { clearCaptchaTelegramMessagesForJob } from '../../lib/captcha-telegram-registry.js';
 
 const HOLD_MS = 30 * 60 * 1000;
 const REMIND_MS = 5 * 60 * 1000;
@@ -90,6 +88,7 @@ function clearTimers(entry: CaptchaHoldEntry) {
 async function cleanupHold(jobId: string, entry: CaptchaHoldEntry): Promise<void> {
   clearTimers(entry);
   holds.delete(jobId);
+  clearCaptchaTelegramMessagesForJob(jobId);
   await deleteCaptchaHoldScreenshot(jobId).catch(() => {});
   await closeBrowserContext(entry.context).catch(() => {});
   if (entry.modemSession) await releaseModem(entry.modemSession).catch(() => {});

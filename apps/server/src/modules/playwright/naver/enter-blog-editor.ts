@@ -18,8 +18,10 @@ import {
   findBlogTitleLocator,
   findVisibleLocator,
   isDraftResumePopupVisible,
+  isBlogTitleSectionReady,
   isNaverBlogEditorInteractable,
   isSeOneEditorShellReady,
+  recoverBlogTitleSection,
 } from './naver-editor-locators.js';
 
 function scaledSleep(min: number, max: number): Promise<void> {
@@ -214,6 +216,9 @@ async function waitForSmartEditor(editorPage: Page, timeoutMs = SMART_EDITOR_WAI
   while (Date.now() < deadline) {
     await waitAndDismissDraftResumePopup(editorPage, 3_000);
     await dismissNaverBlogEditorOverlays(editorPage);
+    if (!(await isBlogTitleSectionReady(editorPage))) {
+      await recoverBlogTitleSection(editorPage);
+    }
     if (await isSmartEditorInteractable(editorPage)) return true;
     await sleep(EDITOR_POLL_MS);
   }

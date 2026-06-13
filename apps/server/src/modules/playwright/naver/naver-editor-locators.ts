@@ -69,10 +69,68 @@ export async function isDraftResumePopupVisible(page: Page): Promise<boolean> {
     const popupNearDim = page.locator('[class*="se-popup"], [role="dialog"]').filter({
       hasText: /작성\s*중인\s*글|이어서\s*작성/,
     });
-    if ((await popupNearDim.count()) > 0) return true;
+    if (await popupNearDim.first().isVisible({ timeout: 200 }).catch(() => false)) return true;
   }
 
   return false;
+}
+
+/** elementFromPoint — 임시저장 모달만 차단(툴바·잔여 dim 오탐 제외) */
+async function isPointBlockedByDraftModal(page: Page, x: number, y: number): Promise<boolean> {
+  return page
+    .evaluate(
+      ({ px, py }) => {
+        const hit = document.elementFromPoint(px, py);
+        if (!hit) return true;
+        if (
+          hit.closest(
+            '.se-section-documentTitle, .se-documentTitle, .se-section-text, .se-text-paragraph[contenteditable="true"]',
+          )
+        ) {
+          return false;
+        }
+        const modal = hit.closest('.se-popup, [role="dialog"]');
+        if (!modal) return false;
+        const text = modal.textContent ?? '';
+        return /작성\s*중인\s*글|이어서\s*작성/.test(text);
+      },
+      { px: x, py: y },
+    )
+    .catch(() => true);
+}
+
+/** 제목란 노출·클릭 유도 — 본문 포커스만 잡힌 채 제목 대기에서 멈출 때 */
+export async function recoverBlogTitleSection(page: Page): Promise<void> {
+  await page
+    .evaluate(() => {
+      window.scrollTo(0, 0);
+      for (const sel of ['.se-wrap', '.se-container', '.se-components-wrap', '.se-main-container']) {
+        const el = document.querySelector(sel);
+        if (el && 'scrollTop' in el) (el as HTMLElement).scrollTop = 0;
+      }
+    })
+    .catch(() => {});
+
+  await dismissSeOneMaterialPopup(page);
+
+  const titleEditable = page
+    .locator(
+      '.se-section-documentTitle [contenteditable="true"], .se-documentTitle [contenteditable="true"]',
+    )
+    .first();
+  if (await titleEditable.isVisible({ timeout: 500 }).catch(() => false)) {
+    await titleEditable.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+    await humanClickLocator(page, titleEditable);
+    await sleep(250);
+    return;
+  }
+
+  const titleSection = page.locator('.se-section-documentTitle, .se-documentTitle').first();
+  if (await titleSection.isVisible({ timeout: 500 }).catch(() => false)) {
+    await titleSection.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+    await humanClickLocator(page, titleSection);
+    await sleep(250);
+  }
 }
 
 /** 제목란 클릭·입력 가능 — 팝업 dim 뒤가 아님 */
@@ -87,20 +145,15 @@ export async function isBlogTitleSectionReady(page: Page): Promise<boolean> {
   if (!(await title.isVisible({ timeout: 600 }).catch(() => false))) return false;
 
   const box = await title.boundingBox().catch(() => null);
-  if (!box || box.height < 18 || box.width < 100) return false;
+  if (!box || box.height < 12 || box.width < 80) return false;
 
-  const blocked = await page
-    .evaluate(
-      ({ x, y }) => {
-        const hit = document.elementFromPoint(x, y);
-        if (!hit) return true;
-        return !!hit.closest(
-          '.se-popup, [role="dialog"], .se-popup-dim, .se_dim, [class*="popup-dim"]',
-        );
-      },
-      { x: box.x + box.width / 2, y: box.y + Math.min(box.height / 2, 24) },
-    )
-    .catch(() => true);
+  if (await isFocusInTitleArea(page)) return true;
+
+  const blocked = await isPointBlockedByDraftModal(
+    page,
+    box.x + box.width / 2,
+    box.y + Math.min(box.height / 2, 24),
+  );
 
   return !blocked;
 }
@@ -108,8 +161,13 @@ export async function isBlogTitleSectionReady(page: Page): Promise<boolean> {
 /** 팝업 닫힌 뒤 제목란 interactable 될 때까지 대기 */
 export async function waitForBlogTitleSectionReady(page: Page, maxMs = 35_000): Promise<void> {
   const deadline = Date.now() + maxMs;
+  let lastRecover = 0;
   while (Date.now() < deadline) {
     if (await isBlogTitleSectionReady(page)) return;
+    if (Date.now() - lastRecover > 900) {
+      await recoverBlogTitleSection(page);
+      lastRecover = Date.now();
+    }
     await sleep(250);
   }
   if (await isDraftResumePopupVisible(page)) {
@@ -452,21 +510,24 @@ export async function insertTextIntoBlogEditable(
     throw new Error('BLOG_EDITABLE_NOT_INTERACTABLE');
   }
 
-  const blocked = await page
-    .evaluate(
-      ({ x, y }) => {
-        const hit = document.elementFromPoint(x, y);
-        if (!hit) return true;
-        return !!hit.closest(
-          '.se-popup, [role="dialog"], .se-popup-dim, .se_dim, [class*="popup-dim"]',
-        );
-      },
-      { x: box.x + box.width / 2, y: box.y + Math.min(box.height / 2, 28) },
-    )
-    .catch(() => true);
+  const blocked = await isPointBlockedByDraftModal(
+    page,
+    box.x + box.width / 2,
+    box.y + Math.min(box.height / 2, 28),
+  );
   if (blocked) {
     throw new Error('BLOG_EDITABLE_BLOCKED_BY_OVERLAY');
   }
+
+  const beforeLen = await loc
+    .evaluate((el) => {
+      const node = el as HTMLElement;
+      const target = node.matches('[contenteditable="true"]')
+        ? node
+        : (node.querySelector('[contenteditable="true"]') as HTMLElement | null);
+      return (target ?? node).textContent?.length ?? 0;
+    })
+    .catch(() => 0);
 
   await loc.evaluate((el, t) => {
     const node = el as HTMLElement;
@@ -492,6 +553,21 @@ export async function insertTextIntoBlogEditable(
       target.textContent = (target.textContent ?? '') + t;
     }
   }, text);
+
+  if (text.length > 0) {
+    const afterLen = await loc
+      .evaluate((el) => {
+        const node = el as HTMLElement;
+        const target = node.matches('[contenteditable="true"]')
+          ? node
+          : (node.querySelector('[contenteditable="true"]') as HTMLElement | null);
+        return (target ?? node).textContent?.length ?? 0;
+      })
+      .catch(() => 0);
+    if (afterLen <= beforeLen) {
+      throw new Error('BLOG_EDITABLE_INSERT_NOOP');
+    }
+  }
 }
 
 function resolveEditableNode(el: HTMLElement): HTMLElement {

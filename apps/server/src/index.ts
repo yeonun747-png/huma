@@ -40,6 +40,10 @@ import { initActivityControl } from './lib/activity-control.js';
 import { recoverCrankPipeline } from './lib/crank-pipeline-recovery.js';
 import { reconcileStaleCrankModemLocks } from './modules/modem/allocation.js';
 import { shutdownCaptchaHolds } from './modules/watcher/captcha-hold.js';
+import {
+  startTelegramCaptchaInbound,
+  stopTelegramCaptchaInbound,
+} from './modules/watcher/telegram-captcha-inbound.js';
 import { startCrankScheduler } from './lib/crank-scheduler.js';
 import { startCafeActivityScheduler } from './lib/cafe-activity-scheduler.js';
 import { registerCrankRoutes } from './routes/crank.js';
@@ -64,6 +68,7 @@ function registerGracefulShutdown(
     app.log.warn(`${signal} 수신 — graceful shutdown 시작`);
     try {
       await worker.close();
+      stopTelegramCaptchaInbound();
       await shutdownCaptchaHolds();
       await reconcileStaleCrankModemLocks();
     } catch (err) {
@@ -205,6 +210,7 @@ async function main() {
       app.log.warn('HUMA 전체 정지 상태 — ▶ 재시작 전까지 큐·스케줄러 가동 안 함');
     }
     const worker = startWorker();
+    startTelegramCaptchaInbound();
     await recoverCrankPipeline();
     startCrankScheduler();
     startCafeActivityScheduler();

@@ -3,6 +3,7 @@ import https from 'node:https';
 import { access, readFile } from 'node:fs/promises';
 
 import type { Workspace } from '@huma/shared';
+import { registerCaptchaTelegramOutboundMessage } from '../../lib/captcha-telegram-registry.js';
 import { shouldNotifyTelegram } from '../../lib/human-engine-policy.js';
 
 /** curl은 되는데 Node axios만 실패하는 IPv6 이슈 회피 */
@@ -13,6 +14,8 @@ const TELEGRAM_AXIOS_OPTS = {
   httpsAgent: telegramHttpsAgent,
   proxy: false as const,
 };
+
+export { TELEGRAM_AXIOS_OPTS };
 
 function formatTelegramAxiosError(err: unknown, fallback: string): string {
   const ax = err as {
@@ -33,6 +36,8 @@ function formatTelegramAxiosError(err: unknown, fallback: string): string {
   return fallback;
 }
 
+export { formatTelegramAxiosError };
+
 const QUIZ_PANANA_WORKSPACES: Workspace[] = ['panana', 'quizoasis'];
 
 export function resolveTelegramChatId(workspace?: string | null): string | null {
@@ -47,6 +52,27 @@ export function resolveTelegramChatId(workspace?: string | null): string | null 
     process.env.TELEGRAM_CHAT_ID_QUIZ_PANANA?.trim() ||
     null
   );
+}
+
+export function resolveWorkspaceFromTelegramChatId(chatId: string | number): string | null {
+  const id = String(chatId).trim();
+  const yeonun = process.env.TELEGRAM_CHAT_ID_YEONUN?.trim();
+  const quizPanana = process.env.TELEGRAM_CHAT_ID_QUIZ_PANANA?.trim();
+  if (yeonun && id === yeonun) return 'yeonun';
+  if (quizPanana && id === quizPanana) return 'panana';
+  return null;
+}
+
+export function isAllowedTelegramChatId(chatId: string | number): boolean {
+  return resolveWorkspaceFromTelegramChatId(chatId) !== null;
+}
+
+/** 텔레그램 메시지에서 CAPTCHA 정답 추출 */
+export function parseCaptchaAnswerFromTelegram(text: string): string | null {
+  const raw = text.trim();
+  if (!raw || raw.startsWith('/')) return null;
+  const answer = raw.replace(/^(정답|답|answer)\s*[:：]?\s*/i, '').trim();
+  return answer || null;
 }
 
 export function resolveVncUrl(workspace?: string | null): string | null {
@@ -79,13 +105,17 @@ function escapeHtml(text: string): string {
 export async function sendTelegramHtml(
   chatId: string,
   html: string,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; messageId?: number }> {
   const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
   if (!token) return { ok: false, error: 'TELEGRAM_BOT_TOKEN 없음' };
   if (!chatId) return { ok: false, error: 'chat_id 없음' };
 
   try {
-    const { data } = await axios.post<{ ok?: boolean; description?: string }>(
+    const { data } = await axios.post<{
+      ok?: boolean;
+      description?: string;
+      result?: { message_id?: number };
+    }>(
       `https://api.telegram.org/bot${token}/sendMessage`,
       {
         chat_id: chatId,
@@ -100,7 +130,7 @@ export async function sendTelegramHtml(
       console.warn('[telegram] send failed:', detail);
       return { ok: false, error: detail };
     }
-    return { ok: true };
+    return { ok: true, messageId: data.result?.message_id };
   } catch (err) {
     const detail = formatTelegramAxiosError(err, 'sendMessage failed');
     console.warn('[telegram] send failed:', detail, err);
@@ -125,7 +155,7 @@ export async function sendTelegramPhoto(
   chatId: string,
   photoPath: string,
   captionHtml: string,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; messageId?: number }> {
   const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
   if (!token) return { ok: false, error: 'TELEGRAM_BOT_TOKEN 없음' };
   if (!chatId) return { ok: false, error: 'chat_id 없음' };
@@ -142,7 +172,11 @@ export async function sendTelegramPhoto(
     form.append('photo', new Blob([buf], { type: 'image/png' }), 'captcha.png');
     form.append('caption', htmlCaptionToPlain(captionHtml));
 
-    const { data } = await axios.post<{ ok?: boolean; description?: string }>(
+    const { data } = await axios.post<{
+      ok?: boolean;
+      description?: string;
+      result?: { message_id?: number };
+    }>(
       `https://api.telegram.org/bot${token}/sendPhoto`,
       form,
       {
@@ -156,7 +190,7 @@ export async function sendTelegramPhoto(
       console.warn('[telegram] photo send failed:', detail);
       return { ok: false, error: detail };
     }
-    return { ok: true };
+    return { ok: true, messageId: data.result?.message_id };
   } catch (err) {
     const detail = formatTelegramAxiosError(err, 'sendPhoto failed');
     console.warn('[telegram] photo send failed:', detail, err);
@@ -282,6 +316,7 @@ export async function notifyCaptchaTelegram(
         '',
         '비밀번호는 서버가 로그인 폼에 <b>다시 자동 재입력</b>했습니다.',
         'huma 큐 → CAPTCHA 정답 원격 입력에서 <b>새 캡처</b>를 확인하고 정답을 다시 제출하세요.',
+        '또는 이 메시지에 <b>답장</b>으로 정답을 내면 huma가 자동 입력합니다.',
       );
     } else if (params.visionAutoFailed) {
       lines.push('', 'Claude Vision 자동 해결 3회 실패 — VNC에서 수동 해결 필요');
@@ -299,6 +334,7 @@ export async function notifyCaptchaTelegram(
         '1) VNC 접속 → CAPTCHA 풀기(또는 huma 정답 원격 입력) → 로그인',
         '2) huma 큐 → 발행 재개',
         '※ CAPTCHA 이미지는 텔레그램·huma 팝업에 캡처로 함께 표시됩니다.',
+        '💬 이 메시지에 <b>답장</b>으로 정답을 내면 huma가 VNC에 자동 입력합니다.',
       );
     }
   }
@@ -312,18 +348,27 @@ export async function notifyCaptchaTelegram(
 
   const caption = lines.join('\n');
 
+  const trackOutbound = (messageId?: number) => {
+    if (messageId) registerCaptchaTelegramOutboundMessage(chatId, messageId, params.jobId);
+  };
+
   if (params.screenshotPath && !params.completed && !params.timedOut) {
     try {
       await access(params.screenshotPath);
       const photo = await sendTelegramPhoto(chatId, params.screenshotPath, caption);
-      if (photo.ok) return photo;
+      if (photo.ok) {
+        trackOutbound(photo.messageId);
+        return photo;
+      }
       console.warn('[telegram] captcha photo fallback to text:', photo.error);
     } catch {
       console.warn('[telegram] captcha screenshot file missing:', params.screenshotPath);
     }
   }
 
-  return sendTelegramHtml(chatId, caption);
+  const text = await sendTelegramHtml(chatId, caption);
+  if (text.ok) trackOutbound(text.messageId);
+  return text;
 }
 
 /** env·Bot API 연결만 빠르게 확인 */
