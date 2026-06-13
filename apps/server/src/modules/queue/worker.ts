@@ -43,6 +43,7 @@ import { getCrankDailyLimit } from '../playwright/warmup.js';
 import { checkSharedWorkspaceLimit } from '../../lib/shared-limit.js';
 import { logOperation } from '../../lib/log-emitter.js';
 import { executePostBlog } from './jobs/post-blog.js';
+import { applyPostingResourceBlocking } from '../playwright/naver/posting-resource-block.js';
 import { executeCafePost } from './jobs/cafe-post.js';
 import { executeCafeReply } from './jobs/cafe-reply.js';
 import { executeSocialCrank } from './jobs/social-crank.js';
@@ -341,6 +342,10 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
             ({ context } = await createBrowser(modemSession?.proxyPort));
           }
 
+          if (type === 'post_blog') {
+            await applyPostingResourceBlocking(context).catch(() => {});
+          }
+
           let heldForCaptcha = false;
           let runPostBlog: (() => Promise<string>) | null = null;
 
@@ -406,6 +411,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
                     }
 
                     ({ context } = await createBrowserForAccount(accountCtx));
+                    await applyPostingResourceBlocking(context).catch(() => {});
                     try {
                       await runPostingWarmup(context);
                     } catch (retryErr) {

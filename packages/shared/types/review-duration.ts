@@ -1,8 +1,8 @@
-/** 본문 길이(대략) → 발행 전 검토 시간(대략) */
+/** 본문 길이(대략) → 발행 전 검토 시간 — 45초~2분 상한 */
 export const REVIEW_DURATION_BY_LENGTH = [
-  { lengthLabel: '600~700자', timeLabel: '45초~1.5분', minMs: 45_000, maxMs: 90_000 },
-  { lengthLabel: '700~800자', timeLabel: '1.3~3.3분', minMs: 78_000, maxMs: 198_000 },
-  { lengthLabel: '900~1000자', timeLabel: '2~5분', minMs: 120_000, maxMs: 300_000 },
+  { lengthLabel: '600자 미만', timeLabel: '45초~1분', minMs: 45_000, maxMs: 60_000 },
+  { lengthLabel: '600~900자', timeLabel: '50초~1.5분', minMs: 50_000, maxMs: 90_000 },
+  { lengthLabel: '900자 이상', timeLabel: '1분~2분', minMs: 60_000, maxMs: 120_000 },
 ] as const;
 
 export const REVIEW_DURATION_SUMMARY = REVIEW_DURATION_BY_LENGTH.map(
@@ -13,12 +13,12 @@ function randomBetween(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-/** 본문 글자수 → [minMs, maxMs] */
+/** 본문 글자수 → [minMs, maxMs] (45초~2분) */
 export function resolveReviewDurationRange(charCount: number): [number, number] {
   const n = Math.max(0, Math.floor(charCount));
-  if (n >= 900) return [120_000, 300_000];
-  if (n >= 700) return [78_000, 198_000];
-  return [45_000, 90_000];
+  if (n >= 900) return [60_000, 120_000];
+  if (n >= 600) return [50_000, 90_000];
+  return [45_000, 60_000];
 }
 
 export function calcReviewDurationMs(charCount: number, _legacyReviewMs?: [number, number]): number {

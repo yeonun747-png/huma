@@ -153,6 +153,21 @@ export async function clickVisibleLocator(page: Page, loc: Locator): Promise<voi
   await humanClickLocator(page, loc);
 }
 
+/** 취소선·선택 블록 등 서식 잔여 해제 — 툴바 「취소」와 혼동 금지 */
+export async function clearSeOneEditorFormatting(page: Page): Promise<void> {
+  await page.keyboard.press('Escape').catch(() => {});
+  await page.keyboard.press('Escape').catch(() => {});
+
+  const strikeOn = page
+    .locator(
+      '[data-name="strike"].se-is-selected, [data-name="strike"][aria-pressed="true"], button[aria-label*="취소선"].se-is-selected',
+    )
+    .first();
+  if (await strikeOn.isVisible({ timeout: 400 }).catch(() => false)) {
+    await humanClickLocator(page, strikeOn).catch(() => {});
+  }
+}
+
 /** 스마트에디터 툴바 버튼 — data-name → aria → 텍스트 순 */
 export async function clickEditorToolbar(
   page: Page,

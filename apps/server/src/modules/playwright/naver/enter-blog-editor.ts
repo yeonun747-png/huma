@@ -120,11 +120,7 @@ async function dismissDraftResumePopup(editorPage: Page): Promise<boolean> {
       const cancelCandidates = [
         root.locator('button.se-popup-button-cancel').first(),
         root.locator('.se-popup-button-cancel').first(),
-        root.locator('button:has-text("취소")').first(),
-        root.getByRole('button', { name: '취소' }).first(),
-        root.locator('[class*="cancel"]').first(),
-        scope.locator('button.se-popup-button-cancel').first(),
-        scope.getByRole('button', { name: '취소' }).first(),
+        root.getByRole('button', { name: '취소', exact: true }).first(),
       ];
 
       for (const btn of cancelCandidates) {
@@ -169,14 +165,6 @@ export async function dismissNaverBlogEditorOverlays(editorPage: Page): Promise<
     if (await dismissDraftResumePopup(editorPage)) dismissed = true;
 
     for (const scope of scopes) {
-      if (
-        await clickIfVisible(
-          scope,
-          '.se-popup-button-cancel, .se_popup_btn_cancel, button:has-text("취소")',
-        )
-      ) {
-        dismissed = true;
-      }
       for (const sel of HELP_CLOSE_SELECTORS) {
         if (await clickIfVisible(scope, sel)) dismissed = true;
       }

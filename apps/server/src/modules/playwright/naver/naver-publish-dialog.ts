@@ -182,5 +182,5 @@ export async function completeNaverPublishDialog(params: {
 
   await scaledHumanSleep(600, 1400, scale);
   await clickConfirmPublish(params.page);
-  await params.page.waitForLoadState('networkidle').catch(() => {});
+  await params.page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => {});
 }

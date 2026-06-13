@@ -15,9 +15,13 @@ import {
   dismissNaverBlogEditorOverlays,
   waitAndDismissDraftResumePopup,
 } from './enter-blog-editor.js';
-import { findBlogTitleLocator, findBlogBodyLocator } from './naver-editor-locators.js';
+import {
+  clearSeOneEditorFormatting,
+  findBlogTitleLocator,
+  findBlogBodyLocator,
+  isDraftResumePopupVisible,
+} from './naver-editor-locators.js';
 import { humanClickLocator } from '../../human-engine/mouse.js';
-import { humanPasteIntoElement } from '../../human-engine/korean-ime.js';
 import { pasteBlogLinkWithOgPreview } from './paste-blog-link.js';
 import { insertImageViaToolbar, insertVideoViaToolbar } from './naver-editor-media.js';
 import { completeNaverPublishDialog } from './naver-publish-dialog.js';
@@ -31,18 +35,34 @@ function mergePersonaConfig(base: HumanEngineConfig, persona: AccountPersona): H
   };
 }
 
-/** SE ONE 제목 — insertText (합성 IME·팝업 간섭 방지) */
+async function readTitleText(titleLoc: Locator): Promise<string> {
+  const inputVal = await titleLoc.inputValue().catch(() => '');
+  if (inputVal.trim()) return inputVal.trim();
+  const text = await titleLoc.textContent().catch(() => '');
+  return (text ?? '').trim();
+}
+
+/** SE ONE 제목 — insertText + 입력 검증 */
 async function typeBlogTitle(page: Page, titleLoc: Locator, title: string): Promise<void> {
   await titleLoc.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
   await humanClickLocator(page, titleLoc);
-  await sleep(randomBetween(200, 450));
+  await sleep(randomBetween(200, 400));
+  await clearSeOneEditorFormatting(page);
+  await humanClickLocator(page, titleLoc);
+  await sleep(120);
   await page.keyboard.press('Control+A').catch(() => {});
   await sleep(80);
   await page.keyboard.insertText(title);
   await sleep(randomBetween(300, 450));
+
+  const written = await readTitleText(titleLoc);
+  if (!written || !title.startsWith(written.slice(0, Math.min(4, written.length)))) {
+    await titleLoc.fill(title).catch(() => page.keyboard.insertText(title));
+    await sleep(300);
+  }
 }
 
-/** SE ONE 본문 — 문단별 붙여넣기 (ProseMirror·합성 IME 호환) */
+/** SE ONE 본문 — 문단별 insertText (Ctrl+V 붙여넣기·취소선 서식 잔여 방지) */
 async function typeSeOneBlogBody(
   page: Page,
   bodyLoc: Locator,
@@ -50,14 +70,22 @@ async function typeSeOneBlogBody(
   config: HumanEngineConfig,
 ): Promise<void> {
   const paragraphs = content.split('\n\n').filter(Boolean);
+  const paraPauseMin = Math.min(config.paragraph_pause_ms[0], 1200);
+  const paraPauseMax = Math.min(config.paragraph_pause_ms[1], 3500);
+
   for (let i = 0; i < paragraphs.length; i += 1) {
+    if (await isDraftResumePopupVisible(page)) {
+      await waitAndDismissDraftResumePopup(page, 8_000);
+    }
+    await clearSeOneEditorFormatting(page);
     await humanClickLocator(page, bodyLoc);
-    await sleep(randomBetween(150, 350));
-    await humanPasteIntoElement(page, bodyLoc, paragraphs[i]!);
+    await sleep(randomBetween(150, 300));
+    await page.keyboard.insertText(paragraphs[i]!);
+    await sleep(randomBetween(200, 400));
     if (i < paragraphs.length - 1) {
       await page.keyboard.press('Enter');
       await page.keyboard.press('Enter');
-      await humanSleep(config.paragraph_pause_ms[0], config.paragraph_pause_ms[1]);
+      await humanSleep(paraPauseMin, paraPauseMax);
     }
   }
 }
@@ -88,27 +116,33 @@ export async function postNaverBlog(params: {
   const page = await enterBlogEditor(params.page, config, { accountId: params.accountId });
   await waitAndDismissDraftResumePopup(page, 20_000);
   await dismissNaverBlogEditorOverlays(page);
+  await clearSeOneEditorFormatting(page);
 
   const titleBox = await findBlogTitleLocator(page);
   if (!titleBox) {
     throw new Error('BLOG_TITLE_NOT_FOUND');
   }
   await typeBlogTitle(page, titleBox, params.title);
-  await scaledHumanSleep(800, 1800, scale);
+  const titleWritten = await readTitleText(titleBox);
+  if (!titleWritten || titleWritten.length < 2) {
+    throw new Error('BLOG_TITLE_WRITE_FAILED');
+  }
+  await scaledHumanSleep(500, 1200, scale);
 
-  await waitAndDismissDraftResumePopup(page, 5_000);
+  await waitAndDismissDraftResumePopup(page, 8_000);
   await dismissNaverBlogEditorOverlays(page);
+  await clearSeOneEditorFormatting(page);
 
   const editor = await findBlogBodyLocator(page);
   if (!editor) {
     throw new Error('BLOG_BODY_NOT_FOUND');
   }
-  await humanClickLocator(page, editor);
-  await sleep(randomBetween(200, 400));
 
   if (isSeOnePostwrite(page)) {
     await typeSeOneBlogBody(page, editor, params.content, config);
   } else {
+    await humanClickLocator(page, editor);
+    await sleep(randomBetween(200, 400));
     await typePostContent(page, editor, params.content, config);
   }
 
