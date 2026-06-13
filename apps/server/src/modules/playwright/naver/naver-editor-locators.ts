@@ -40,7 +40,7 @@ const TITLE_SECTION_SELECTOR =
   '.se-section-documentTitle, .se-documentTitle, [data-placeholder*="제목"], .se-title-text';
 
 const BODY_SECTION_SELECTOR =
-  '.se-section-text, .se-text-paragraph, .se-content, .se-main-container, .se-components-wrap';
+  '.se-section-text:not(.se-section-documentTitle), .se-text-paragraph[contenteditable="true"], .se-content';
 
 const TITLE_PLACEHOLDER_RE = /^(제목|title)$/i;
 
@@ -266,7 +266,8 @@ export function isBlogTitleWritten(written: string, expected: string): boolean {
   if (!w || isTitlePlaceholderText(w)) return false;
   if (w.length < 2) return false;
   const probe = Math.min(4, w.length, e.length);
-  if (probe < 2) return w.length >= e.length * 0.5;
+  if (probe < 2) return w.length >= e.length * 0.5 && w.length <= e.length * 1.15;
+  if (w.length > e.length * 1.15) return false;
   return e.startsWith(w.slice(0, probe)) || w.startsWith(e.slice(0, probe));
 }
 
@@ -319,8 +320,138 @@ async function hasTitleFieldFocus(page: Page, titleLoc: Locator): Promise<boolea
 }
 
 async function hasBodyFieldFocus(page: Page, bodyLoc: Locator): Promise<boolean> {
+  if (await isFocusInTitleArea(page)) return false;
   if (await isFocusOnLocator(bodyLoc)) return true;
   return isFocusInBodyArea(page);
+}
+
+/** 제목 contenteditable blur — 본문 입력 전 DOM 포커스 해제 */
+export async function blurBlogTitleField(page: Page): Promise<void> {
+  await page
+    .evaluate((sel) => {
+      const nodes = document.querySelectorAll(sel);
+      for (const node of nodes) {
+        if (node instanceof HTMLElement) node.blur();
+      }
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && active.closest('.se-section-documentTitle, .se-documentTitle')) {
+        active.blur();
+      }
+    }, '.se-section-documentTitle [contenteditable="true"], .se-documentTitle [contenteditable="true"]')
+    .catch(() => {});
+}
+
+/** 본문 입력 대상 contenteditable (section wrapper → paragraph) */
+export async function resolveBodyEditableLocator(bodyLoc: Locator): Promise<Locator> {
+  const paragraph = bodyLoc.locator('.se-text-paragraph[contenteditable="true"]').first();
+  if (
+    (await paragraph.count()) > 0 &&
+    (await paragraph.isVisible({ timeout: 500 }).catch(() => false))
+  ) {
+    return paragraph;
+  }
+  const nested = bodyLoc.locator('[contenteditable="true"]').first();
+  if (
+    (await nested.count()) > 0 &&
+    (await nested.isVisible({ timeout: 400 }).catch(() => false))
+  ) {
+    return nested;
+  }
+  return bodyLoc;
+}
+
+/** locator에 직접 insertText — page.keyboard는 DOM 포커스(제목)로 새는 문제 방지 */
+export async function insertTextIntoBlogEditable(loc: Locator, text: string): Promise<void> {
+  await loc.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
+  await loc.evaluate((el, t) => {
+    const node = el as HTMLElement;
+    const editable =
+      node.matches('[contenteditable="true"]')
+        ? node
+        : (node.querySelector('[contenteditable="true"]') as HTMLElement | null);
+    const target = editable ?? node;
+    target.focus();
+
+    const sel = window.getSelection();
+    if (sel) {
+      const range = document.createRange();
+      range.selectNodeContents(target);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+
+    if (!document.execCommand('insertText', false, t)) {
+      target.textContent = (target.textContent ?? '') + t;
+    }
+  }, text);
+}
+
+function resolveEditableNode(el: HTMLElement): HTMLElement {
+  if (el.matches('[contenteditable="true"]')) return el;
+  return (el.querySelector('[contenteditable="true"]') as HTMLElement | null) ?? el;
+}
+
+/** 본문 단락 구분 — page.keyboard Enter 금지 */
+export async function insertParagraphBreakInBlogEditable(
+  loc: Locator,
+  lineBreaks = 2,
+): Promise<void> {
+  const breaks = '\n'.repeat(Math.max(1, lineBreaks));
+  await loc.evaluate((el, text) => {
+    const target = resolveEditableNode(el as HTMLElement);
+    target.focus();
+    const sel = window.getSelection();
+    if (sel) {
+      const range = document.createRange();
+      range.selectNodeContents(target);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    document.execCommand('insertText', false, text);
+  }, breaks);
+}
+
+/** input/textarea 직접 insert — 발행 태그 등 */
+export async function insertTextIntoInputLocator(loc: Locator, text: string): Promise<void> {
+  await loc.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+  await loc.focus().catch(() => {});
+  try {
+    await loc.fill(text);
+    return;
+  } catch {
+    /* fall through */
+  }
+  await loc.evaluate((el, t) => {
+    const input = el as HTMLInputElement | HTMLTextAreaElement;
+    input.focus();
+    input.value = t;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }, text);
+}
+
+export async function readBlogBodyText(bodyLoc: Locator): Promise<string> {
+  return bodyLoc
+    .evaluate((el) => {
+      const node = el as HTMLElement;
+      const clone = node.cloneNode(true) as HTMLElement;
+      for (const ph of clone.querySelectorAll('.se-placeholder, [class*="placeholder"]')) {
+        ph.remove();
+      }
+      return (clone.innerText ?? clone.textContent ?? '').trim();
+    })
+    .catch(() => '');
+}
+
+/** CAPTCHA 재개·재시도 — 본문이 이미 채워졌으면 스킵 */
+export function isBlogBodySubstantiallyWritten(bodyText: string, expectedContent: string): boolean {
+  const b = bodyText.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+  const e = expectedContent.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+  if (b.length < 60) return false;
+  if (!e) return b.length >= 60;
+  const probe = Math.min(48, e.length);
+  return b.includes(e.slice(0, probe)) || e.includes(b.slice(0, Math.min(probe, b.length)));
 }
 
 export async function isFocusInBodyArea(page: Page): Promise<boolean> {
@@ -363,17 +494,20 @@ export async function focusBlogTitleField(page: Page, titleLoc: Locator): Promis
   }
 }
 
-export async function focusBlogBodyField(page: Page, bodyLoc: Locator, maxAttempts = 5): Promise<void> {
+export async function focusBlogBodyField(page: Page, bodyLoc: Locator, maxAttempts = 6): Promise<void> {
+  const editable = await resolveBodyEditableLocator(bodyLoc);
   for (let i = 0; i < maxAttempts; i += 1) {
     if (await isDraftResumePopupVisible(page)) {
       await sleep(200);
       continue;
     }
+    await blurBlogTitleField(page);
     await dismissSeOneMaterialPopup(page);
-    await bodyLoc.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
-    await humanClickBodyParagraph(page, bodyLoc);
+    await editable.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
+    await humanClickBodyParagraph(page, editable);
+    await editable.focus().catch(() => {});
     await sleep(randomBetweenTitleFocus());
-    if (await hasBodyFieldFocus(page, bodyLoc)) return;
+    if ((await hasBodyFieldFocus(page, editable)) && !(await isFocusInTitleArea(page))) return;
   }
 }
 

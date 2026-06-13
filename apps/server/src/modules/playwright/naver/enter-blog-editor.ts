@@ -275,9 +275,18 @@ export async function enterBlogEditor(
   for (const url of writeUrls) {
     if (POSTWRITE_URL_RE.test(workflowPage.url())) break;
 
-    await workflowPage
-      .goto(url, { waitUntil: 'domcontentloaded', timeout: PLAYWRIGHT_NAV_TIMEOUT_MS })
-      .catch(() => {});
+    let navOk = false;
+    try {
+      await workflowPage.goto(url, {
+        waitUntil: 'domcontentloaded',
+        timeout: PLAYWRIGHT_NAV_TIMEOUT_MS,
+      });
+      navOk = true;
+    } catch {
+      navOk = POSTWRITE_URL_RE.test(workflowPage.url());
+    }
+    if (!navOk) continue;
+
     await scaledSleep(1500, 3000);
     await waitAndDismissDraftResumePopup(workflowPage, 15_000);
 
@@ -315,5 +324,5 @@ export async function enterBlogEditor(
   await notifySlack(
     `블로그 에디터(SmartEditor ONE) 진입 실패 — blogId=${blogId ?? '미확인'} (${SMART_EDITOR_WAIT_MS / 1000}s, ${detail})`,
   );
-  throw new Error('BLOG_EDITOR_NOT_READY');
+  throw new Error(POSTWRITE_URL_RE.test(failPage.url()) ? 'BLOG_EDITOR_NOT_READY' : 'BLOG_NAV_FAILED');
 }

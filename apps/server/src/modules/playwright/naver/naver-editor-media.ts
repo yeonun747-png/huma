@@ -8,7 +8,7 @@ async function insertFileViaToolbar(
   localPath: string,
   toolbar: { dataNames: string[]; buttonTexts: string[]; classHints: string[] },
 ): Promise<boolean> {
-  const chooserPromise = page.waitForEvent('filechooser', { timeout: 10_000 }).catch(() => null);
+  const chooserPromise = page.waitForEvent('filechooser', { timeout: 12_000 }).catch(() => null);
   const clicked = await clickEditorToolbar(page, toolbar);
   if (!clicked) return false;
 
@@ -21,14 +21,13 @@ async function insertFileViaToolbar(
 }
 
 /** 툴바 「사진」 → filechooser. 실패 시 hidden input 폴백 */
-export async function insertImageViaToolbar(page: Page, localPath: string): Promise<void> {
+export async function insertImageViaToolbar(page: Page, localPath: string): Promise<boolean> {
   const viaToolbar = await insertFileViaToolbar(page, localPath, {
     dataNames: ['image', 'photo'],
     buttonTexts: ['사진'],
     classHints: ['image-toolbar', 'photo'],
   });
-
-  if (viaToolbar) return;
+  if (viaToolbar) return true;
 
   const fileInput = await findVisibleLocator(
     page,
@@ -38,14 +37,17 @@ export async function insertImageViaToolbar(page: Page, localPath: string): Prom
   if (fileInput) {
     await fileInput.setInputFiles(localPath);
     await humanSleep(2000, 4000);
-    return;
+    return true;
   }
 
   const fallback = page.locator('input[type="file"]').first();
   if ((await fallback.count()) > 0) {
     await fallback.setInputFiles(localPath);
     await humanSleep(2000, 4000);
+    return true;
   }
+
+  return false;
 }
 
 /** 툴바 「동영상」 — video_path 있을 때만 호출 */

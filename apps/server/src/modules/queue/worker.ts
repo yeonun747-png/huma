@@ -10,6 +10,7 @@ import {
   closeExtraTabsExcept,
   acquireWorkflowPage,
 } from '../playwright/browser.js';
+import { isPostBlogRetryableError, POST_BLOG_RETRY } from '../playwright/naver/blog-editor-pipeline.js';
 import { pickPostingWorkflowPage } from '../../lib/posting-captcha-session.js';
 import { sleep } from '../../lib/utils.js';
 import { loadAccountForBrowser } from '../playwright/account-loader.js';
@@ -453,14 +454,8 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
                   } catch (postErr) {
                     lastErr = postErr as Error;
                     const msg = lastErr.message ?? '';
-                    if (
-                      attempt < 4 &&
-                      (msg.includes('BLOG_WRITE_BTN_NOT_FOUND') ||
-                        msg.includes('BLOG_EDITOR_NOT_READY') ||
-                        msg.includes('BLOG_BODY_NOT_FOUND') ||
-                        msg.includes('BLOG_TITLE_NOT_FOUND'))
-                    ) {
-                      await sleep(10_000);
+                    if (attempt < POST_BLOG_RETRY.maxAttempts && isPostBlogRetryableError(msg)) {
+                      await sleep(POST_BLOG_RETRY.delayMs);
                       continue;
                     }
                     throw postErr;

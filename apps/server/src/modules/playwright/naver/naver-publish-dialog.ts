@@ -10,7 +10,12 @@ import {
   prepareSeOneEditorSurface,
   waitAndDismissDraftResumePopup,
 } from './enter-blog-editor.js';
-import { findVisibleLocator, clickVisibleLocator } from './naver-editor-locators.js';
+import {
+  findVisibleLocator,
+  clickVisibleLocator,
+  insertTextIntoInputLocator,
+} from './naver-editor-locators.js';
+import { waitForNaverPublishSuccess } from './blog-editor-pipeline.js';
 
 const PUBLISH_BTN_SELECTORS = [
   '[class*="publish_btn"]',
@@ -80,7 +85,6 @@ async function waitForPublishLayer(page: Page, timeoutMs = 15_000): Promise<bool
   return false;
 }
 
-/** 카테고리 드롭다운에서 항목 humanClick 선택 */
 export async function selectPublishCategory(
   page: Page,
   categoryName: string,
@@ -110,7 +114,6 @@ export async function selectPublishCategory(
   return true;
 }
 
-/** 태그 입력 — insertText (오탈자 시뮬레이션·마우스 이동 없이 안정 입력) */
 export async function typePublishTags(
   page: Page,
   hashtags: string[],
@@ -128,10 +131,9 @@ export async function typePublishTags(
   await humanClickLocator(page, input);
 
   for (let i = 0; i < tags.length; i++) {
-    await page.keyboard.insertText(`#${tags[i]!}`);
+    await insertTextIntoInputLocator(input, `#${tags[i]!}`);
     await scaledHumanSleep(200, 550, scale);
-    const confirmKey = Math.random() < 0.75 ? 'Space' : 'Enter';
-    await page.keyboard.press(confirmKey);
+    await input.press(i < tags.length - 1 || Math.random() < 0.75 ? 'Space' : 'Enter');
     await scaledHumanSleep(400, 900, scale);
   }
 
@@ -139,11 +141,9 @@ export async function typePublishTags(
   return true;
 }
 
-/** 2차 발행 패널 우하단 최종 발행 */
 export async function clickConfirmPublish(page: Page): Promise<void> {
   const confirm = await findVisibleLocator(page, CONFIRM_PUBLISH_SELECTORS, { inFrame: false });
   if (!confirm) {
-    // 패널 내 마지막 「발행」 버튼 폴백
     const layer = await findVisibleLocator(page, PUBLISH_LAYER_SELECTORS, { inFrame: false });
     if (layer) {
       const fallback = layer.locator('button:has-text("발행")').last();
@@ -164,7 +164,7 @@ export async function completeNaverPublishDialog(params: {
   hashtags?: string[];
   humanConfig: HumanEngineConfig;
   scale?: number;
-}): Promise<void> {
+}): Promise<string> {
   const scale = params.scale ?? 1;
 
   await prepareSeOneEditorSurface(params.page, 12_000);
@@ -193,5 +193,7 @@ export async function completeNaverPublishDialog(params: {
   await scaledHumanSleep(600, 1400, scale);
   await dismissNaverBlogEditorOverlays(params.page);
   await clickConfirmPublish(params.page);
-  await params.page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => {});
+  await params.page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => {});
+
+  return waitForNaverPublishSuccess(params.page);
 }

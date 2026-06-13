@@ -2,13 +2,20 @@ import type { Locator, Page } from 'playwright';
 
 import { sleep } from '../../../lib/utils.js';
 import { humanClickLocator } from '../../human-engine/mouse.js';
-import { humanPasteIntoElement, humanTypeIntoElement } from '../../human-engine/korean-ime.js';
 import { scaledHumanSleep } from '../../human-engine/timing.js';
 import type { HumanEngineConfig } from '../../../lib/settings.js';
 import { resolveBlogLinkUrl } from '../../../lib/blog-link.js';
-import { clickEditorToolbar, findVisibleLocator } from './naver-editor-locators.js';
+import {
+  blurBlogTitleField,
+  clickEditorToolbar,
+  findVisibleLocator,
+  focusBlogBodyField,
+  insertParagraphBreakInBlogEditable,
+  insertTextIntoBlogEditable,
+  insertTextIntoInputLocator,
+  resolveBodyEditableLocator,
+} from './naver-editor-locators.js';
 
-/** 네이버 스마트에디터 OG 링크 카드 셀렉터 */
 const OG_LINK_SELECTORS = [
   '.se-module-oglink',
   '.se-oglink-module',
@@ -17,10 +24,18 @@ const OG_LINK_SELECTORS = [
   '[data-module="oglink"]',
 ];
 
+async function isOgLinkVisible(page: Page): Promise<boolean> {
+  for (const sel of OG_LINK_SELECTORS) {
+    if ((await page.locator(sel).count()) > 0) return true;
+    if ((await page.frameLocator('#mainFrame').locator(sel).count().catch(() => 0)) > 0) return true;
+  }
+  return false;
+}
+
 /**
  * 링크 삽입
- * - 연운: 본문 Ctrl+V 붙여넣기 → OG 카드 (클릭 유도)
- * - 그 외: 툴바 「링크」 → URL 입력 → 확인 (실패 시 Ctrl+V 폴백)
+ * - 연운: 본문 locator 직접 붙여넣기 → OG 카드
+ * - 그 외: 툴바 「링크」 → URL 입력 → 확인 (실패 시 직접 insert 폴백)
  */
 export async function pasteBlogLinkWithOgPreview(
   page: Page,
@@ -36,31 +51,28 @@ export async function pasteBlogLinkWithOgPreview(
   const workspace = options.workspace ?? 'yeonun';
   const insertUrl = resolveBlogLinkUrl(workspace, linkUrl, linkUrl);
 
-  await humanClickLocator(page, editor);
-  await page.keyboard.press('Enter');
-  await page.keyboard.press('Enter');
+  await blurBlogTitleField(page);
+  await focusBlogBodyField(page, editor);
+  const editable = await resolveBodyEditableLocator(editor);
+  await insertParagraphBreakInBlogEditable(editable, 2);
   await scaledHumanSleep(400, 900, scale);
 
   if (workspace === 'yeonun') {
-    await humanPasteIntoElement(page, editor, insertUrl);
+    await insertTextIntoBlogEditable(editable, insertUrl);
   } else {
-    const toolbarLinked = await insertLinkViaToolbar(page, insertUrl, options.humanConfig, scale);
+    const toolbarLinked = await insertLinkViaToolbar(page, insertUrl, scale);
     if (!toolbarLinked) {
-      await humanPasteIntoElement(page, editor, insertUrl);
+      await insertTextIntoBlogEditable(editable, insertUrl);
     }
   }
 
-  const frame = page.frameLocator('#mainFrame');
   const deadline = Date.now() + 20_000;
   let ogPreview = false;
   while (Date.now() < deadline) {
-    for (const sel of OG_LINK_SELECTORS) {
-      if ((await frame.locator(sel).count()) > 0) {
-        ogPreview = true;
-        break;
-      }
+    if (await isOgLinkVisible(page)) {
+      ogPreview = true;
+      break;
     }
-    if (ogPreview) break;
     await sleep(400);
   }
 
@@ -68,11 +80,9 @@ export async function pasteBlogLinkWithOgPreview(
   return { ogPreview };
 }
 
-/** 툴바 「링크」 → URL 입력 → 확인 (OG 없는 본문 링크용 · 연운 제외) */
 async function insertLinkViaToolbar(
   page: Page,
   linkUrl: string,
-  humanConfig: HumanEngineConfig,
   scale: number,
 ): Promise<boolean> {
   const clicked = await clickEditorToolbar(page, {
@@ -100,7 +110,7 @@ async function insertLinkViaToolbar(
   }
 
   await humanClickLocator(page, input);
-  await humanTypeIntoElement(page, input, linkUrl, humanConfig, { skipFocus: true });
+  await insertTextIntoInputLocator(input, linkUrl);
   await scaledHumanSleep(400, 900, scale);
 
   const confirmSelectors = [
@@ -116,7 +126,7 @@ async function insertLinkViaToolbar(
     return true;
   }
 
-  await page.keyboard.press('Enter');
+  await input.press('Enter');
   await scaledHumanSleep(800, 1600, scale);
   return true;
 }

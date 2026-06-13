@@ -30,12 +30,15 @@ function scoreWorkflowPageUrl(url: string): number {
   if (url.includes('section.blog.naver.com') || /BlogHome/i.test(url)) return 85;
   if (url.includes('www.naver.com') && !url.includes('nidlogin')) return 70;
   if (url.includes('nidlogin')) return 25;
-  if (url.includes('search.naver.com')) return 12;
+  if (url.includes('search.naver.com') || url.includes('dict.naver.com')) return 5;
   if (url.includes('naver.com')) return 40;
   return 5;
 }
 
 export function pickPostingWorkflowPage(context: BrowserContext): Page | undefined {
+  const postwrite = findNaverPostwritePage(context);
+  if (postwrite) return postwrite;
+
   const pages = context.pages().filter((p) => !p.isClosed());
   const ranked = pages
     .map((page) => ({ page, score: scoreWorkflowPageUrl(page.url()) }))

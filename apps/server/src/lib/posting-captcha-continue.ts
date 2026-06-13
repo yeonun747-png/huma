@@ -11,6 +11,7 @@ import { closeBrowserContext, closeIdleBlankTabs, closeExtraTabsExcept } from '.
 import { executePostBlog } from '../modules/queue/jobs/post-blog.js';
 import { findNaverPostwritePage } from '../modules/playwright/naver/enter-blog-editor.js';
 import { releaseModem, type ModemSession } from '../modules/proxy/manager.js';
+import { isPostBlogRetryableError, POST_BLOG_RETRY } from '../modules/playwright/naver/blog-editor-pipeline.js';
 import { pickPostingWorkflowPage } from './posting-captcha-session.js';
 import { sleep } from './utils.js';
 import { shouldPreserveBrowserPageForVnc } from '../modules/watcher/captcha-hold.js';
@@ -21,8 +22,8 @@ async function incrementPostCount(accountId: string): Promise<void> {
   await supabase.from('huma_accounts').update({ post_count_today: current + 1 }).eq('id', accountId);
 }
 
-const EDITOR_RETRY_MAX = 5;
-const EDITOR_RETRY_DELAY_MS = 15_000;
+const EDITOR_RETRY_MAX = POST_BLOG_RETRY.maxAttempts;
+const EDITOR_RETRY_DELAY_MS = POST_BLOG_RETRY.delayMs;
 
 /**
  * CAPTCHA hold — 동일 브라우저·로그인 세션 유지한 채 post_blog 이어하기.
@@ -120,13 +121,7 @@ export async function continuePostBlogFromCaptchaHold(params: {
           return { ok: true, reHeld: true };
         }
 
-        if (
-          attempt < EDITOR_RETRY_MAX &&
-          (msg.includes('BLOG_EDITOR_NOT_READY') ||
-            msg.includes('BLOG_WRITE_BTN_NOT_FOUND') ||
-            msg.includes('BLOG_BODY_NOT_FOUND') ||
-            msg.includes('BLOG_TITLE_NOT_FOUND'))
-        ) {
+        if (attempt < EDITOR_RETRY_MAX && isPostBlogRetryableError(msg)) {
           await logOperation({
             level: 'warn',
             message: `[post_blog] 에디터 로딩 대기 재시도 ${attempt}/${EDITOR_RETRY_MAX} (재로그인 없음): ${msg}`,
