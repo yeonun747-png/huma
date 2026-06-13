@@ -4,6 +4,7 @@ import {
   isVncTilingEnabled,
   resolveVncChromeForProxyPort,
 } from './vnc-window-layout.js';
+import { invalidateVncScreenOffset } from './vnc-pointer.js';
 
 const GUARD_INTERVAL_MS = 2000;
 
@@ -80,6 +81,9 @@ export async function enforceVncWindowBounds(
         windowState: chrome.windowState ?? 'normal',
       },
     });
+    for (const p of context.pages()) {
+      if (!p.isClosed()) invalidateVncScreenOffset(p);
+    }
   } catch {
     /* headless·구형 Chromium */
   }

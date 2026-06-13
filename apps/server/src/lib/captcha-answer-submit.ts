@@ -29,7 +29,7 @@ export async function submitCaptchaAnswerForJob(
     return { ok: false, error: 'CAPTCHA 세션이 없습니다 (만료·종료됨)' };
   }
 
-  const page = pickNaverCaptchaPage(hold.context);
+  const page = await pickNaverCaptchaPage(hold.context);
   if (!page || page.isClosed()) {
     return { ok: false, error: '브라우저 페이지가 닫혔습니다' };
   }

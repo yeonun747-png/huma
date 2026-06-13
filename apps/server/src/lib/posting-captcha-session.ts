@@ -152,7 +152,7 @@ export async function pollUntilNaverLoginRedirect(
 export async function persistPostingSessionBeforeHoldClose(context: BrowserContext): Promise<void> {
   if (findNaverPostwritePage(context)) return;
 
-  const page = pickPostingWorkflowPage(context) ?? pickNaverCaptchaPage(context);
+  const page = pickPostingWorkflowPage(context) ?? (await pickNaverCaptchaPage(context));
   if (!page) return;
 
   if (await isNaverCaptchaVisible(page)) return;
@@ -220,7 +220,7 @@ export async function ensurePostingSessionAfterCaptcha(
     return true;
   }
 
-  let page = pickPostingWorkflowPage(context) ?? pickNaverCaptchaPage(context);
+  let page = pickPostingWorkflowPage(context) ?? (await pickNaverCaptchaPage(context));
   if (!page || page.isClosed()) return false;
 
   const url = page.url();
@@ -238,7 +238,7 @@ export async function ensurePostingSessionAfterCaptcha(
     if (page.url().includes('nidlogin.login')) return false;
     await humanSleep(...scaleMs(800, 1500));
   } else if (page.url().includes('nidlogin')) {
-    const nidPage = pickNaverCaptchaPage(context) ?? page;
+    const nidPage = (await pickNaverCaptchaPage(context)) ?? page;
     if (nidPage && (await isNaverLoginPendingAfterCaptcha(nidPage))) {
       await nidPage
         .waitForURL((u) => !u.href.includes('nidlogin'), { timeout: loginWaitMs })

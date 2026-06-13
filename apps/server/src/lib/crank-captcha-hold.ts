@@ -42,7 +42,7 @@ export async function tryEnterCrankCaptchaHold(params: CrankCaptchaHoldParams): 
 
   const errMsg = (params.err as Error)?.message ?? '';
   let visionAutoFailed = false;
-  const captchaPage = pickNaverCaptchaPage(params.context);
+  const captchaPage = await pickNaverCaptchaPage(params.context);
   const shouldRetryVision =
     isCaptchaError(params.err) ||
     (Boolean(captchaPage) && errMsg.includes('HUMAN_CLICK_NO_BBOX'));

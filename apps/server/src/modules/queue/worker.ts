@@ -511,7 +511,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
               POSTING_JOBS.includes(type)
             ) {
               let visionAutoFailed = false;
-              const captchaPage = pickNaverCaptchaPage(context);
+              const captchaPage = await pickNaverCaptchaPage(context);
               const errMsg = (err as Error).message ?? '';
               const shouldRetryVision =
                 isCaptchaError(err) ||

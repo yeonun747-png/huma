@@ -5,6 +5,12 @@ import { decrypt } from './crypto.js';
 import { humanSleep } from '../modules/human-engine/typing.js';
 import { humanClickLocator } from '../modules/human-engine/mouse.js';
 import { randomBetween, sleep } from './utils.js';
+import {
+  ensureNaverLoginIdPhoneTab,
+  NAVER_LOGIN_ID_URL,
+} from './naver-login-session.js';
+
+export { ensureNaverLoginIdPhoneTab, NAVER_LOGIN_ID_URL };
 
 const NAVER_LOGIN_BTN_SELECTORS = [
   '#log\\.login',
@@ -20,6 +26,8 @@ export async function typeIntoNaverLoginField(
   selector: string,
   value: string,
 ): Promise<void> {
+  await ensureNaverLoginIdPhoneTab(page);
+
   const loc = page.locator(selector);
   await loc.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
   const box = await loc.boundingBox().catch(() => null);
@@ -45,6 +53,8 @@ export async function ensureNaverLoginCredentialsForCaptcha(
 ): Promise<void> {
   if (!page.url().includes('nidlogin')) return;
 
+  await ensureNaverLoginIdPhoneTab(page);
+
   const { data: account } = await supabase
     .from('huma_accounts')
     .select('naver_pw_enc')
@@ -69,6 +79,8 @@ export async function ensureNaverLoginCredentialsForCaptcha(
 
 /** 로그인 버튼 — bbox 없을 때 force click 폴백. */
 export async function clickNaverLoginButton(page: Page): Promise<void> {
+  await ensureNaverLoginIdPhoneTab(page);
+
   for (const sel of NAVER_LOGIN_BTN_SELECTORS) {
     const btn = page.locator(sel).first();
     if (!(await btn.isVisible().catch(() => false))) continue;

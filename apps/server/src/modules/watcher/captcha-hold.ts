@@ -26,6 +26,7 @@ import { enforceVncWindowBounds } from '../../lib/vnc-window-guard.js';
 import { notifyCaptchaTelegram, resolveVncUrl, buildJobWebUrl } from './telegram.js';
 import { deleteCaptchaHoldScreenshot, saveCaptchaHoldScreenshot } from '../../lib/captcha-hold-screenshot.js';
 import { clearCaptchaTelegramMessagesForJob } from '../../lib/captcha-telegram-registry.js';
+import { consolidateNaverLoginTabs } from '../../lib/naver-login-session.js';
 
 const HOLD_MS = 30 * 60 * 1000;
 const REMIND_MS = 5 * 60 * 1000;
@@ -102,7 +103,7 @@ export async function refreshCaptchaHoldScreenshot(
 ): Promise<string | null> {
   const shotPage =
     page ??
-    pickNaverCaptchaPage(entry.context) ??
+    (await pickNaverCaptchaPage(entry.context)) ??
     pickPostingWorkflowPage(entry.context);
   if (!shotPage || shotPage.isClosed()) return entry.screenshotPath ?? null;
   if (!(await isNaverCaptchaVisible(shotPage))) return entry.screenshotPath ?? null;
@@ -133,7 +134,7 @@ export async function syncCaptchaHoldState(
 
   const shotPage =
     page ??
-    pickNaverCaptchaPage(entry.context) ??
+    (await pickNaverCaptchaPage(entry.context)) ??
     pickPostingWorkflowPage(entry.context);
   if (!shotPage || shotPage.isClosed()) return;
 
@@ -283,7 +284,7 @@ function scheduleReminders(entry: CaptchaHoldEntry): void {
 async function tryAutoResumePostingCaptcha(entry: CaptchaHoldEntry): Promise<void> {
   if (!holds.has(entry.jobId) || entry.resumingInProgress || entry.autoResumeFiring) return;
 
-  const page = pickPostingWorkflowPage(entry.context) ?? pickNaverCaptchaPage(entry.context);
+  const page = pickPostingWorkflowPage(entry.context) ?? (await pickNaverCaptchaPage(entry.context));
   if (!page || page.isClosed()) return;
   if (await isNaverCaptchaVisible(page)) {
     await syncCaptchaHoldState(entry, page);
@@ -416,8 +417,9 @@ export async function enterCaptchaHold(
   holds.set(input.jobId, entry);
   scheduleReminders(entry);
   await focusVncBrowserPage(input.context, input.modemSession?.proxyPort);
+  await consolidateNaverLoginTabs(input.context);
 
-  const captchaPage = pickNaverCaptchaPage(input.context);
+  const captchaPage = await pickNaverCaptchaPage(input.context);
   if (captchaPage && !captchaPage.isClosed() && captchaPage.url().includes('nidlogin')) {
     await ensureNaverLoginCredentialsForCaptcha(captchaPage, input.accountId, { fast: true }).catch(
       () => {},
@@ -576,7 +578,7 @@ export async function completeCaptchaHold(
         .then(({ data }) => (data ? buildPostBlogPayloadFromJob(data) : undefined)));
 
     if (postPayload) {
-      const wfPage = pickPostingWorkflowPage(entry.context) ?? pickNaverCaptchaPage(entry.context);
+      const wfPage = pickPostingWorkflowPage(entry.context) ?? (await pickNaverCaptchaPage(entry.context));
       if (wfPage && !wfPage.isClosed() && (await isNaverCaptchaVisible(wfPage))) {
         entry.resumingInProgress = false;
         holds.set(jobId, entry);
@@ -592,7 +594,7 @@ export async function completeCaptchaHold(
         entry.resumingInProgress = false;
         holds.set(jobId, entry);
         scheduleReminders(entry);
-        const nidPage = pickNaverCaptchaPage(entry.context);
+        const nidPage = await pickNaverCaptchaPage(entry.context);
         if (nidPage?.url().includes('nidlogin') && (await isNaverLoginPendingAfterCaptcha(nidPage))) {
           return { ok: false, error: 'CAPTCHA_PENDING_LOGIN' };
         }

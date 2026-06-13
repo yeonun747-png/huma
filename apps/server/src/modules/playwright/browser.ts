@@ -355,6 +355,9 @@ export async function createBrowserForAccount(account: BrowserAccountContext) {
     void import('../human-engine/mouse.js').then(({ seedMousePosition }) => {
       seedMousePosition(page);
     });
+    void import('../../lib/vnc-pointer.js').then(({ injectVncPointerOverlay }) => {
+      void injectVncPointerOverlay(page);
+    });
   });
 
   startVncWindowGuard(context, account.proxy_port, resolveHeadless());

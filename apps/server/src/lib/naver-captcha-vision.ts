@@ -125,13 +125,11 @@ const CONFIRM_SELECTORS = [
   '[class*="captcha"] button[type="submit"]',
 ];
 
-export function pickNaverCaptchaPage(context: BrowserContext): Page | undefined {
-  const pages = context.pages().filter((p) => !p.isClosed());
-  return (
-    pages.find((p) => p.url().includes('nid.naver.com')) ??
-    pages.find((p) => p.url().includes('naver.com')) ??
-    pages.at(-1)
-  );
+import { pickNaverLoginCaptchaPage } from './naver-login-session.js';
+
+/** CAPTCHA·비번 재입력 대상 — ID/전화번호 탭 우선(QR 중복 탭 제외) */
+export async function pickNaverCaptchaPage(context: BrowserContext): Promise<Page | undefined> {
+  return pickNaverLoginCaptchaPage(context);
 }
 
 /** 보이는 캡차 루트 안에 실제 챌린지(입력·이미지·슬라이더·그리드)가 있을 때만 */

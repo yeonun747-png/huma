@@ -1,6 +1,7 @@
 import type { Locator, Page } from 'playwright';
 import { randomBetween, sleep } from '../../lib/utils.js';
 import { getSetting } from '../../lib/settings.js';
+import { showVncAutomationPointer } from '../../lib/vnc-pointer.js';
 
 interface Point {
   x: number;
@@ -69,6 +70,7 @@ export async function humanMouseMove(page: Page, x: number, y: number) {
     const t = easeInOut(i / steps);
     const p = cubicBezier(t, start, cp1, cp2, end);
     await page.mouse.move(p.x, p.y);
+    await showVncAutomationPointer(page, p.x, p.y);
     await sleep(randomBetween(8, 22));
   }
 
@@ -76,8 +78,10 @@ export async function humanMouseMove(page: Page, x: number, y: number) {
     const ox = x + randomBetween(-10, 10);
     const oy = y + randomBetween(-8, 8);
     await page.mouse.move(ox, oy);
+    await showVncAutomationPointer(page, ox, oy);
     await sleep(randomBetween(18, 48));
     await page.mouse.move(x, y);
+    await showVncAutomationPointer(page, x, y);
     await sleep(randomBetween(10, 24));
   }
 
@@ -108,6 +112,7 @@ export async function humanClickLocator(
   await humanMouseMove(page, cx, cy);
   await sleep(randomBetween(preClickDelayMs[0], preClickDelayMs[1]));
   await page.mouse.click(cx, cy);
+  await showVncAutomationPointer(page, cx, cy, { click: true });
   setMousePosition(page, { x: cx, y: cy });
 }
 
@@ -148,6 +153,7 @@ export async function humanDrag(
     const p = cubicBezier(t, start, cp1, cp2, end);
     const wobble = Math.sin(t * Math.PI) * randomBetween(-2, 2);
     await page.mouse.move(p.x, p.y + wobble);
+    await showVncAutomationPointer(page, p.x, p.y + wobble);
     await sleep(randomBetween(10, 24));
   }
 
