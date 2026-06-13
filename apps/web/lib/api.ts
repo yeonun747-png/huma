@@ -167,6 +167,7 @@ export const api = {
         expiresAt?: string;
         captchaScreenshotUpdatedAt?: number;
         hasCaptchaScreenshot?: boolean;
+        captchaRound?: number;
       } | null;
       vnc_url?: string | null;
       web_url?: string | null;
@@ -192,6 +193,7 @@ export const api = {
       hold?: {
         captchaScreenshotUpdatedAt?: number;
         hasCaptchaScreenshot?: boolean;
+        captchaRound?: number;
       } | null;
     }>(`/api/jobs/${id}/captcha-answer`, {
       method: 'POST',

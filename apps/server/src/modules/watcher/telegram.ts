@@ -201,6 +201,9 @@ export interface CaptchaTelegramParams {
   vncSlotLabel?: string;
   /** CAPTCHA 화면 캡처 파일 (텔레그램 sendPhoto) */
   screenshotPath?: string | null;
+  /** 2중·재출제 CAPTCHA */
+  secondCaptcha?: boolean;
+  secondCaptchaRound?: number;
 }
 
 export async function notifyCaptchaTelegram(
@@ -234,6 +237,10 @@ export async function notifyCaptchaTelegram(
     head = params.drill
       ? '🧪 huma · Vision 3회 실패, VNC 필요 (DRILL)'
       : '⚠️ huma · Vision 3회 실패, VNC 필요';
+  } else if (params.secondCaptcha) {
+    head = params.drill
+      ? `🔄 huma · CAPTCHA 재출제 (DRILL · ${params.secondCaptchaRound ?? 2}차)`
+      : `🔄 huma · CAPTCHA 재출제 (2중 캡차 · ${params.secondCaptchaRound ?? 2}차)`;
   } else {
     head = params.drill
       ? '🧪 huma · CAPTCHA 연습(DRILL) — VNC 확인 후 huma에서 발행 완료'
@@ -249,7 +256,13 @@ export async function notifyCaptchaTelegram(
   ];
 
   if (!params.completed && !params.timedOut) {
-    if (params.visionAutoFailed) {
+    if (params.secondCaptcha) {
+      lines.push(
+        '',
+        '비밀번호는 서버가 로그인 폼에 <b>다시 자동 재입력</b>했습니다.',
+        'huma 큐 → CAPTCHA 정답 원격 입력에서 <b>새 캡처</b>를 확인하고 정답을 다시 제출하세요.',
+      );
+    } else if (params.visionAutoFailed) {
       lines.push('', 'Claude Vision 자동 해결 3회 실패 — VNC에서 수동 해결 필요');
     }
     if (params.jobType === 'social_crank') {

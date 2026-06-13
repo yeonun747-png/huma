@@ -33,6 +33,10 @@ const HOLD_MS = 30 * 60 * 1000;
 const REMIND_MS = 5 * 60 * 1000;
 const MAX_REMINDS = 3;
 const CAPTCHA_AUTO_RESUME_MS = 1_500;
+/** hold 중 CAPTCHA 재출제(2중) 감지 폴링 */
+const CAPTCHA_HOLD_POLL_MS = 2_000;
+/** 2중 CAPTCHA 텔레그램 재알림 최소 간격 */
+const SECOND_CAPTCHA_TELEGRAM_COOLDOWN_MS = 90_000;
 
 export interface CaptchaHoldInput {
   jobId: string;
@@ -67,6 +71,11 @@ interface CaptchaHoldEntry extends CaptchaHoldInput {
   timers: NodeJS.Timeout[];
   screenshotPath?: string | null;
   screenshotUpdatedAt?: number;
+  /** 1=최초, 2+=2중·재출제 CAPTCHA */
+  captchaRound: number;
+  captchaCurrentlyVisible: boolean;
+  captchaClearedOnce: boolean;
+  lastSecondCaptchaNotifyAt?: number;
 }
 
 const holds = new Map<string, CaptchaHoldEntry>();
@@ -105,6 +114,90 @@ export async function refreshCaptchaHoldScreenshot(
     entry.screenshotUpdatedAt = Date.now();
   }
   return path;
+}
+
+/**
+ * hold 중 CAPTCHA 상태 동기화 — 2중 캡차 감지·비번 재입력·캡처·텔레그램 재알림.
+ * (최초 1회 통과 후 다시 CAPTCHA가 보이면 2중 캡차로 처리)
+ */
+export async function syncCaptchaHoldState(
+  entry: CaptchaHoldEntry,
+  page?: Page | null,
+  options?: { treatAsSecondRound?: boolean },
+): Promise<void> {
+  if (!holds.has(entry.jobId) || entry.resumingInProgress) return;
+
+  const shotPage =
+    page ??
+    pickNaverCaptchaPage(entry.context) ??
+    pickPostingWorkflowPage(entry.context);
+  if (!shotPage || shotPage.isClosed()) return;
+
+  const visible = await isNaverCaptchaVisible(shotPage);
+
+  if (!visible) {
+    if (entry.captchaCurrentlyVisible) {
+      entry.captchaClearedOnce = true;
+    }
+    entry.captchaCurrentlyVisible = false;
+    return;
+  }
+
+  const isSecondRound = entry.captchaClearedOnce && !entry.captchaCurrentlyVisible;
+  entry.captchaCurrentlyVisible = true;
+
+  if (shotPage.url().includes('nidlogin')) {
+    await ensureNaverLoginCredentialsForCaptcha(shotPage, entry.accountId, { fast: true }).catch(
+      () => {},
+    );
+  }
+
+  await refreshCaptchaHoldScreenshot(entry, shotPage);
+
+  if (isSecondRound) {
+    entry.captchaRound += 1;
+    entry.captchaClearedOnce = false;
+    await notifySecondCaptchaTelegram(entry);
+  } else if (options?.treatAsSecondRound && entry.captchaRound === 1) {
+    entry.captchaRound = 2;
+    await notifySecondCaptchaTelegram(entry);
+  }
+}
+
+async function notifySecondCaptchaTelegram(entry: CaptchaHoldEntry): Promise<void> {
+  const now = Date.now();
+  if (
+    entry.lastSecondCaptchaNotifyAt &&
+    now - entry.lastSecondCaptchaNotifyAt < SECOND_CAPTCHA_TELEGRAM_COOLDOWN_MS
+  ) {
+    return;
+  }
+  entry.lastSecondCaptchaNotifyAt = now;
+
+  const vncSlotLabel = entry.modemSession?.proxyPort
+    ? vncSlotLabelKo(entry.modemSession.proxyPort)
+    : undefined;
+
+  await notifyCaptchaTelegram({
+    jobId: entry.jobId,
+    workspace: entry.workspace,
+    accountLabel: entry.accountLabel,
+    jobTitle: entry.jobTitle,
+    jobType: entry.jobType,
+    drill: entry.isDrill,
+    force: entry.isDrill,
+    secondCaptcha: true,
+    secondCaptchaRound: entry.captchaRound,
+    screenshotPath: entry.screenshotPath,
+    vncSlotLabel,
+  });
+
+  await logOperation({
+    level: 'warn',
+    message: `[CAPTCHA] 2중 캡차 감지 (라운드 ${entry.captchaRound}) — 비번 재입력·캡처·텔레그램 재알림`,
+    job_id: entry.jobId,
+    account_id: entry.accountId,
+  });
 }
 
 async function markJobFailed(jobId: string, message: string): Promise<void> {
@@ -171,6 +264,11 @@ function scheduleReminders(entry: CaptchaHoldEntry): void {
     void expireCaptchaHold(entry.jobId);
   }, entry.holdMs);
   entry.timers.push(timeout);
+
+  const captchaPoll = setInterval(() => {
+    void syncCaptchaHoldState(entry);
+  }, CAPTCHA_HOLD_POLL_MS);
+  entry.timers.push(captchaPoll);
 }
 
 async function tryAutoResumePostingCaptcha(entry: CaptchaHoldEntry): Promise<void> {
@@ -178,7 +276,10 @@ async function tryAutoResumePostingCaptcha(entry: CaptchaHoldEntry): Promise<voi
 
   const page = pickPostingWorkflowPage(entry.context) ?? pickNaverCaptchaPage(entry.context);
   if (!page || page.isClosed()) return;
-  if (await isNaverCaptchaVisible(page)) return;
+  if (await isNaverCaptchaVisible(page)) {
+    await syncCaptchaHoldState(entry, page);
+    return;
+  }
 
   const url = page.url();
   if (url === 'about:blank' || url === '') return;
@@ -299,6 +400,9 @@ export async function enterCaptchaHold(
     resumingInProgress: false,
     autoResumeFiring: false,
     timers: [],
+    captchaRound: 1,
+    captchaCurrentlyVisible: true,
+    captchaClearedOnce: false,
   };
   holds.set(input.jobId, entry);
   scheduleReminders(entry);
@@ -614,6 +718,7 @@ export function getCaptchaHoldPublicInfo(jobId: string): {
   isDrill?: boolean;
   captchaScreenshotUpdatedAt?: number;
   hasCaptchaScreenshot?: boolean;
+  captchaRound?: number;
 } | null {
   const entry = holds.get(jobId);
   if (!entry) return null;
@@ -626,5 +731,6 @@ export function getCaptchaHoldPublicInfo(jobId: string): {
     isDrill: entry.isDrill,
     captchaScreenshotUpdatedAt: entry.screenshotUpdatedAt,
     hasCaptchaScreenshot: Boolean(entry.screenshotPath),
+    captchaRound: entry.captchaRound,
   };
 }

@@ -26,7 +26,7 @@ import {
   completeCaptchaHold,
   getCaptchaHold,
   getCaptchaHoldPublicInfo,
-  refreshCaptchaHoldScreenshot,
+  syncCaptchaHoldState,
 } from '../modules/watcher/captcha-hold.js';
 import { readCaptchaHoldScreenshot } from '../lib/captcha-hold-screenshot.js';
 import {
@@ -638,8 +638,8 @@ export async function registerJobRoutes(app: FastifyInstance) {
     const liveHold = getCaptchaHold(id);
     if (liveHold) {
       const page = pickNaverCaptchaPage(liveHold.context);
-      if (page && !page.isClosed() && (await isNaverCaptchaVisible(page))) {
-        await refreshCaptchaHoldScreenshot(liveHold, page);
+      if (page && !page.isClosed()) {
+        await syncCaptchaHoldState(liveHold, page);
       }
     }
     const refreshed = getCaptchaHoldPublicInfo(id);
@@ -727,7 +727,7 @@ export async function registerJobRoutes(app: FastifyInstance) {
     }
 
     if (await isNaverCaptchaVisible(page)) {
-      await refreshCaptchaHoldScreenshot(hold, page);
+      await syncCaptchaHoldState(hold, page, { treatAsSecondRound: !result.cleared });
     }
 
     const holdInfo = getCaptchaHoldPublicInfo(id);

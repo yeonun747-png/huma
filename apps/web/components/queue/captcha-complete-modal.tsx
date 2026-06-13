@@ -13,6 +13,7 @@ interface CaptchaHoldInfo {
     expiresAt?: string;
     captchaScreenshotUpdatedAt?: number;
     hasCaptchaScreenshot?: boolean;
+    captchaRound?: number;
   } | null;
   vnc_url?: string | null;
   web_url?: string | null;
@@ -260,6 +261,9 @@ export function CaptchaCompleteModal({
           <div className="m-modal-field rounded-md border border-huma-bdr2 bg-huma-bg3 px-3 py-2.5">
             <div className="m-modal-label text-huma-t2">
               CAPTCHA 정답 원격 입력 <span className="text-huma-t4">(VNC 한글 입력 불필요)</span>
+              {holdInfo?.hold?.captchaRound && holdInfo.hold.captchaRound > 1 ? (
+                <span className="ml-2 text-huma-warn">· {holdInfo.hold.captchaRound}차 CAPTCHA</span>
+              ) : null}
             </div>
             <p className="mb-2 text-xs text-huma-t3">
               VNC 화면의 CAPTCHA 이미지를 보고 정답(한글·숫자)을 여기에 입력하면 서버가 직접 입력칸에
