@@ -138,6 +138,25 @@ async function isLocatorMainEditorBody(page: Page, loc: Locator): Promise<boolea
     .catch(() => false);
 }
 
+/** 본문 섹션(placeholder만 있고 paragraph 미생성) */
+async function isLocatorBodySection(page: Page, loc: Locator): Promise<boolean> {
+  if (await isLocatorInTitleSection(loc)) return false;
+  if (await isLocatorInEditorChrome(loc)) return false;
+
+  const box = await loc.boundingBox().catch(() => null);
+  if (!box || box.height < 28 || box.width < 80) return false;
+
+  const vp = page.viewportSize();
+  if (vp && box.y > vp.height * 0.85) return false;
+
+  return loc
+    .evaluate((el) => {
+      if (el.closest('.se-section-documentTitle, .se-documentTitle')) return false;
+      return !!el.closest('.se-section-text, .se-components-wrap');
+    })
+    .catch(() => false);
+}
+
 /** 글감 검색 팝업 — 본문 포커스 전 닫기 */
 export async function dismissSeOneMaterialPopup(page: Page): Promise<void> {
   const popup = page
@@ -186,6 +205,29 @@ export async function findBlogBodyLocator(page: Page): Promise<Locator | null> {
   for (const scope of [page, editorFrame(page)] as Array<Page | FrameLocator>) {
     const mainParagraph = await pickMainBodyParagraph(page, scope);
     if (mainParagraph) return mainParagraph;
+
+    const bodySection = scope
+      .locator('.se-components-wrap .se-section-text:not(.se-section-documentTitle)')
+      .first();
+    try {
+      if (
+        (await bodySection.count()) > 0 &&
+        (await bodySection.isVisible({ timeout: 600 }).catch(() => false)) &&
+        (await isLocatorBodySection(page, bodySection))
+      ) {
+        const paragraph = bodySection.locator('.se-text-paragraph[contenteditable="true"]').first();
+        if (
+          (await paragraph.count()) > 0 &&
+          (await paragraph.isVisible({ timeout: 300 }).catch(() => false)) &&
+          (await isLocatorMainEditorBody(page, paragraph))
+        ) {
+          return paragraph;
+        }
+        return bodySection;
+      }
+    } catch {
+      /* ignore */
+    }
 
     for (const sel of BLOG_BODY_SELECTORS) {
       const loc = scope.locator(sel).first();
@@ -350,6 +392,56 @@ async function humanClickBodyParagraph(page: Page, bodyLoc: Locator): Promise<vo
   await humanMouseMove(page, x, y);
   await sleep(100 + Math.floor(Math.random() * 200));
   await page.mouse.click(x, y);
+}
+
+/** 제목 아래 본문 placeholder 클릭 — contenteditable paragraph 생성 유도 */
+async function clickSeOneBodyPlaceholder(page: Page, titleLoc: Locator | null): Promise<void> {
+  await dismissSeOneMaterialPopup(page);
+
+  const section = page
+    .locator('.se-components-wrap .se-section-text:not(.se-section-documentTitle)')
+    .first();
+  if (
+    (await section.isVisible({ timeout: 1500 }).catch(() => false)) &&
+    (await isLocatorBodySection(page, section))
+  ) {
+    await humanClickBodyParagraph(page, section);
+    await sleep(300);
+    return;
+  }
+
+  if (!titleLoc) return;
+  const box = await titleLoc.boundingBox().catch(() => null);
+  if (!box) return;
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height + 56;
+  await humanMouseMove(page, x, y);
+  await sleep(120);
+  await page.mouse.click(x, y);
+  await sleep(300);
+}
+
+/** 본문란 확보 — 제목 입력 직후 paragraph 미생성 시 placeholder 클릭 후 재탐색 */
+export async function ensureBlogBodyLocator(
+  page: Page,
+  titleLoc?: Locator | null,
+): Promise<Locator | null> {
+  const title = titleLoc ?? (await findBlogTitleLocator(page));
+  for (let i = 0; i < 5; i += 1) {
+    await prepareSeOneEditorSurfaceForBody(page);
+    const loc = await findBlogBodyLocator(page);
+    if (loc) return loc;
+    await clickSeOneBodyPlaceholder(page, title);
+    await sleep(350);
+  }
+  return null;
+}
+
+async function prepareSeOneEditorSurfaceForBody(page: Page): Promise<void> {
+  await dismissSeOneMaterialPopup(page);
+  if (await isDraftResumePopupVisible(page)) {
+    await sleep(200);
+  }
 }
 
 function randomBetweenTitleFocus(): number {

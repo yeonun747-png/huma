@@ -122,11 +122,14 @@ export async function continuePostBlogFromCaptchaHold(params: {
 
         if (
           attempt < EDITOR_RETRY_MAX &&
-          (msg.includes('BLOG_EDITOR_NOT_READY') || msg.includes('BLOG_WRITE_BTN_NOT_FOUND'))
+          (msg.includes('BLOG_EDITOR_NOT_READY') ||
+            msg.includes('BLOG_WRITE_BTN_NOT_FOUND') ||
+            msg.includes('BLOG_BODY_NOT_FOUND') ||
+            msg.includes('BLOG_TITLE_NOT_FOUND'))
         ) {
           await logOperation({
             level: 'warn',
-            message: `[post_blog] 에디터 로딩 대기 재시도 ${attempt}/${EDITOR_RETRY_MAX} (재로그인 없음)`,
+            message: `[post_blog] 에디터 로딩 대기 재시도 ${attempt}/${EDITOR_RETRY_MAX} (재로그인 없음): ${msg}`,
             job_id: jobId,
             account_id: accountId,
           });

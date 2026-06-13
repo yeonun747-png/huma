@@ -5,16 +5,78 @@ import { cancelCaptchaHold } from '../modules/watcher/captcha-hold.js';
 
 const VIDEO_JOB_FK_COLS = ['blog_job_id', 'threads_job_id', 'twitter_job_id'] as const;
 
-/** huma_logs·video_queue FK 정리 후 job 삭제 */
-export async function deleteJobById(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
-  const { data: existing, error: selectErr } = await supabase
-    .from('huma_jobs')
-    .select('id, bull_job_id, title, platform_schedule, status')
-    .eq('id', id)
-    .maybeSingle();
+type JobDeleteRow = {
+  id: string;
+  job_type: string;
+  result_url?: string | null;
+  bull_job_id?: string | null;
+  title?: string | null;
+  platform_schedule?: Record<string, unknown> | null;
+  status?: string | null;
+};
 
-  if (selectErr) return { ok: false, error: selectErr.message };
-  if (!existing) return { ok: false, error: '작업 없음' };
+/** content_full(스케줄) ↔ post_blog(Claude 발행) 연동 삭제 */
+async function relatedJobIds(job: JobDeleteRow): Promise<string[]> {
+  const out: string[] = [];
+
+  if (job.job_type === 'content_full' && job.result_url?.trim()) {
+    out.push(job.result_url.trim());
+  }
+
+  const { data: parents } = await supabase
+    .from('huma_jobs')
+    .select('id')
+    .eq('result_url', job.id)
+    .eq('job_type', 'content_full');
+  for (const row of parents ?? []) out.push(row.id);
+
+  const { data: vqRows } = await supabase
+    .from('huma_video_queue')
+    .select('job_id, blog_job_id, threads_job_id, twitter_job_id')
+    .or(
+      `blog_job_id.eq.${job.id},job_id.eq.${job.id},threads_job_id.eq.${job.id},twitter_job_id.eq.${job.id}`,
+    );
+
+  for (const vq of vqRows ?? []) {
+    if (vq.job_id && vq.job_id !== job.id) out.push(vq.job_id);
+    if (vq.blog_job_id && vq.blog_job_id !== job.id) out.push(vq.blog_job_id);
+    if (vq.threads_job_id) out.push(vq.threads_job_id);
+    if (vq.twitter_job_id) out.push(vq.twitter_job_id);
+  }
+
+  return [...new Set(out)];
+}
+
+async function expandJobDeleteSet(seedIds: string[]): Promise<string[]> {
+  const toDelete = new Set<string>();
+  const queue = [...new Set(seedIds.filter(Boolean))];
+
+  while (queue.length > 0) {
+    const cur = queue.pop()!;
+    if (toDelete.has(cur)) continue;
+
+    const { data: job, error } = await supabase
+      .from('huma_jobs')
+      .select('id, job_type, result_url')
+      .eq('id', cur)
+      .maybeSingle();
+
+    if (error || !job) continue;
+    toDelete.add(cur);
+
+    const related = await relatedJobIds(job as JobDeleteRow);
+    for (const id of related) {
+      if (!toDelete.has(id)) queue.push(id);
+    }
+  }
+
+  return [...toDelete];
+}
+
+async function deleteSingleJobRecord(
+  existing: JobDeleteRow,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const id = existing.id;
 
   if (isCaptchaDrillJob(existing) || existing.status === 'awaiting_captcha') {
     await cancelCaptchaHold(id);
@@ -39,14 +101,49 @@ export async function deleteJobById(id: string): Promise<{ ok: true } | { ok: fa
   return { ok: true };
 }
 
+/** huma_logs·video_queue FK 정리 후 job 삭제 (연동 content_full·post_blog 포함) */
+export async function deleteJobById(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const ids = await expandJobDeleteSet([id]);
+  if (ids.length === 0) return { ok: false, error: '작업 없음' };
+
+  for (const jobId of ids) {
+    const { data: existing, error: selectErr } = await supabase
+      .from('huma_jobs')
+      .select('id, bull_job_id, title, platform_schedule, status, job_type, result_url')
+      .eq('id', jobId)
+      .maybeSingle();
+
+    if (selectErr) return { ok: false, error: selectErr.message };
+    if (!existing) continue;
+
+    const result = await deleteSingleJobRecord(existing as JobDeleteRow);
+    if (!result.ok) return result;
+  }
+
+  return { ok: true };
+}
+
 export async function deleteJobsByIds(ids: string[]): Promise<{ deleted: number; failed: number; errors: string[] }> {
-  const unique = [...new Set(ids.filter(Boolean))];
+  const expanded = await expandJobDeleteSet(ids);
   let deleted = 0;
   let failed = 0;
   const errors: string[] = [];
 
-  for (const id of unique) {
-    const result = await deleteJobById(id);
+  for (const id of expanded) {
+    const { data: existing, error: selectErr } = await supabase
+      .from('huma_jobs')
+      .select('id, bull_job_id, title, platform_schedule, status, job_type, result_url')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (selectErr) {
+      failed += 1;
+      errors.push(selectErr.message);
+      continue;
+    }
+    if (!existing) continue;
+
+    const result = await deleteSingleJobRecord(existing as JobDeleteRow);
     if (result.ok) {
       deleted += 1;
     } else {

@@ -20,6 +20,7 @@ import {
   clearBlogTitleField,
   findBlogTitleLocator,
   findBlogBodyLocator,
+  ensureBlogBodyLocator,
   focusBlogBodyField,
   focusBlogTitleField,
   isBlogTitleWritten,
@@ -140,7 +141,7 @@ export async function postNaverBlog(params: {
 
   await prepareSeOneEditorSurface(page, 10_000);
 
-  const editor = await findBlogBodyLocator(page);
+  const editor = await ensureBlogBodyLocator(page, titleBox);
   if (!editor) {
     throw new Error('BLOG_BODY_NOT_FOUND');
   }

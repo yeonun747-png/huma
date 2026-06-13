@@ -455,7 +455,10 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
                     const msg = lastErr.message ?? '';
                     if (
                       attempt < 4 &&
-                      (msg.includes('BLOG_WRITE_BTN_NOT_FOUND') || msg.includes('BLOG_EDITOR_NOT_READY'))
+                      (msg.includes('BLOG_WRITE_BTN_NOT_FOUND') ||
+                        msg.includes('BLOG_EDITOR_NOT_READY') ||
+                        msg.includes('BLOG_BODY_NOT_FOUND') ||
+                        msg.includes('BLOG_TITLE_NOT_FOUND'))
                     ) {
                       await sleep(10_000);
                       continue;
