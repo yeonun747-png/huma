@@ -216,27 +216,30 @@ export async function isFocusInBodyArea(page: Page): Promise<boolean> {
     .catch(() => false);
 }
 
-/** 임시저장 팝업 취소 직후 본문 블록 선택·포커스 잔여 → 제목란으로 이동 */
-export async function focusBlogTitleField(page: Page, titleLoc: Locator, maxAttempts = 6): Promise<void> {
-  for (let i = 0; i < maxAttempts; i += 1) {
-    if (await isDraftResumePopupVisible(page)) {
-      await sleep(200);
-      continue;
-    }
-    await titleLoc.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
-    await titleLoc.focus().catch(() => {});
-    await humanClickLocator(page, titleLoc);
-    await sleep(randomBetweenTitleFocus());
-    if (await hasTitleFieldFocus(page, titleLoc)) return;
-    if (!(await isDraftResumePopupVisible(page))) {
-      await page.keyboard.press('Escape').catch(() => {});
-      await sleep(120);
-    }
-    await humanClickLocator(page, titleLoc);
-    await sleep(randomBetweenTitleFocus());
-    if (await hasTitleFieldFocus(page, titleLoc)) return;
+/** 제목란 클릭 — 포커스 검증 실패해도 throw 안 함(입력 검증은 typeBlogTitle) */
+export async function focusBlogTitleField(page: Page, titleLoc: Locator): Promise<void> {
+  if (await isDraftResumePopupVisible(page)) {
+    await sleep(300);
   }
-  throw new Error('BLOG_TITLE_FOCUS_FAILED');
+
+  await titleLoc.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
+
+  const editable = page
+    .locator(
+      '.se-section-documentTitle [contenteditable="true"], .se-documentTitle [contenteditable="true"]',
+    )
+    .first();
+  const hasEditable =
+    (await editable.count()) > 0 && (await editable.isVisible({ timeout: 500 }).catch(() => false));
+  const target = hasEditable ? editable : titleLoc;
+
+  await humanClickLocator(page, target);
+  await sleep(randomBetweenTitleFocus());
+
+  if (!(await hasTitleFieldFocus(page, target)) && !(await isFocusInTitleArea(page))) {
+    await humanClickLocator(page, titleLoc);
+    await sleep(180);
+  }
 }
 
 export async function focusBlogBodyField(page: Page, bodyLoc: Locator, maxAttempts = 5): Promise<void> {

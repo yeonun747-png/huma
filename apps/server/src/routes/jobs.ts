@@ -635,17 +635,9 @@ export async function registerJobRoutes(app: FastifyInstance) {
     if (!job) return reply.code(404).send({ error: '작업 없음' });
 
     const hold = getCaptchaHoldPublicInfo(id);
-    const liveHold = getCaptchaHold(id);
-    if (liveHold) {
-      const page = pickNaverCaptchaPage(liveHold.context);
-      if (page && !page.isClosed()) {
-        await syncCaptchaHoldState(liveHold, page);
-      }
-    }
-    const refreshed = getCaptchaHoldPublicInfo(id);
     return {
       job_status: job.status,
-      hold: refreshed,
+      hold,
       vnc_url: resolveVncUrl(job.workspace),
       web_url: buildJobWebUrl(id),
     };
@@ -727,7 +719,11 @@ export async function registerJobRoutes(app: FastifyInstance) {
     }
 
     if (await isNaverCaptchaVisible(page)) {
-      await syncCaptchaHoldState(hold, page, { treatAsSecondRound: !result.cleared });
+      await syncCaptchaHoldState(hold, page, {
+        treatAsSecondRound: !result.cleared,
+        captureScreenshot: true,
+        refillPassword: true,
+      });
     }
 
     const holdInfo = getCaptchaHoldPublicInfo(id);

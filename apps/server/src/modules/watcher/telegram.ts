@@ -1,5 +1,6 @@
 import axios from 'axios';
 import https from 'node:https';
+import { access, readFile } from 'node:fs/promises';
 
 import type { Workspace } from '@huma/shared';
 import { shouldNotifyTelegram } from '../../lib/human-engine-policy.js';
@@ -107,6 +108,19 @@ export async function sendTelegramHtml(
   }
 }
 
+function htmlCaptionToPlain(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<a href="([^"]+)">[^<]*<\/a>/gi, '$1')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .trim()
+    .slice(0, 1020);
+}
+
 export async function sendTelegramPhoto(
   chatId: string,
   photoPath: string,
@@ -117,19 +131,26 @@ export async function sendTelegramPhoto(
   if (!chatId) return { ok: false, error: 'chat_id 없음' };
 
   try {
-    const buf = await import('node:fs/promises').then((fs) => fs.readFile(photoPath));
+    await access(photoPath);
+    const buf = await readFile(photoPath);
+    if (buf.length < 500) {
+      return { ok: false, error: `screenshot too small (${buf.length}B)` };
+    }
+
     const form = new FormData();
     form.append('chat_id', chatId);
     form.append('photo', new Blob([buf], { type: 'image/png' }), 'captcha.png');
-    form.append('caption', captionHtml.slice(0, 1020));
-    form.append('parse_mode', 'HTML');
+    form.append('caption', htmlCaptionToPlain(captionHtml));
 
-    const res = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
-      method: 'POST',
-      body: form,
-      signal: AbortSignal.timeout(20_000),
-    });
-    const data = (await res.json()) as { ok?: boolean; description?: string };
+    const { data } = await axios.post<{ ok?: boolean; description?: string }>(
+      `https://api.telegram.org/bot${token}/sendPhoto`,
+      form,
+      {
+        ...TELEGRAM_AXIOS_OPTS,
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+      },
+    );
     if (!data.ok) {
       const detail = data.description?.trim() || 'sendPhoto ok:false';
       console.warn('[telegram] photo send failed:', detail);
@@ -292,9 +313,14 @@ export async function notifyCaptchaTelegram(
   const caption = lines.join('\n');
 
   if (params.screenshotPath && !params.completed && !params.timedOut) {
-    const photo = await sendTelegramPhoto(chatId, params.screenshotPath, caption);
-    if (photo.ok) return photo;
-    console.warn('[telegram] captcha photo fallback to text:', photo.error);
+    try {
+      await access(params.screenshotPath);
+      const photo = await sendTelegramPhoto(chatId, params.screenshotPath, caption);
+      if (photo.ok) return photo;
+      console.warn('[telegram] captcha photo fallback to text:', photo.error);
+    } catch {
+      console.warn('[telegram] captcha screenshot file missing:', params.screenshotPath);
+    }
   }
 
   return sendTelegramHtml(chatId, caption);

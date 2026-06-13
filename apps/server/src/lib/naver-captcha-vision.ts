@@ -802,13 +802,38 @@ export async function tryAutoSolveNaverCaptcha(
   return 'failed';
 }
 
-/** CAPTCHA hold·텔레그램·웹 UI용 PNG 캡처 */
+/** CAPTCHA hold·텔레그램·웹 UI용 PNG — #captchaimg → 활성 루트 → 로그인 패널 → 뷰포트 전체 */
 export async function captureNaverCaptchaPng(page: Page): Promise<Buffer | null> {
-  const type = await detectCaptchaType(page);
-  const question = await readCaptchaQuestion(page);
-  const shot = await captureCaptchaScreenshot(page, type, question);
-  if (shot?.base64) return Buffer.from(shot.base64, 'base64');
+  await page.bringToFront().catch(() => {});
 
-  const fallback = await page.screenshot({ type: 'png', fullPage: false }).catch(() => null);
-  return fallback?.length ? fallback : null;
+  for (const sel of ['#captchaimg', '#captcha img', 'img[id*="captcha"]', 'img[src*="captcha"]']) {
+    const img = page.locator(sel).first();
+    if (!(await img.isVisible({ timeout: 400 }).catch(() => false))) continue;
+    const box = await img.boundingBox().catch(() => null);
+    if (!box || box.width < 60 || box.height < 20) continue;
+    const buf = await img.screenshot({ type: 'png', animations: 'disabled' }).catch(() => null);
+    if (buf && buf.length > 400) return buf;
+  }
+
+  const activeRoot = await locateActiveCaptchaRoot(page);
+  if (activeRoot) {
+    const box = await activeRoot.boundingBox().catch(() => null);
+    if (box && box.width >= 100 && box.height >= 60) {
+      const buf = await activeRoot.screenshot({ type: 'png', animations: 'disabled' }).catch(() => null);
+      if (buf && buf.length > 800) return buf;
+    }
+  }
+
+  if (page.url().includes('nidlogin')) {
+    for (const sel of ['#frmNIDLogin', '.login_wrap', '#wrapper', '.login_box']) {
+      const panel = page.locator(sel).first();
+      if (!(await panel.isVisible({ timeout: 300 }).catch(() => false))) continue;
+      const box = await panel.boundingBox().catch(() => null);
+      if (!box || box.width < 200 || box.height < 200) continue;
+      const buf = await panel.screenshot({ type: 'png', animations: 'disabled' }).catch(() => null);
+      if (buf && buf.length > 2000) return buf;
+    }
+  }
+
+  return page.screenshot({ type: 'png', fullPage: false, animations: 'disabled' }).catch(() => null);
 }

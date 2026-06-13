@@ -123,7 +123,12 @@ export async function refreshCaptchaHoldScreenshot(
 export async function syncCaptchaHoldState(
   entry: CaptchaHoldEntry,
   page?: Page | null,
-  options?: { treatAsSecondRound?: boolean },
+  options?: {
+    treatAsSecondRound?: boolean;
+    /** 기본 false — 폴링 시 캡처·비번 재입력으로 VNC 깜빡임 방지 */
+    captureScreenshot?: boolean;
+    refillPassword?: boolean;
+  },
 ): Promise<void> {
   if (!holds.has(entry.jobId) || entry.resumingInProgress) return;
 
@@ -146,13 +151,18 @@ export async function syncCaptchaHoldState(
   const isSecondRound = entry.captchaClearedOnce && !entry.captchaCurrentlyVisible;
   entry.captchaCurrentlyVisible = true;
 
-  if (shotPage.url().includes('nidlogin')) {
+  const shouldRefill = options?.refillPassword === true || isSecondRound;
+  if (shouldRefill && shotPage.url().includes('nidlogin')) {
     await ensureNaverLoginCredentialsForCaptcha(shotPage, entry.accountId, { fast: true }).catch(
       () => {},
     );
   }
 
-  await refreshCaptchaHoldScreenshot(entry, shotPage);
+  const shouldCapture =
+    options?.captureScreenshot === true || isSecondRound || options?.treatAsSecondRound === true;
+  if (shouldCapture) {
+    await refreshCaptchaHoldScreenshot(entry, shotPage);
+  }
 
   if (isSecondRound) {
     entry.captchaRound += 1;
@@ -416,7 +426,10 @@ export async function enterCaptchaHold(
   }
 
   if (captchaPage && !captchaPage.isClosed()) {
-    await refreshCaptchaHoldScreenshot(entry, captchaPage);
+    await syncCaptchaHoldState(entry, captchaPage, {
+      captureScreenshot: true,
+      refillPassword: true,
+    });
   }
 
   const vncSlotLabel = input.modemSession?.proxyPort
