@@ -1,4 +1,4 @@
-import type { BrowserContext } from 'playwright';
+import type { BrowserContext, Page } from 'playwright';
 
 import { supabase } from '../../middleware/auth.js';
 import { logOperation } from '../../lib/log-emitter.js';
@@ -24,6 +24,10 @@ import { ensureNaverLoginCredentialsForCaptcha } from '../../lib/naver-login-fie
 import { vncSlotLabelKo } from '../../lib/vnc-window-layout.js';
 import { enforceVncWindowBounds } from '../../lib/vnc-window-guard.js';
 import { notifyCaptchaTelegram, resolveVncUrl, buildJobWebUrl } from './telegram.js';
+import {
+  deleteCaptchaHoldScreenshot,
+  saveCaptchaHoldScreenshot,
+} from '../../lib/captcha-hold-screenshot.js';
 
 const HOLD_MS = 30 * 60 * 1000;
 const REMIND_MS = 5 * 60 * 1000;
@@ -61,6 +65,8 @@ interface CaptchaHoldEntry extends CaptchaHoldInput {
   /** 자동 재개 인터벌 틱 중복 실행 방지 (resumingInProgress 와 별개 — completeCaptchaHold 가 후자를 소유) */
   autoResumeFiring: boolean;
   timers: NodeJS.Timeout[];
+  screenshotPath?: string | null;
+  screenshotUpdatedAt?: number;
 }
 
 const holds = new Map<string, CaptchaHoldEntry>();
@@ -75,9 +81,30 @@ function clearTimers(entry: CaptchaHoldEntry) {
 async function cleanupHold(jobId: string, entry: CaptchaHoldEntry): Promise<void> {
   clearTimers(entry);
   holds.delete(jobId);
+  await deleteCaptchaHoldScreenshot(jobId).catch(() => {});
   await closeBrowserContext(entry.context).catch(() => {});
   if (entry.modemSession) await releaseModem(entry.modemSession).catch(() => {});
   entry.releaseAccountLock();
+}
+
+/** CAPTCHA 화면 캡처 — 2중 캡차·오답 재출제 시 갱신 */
+export async function refreshCaptchaHoldScreenshot(
+  entry: CaptchaHoldEntry,
+  page?: Page | null,
+): Promise<string | null> {
+  const shotPage =
+    page ??
+    pickNaverCaptchaPage(entry.context) ??
+    pickPostingWorkflowPage(entry.context);
+  if (!shotPage || shotPage.isClosed()) return entry.screenshotPath ?? null;
+  if (!(await isNaverCaptchaVisible(shotPage))) return entry.screenshotPath ?? null;
+
+  const path = await saveCaptchaHoldScreenshot(shotPage, entry.jobId);
+  if (path) {
+    entry.screenshotPath = path;
+    entry.screenshotUpdatedAt = Date.now();
+  }
+  return path;
 }
 
 async function markJobFailed(jobId: string, message: string): Promise<void> {
@@ -284,6 +311,10 @@ export async function enterCaptchaHold(
     );
   }
 
+  if (captchaPage && !captchaPage.isClosed()) {
+    await refreshCaptchaHoldScreenshot(entry, captchaPage);
+  }
+
   const vncSlotLabel = input.modemSession?.proxyPort
     ? vncSlotLabelKo(input.modemSession.proxyPort)
     : undefined;
@@ -298,6 +329,7 @@ export async function enterCaptchaHold(
     force: isDrill,
     visionAutoFailed: input.visionAutoFailed,
     vncSlotLabel,
+    screenshotPath: entry.screenshotPath,
   });
 
   await logOperation({
@@ -580,6 +612,8 @@ export function getCaptchaHoldPublicInfo(jobId: string): {
   vncUrl?: string | null;
   webUrl?: string | null;
   isDrill?: boolean;
+  captchaScreenshotUpdatedAt?: number;
+  hasCaptchaScreenshot?: boolean;
 } | null {
   const entry = holds.get(jobId);
   if (!entry) return null;
@@ -590,5 +624,7 @@ export function getCaptchaHoldPublicInfo(jobId: string): {
     vncUrl: resolveVncUrl(entry.workspace),
     webUrl: buildJobWebUrl(jobId),
     isDrill: entry.isDrill,
+    captchaScreenshotUpdatedAt: entry.screenshotUpdatedAt,
+    hasCaptchaScreenshot: Boolean(entry.screenshotPath),
   };
 }

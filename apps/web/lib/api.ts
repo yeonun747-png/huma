@@ -162,17 +162,37 @@ export const api = {
   getCaptchaHold: (id: string) =>
     request<{
       job_status: string;
-      hold: { active: boolean; expiresAt?: string } | null;
+      hold: {
+        active: boolean;
+        expiresAt?: string;
+        captchaScreenshotUpdatedAt?: number;
+        hasCaptchaScreenshot?: boolean;
+      } | null;
       vnc_url?: string | null;
       web_url?: string | null;
     }>(`/api/jobs/${id}/captcha-hold`),
+  fetchCaptchaScreenshotObjectUrl: async (jobId: string, updatedAt?: number): Promise<string | null> => {
+    const token = getToken();
+    const q = updatedAt ? `?t=${updatedAt}` : '';
+    const res = await fetch(`${API_BASE}/api/jobs/${jobId}/captcha-screenshot${q}`, {
+      headers: token ? { 'X-HUMA-KEY': token } : {},
+    });
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  },
   submitCaptchaAnswer: (id: string, answer: string) =>
     request<{
       ok: boolean;
       submitted: boolean;
       captcha_cleared: boolean;
       pending_login?: boolean;
+      captcha_still_visible?: boolean;
       auto_resumed?: boolean;
+      hold?: {
+        captchaScreenshotUpdatedAt?: number;
+        hasCaptchaScreenshot?: boolean;
+      } | null;
     }>(`/api/jobs/${id}/captcha-answer`, {
       method: 'POST',
       body: JSON.stringify({ answer }),

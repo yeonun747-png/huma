@@ -107,6 +107,42 @@ export async function sendTelegramHtml(
   }
 }
 
+export async function sendTelegramPhoto(
+  chatId: string,
+  photoPath: string,
+  captionHtml: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
+  if (!token) return { ok: false, error: 'TELEGRAM_BOT_TOKEN 없음' };
+  if (!chatId) return { ok: false, error: 'chat_id 없음' };
+
+  try {
+    const buf = await import('node:fs/promises').then((fs) => fs.readFile(photoPath));
+    const form = new FormData();
+    form.append('chat_id', chatId);
+    form.append('photo', new Blob([buf], { type: 'image/png' }), 'captcha.png');
+    form.append('caption', captionHtml.slice(0, 1020));
+    form.append('parse_mode', 'HTML');
+
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+      method: 'POST',
+      body: form,
+      signal: AbortSignal.timeout(20_000),
+    });
+    const data = (await res.json()) as { ok?: boolean; description?: string };
+    if (!data.ok) {
+      const detail = data.description?.trim() || 'sendPhoto ok:false';
+      console.warn('[telegram] photo send failed:', detail);
+      return { ok: false, error: detail };
+    }
+    return { ok: true };
+  } catch (err) {
+    const detail = formatTelegramAxiosError(err, 'sendPhoto failed');
+    console.warn('[telegram] photo send failed:', detail, err);
+    return { ok: false, error: detail };
+  }
+}
+
 async function verifyTelegramBot(token: string): Promise<{ ok: true; username: string } | { ok: false; error: string }> {
   try {
     const { data } = await axios.get<{ ok?: boolean; result?: { username?: string }; description?: string }>(
@@ -163,6 +199,8 @@ export interface CaptchaTelegramParams {
   visionAutoFailed?: boolean;
   /** VNC 3열 타일 — 어느 창인지 */
   vncSlotLabel?: string;
+  /** CAPTCHA 화면 캡처 파일 (텔레그램 sendPhoto) */
+  screenshotPath?: string | null;
 }
 
 export async function notifyCaptchaTelegram(
@@ -226,6 +264,7 @@ export async function notifyCaptchaTelegram(
         '비밀번호는 서버가 VNC 로그인 폼에 자동 재입력했습니다.',
         '1) VNC 접속 → CAPTCHA 풀기(또는 huma 정답 원격 입력) → 로그인',
         '2) huma 큐 → 발행 재개',
+        '※ CAPTCHA 이미지는 텔레그램·huma 팝업에 캡처로 함께 표시됩니다.',
       );
     }
   }
@@ -237,7 +276,15 @@ export async function notifyCaptchaTelegram(
     lines.push(`VNC: <a href="${escapeHtml(vncUrl)}">${escapeHtml(vncUrl)}</a>`);
   }
 
-  return sendTelegramHtml(chatId, lines.join('\n'));
+  const caption = lines.join('\n');
+
+  if (params.screenshotPath && !params.completed && !params.timedOut) {
+    const photo = await sendTelegramPhoto(chatId, params.screenshotPath, caption);
+    if (photo.ok) return photo;
+    console.warn('[telegram] captcha photo fallback to text:', photo.error);
+  }
+
+  return sendTelegramHtml(chatId, caption);
 }
 
 /** env·Bot API 연결만 빠르게 확인 */

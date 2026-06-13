@@ -8,7 +8,12 @@ import { copyVncEndpoint, isTailscaleEndpoint, parseVncEndpoint } from '@/lib/op
 
 interface CaptchaHoldInfo {
   job_status: string;
-  hold: { active: boolean; expiresAt?: string } | null;
+  hold: {
+    active: boolean;
+    expiresAt?: string;
+    captchaScreenshotUpdatedAt?: number;
+    hasCaptchaScreenshot?: boolean;
+  } | null;
   vnc_url?: string | null;
   web_url?: string | null;
 }
@@ -30,19 +35,45 @@ export function CaptchaCompleteModal({
   const [captchaAnswer, setCaptchaAnswer] = useState('');
   const [sendingAnswer, setSendingAnswer] = useState(false);
   const [answerMsg, setAnswerMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
+  const [screenshotLightbox, setScreenshotLightbox] = useState(false);
+  const [screenshotUpdatedAt, setScreenshotUpdatedAt] = useState<number | undefined>();
+
+  const loadScreenshot = useCallback(async (updatedAt?: number) => {
+    const url = await api.fetchCaptchaScreenshotObjectUrl(job.id, updatedAt);
+    setScreenshotUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return url;
+    });
+  }, [job.id]);
 
   const loadHold = useCallback(async () => {
     try {
       const info = await api.getCaptchaHold(job.id);
       setHoldInfo(info);
+      if (info.hold?.hasCaptchaScreenshot) {
+        const at = info.hold.captchaScreenshotUpdatedAt;
+        if (at !== screenshotUpdatedAt) {
+          setScreenshotUpdatedAt(at);
+          await loadScreenshot(at);
+        }
+      }
     } catch {
       setHoldInfo(null);
     }
-  }, [job.id]);
+  }, [job.id, loadScreenshot, screenshotUpdatedAt]);
 
   useEffect(() => {
     void loadHold();
+    const timer = window.setInterval(() => void loadHold(), 4000);
+    return () => window.clearInterval(timer);
   }, [loadHold]);
+
+  useEffect(() => {
+    return () => {
+      if (screenshotUrl) URL.revokeObjectURL(screenshotUrl);
+    };
+  }, [screenshotUrl]);
 
   const runComplete = async (url?: string) => {
     setSubmitting(true);
@@ -113,6 +144,14 @@ export function CaptchaCompleteModal({
         setCaptchaAnswer('');
         onCompleted();
         window.setTimeout(() => onClose(), 1800);
+      } else if (r.captcha_still_visible) {
+        setAnswerMsg({
+          ok: false,
+          text: '제출했으나 CAPTCHA가 다시 나타났습니다(2중 캡차·오답). 아래 캡처를 확인하고 재입력하세요.',
+        });
+        if (r.hold?.hasCaptchaScreenshot) {
+          await loadScreenshot(r.hold.captchaScreenshotUpdatedAt);
+        }
       } else {
         setAnswerMsg({
           ok: false,
@@ -226,6 +265,22 @@ export function CaptchaCompleteModal({
               VNC 화면의 CAPTCHA 이미지를 보고 정답(한글·숫자)을 여기에 입력하면 서버가 직접 입력칸에
               넣고 제출합니다. 통과되면 로그인 버튼만 VNC에서 누르면 자동으로 에디터까지 이어집니다.
             </p>
+            {screenshotUrl ? (
+              <button
+                type="button"
+                className="mb-3 block w-full overflow-hidden rounded-md border border-huma-bdr2 bg-black/5"
+                onClick={() => setScreenshotLightbox(true)}
+                title="클릭하면 크게 보기"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={screenshotUrl}
+                  alt="CAPTCHA 캡처"
+                  className="mx-auto max-h-40 w-full cursor-zoom-in object-contain"
+                />
+                <span className="block py-1 text-center text-[11px] text-huma-t4">클릭하면 크게 보기</span>
+              </button>
+            ) : null}
             <div className="flex gap-2">
               <input
                 type="text"
@@ -299,6 +354,30 @@ export function CaptchaCompleteModal({
           </button>
         </div>
       </div>
+
+      {screenshotLightbox && screenshotUrl ? (
+        <div
+          className="fixed inset-0 z-[300] flex items-center justify-center bg-black/80 p-4"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setScreenshotLightbox(false)}
+        >
+          <button
+            type="button"
+            className="absolute right-4 top-4 rounded bg-black/50 px-3 py-1 text-sm text-white"
+            onClick={() => setScreenshotLightbox(false)}
+          >
+            닫기
+          </button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={screenshotUrl}
+            alt="CAPTCHA 확대"
+            className="max-h-[90vh] max-w-full object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

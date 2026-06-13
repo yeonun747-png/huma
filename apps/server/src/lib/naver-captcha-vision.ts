@@ -801,3 +801,14 @@ export async function tryAutoSolveNaverCaptcha(
   });
   return 'failed';
 }
+
+/** CAPTCHA hold·텔레그램·웹 UI용 PNG 캡처 */
+export async function captureNaverCaptchaPng(page: Page): Promise<Buffer | null> {
+  const type = await detectCaptchaType(page);
+  const question = await readCaptchaQuestion(page);
+  const shot = await captureCaptchaScreenshot(page, type, question);
+  if (shot?.base64) return Buffer.from(shot.base64, 'base64');
+
+  const fallback = await page.screenshot({ type: 'png', fullPage: false }).catch(() => null);
+  return fallback?.length ? fallback : null;
+}

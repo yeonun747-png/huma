@@ -181,6 +181,27 @@ export async function isFocusInTitleArea(page: Page): Promise<boolean> {
     .catch(() => false);
 }
 
+/** 클릭한 제목·본문 locator에 포커스가 있는지 — SE ONE placeholder 입력은 closest 미매칭 방지 */
+export async function isFocusOnLocator(loc: Locator): Promise<boolean> {
+  return loc
+    .evaluate((el) => {
+      const active = document.activeElement;
+      if (!active) return false;
+      return el === active || el.contains(active);
+    })
+    .catch(() => false);
+}
+
+async function hasTitleFieldFocus(page: Page, titleLoc: Locator): Promise<boolean> {
+  if (await isFocusOnLocator(titleLoc)) return true;
+  return isFocusInTitleArea(page);
+}
+
+async function hasBodyFieldFocus(page: Page, bodyLoc: Locator): Promise<boolean> {
+  if (await isFocusOnLocator(bodyLoc)) return true;
+  return isFocusInBodyArea(page);
+}
+
 export async function isFocusInBodyArea(page: Page): Promise<boolean> {
   return page
     .evaluate(
@@ -203,14 +224,17 @@ export async function focusBlogTitleField(page: Page, titleLoc: Locator, maxAtte
       continue;
     }
     await titleLoc.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
+    await titleLoc.focus().catch(() => {});
     await humanClickLocator(page, titleLoc);
     await sleep(randomBetweenTitleFocus());
-    if (await isFocusInTitleArea(page)) return;
-    await page.keyboard.press('Escape').catch(() => {});
-    await sleep(120);
+    if (await hasTitleFieldFocus(page, titleLoc)) return;
+    if (!(await isDraftResumePopupVisible(page))) {
+      await page.keyboard.press('Escape').catch(() => {});
+      await sleep(120);
+    }
     await humanClickLocator(page, titleLoc);
     await sleep(randomBetweenTitleFocus());
-    if (await isFocusInTitleArea(page)) return;
+    if (await hasTitleFieldFocus(page, titleLoc)) return;
   }
   throw new Error('BLOG_TITLE_FOCUS_FAILED');
 }
@@ -222,9 +246,10 @@ export async function focusBlogBodyField(page: Page, bodyLoc: Locator, maxAttemp
       continue;
     }
     await bodyLoc.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
+    await bodyLoc.focus().catch(() => {});
     await humanClickLocator(page, bodyLoc);
     await sleep(randomBetweenTitleFocus());
-    if (await isFocusInBodyArea(page)) return;
+    if (await hasBodyFieldFocus(page, bodyLoc)) return;
   }
   throw new Error('BLOG_BODY_FOCUS_FAILED');
 }

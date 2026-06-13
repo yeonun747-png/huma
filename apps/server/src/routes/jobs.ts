@@ -26,7 +26,9 @@ import {
   completeCaptchaHold,
   getCaptchaHold,
   getCaptchaHoldPublicInfo,
+  refreshCaptchaHoldScreenshot,
 } from '../modules/watcher/captcha-hold.js';
+import { readCaptchaHoldScreenshot } from '../lib/captcha-hold-screenshot.js';
 import {
   applyManualCaptchaAnswer,
   isNaverCaptchaVisible,
@@ -633,12 +635,41 @@ export async function registerJobRoutes(app: FastifyInstance) {
     if (!job) return reply.code(404).send({ error: '작업 없음' });
 
     const hold = getCaptchaHoldPublicInfo(id);
+    const liveHold = getCaptchaHold(id);
+    if (liveHold) {
+      const page = pickNaverCaptchaPage(liveHold.context);
+      if (page && !page.isClosed() && (await isNaverCaptchaVisible(page))) {
+        await refreshCaptchaHoldScreenshot(liveHold, page);
+      }
+    }
+    const refreshed = getCaptchaHoldPublicInfo(id);
     return {
       job_status: job.status,
-      hold,
+      hold: refreshed,
       vnc_url: resolveVncUrl(job.workspace),
       web_url: buildJobWebUrl(id),
     };
+  });
+
+  app.get('/api/jobs/:id/captcha-screenshot', { preHandler: authMiddleware }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const allowedWorkspaces = getWorkspaceFilter(request);
+    const access = await assertJobWorkspaceAccess(id, allowedWorkspaces);
+    if (!access.ok) return reply.code(access.status).send({ error: access.error });
+
+    if (!getCaptchaHold(id)) {
+      return reply.code(404).send({ error: 'CAPTCHA 세션이 없습니다' });
+    }
+
+    const buf = await readCaptchaHoldScreenshot(id);
+    if (!buf?.length) {
+      return reply.code(404).send({ error: '캡처 이미지 없음' });
+    }
+
+    return reply
+      .header('Content-Type', 'image/png')
+      .header('Cache-Control', 'no-store')
+      .send(buf);
   });
 
   app.post('/api/jobs/:id/captcha-complete', { preHandler: authMiddleware }, async (request, reply) => {
@@ -695,6 +726,13 @@ export async function registerJobRoutes(app: FastifyInstance) {
       return reply.code(409).send({ error: 'CAPTCHA 입력칸을 찾지 못했습니다' });
     }
 
+    if (await isNaverCaptchaVisible(page)) {
+      await refreshCaptchaHoldScreenshot(hold, page);
+    }
+
+    const holdInfo = getCaptchaHoldPublicInfo(id);
+    const captchaStillVisible = await isNaverCaptchaVisible(page);
+
     // 발행 재개는 백그라운드 — HTTP 응답을 막지 않음(타임아웃 방지)
     if (
       result.cleared &&
@@ -714,7 +752,9 @@ export async function registerJobRoutes(app: FastifyInstance) {
       submitted: result.submitted,
       captcha_cleared: result.cleared,
       pending_login: result.pending_login,
+      captcha_still_visible: captchaStillVisible,
       auto_resumed: false,
+      hold: holdInfo,
     };
   });
 

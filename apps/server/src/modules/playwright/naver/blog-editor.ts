@@ -41,7 +41,6 @@ function mergePersonaConfig(base: HumanEngineConfig, persona: AccountPersona): H
 
 /** SE ONE 제목 — 포커스 검증 후 insertText (page Ctrl+A 금지) */
 async function typeBlogTitle(page: Page, titleLoc: Locator, title: string): Promise<void> {
-  await prepareSeOneEditorSurface(page, 20_000);
   await focusBlogTitleField(page, titleLoc);
   await clearBlogTitleField(titleLoc);
   await sleep(randomBetween(80, 160));
