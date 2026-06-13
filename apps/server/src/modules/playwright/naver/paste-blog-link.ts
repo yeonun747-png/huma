@@ -54,15 +54,15 @@ export async function pasteBlogLinkWithOgPreview(
   await blurBlogTitleField(page);
   await focusBlogBodyField(page, editor);
   const editable = await resolveBodyEditableLocator(editor);
-  await insertParagraphBreakInBlogEditable(editable, 2);
+  await insertParagraphBreakInBlogEditable(page, editable, 2);
   await scaledHumanSleep(400, 900, scale);
 
   if (workspace === 'yeonun') {
-    await insertTextIntoBlogEditable(editable, insertUrl);
+    await insertTextIntoBlogEditable(page, editable, insertUrl);
   } else {
     const toolbarLinked = await insertLinkViaToolbar(page, insertUrl, scale);
     if (!toolbarLinked) {
-      await insertTextIntoBlogEditable(editable, insertUrl);
+      await insertTextIntoBlogEditable(page, editable, insertUrl);
     }
   }
 

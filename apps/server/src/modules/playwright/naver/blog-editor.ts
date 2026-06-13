@@ -27,6 +27,7 @@ import {
   isDraftResumePopupVisible,
   isFocusInTitleArea,
   readBlogTitleText,
+  waitForBlogTitleSectionReady,
 } from './naver-editor-locators.js';
 import {
   extractPublishedPostUrl,
@@ -55,8 +56,14 @@ async function assertTitleStable(page: Page, titleLoc: Locator, expected: string
 
 /** SE ONE 제목 — 이미 입력됐으면 스킵(CAPTCHA 재개·재시도 중복 방지) */
 async function typeBlogTitle(page: Page, titleLoc: Locator, title: string): Promise<void> {
+  await prepareSeOneEditorSurface(page, 15_000);
+  await waitForBlogTitleSectionReady(page, 30_000);
+
   const existing = await readBlogTitleText(titleLoc);
   if (isBlogTitleWritten(existing, title)) return;
+
+  const freshTitleLoc = (await findBlogTitleLocator(page)) ?? titleLoc;
+  await waitForBlogTitleSectionReady(page, 15_000);
 
   const titleEditable = page
     .locator(
@@ -67,14 +74,14 @@ async function typeBlogTitle(page: Page, titleLoc: Locator, title: string): Prom
     (await titleEditable.count()) > 0 &&
     (await titleEditable.isVisible({ timeout: 500 }).catch(() => false))
       ? titleEditable
-      : titleLoc;
+      : freshTitleLoc;
 
-  await focusBlogTitleField(page, titleLoc);
+  await focusBlogTitleField(page, freshTitleLoc);
   await clearBlogTitleField(titleTarget);
   await sleep(randomBetween(80, 160));
-  await insertTextIntoBlogEditable(titleTarget, title);
+  await insertTextIntoBlogEditable(page, titleTarget, title);
   await sleep(randomBetween(300, 500));
-  await assertTitleStable(page, titleLoc, title);
+  await assertTitleStable(page, freshTitleLoc, title);
 }
 
 /** SE ONE 본문 — locator 직접 입력만 사용 (page.keyboard 금지) */
@@ -117,7 +124,7 @@ async function typeSeOneBlogBody(
     }
 
     await sleep(randomBetween(120, 240));
-    await insertTextIntoBlogEditable(editable, paragraphs[i]!);
+    await insertTextIntoBlogEditable(page, editable, paragraphs[i]!);
     await sleep(randomBetween(200, 400));
 
     const titleAfter = await readBlogTitleText(titleLoc);
@@ -129,7 +136,7 @@ async function typeSeOneBlogBody(
       await blurBlogTitleField(page);
       await focusBlogBodyField(page, bodyLoc);
       const breakTarget = await resolveBodyEditableLocator(bodyLoc);
-      await insertParagraphBreakInBlogEditable(breakTarget, 2);
+      await insertParagraphBreakInBlogEditable(page, breakTarget, 2);
       await humanSleep(paraPauseMin, paraPauseMax);
     }
   }
@@ -162,6 +169,7 @@ export async function postNaverBlog(params: {
   }
 
   await prepareSeOneEditorSurface(page, 25_000);
+  await waitForBlogTitleSectionReady(page, 35_000);
 
   const titleBox = await findBlogTitleLocator(page);
   if (!titleBox) {

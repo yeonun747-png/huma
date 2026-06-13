@@ -151,6 +151,9 @@ export async function waitAndDismissDraftResumePopup(
     if (!(await isDraftResumePopupVisible(editorPage))) return;
     await sleep(150);
   }
+  if (await isDraftResumePopupVisible(editorPage)) {
+    throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
+  }
 }
 
 /** 도움말·임시저장·dim 등 — 에디터 입력을 가리는 오버레이 제거 (발행 전에도 재호출) */
@@ -229,6 +232,7 @@ async function tryEditorOnPage(page: Page, waitBudgetMs = SMART_EDITOR_WAIT_MS):
   ) {
     if (await waitForSmartEditor(page, waitBudgetMs)) {
       await dismissNaverBlogEditorOverlays(page);
+      await prepareSeOneEditorSurface(page, 20_000);
       return page;
     }
   }

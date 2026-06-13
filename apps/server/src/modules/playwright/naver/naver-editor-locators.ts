@@ -50,8 +50,10 @@ export async function isDraftResumePopupVisible(page: Page): Promise<boolean> {
     page.locator('text=작성 중인 글이 있습니다').first(),
     page.locator('text=작성중인 글이 있습니다').first(),
     page.getByText(/작성\s*중인\s*글이/).first(),
-    page.locator('[class*="se-popup"]').filter({ hasText: '작성 중인 글이 있습니다' }).first(),
+    page.getByText(/이어서\s*작성하시겠습니까/).first(),
     page.locator('[class*="se-popup"]').filter({ hasText: /작성\s*중인\s*글/ }).first(),
+    page.locator('[class*="se-popup"]').filter({ hasText: /이어서\s*작성/ }).first(),
+    page.locator('[role="dialog"]').filter({ hasText: /작성\s*중인\s*글/ }).first(),
     page
       .locator('[class*="se-popup"]')
       .filter({ hasText: /작성\s*중인\s*글/ })
@@ -59,21 +61,94 @@ export async function isDraftResumePopupVisible(page: Page): Promise<boolean> {
       .first(),
   ];
   for (const loc of patterns) {
-    if (await loc.isVisible({ timeout: 200 }).catch(() => false)) return true;
+    if (await loc.isVisible({ timeout: 250 }).catch(() => false)) return true;
   }
+
+  const dim = page.locator('.se-popup-dim, .se_dim, [class*="popup-dim"]').first();
+  if (await dim.isVisible({ timeout: 150 }).catch(() => false)) {
+    const popupNearDim = page.locator('[class*="se-popup"], [role="dialog"]').filter({
+      hasText: /작성\s*중인\s*글|이어서\s*작성/,
+    });
+    if ((await popupNearDim.count()) > 0) return true;
+  }
+
   return false;
 }
 
-/** 제목란 — SE ONE placeholder "제목" 우선 */
+/** 제목란 클릭·입력 가능 — 팝업 dim 뒤가 아님 */
+export async function isBlogTitleSectionReady(page: Page): Promise<boolean> {
+  if (await isDraftResumePopupVisible(page)) return false;
+
+  const title = page
+    .locator(
+      '.se-section-documentTitle [contenteditable="true"], .se-documentTitle [contenteditable="true"]',
+    )
+    .first();
+  if (!(await title.isVisible({ timeout: 600 }).catch(() => false))) return false;
+
+  const box = await title.boundingBox().catch(() => null);
+  if (!box || box.height < 18 || box.width < 100) return false;
+
+  const blocked = await page
+    .evaluate(
+      ({ x, y }) => {
+        const hit = document.elementFromPoint(x, y);
+        if (!hit) return true;
+        return !!hit.closest(
+          '.se-popup, [role="dialog"], .se-popup-dim, .se_dim, [class*="popup-dim"]',
+        );
+      },
+      { x: box.x + box.width / 2, y: box.y + Math.min(box.height / 2, 24) },
+    )
+    .catch(() => true);
+
+  return !blocked;
+}
+
+/** 팝업 닫힌 뒤 제목란 interactable 될 때까지 대기 */
+export async function waitForBlogTitleSectionReady(page: Page, maxMs = 35_000): Promise<void> {
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    if (await isBlogTitleSectionReady(page)) return;
+    await sleep(250);
+  }
+  if (await isDraftResumePopupVisible(page)) {
+    throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
+  }
+  throw new Error('BLOG_TITLE_SECTION_NOT_READY');
+}
+
+/** 제목란 — SE ONE placeholder "제목" 우선 (팝업 dim 뒤 요소 제외) */
 export async function findBlogTitleLocator(page: Page): Promise<Locator | null> {
+  if (await isDraftResumePopupVisible(page)) return null;
+
+  const titleEditable = page
+    .locator(
+      '.se-section-documentTitle [contenteditable="true"], .se-documentTitle [contenteditable="true"]',
+    )
+    .first();
+  if (
+    (await titleEditable.count()) > 0 &&
+    (await titleEditable.isVisible({ timeout: 800 }).catch(() => false)) &&
+    (await isBlogTitleSectionReady(page))
+  ) {
+    return titleEditable;
+  }
+
   try {
     const ph = page.getByPlaceholder('제목').first();
-    if ((await ph.count()) > 0 && (await ph.isVisible({ timeout: 800 }).catch(() => false))) {
+    if (
+      (await ph.count()) > 0 &&
+      (await ph.isVisible({ timeout: 800 }).catch(() => false)) &&
+      (await isBlogTitleSectionReady(page))
+    ) {
       return ph;
     }
   } catch {
     /* ignore */
   }
+
+  if (!(await isBlogTitleSectionReady(page))) return null;
 
   const titleOnly = [
     '.se-section-documentTitle [contenteditable="true"]',
@@ -259,11 +334,12 @@ export function isTitlePlaceholderText(text: string): boolean {
   return !t || TITLE_PLACEHOLDER_RE.test(t);
 }
 
-/** placeholder「제목」·빈 값 제외 — 실제 제목 입력 여부 */
+/** placeholder「제목」·빈 값·팝업 오염 제외 — 실제 제목 입력 여부 */
 export function isBlogTitleWritten(written: string, expected: string): boolean {
   const w = written.replace(/\u00a0/g, ' ').trim();
   const e = expected.replace(/\u00a0/g, ' ').trim();
   if (!w || isTitlePlaceholderText(w)) return false;
+  if (/이어서\s*작성|작성\s*중인\s*글|배경\s*사진|제목위치|삭제취소확인/.test(w)) return false;
   if (w.length < 2) return false;
   const probe = Math.min(4, w.length, e.length);
   if (probe < 2) return w.length >= e.length * 0.5 && w.length <= e.length * 1.15;
@@ -360,16 +436,47 @@ export async function resolveBodyEditableLocator(bodyLoc: Locator): Promise<Loca
   return bodyLoc;
 }
 
-/** locator에 직접 insertText — page.keyboard는 DOM 포커스(제목)로 새는 문제 방지 */
-export async function insertTextIntoBlogEditable(loc: Locator, text: string): Promise<void> {
+/** locator에 직접 insertText — 팝업·dim 뒤 DOM 조작 금지 */
+export async function insertTextIntoBlogEditable(
+  page: Page,
+  loc: Locator,
+  text: string,
+): Promise<void> {
+  if (await isDraftResumePopupVisible(page)) {
+    throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
+  }
+
   await loc.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
+  const box = await loc.boundingBox().catch(() => null);
+  if (!box || box.width < 8 || box.height < 8) {
+    throw new Error('BLOG_EDITABLE_NOT_INTERACTABLE');
+  }
+
+  const blocked = await page
+    .evaluate(
+      ({ x, y }) => {
+        const hit = document.elementFromPoint(x, y);
+        if (!hit) return true;
+        return !!hit.closest(
+          '.se-popup, [role="dialog"], .se-popup-dim, .se_dim, [class*="popup-dim"]',
+        );
+      },
+      { x: box.x + box.width / 2, y: box.y + Math.min(box.height / 2, 28) },
+    )
+    .catch(() => true);
+  if (blocked) {
+    throw new Error('BLOG_EDITABLE_BLOCKED_BY_OVERLAY');
+  }
+
   await loc.evaluate((el, t) => {
     const node = el as HTMLElement;
+    if (node.closest('.se-popup, [role="dialog"]')) return;
     const editable =
       node.matches('[contenteditable="true"]')
         ? node
         : (node.querySelector('[contenteditable="true"]') as HTMLElement | null);
     const target = editable ?? node;
+    if (target.closest('.se-popup, [role="dialog"]')) return;
     target.focus();
 
     const sel = window.getSelection();
@@ -394,12 +501,17 @@ function resolveEditableNode(el: HTMLElement): HTMLElement {
 
 /** 본문 단락 구분 — page.keyboard Enter 금지 */
 export async function insertParagraphBreakInBlogEditable(
+  page: Page,
   loc: Locator,
   lineBreaks = 2,
 ): Promise<void> {
+  if (await isDraftResumePopupVisible(page)) {
+    throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
+  }
   const breaks = '\n'.repeat(Math.max(1, lineBreaks));
   await loc.evaluate((el, text) => {
     const target = resolveEditableNode(el as HTMLElement);
+    if (target.closest('.se-popup, [role="dialog"]')) return;
     target.focus();
     const sel = window.getSelection();
     if (sel) {
@@ -471,7 +583,10 @@ export async function isFocusInBodyArea(page: Page): Promise<boolean> {
 /** 제목란 클릭 — 포커스 검증 실패해도 throw 안 함(입력 검증은 typeBlogTitle) */
 export async function focusBlogTitleField(page: Page, titleLoc: Locator): Promise<void> {
   if (await isDraftResumePopupVisible(page)) {
-    await sleep(300);
+    throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
+  }
+  if (!(await isBlogTitleSectionReady(page))) {
+    throw new Error('BLOG_TITLE_SECTION_NOT_READY');
   }
 
   await titleLoc.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
@@ -638,11 +753,11 @@ export async function isNaverBlogEditorInteractable(page: Page): Promise<boolean
   const hasLegacyFrame = (await page.locator('#mainFrame').count().catch(() => 0)) > 0;
   if (!onPostwrite && !hasLegacyFrame) return false;
 
-  if ((await findBlogTitleLocator(page)) !== null) return true;
+  if (await isBlogTitleSectionReady(page)) return true;
   if ((await findBlogBodyLocator(page)) !== null) return true;
 
   if (onPostwrite && (await isSeOneEditorShellReady(page))) {
-    return (await findBlogBodyLocator(page)) !== null || (await findBlogTitleLocator(page)) !== null;
+    return (await isBlogTitleSectionReady(page)) || (await findBlogBodyLocator(page)) !== null;
   }
 
   return false;
