@@ -1,6 +1,7 @@
 import type { FrameLocator, Locator, Page } from 'playwright';
 
 import { humanClickLocator } from '../../human-engine/mouse.js';
+import { sleep } from '../../../lib/utils.js';
 
 export function editorFrame(page: Page): FrameLocator {
   return page.frameLocator('#mainFrame');
@@ -20,7 +21,11 @@ export const BLOG_TITLE_SELECTORS = [
   '.se-documentTitle [contenteditable="true"]',
 ];
 
+/** 제목 섹션(.se-section-documentTitle) 밖 본문만 — 제목·본문 셀렉터 겹침 방지 */
 export const BLOG_BODY_SELECTORS = [
+  '.se-components-wrap .se-section-text .se-text-paragraph[contenteditable="true"]',
+  '.se-section-text:not(.se-section-documentTitle) .se-text-paragraph[contenteditable="true"]',
+  '.se-section-text:not(.se-section-documentTitle) [contenteditable="true"]',
   '.se-section-text [contenteditable="true"]',
   '.se-text-paragraph[contenteditable="true"]',
   '.se-content',
@@ -29,8 +34,15 @@ export const BLOG_BODY_SELECTORS = [
   '.se-main-container',
   '.se-section-text',
   '[class*="se-section-text"]',
-  '.se-placeholder',
 ];
+
+const TITLE_SECTION_SELECTOR =
+  '.se-section-documentTitle, .se-documentTitle, [data-placeholder*="제목"], .se-title-text';
+
+const BODY_SECTION_SELECTOR =
+  '.se-section-text, .se-text-paragraph, .se-content, .se-main-container, .se-components-wrap';
+
+const TITLE_PLACEHOLDER_RE = /^(제목|title)$/i;
 
 /** 임시저장 이어쓰기 팝업 — 취소 전에는 에디터 입력 금지 */
 export async function isDraftResumePopupVisible(page: Page): Promise<boolean> {
@@ -39,6 +51,12 @@ export async function isDraftResumePopupVisible(page: Page): Promise<boolean> {
     page.locator('text=작성중인 글이 있습니다').first(),
     page.getByText(/작성\s*중인\s*글이/).first(),
     page.locator('[class*="se-popup"]').filter({ hasText: '작성 중인 글이 있습니다' }).first(),
+    page.locator('[class*="se-popup"]').filter({ hasText: /작성\s*중인\s*글/ }).first(),
+    page
+      .locator('[class*="se-popup"]')
+      .filter({ hasText: /작성\s*중인\s*글/ })
+      .locator('xpath=ancestor-or-self::*[contains(@class,"se-popup")][1]')
+      .first(),
   ];
   for (const loc of patterns) {
     if (await loc.isVisible({ timeout: 200 }).catch(() => false)) return true;
@@ -72,31 +90,163 @@ export async function findBlogTitleLocator(page: Page): Promise<Locator | null> 
   return findVisibleLocator(page, BLOG_TITLE_SELECTORS);
 }
 
+async function isLocatorInTitleSection(loc: Locator): Promise<boolean> {
+  return loc
+    .evaluate((el, sel) => !!el.closest(sel), TITLE_SECTION_SELECTOR)
+    .catch(() => false);
+}
+
 /** 본문란 — 제목·documentTitle 제외 */
 export async function findBlogBodyLocator(page: Page): Promise<Locator | null> {
   try {
-    const ph = page.getByPlaceholder(/본문|일상/).first();
+    const ph = page.getByPlaceholder(/본문|일상|글감/).first();
     if ((await ph.count()) > 0 && (await ph.isVisible({ timeout: 800 }).catch(() => false))) {
-      return ph;
+      if (!(await isLocatorInTitleSection(ph))) return ph;
     }
   } catch {
     /* ignore */
   }
 
-  const body = await findVisibleLocator(page, BLOG_BODY_SELECTORS, { inFrame: false });
-  if (body) return body;
-
-  const legacy = await findVisibleLocator(page, BLOG_BODY_SELECTORS);
-  if (legacy) return legacy;
+  for (const scope of [page, editorFrame(page)] as Array<Page | FrameLocator>) {
+    for (const sel of BLOG_BODY_SELECTORS) {
+      const loc = scope.locator(sel).first();
+      try {
+        if ((await loc.count()) > 0 && (await loc.isVisible().catch(() => false))) {
+          if (!(await isLocatorInTitleSection(loc))) return loc;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+  }
 
   if ((await page.locator('#mainFrame').count().catch(() => 0)) > 0) {
-    return page
+    const legacy = page
       .frameLocator('#mainFrame')
       .locator('.se-content, .se-text-paragraph, [contenteditable="true"]')
       .first();
+    if ((await legacy.count()) > 0 && (await legacy.isVisible().catch(() => false))) {
+      return legacy;
+    }
   }
 
   return null;
+}
+
+export function isTitlePlaceholderText(text: string): boolean {
+  const t = text.replace(/\u00a0/g, ' ').trim();
+  return !t || TITLE_PLACEHOLDER_RE.test(t);
+}
+
+/** placeholder「제목」·빈 값 제외 — 실제 제목 입력 여부 */
+export function isBlogTitleWritten(written: string, expected: string): boolean {
+  const w = written.replace(/\u00a0/g, ' ').trim();
+  const e = expected.replace(/\u00a0/g, ' ').trim();
+  if (!w || isTitlePlaceholderText(w)) return false;
+  if (w.length < 2) return false;
+  const probe = Math.min(4, w.length, e.length);
+  if (probe < 2) return w.length >= e.length * 0.5;
+  return e.startsWith(w.slice(0, probe)) || w.startsWith(e.slice(0, probe));
+}
+
+export async function readBlogTitleText(titleLoc: Locator): Promise<string> {
+  const inputVal = await titleLoc.inputValue().catch(() => '');
+  if (inputVal.trim() && !isTitlePlaceholderText(inputVal)) return inputVal.trim();
+
+  const inner = await titleLoc
+    .evaluate((el) => {
+      const node = el as HTMLElement;
+      const clone = node.cloneNode(true) as HTMLElement;
+      for (const ph of clone.querySelectorAll('.se-placeholder, [class*="placeholder"]')) {
+        ph.remove();
+      }
+      return (clone.innerText ?? clone.textContent ?? '').trim();
+    })
+    .catch(() => '');
+
+  if (inner && !isTitlePlaceholderText(inner)) return inner;
+
+  const text = await titleLoc.textContent().catch(() => '');
+  const t = (text ?? '').trim();
+  return isTitlePlaceholderText(t) ? '' : t;
+}
+
+export async function isFocusInTitleArea(page: Page): Promise<boolean> {
+  return page
+    .evaluate((sel) => {
+      const el = document.activeElement;
+      if (!el) return false;
+      return !!el.closest(sel);
+    }, TITLE_SECTION_SELECTOR)
+    .catch(() => false);
+}
+
+export async function isFocusInBodyArea(page: Page): Promise<boolean> {
+  return page
+    .evaluate(
+      ({ titleSel, bodySel }) => {
+        const el = document.activeElement;
+        if (!el) return false;
+        if (el.closest(titleSel)) return false;
+        return !!el.closest(bodySel);
+      },
+      { titleSel: TITLE_SECTION_SELECTOR, bodySel: BODY_SECTION_SELECTOR },
+    )
+    .catch(() => false);
+}
+
+/** 임시저장 팝업 취소 직후 본문 블록 선택·포커스 잔여 → 제목란으로 이동 */
+export async function focusBlogTitleField(page: Page, titleLoc: Locator, maxAttempts = 6): Promise<void> {
+  for (let i = 0; i < maxAttempts; i += 1) {
+    if (await isDraftResumePopupVisible(page)) {
+      await sleep(200);
+      continue;
+    }
+    await titleLoc.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
+    await humanClickLocator(page, titleLoc);
+    await sleep(randomBetweenTitleFocus());
+    if (await isFocusInTitleArea(page)) return;
+    await page.keyboard.press('Escape').catch(() => {});
+    await sleep(120);
+    await humanClickLocator(page, titleLoc);
+    await sleep(randomBetweenTitleFocus());
+    if (await isFocusInTitleArea(page)) return;
+  }
+  throw new Error('BLOG_TITLE_FOCUS_FAILED');
+}
+
+export async function focusBlogBodyField(page: Page, bodyLoc: Locator, maxAttempts = 5): Promise<void> {
+  for (let i = 0; i < maxAttempts; i += 1) {
+    if (await isDraftResumePopupVisible(page)) {
+      await sleep(200);
+      continue;
+    }
+    await bodyLoc.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
+    await humanClickLocator(page, bodyLoc);
+    await sleep(randomBetweenTitleFocus());
+    if (await isFocusInBodyArea(page)) return;
+  }
+  throw new Error('BLOG_BODY_FOCUS_FAILED');
+}
+
+function randomBetweenTitleFocus(): number {
+  return 180 + Math.floor(Math.random() * 140);
+}
+
+/** 제목란만 비움 — page.keyboard Control+A 금지(본문 블록 전체 선택 방지) */
+export async function clearBlogTitleField(titleLoc: Locator): Promise<void> {
+  await titleLoc
+    .evaluate((el) => {
+      const node = el as HTMLElement;
+      node.focus();
+      if (node.isContentEditable) {
+        node.innerHTML = '';
+        node.textContent = '';
+      } else if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement) {
+        node.value = '';
+      }
+    })
+    .catch(() => {});
 }
 
 export async function findVisibleLocator(
@@ -153,10 +303,9 @@ export async function clickVisibleLocator(page: Page, loc: Locator): Promise<voi
   await humanClickLocator(page, loc);
 }
 
-/** 취소선·선택 블록 등 서식 잔여 해제 — 툴바 「취소」와 혼동 금지 */
+/** 취소선 토글만 해제 — Escape·Control+A는 팝업·블록 선택을 악화시킬 수 있어 사용 안 함 */
 export async function clearSeOneEditorFormatting(page: Page): Promise<void> {
-  await page.keyboard.press('Escape').catch(() => {});
-  await page.keyboard.press('Escape').catch(() => {});
+  if (await isDraftResumePopupVisible(page)) return;
 
   const strikeOn = page
     .locator(

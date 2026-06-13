@@ -3,8 +3,13 @@ import type { Page } from 'playwright';
 import { sleep } from '../../../lib/utils.js';
 import type { HumanEngineConfig } from '../../../lib/settings.js';
 import { humanClickLocator } from '../../human-engine/mouse.js';
-import { humanType, humanSleep } from '../../human-engine/typing.js';
+import { humanSleep } from '../../human-engine/typing.js';
 import { scaledHumanSleep } from '../../human-engine/timing.js';
+import {
+  dismissNaverBlogEditorOverlays,
+  prepareSeOneEditorSurface,
+  waitAndDismissDraftResumePopup,
+} from './enter-blog-editor.js';
 import { findVisibleLocator, clickVisibleLocator } from './naver-editor-locators.js';
 
 const PUBLISH_BTN_SELECTORS = [
@@ -105,11 +110,11 @@ export async function selectPublishCategory(
   return true;
 }
 
-/** 태그 입력 — 태그마다 humanType 후 Space/Enter 로 칩 완성 (네이버는 쉼표 미지원) */
+/** 태그 입력 — insertText (오탈자 시뮬레이션·마우스 이동 없이 안정 입력) */
 export async function typePublishTags(
   page: Page,
   hashtags: string[],
-  humanConfig: HumanEngineConfig,
+  _humanConfig: HumanEngineConfig,
   scale = 1,
 ): Promise<boolean> {
   const tags = hashtags
@@ -123,7 +128,7 @@ export async function typePublishTags(
   await humanClickLocator(page, input);
 
   for (let i = 0; i < tags.length; i++) {
-    await humanType(page, input, `#${tags[i]!}`, humanConfig);
+    await page.keyboard.insertText(`#${tags[i]!}`);
     await scaledHumanSleep(200, 550, scale);
     const confirmKey = Math.random() < 0.75 ? 'Space' : 'Enter';
     await page.keyboard.press(confirmKey);
@@ -161,6 +166,11 @@ export async function completeNaverPublishDialog(params: {
   scale?: number;
 }): Promise<void> {
   const scale = params.scale ?? 1;
+
+  await prepareSeOneEditorSurface(params.page, 12_000);
+  await waitAndDismissDraftResumePopup(params.page, 5_000);
+  await dismissNaverBlogEditorOverlays(params.page);
+
   await clickTopPublishButton(params.page);
   await scaledHumanSleep(800, 1800, scale);
 
@@ -181,6 +191,7 @@ export async function completeNaverPublishDialog(params: {
   }
 
   await scaledHumanSleep(600, 1400, scale);
+  await dismissNaverBlogEditorOverlays(params.page);
   await clickConfirmPublish(params.page);
   await params.page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => {});
 }

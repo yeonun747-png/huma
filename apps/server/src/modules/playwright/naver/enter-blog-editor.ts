@@ -128,7 +128,7 @@ async function dismissDraftResumePopup(editorPage: Page): Promise<boolean> {
         await humanClickLocator(editorPage, btn).catch(() =>
           btn.click({ timeout: 3000, force: true }).catch(() => {}),
         );
-        await sleep(400);
+        await sleep(500);
         if (!(await isDraftResumePopupVisible(editorPage))) return true;
       }
     }
@@ -179,9 +179,22 @@ export async function dismissNaverBlogEditorOverlays(editorPage: Page): Promise<
       dismissed = true;
     }
 
-    await editorPage.keyboard.press('Escape').catch(() => {});
+    // 임시저장 팝업이 떠 있을 때 Escape는 포커스·블록 선택만 꼬이게 함
+    if (!(await isDraftResumePopupVisible(editorPage))) {
+      await editorPage.keyboard.press('Escape').catch(() => {});
+    }
     if (!dismissed) break;
     await sleep(350);
+  }
+}
+
+/** 키보드 입력 직전 — 임시저장 팝업·도움말이 없을 때까지 대기 */
+export async function prepareSeOneEditorSurface(editorPage: Page, maxMs = 25_000): Promise<void> {
+  await waitAndDismissDraftResumePopup(editorPage, maxMs);
+  await dismissNaverBlogEditorOverlays(editorPage);
+  await waitAndDismissDraftResumePopup(editorPage, 5_000);
+  if (await isDraftResumePopupVisible(editorPage)) {
+    throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
   }
 }
 

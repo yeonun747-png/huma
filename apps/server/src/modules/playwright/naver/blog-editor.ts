@@ -12,16 +12,20 @@ import { parsePersona, type AccountPersona } from '../persona.js';
 
 import {
   enterBlogEditor,
-  dismissNaverBlogEditorOverlays,
+  prepareSeOneEditorSurface,
   waitAndDismissDraftResumePopup,
 } from './enter-blog-editor.js';
 import {
   clearSeOneEditorFormatting,
+  clearBlogTitleField,
   findBlogTitleLocator,
   findBlogBodyLocator,
+  focusBlogBodyField,
+  focusBlogTitleField,
+  isBlogTitleWritten,
   isDraftResumePopupVisible,
+  readBlogTitleText,
 } from './naver-editor-locators.js';
-import { humanClickLocator } from '../../human-engine/mouse.js';
 import { pasteBlogLinkWithOgPreview } from './paste-blog-link.js';
 import { insertImageViaToolbar, insertVideoViaToolbar } from './naver-editor-media.js';
 import { completeNaverPublishDialog } from './naver-publish-dialog.js';
@@ -35,34 +39,32 @@ function mergePersonaConfig(base: HumanEngineConfig, persona: AccountPersona): H
   };
 }
 
-async function readTitleText(titleLoc: Locator): Promise<string> {
-  const inputVal = await titleLoc.inputValue().catch(() => '');
-  if (inputVal.trim()) return inputVal.trim();
-  const text = await titleLoc.textContent().catch(() => '');
-  return (text ?? '').trim();
-}
-
-/** SE ONE 제목 — insertText + 입력 검증 */
+/** SE ONE 제목 — 포커스 검증 후 insertText (page Ctrl+A 금지) */
 async function typeBlogTitle(page: Page, titleLoc: Locator, title: string): Promise<void> {
-  await titleLoc.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
-  await humanClickLocator(page, titleLoc);
-  await sleep(randomBetween(200, 400));
-  await clearSeOneEditorFormatting(page);
-  await humanClickLocator(page, titleLoc);
-  await sleep(120);
-  await page.keyboard.press('Control+A').catch(() => {});
-  await sleep(80);
+  await prepareSeOneEditorSurface(page, 20_000);
+  await focusBlogTitleField(page, titleLoc);
+  await clearBlogTitleField(titleLoc);
+  await sleep(randomBetween(80, 160));
   await page.keyboard.insertText(title);
-  await sleep(randomBetween(300, 450));
+  await sleep(randomBetween(300, 500));
 
-  const written = await readTitleText(titleLoc);
-  if (!written || !title.startsWith(written.slice(0, Math.min(4, written.length)))) {
-    await titleLoc.fill(title).catch(() => page.keyboard.insertText(title));
-    await sleep(300);
+  let written = await readBlogTitleText(titleLoc);
+  if (!isBlogTitleWritten(written, title)) {
+    await focusBlogTitleField(page, titleLoc);
+    await clearBlogTitleField(titleLoc);
+    await titleLoc.fill(title).catch(async () => {
+      await page.keyboard.insertText(title);
+    });
+    await sleep(350);
+    written = await readBlogTitleText(titleLoc);
+  }
+
+  if (!isBlogTitleWritten(written, title)) {
+    throw new Error('BLOG_TITLE_WRITE_FAILED');
   }
 }
 
-/** SE ONE 본문 — 문단별 insertText (Ctrl+V 붙여넣기·취소선 서식 잔여 방지) */
+/** SE ONE 본문 — 제목 입력 확인 후 문단별 insertText */
 async function typeSeOneBlogBody(
   page: Page,
   bodyLoc: Locator,
@@ -73,15 +75,23 @@ async function typeSeOneBlogBody(
   const paraPauseMin = Math.min(config.paragraph_pause_ms[0], 1200);
   const paraPauseMax = Math.min(config.paragraph_pause_ms[1], 3500);
 
+  await prepareSeOneEditorSurface(page, 12_000);
+  await clearSeOneEditorFormatting(page);
+  await focusBlogBodyField(page, bodyLoc);
+
   for (let i = 0; i < paragraphs.length; i += 1) {
     if (await isDraftResumePopupVisible(page)) {
-      await waitAndDismissDraftResumePopup(page, 8_000);
+      await waitAndDismissDraftResumePopup(page, 10_000);
+      await prepareSeOneEditorSurface(page, 8_000);
+      await focusBlogBodyField(page, bodyLoc);
     }
+
     await clearSeOneEditorFormatting(page);
-    await humanClickLocator(page, bodyLoc);
-    await sleep(randomBetween(150, 300));
+    await focusBlogBodyField(page, bodyLoc);
+    await sleep(randomBetween(120, 240));
     await page.keyboard.insertText(paragraphs[i]!);
     await sleep(randomBetween(200, 400));
+
     if (i < paragraphs.length - 1) {
       await page.keyboard.press('Enter');
       await page.keyboard.press('Enter');
@@ -114,24 +124,22 @@ export async function postNaverBlog(params: {
   const scale = params.rttScale ?? 1;
 
   const page = await enterBlogEditor(params.page, config, { accountId: params.accountId });
-  await waitAndDismissDraftResumePopup(page, 20_000);
-  await dismissNaverBlogEditorOverlays(page);
-  await clearSeOneEditorFormatting(page);
+  await prepareSeOneEditorSurface(page, 25_000);
 
   const titleBox = await findBlogTitleLocator(page);
   if (!titleBox) {
     throw new Error('BLOG_TITLE_NOT_FOUND');
   }
+
   await typeBlogTitle(page, titleBox, params.title);
-  const titleWritten = await readTitleText(titleBox);
-  if (!titleWritten || titleWritten.length < 2) {
+  await scaledHumanSleep(400, 900, scale);
+
+  const titleWritten = await readBlogTitleText(titleBox);
+  if (!isBlogTitleWritten(titleWritten, params.title)) {
     throw new Error('BLOG_TITLE_WRITE_FAILED');
   }
-  await scaledHumanSleep(500, 1200, scale);
 
-  await waitAndDismissDraftResumePopup(page, 8_000);
-  await dismissNaverBlogEditorOverlays(page);
-  await clearSeOneEditorFormatting(page);
+  await prepareSeOneEditorSurface(page, 10_000);
 
   const editor = await findBlogBodyLocator(page);
   if (!editor) {
@@ -141,12 +149,14 @@ export async function postNaverBlog(params: {
   if (isSeOnePostwrite(page)) {
     await typeSeOneBlogBody(page, editor, params.content, config);
   } else {
-    await humanClickLocator(page, editor);
+    await focusBlogBodyField(page, editor);
     await sleep(randomBetween(200, 400));
     await typePostContent(page, editor, params.content, config);
   }
 
   if (params.linkUrl?.trim()) {
+    await prepareSeOneEditorSurface(page, 6_000);
+    await focusBlogBodyField(page, editor);
     await pasteBlogLinkWithOgPreview(page, editor, params.linkUrl.trim(), {
       workspace: params.workspace ?? 'yeonun',
       scale,
@@ -156,14 +166,22 @@ export async function postNaverBlog(params: {
 
   if (params.imageUrls?.length) {
     for (const imagePath of params.imageUrls) {
+      await prepareSeOneEditorSurface(page, 4_000);
       await insertImageViaToolbar(page, imagePath);
       await scaledHumanSleep(1000, 3000, scale);
     }
   }
 
   if (params.videoPath?.trim()) {
+    await prepareSeOneEditorSurface(page, 4_000);
     await insertVideoViaToolbar(page, params.videoPath.trim());
     await scaledHumanSleep(1500, 3500, scale);
+  }
+
+  await prepareSeOneEditorSurface(page, 8_000);
+  const titleBeforeReview = await readBlogTitleText(titleBox);
+  if (!isBlogTitleWritten(titleBeforeReview, params.title)) {
+    throw new Error('BLOG_TITLE_LOST_BEFORE_REVIEW');
   }
 
   await scrollReview(
@@ -173,6 +191,8 @@ export async function postNaverBlog(params: {
       config.review_duration_ms,
     ),
   );
+
+  await prepareSeOneEditorSurface(page, 8_000);
 
   await completeNaverPublishDialog({
     page,
