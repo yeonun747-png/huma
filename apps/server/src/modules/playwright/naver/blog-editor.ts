@@ -30,6 +30,7 @@ import {
   waitForBlogTitleSectionReady,
   recoverBlogTitleSection,
   isBlogTitleSectionReady,
+  typeTextIntoBlogTitleField,
 } from './naver-editor-locators.js';
 import {
   extractPublishedPostUrl,
@@ -71,21 +72,7 @@ async function typeBlogTitle(page: Page, titleLoc: Locator, title: string): Prom
     await waitForBlogTitleSectionReady(page, 12_000);
   }
 
-  const titleEditable = page
-    .locator(
-      '.se-section-documentTitle [contenteditable="true"], .se-documentTitle [contenteditable="true"]',
-    )
-    .first();
-  const titleTarget =
-    (await titleEditable.count()) > 0 &&
-    (await titleEditable.isVisible({ timeout: 500 }).catch(() => false))
-      ? titleEditable
-      : freshTitleLoc;
-
-  await focusBlogTitleField(page, freshTitleLoc);
-  await clearBlogTitleField(titleTarget);
-  await sleep(randomBetween(80, 160));
-  await insertTextIntoBlogEditable(page, titleTarget, title);
+  await typeTextIntoBlogTitleField(page, freshTitleLoc, title);
   await sleep(randomBetween(300, 500));
   await assertTitleStable(page, freshTitleLoc, title);
 }

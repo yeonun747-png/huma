@@ -773,20 +773,147 @@ function randomBetweenTitleFocus(): number {
   return 180 + Math.floor(Math.random() * 140);
 }
 
-/** 제목란만 비움 — page.keyboard Control+A 금지(본문 블록 전체 선택 방지) */
+/** 제목 paragraph contenteditable — SE ONE wrapper 대신 실제 입력 노드 */
+export async function resolveTitleEditableLocator(page: Page, titleLoc: Locator): Promise<Locator> {
+  const fromLoc = titleLoc.locator('.se-text-paragraph[contenteditable="true"]').first();
+  if (
+    (await fromLoc.count()) > 0 &&
+    (await fromLoc.isVisible({ timeout: 500 }).catch(() => false))
+  ) {
+    return fromLoc;
+  }
+
+  const sectionParagraph = page
+    .locator(
+      '.se-section-documentTitle .se-text-paragraph[contenteditable="true"], .se-documentTitle .se-text-paragraph[contenteditable="true"]',
+    )
+    .first();
+  if (
+    (await sectionParagraph.count()) > 0 &&
+    (await sectionParagraph.isVisible({ timeout: 500 }).catch(() => false))
+  ) {
+    return sectionParagraph;
+  }
+
+  const sectionEditable = page
+    .locator(
+      '.se-section-documentTitle [contenteditable="true"], .se-documentTitle [contenteditable="true"]',
+    )
+    .first();
+  if (
+    (await sectionEditable.count()) > 0 &&
+    (await sectionEditable.isVisible({ timeout: 500 }).catch(() => false))
+  ) {
+    return sectionEditable;
+  }
+
+  return titleLoc;
+}
+
+/** 제목란만 비움 — innerHTML 금지(SE ONE paragraph 구조 유지) */
 export async function clearBlogTitleField(titleLoc: Locator): Promise<void> {
   await titleLoc
     .evaluate((el) => {
       const node = el as HTMLElement;
-      node.focus();
-      if (node.isContentEditable) {
-        node.innerHTML = '';
-        node.textContent = '';
-      } else if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement) {
-        node.value = '';
+      const target =
+        node.matches('[contenteditable="true"]')
+          ? node
+          : (node.querySelector('[contenteditable="true"]') as HTMLElement | null) ?? node;
+      target.focus();
+      for (const ph of target.querySelectorAll('.se-placeholder, [class*="placeholder"]')) {
+        ph.remove();
+      }
+      if (target.isContentEditable) {
+        const sel = window.getSelection();
+        if (sel) {
+          const range = document.createRange();
+          range.selectNodeContents(target);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+        document.execCommand('selectAll', false);
+        document.execCommand('delete', false);
+      } else if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+        target.value = '';
       }
     })
     .catch(() => {});
+}
+
+/** SE ONE 제목 — innerHTML 비우기 금지(placeholder paragraph 구조 유지) */
+export async function typeTextIntoBlogTitleField(
+  page: Page,
+  titleLoc: Locator,
+  text: string,
+): Promise<void> {
+  if (await isDraftResumePopupVisible(page)) {
+    throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
+  }
+
+  const editable = await resolveTitleEditableLocator(page, titleLoc);
+  await focusBlogTitleField(page, titleLoc);
+  await sleep(120);
+
+  await editable.evaluate((el) => {
+    const target = el as HTMLElement;
+    target.focus();
+    for (const ph of target.querySelectorAll('.se-placeholder, [class*="placeholder"]')) {
+      ph.remove();
+    }
+    const sel = window.getSelection();
+    if (sel) {
+      const range = document.createRange();
+      range.selectNodeContents(target);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    document.execCommand('selectAll', false);
+    document.execCommand('delete', false);
+  });
+
+  await sleep(80);
+
+  const execOk = await editable.evaluate((el, t) => {
+    const target = el as HTMLElement;
+    target.focus();
+    const sel = window.getSelection();
+    if (sel) {
+      const range = document.createRange();
+      range.selectNodeContents(target);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    const ok = document.execCommand('insertText', false, t);
+    if (!ok) {
+      target.textContent = t;
+    }
+    target.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true }));
+    target.dispatchEvent(new Event('change', { bubbles: true }));
+    return ok;
+  }, text);
+
+  let written = await readBlogTitleText(titleLoc);
+  if (!isBlogTitleWritten(written, text) && (await isFocusInTitleArea(page))) {
+    await page.keyboard.insertText(text);
+    await sleep(150);
+    written = await readBlogTitleText(titleLoc);
+  }
+
+  if (!isBlogTitleWritten(written, text)) {
+    await editable.evaluate((el, t) => {
+      const target = el as HTMLElement;
+      target.focus();
+      target.textContent = t;
+      target.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true }));
+      target.dispatchEvent(new Event('change', { bubbles: true }));
+    }, text);
+    written = await readBlogTitleText(titleLoc);
+  }
+
+  if (!isBlogTitleWritten(written, text)) {
+    throw new Error(execOk ? 'BLOG_TITLE_WRITE_FAILED' : 'BLOG_EDITABLE_INSERT_NOOP');
+  }
 }
 
 export async function findVisibleLocator(
