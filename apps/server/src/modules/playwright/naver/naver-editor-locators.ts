@@ -21,6 +21,8 @@ export const BLOG_TITLE_SELECTORS = [
 ];
 
 export const BLOG_BODY_SELECTORS = [
+  '.se-section-text [contenteditable="true"]',
+  '.se-text-paragraph[contenteditable="true"]',
   '.se-content',
   '.se-text-paragraph',
   '.se-component-content',
@@ -28,10 +30,75 @@ export const BLOG_BODY_SELECTORS = [
   '.se-section-text',
   '[class*="se-section-text"]',
   '.se-placeholder',
-  '[contenteditable="true"]',
 ];
 
-/** iframe·페이지 양쪽에서 첫 번째 보이는 locator 탐색 */
+/** 임시저장 이어쓰기 팝업 — 취소 전에는 에디터 입력 금지 */
+export async function isDraftResumePopupVisible(page: Page): Promise<boolean> {
+  const patterns = [
+    page.locator('text=작성 중인 글이 있습니다').first(),
+    page.locator('text=작성중인 글이 있습니다').first(),
+    page.getByText(/작성\s*중인\s*글이/).first(),
+    page.locator('[class*="se-popup"]').filter({ hasText: '작성 중인 글이 있습니다' }).first(),
+  ];
+  for (const loc of patterns) {
+    if (await loc.isVisible({ timeout: 200 }).catch(() => false)) return true;
+  }
+  return false;
+}
+
+/** 제목란 — SE ONE placeholder "제목" 우선 */
+export async function findBlogTitleLocator(page: Page): Promise<Locator | null> {
+  try {
+    const ph = page.getByPlaceholder('제목').first();
+    if ((await ph.count()) > 0 && (await ph.isVisible({ timeout: 800 }).catch(() => false))) {
+      return ph;
+    }
+  } catch {
+    /* ignore */
+  }
+
+  const titleOnly = [
+    '.se-section-documentTitle [contenteditable="true"]',
+    '.se-documentTitle [contenteditable="true"]',
+    '.se-documentTitle',
+    '.se-section-documentTitle',
+    '#subjectTextBox',
+    '#titleArea',
+    '.se-title-text',
+  ];
+  const css = await findVisibleLocator(page, titleOnly, { inFrame: false });
+  if (css) return css;
+
+  return findVisibleLocator(page, BLOG_TITLE_SELECTORS);
+}
+
+/** 본문란 — 제목·documentTitle 제외 */
+export async function findBlogBodyLocator(page: Page): Promise<Locator | null> {
+  try {
+    const ph = page.getByPlaceholder(/본문|일상/).first();
+    if ((await ph.count()) > 0 && (await ph.isVisible({ timeout: 800 }).catch(() => false))) {
+      return ph;
+    }
+  } catch {
+    /* ignore */
+  }
+
+  const body = await findVisibleLocator(page, BLOG_BODY_SELECTORS, { inFrame: false });
+  if (body) return body;
+
+  const legacy = await findVisibleLocator(page, BLOG_BODY_SELECTORS);
+  if (legacy) return legacy;
+
+  if ((await page.locator('#mainFrame').count().catch(() => 0)) > 0) {
+    return page
+      .frameLocator('#mainFrame')
+      .locator('.se-content, .se-text-paragraph, [contenteditable="true"]')
+      .first();
+  }
+
+  return null;
+}
+
 export async function findVisibleLocator(
   page: Page,
   selectors: string[],
@@ -55,19 +122,6 @@ export async function findVisibleLocator(
   return null;
 }
 
-/** 제목란 — CSS + placeholder "제목" (현행 SE ONE 스크린샷 기준) */
-export async function findBlogTitleLocator(page: Page): Promise<Locator | null> {
-  const css = await findVisibleLocator(page, BLOG_TITLE_SELECTORS);
-  if (css) return css;
-  try {
-    const ph = page.getByPlaceholder('제목').first();
-    if ((await ph.count()) > 0 && (await ph.isVisible())) return ph;
-  } catch {
-    /* ignore */
-  }
-  return null;
-}
-
 /** 현행 SE ONE — #mainFrame 없이 postwrite URL + 상단 발행 버튼 */
 export async function isSeOneEditorShellReady(page: Page): Promise<boolean> {
   if (!/postwrite|PostWriteForm|GoBlogWrite/i.test(page.url())) return false;
@@ -79,17 +133,17 @@ export async function isSeOneEditorShellReady(page: Page): Promise<boolean> {
 }
 
 export async function isNaverBlogEditorInteractable(page: Page): Promise<boolean> {
+  if (await isDraftResumePopupVisible(page)) return false;
+
   const onPostwrite = /postwrite|PostWriteForm|GoBlogWrite/i.test(page.url());
   const hasLegacyFrame = (await page.locator('#mainFrame').count().catch(() => 0)) > 0;
   if (!onPostwrite && !hasLegacyFrame) return false;
 
   if ((await findBlogTitleLocator(page)) !== null) return true;
-  if ((await findVisibleLocator(page, BLOG_BODY_SELECTORS)) !== null) return true;
+  if ((await findBlogBodyLocator(page)) !== null) return true;
 
   if (onPostwrite && (await isSeOneEditorShellReady(page))) {
-    const pageOnlyBody = await findVisibleLocator(page, BLOG_BODY_SELECTORS, { inFrame: false });
-    const pageOnlyTitle = await findVisibleLocator(page, BLOG_TITLE_SELECTORS, { inFrame: false });
-    return pageOnlyBody !== null || pageOnlyTitle !== null;
+    return (await findBlogBodyLocator(page)) !== null || (await findBlogTitleLocator(page)) !== null;
   }
 
   return false;

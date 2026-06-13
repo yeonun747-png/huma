@@ -16,6 +16,7 @@ import {
   BLOG_TITLE_SELECTORS,
   findBlogTitleLocator,
   findVisibleLocator,
+  isDraftResumePopupVisible,
   isNaverBlogEditorInteractable,
   isSeOneEditorShellReady,
 } from './naver-editor-locators.js';
@@ -97,48 +98,62 @@ async function dismissDraftResumePopup(editorPage: Page): Promise<boolean> {
     scopes.push(editorPage.frameLocator('#mainFrame'));
   }
 
-  const popupLocators = (scope: Page | ReturnType<Page['frameLocator']>) => [
-    scope.locator('text=작성 중인 글이 있습니다').first(),
-    scope.locator('text=작성중인 글이 있습니다').first(),
-    scope.getByText(/작성\s*중인\s*글이/).first(),
-  ];
-
-  const cancelSelectors = [
-    '.se-popup-button-cancel',
-    'button.se-popup-button-cancel',
-    '.se_popup_btn_cancel',
-    '[class*="popup"] button[class*="cancel"]',
-    'button:has-text("취소")',
-  ];
-
   for (const scope of scopes) {
-    let hasPopup = false;
-    for (const popup of popupLocators(scope)) {
-      if (await popup.isVisible({ timeout: 600 }).catch(() => false)) {
-        hasPopup = true;
-        break;
+    const popupRoot = scope
+      .locator('[class*="se-popup"], [role="dialog"]')
+      .filter({ hasText: /작성\s*중인\s*글/ })
+      .first();
+
+    const roots = [popupRoot];
+    for (const popup of [
+      scope.locator('text=작성 중인 글이 있습니다').first(),
+      scope.getByText(/작성\s*중인\s*글이/).first(),
+    ]) {
+      if (await popup.isVisible({ timeout: 200 }).catch(() => false)) {
+        roots.push(popup.locator('xpath=ancestor::*[contains(@class,"popup") or @role="dialog"][1]').first());
       }
     }
-    if (!hasPopup) continue;
 
-    for (const sel of cancelSelectors) {
-      const btn = scope.locator(sel).first();
-      if (!(await btn.isVisible({ timeout: 1000 }).catch(() => false))) continue;
-      await humanClickLocator(editorPage, btn).catch(() => btn.click({ timeout: 4000 }).catch(() => {}));
-      await sleep(500);
-      return true;
-    }
+    for (const root of roots) {
+      if (!(await root.isVisible({ timeout: 300 }).catch(() => false))) continue;
 
-    const cancelRole = scope.getByRole('button', { name: '취소' }).first();
-    if (await cancelRole.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await humanClickLocator(editorPage, cancelRole).catch(() =>
-        cancelRole.click({ timeout: 4000 }).catch(() => {}),
-      );
-      await sleep(500);
-      return true;
+      const cancelCandidates = [
+        root.locator('button.se-popup-button-cancel').first(),
+        root.locator('.se-popup-button-cancel').first(),
+        root.locator('button:has-text("취소")').first(),
+        root.getByRole('button', { name: '취소' }).first(),
+        root.locator('[class*="cancel"]').first(),
+        scope.locator('button.se-popup-button-cancel').first(),
+        scope.getByRole('button', { name: '취소' }).first(),
+      ];
+
+      for (const btn of cancelCandidates) {
+        if (!(await btn.isVisible({ timeout: 400 }).catch(() => false))) continue;
+        await humanClickLocator(editorPage, btn).catch(() =>
+          btn.click({ timeout: 3000, force: true }).catch(() => {}),
+        );
+        await sleep(400);
+        if (!(await isDraftResumePopupVisible(editorPage))) return true;
+      }
     }
   }
   return false;
+}
+
+/** 팝업이 뜨거나 사라질 때까지 빠르게 폴링하며 취소 클릭 */
+export async function waitAndDismissDraftResumePopup(
+  editorPage: Page,
+  maxMs = 20_000,
+): Promise<void> {
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    if (await dismissDraftResumePopup(editorPage)) {
+      await sleep(350);
+      if (!(await isDraftResumePopupVisible(editorPage))) return;
+    }
+    if (!(await isDraftResumePopupVisible(editorPage))) return;
+    await sleep(150);
+  }
 }
 
 /** 도움말·임시저장·dim 등 — 에디터 입력을 가리는 오버레이 제거 (발행 전에도 재호출) */
@@ -191,6 +206,7 @@ async function waitForSmartEditor(editorPage: Page, timeoutMs = SMART_EDITOR_WAI
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
+    await waitAndDismissDraftResumePopup(editorPage, 3_000);
     await dismissNaverBlogEditorOverlays(editorPage);
     if (await isSmartEditorInteractable(editorPage)) return true;
     await sleep(EDITOR_POLL_MS);
@@ -260,7 +276,7 @@ export async function enterBlogEditor(
       .goto(url, { waitUntil: 'domcontentloaded', timeout: PLAYWRIGHT_NAV_TIMEOUT_MS })
       .catch(() => {});
     await scaledSleep(1500, 3000);
-    await dismissDraftResumePopup(workflowPage);
+    await waitAndDismissDraftResumePopup(workflowPage, 15_000);
 
     const ready = await tryEditorOnPage(workflowPage, remainingMs());
     if (ready) return ready;
