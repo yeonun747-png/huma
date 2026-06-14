@@ -9,10 +9,8 @@ import {
   blurBlogTitleField,
   clickEditorToolbar,
   findVisibleLocator,
-  focusBlogBodyField,
-  insertParagraphBreakInBlogEditable,
-  insertTextIntoBlogEditable,
   insertTextIntoInputLocator,
+  isFocusInTitleArea,
   resolveBodyEditableLocator,
 } from './naver-editor-locators.js';
 
@@ -52,17 +50,22 @@ export async function pasteBlogLinkWithOgPreview(
   const insertUrl = resolveBlogLinkUrl(workspace, linkUrl, linkUrl);
 
   await blurBlogTitleField(page);
-  await focusBlogBodyField(page, editor);
   const editable = await resolveBodyEditableLocator(editor);
-  await insertParagraphBreakInBlogEditable(page, editable, 2);
-  await scaledHumanSleep(400, 900, scale);
+  await humanClickLocator(page, editable);
+  await sleep(200);
+  if (await isFocusInTitleArea(page)) {
+    throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
+  }
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  await sleep(200);
 
   if (workspace === 'yeonun') {
-    await insertTextIntoBlogEditable(page, editable, insertUrl);
+    await page.keyboard.insertText(insertUrl);
   } else {
     const toolbarLinked = await insertLinkViaToolbar(page, insertUrl, scale);
     if (!toolbarLinked) {
-      await insertTextIntoBlogEditable(page, editable, insertUrl);
+      await page.keyboard.insertText(insertUrl);
     }
   }
 

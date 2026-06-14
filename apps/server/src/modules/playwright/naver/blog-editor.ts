@@ -166,7 +166,12 @@ export async function postNaverBlog(params: {
   });
 
   if (params.linkUrl?.trim()) {
-    await prepareSeOneEditorSurface(page, 6_000);
+    await logOperation({
+      level: 'info',
+      message: '[post_blog] 링크 삽입 시작',
+      account_id: params.accountId,
+    }).catch(() => {});
+    await prepareSeOneEditorSurface(page, 6_000, { destructiveDraftDismiss: false });
     await blurBlogTitleField(page);
     await clickBlogBodyPlaceholder(page);
     await pasteBlogLinkWithOgPreview(page, editor, params.linkUrl.trim(), {
@@ -178,7 +183,7 @@ export async function postNaverBlog(params: {
 
   if (params.imageUrls?.length) {
     for (const imagePath of params.imageUrls) {
-      await prepareSeOneEditorSurface(page, 4_000);
+      await prepareSeOneEditorSurface(page, 4_000, { destructiveDraftDismiss: false });
       const ok = await insertImageViaToolbar(page, imagePath);
       if (!ok) throw new Error('BLOG_IMAGE_INSERT_FAILED');
       await scaledHumanSleep(1000, 3000, scale);
@@ -186,7 +191,7 @@ export async function postNaverBlog(params: {
   }
 
   if (params.videoPath?.trim()) {
-    await prepareSeOneEditorSurface(page, 4_000);
+    await prepareSeOneEditorSurface(page, 4_000, { destructiveDraftDismiss: false });
     const ok = await insertVideoViaToolbar(page, params.videoPath.trim());
     if (!ok) throw new Error('BLOG_VIDEO_INSERT_FAILED');
     await scaledHumanSleep(1500, 3500, scale);
