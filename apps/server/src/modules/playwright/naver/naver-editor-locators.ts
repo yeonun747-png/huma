@@ -737,6 +737,10 @@ async function humanClickBodyParagraph(page: Page, bodyLoc: Locator): Promise<vo
 
 /** 본문 placeholder — 「글감과 함께 나의 일상을 기록해보세요!」 마우스 클릭 */
 export async function clickBlogBodyPlaceholder(page: Page): Promise<void> {
+  if (!(await isSeOneEditorSurfaceHealthy(page))) {
+    throw new Error('BLOG_EDITOR_NOT_READY');
+  }
+
   await dismissSeOneMaterialPopup(page);
 
   const byText = page
@@ -780,7 +784,14 @@ export async function clickBlogBodyPlaceholder(page: Page): Promise<void> {
  * 본문이 통째로 지워지는 사고가 발생하므로 절대 사용하지 않는다.
  * 반드시 제목 contenteditable 노드 내부로 한정된 selection·delete만 수행한다.
  */
-async function clearFocusedTitleEditable(_page: Page, editable: Locator): Promise<void> {
+async function clearFocusedTitleEditable(_page: Page, editable: Locator, force = false): Promise<void> {
+  if (!force) {
+    const existing = (await readBlogTitleText(editable)).trim();
+    if (!existing || isTitlePlaceholderText(existing)) {
+      await focusTitleEditableNode(editable);
+      return;
+    }
+  }
   await clearBlogTitleField(editable);
   await sleep(80);
 }
@@ -798,20 +809,18 @@ export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: s
   const editable = await resolveTitleEditableLocator(page, titleLoc);
   await editable.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
 
-  // 제목칸 마우스 클릭 — 1회만
+  // 제목칸 마우스 클릭 — 1회만 (시뮬과 동일: 클릭 후 insertText, 빈 칸은 DOM 삭제 없음)
   await humanClickLocator(page, editable);
   await sleep(200);
 
-  // 입력 전 제목 노드에 한정해 비우고 캐럿을 제목 끝으로
-  await clearFocusedTitleEditable(page, editable);
   await focusTitleEditableNode(editable);
   await page.keyboard.insertText(text);
   await sleep(300);
 
   let written = await readBlogTitleText(titleLoc);
   if (!isBlogTitleWritten(written, text)) {
-    // 폴백 ① — 재클릭 없이 제목 노드 재포커스 후 다시 insertText
-    await clearFocusedTitleEditable(page, editable);
+    // 폴백 ① — 재클릭 없이 기존 텍스트만 비우고 재삽입
+    await clearFocusedTitleEditable(page, editable, true);
     await focusTitleEditableNode(editable);
     await page.keyboard.insertText(text);
     await sleep(300);
@@ -819,8 +828,8 @@ export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: s
   }
 
   if (!isBlogTitleWritten(written, text)) {
-    // 폴백 ② — 재클릭 없이 클립보드 붙여넣기(캐럿 위치 붙여넣기, 파괴적 아님)
-    await clearFocusedTitleEditable(page, editable);
+    // 폴백 ② — 재클릭 없이 클립보드 붙여넣기
+    await clearFocusedTitleEditable(page, editable, true);
     await focusTitleEditableNode(editable);
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
     await page
@@ -897,6 +906,8 @@ export async function ensureBlogBodyLocator(
   page: Page,
   titleLoc?: Locator | null,
 ): Promise<Locator | null> {
+  if (!(await isSeOneEditorSurfaceHealthy(page))) return null;
+
   const title = titleLoc ?? (await findBlogTitleLocator(page));
   for (let i = 0; i < 5; i += 1) {
     await prepareSeOneEditorSurfaceForBody(page);
@@ -956,7 +967,7 @@ export async function resolveTitleEditableLocator(page: Page, titleLoc: Locator)
   return titleLoc;
 }
 
-/** 제목란만 비움 — innerHTML 금지(SE ONE paragraph 구조 유지) */
+/** 제목란만 비움 — placeholder DOM 제거 금지(SE ONE 구조 파괴 방지) */
 export async function clearBlogTitleField(titleLoc: Locator): Promise<void> {
   await titleLoc
     .evaluate((el) => {
@@ -966,19 +977,38 @@ export async function clearBlogTitleField(titleLoc: Locator): Promise<void> {
           ? node
           : (node.querySelector('[contenteditable="true"]') as HTMLElement | null) ?? node;
       target.focus();
-      for (const ph of target.querySelectorAll('.se-placeholder, [class*="placeholder"]')) {
+
+      const clone = target.cloneNode(true) as HTMLElement;
+      for (const ph of clone.querySelectorAll('.se-placeholder, [class*="placeholder"]')) {
         ph.remove();
       }
+      const existing = (clone.innerText ?? clone.textContent ?? '').replace(/\u00a0/g, ' ').trim();
+      const isEmptyOrPlaceholder = !existing || /^(제목|title)$/i.test(existing);
+
+      if (isEmptyOrPlaceholder) {
+        const sel = window.getSelection();
+        if (sel && target.isContentEditable) {
+          const caret = document.createRange();
+          caret.selectNodeContents(target);
+          caret.collapse(false);
+          sel.removeAllRanges();
+          sel.addRange(caret);
+        }
+        return;
+      }
+
       if (target.isContentEditable) {
         const sel = window.getSelection();
+        const delRange = document.createRange();
+        delRange.selectNodeContents(target);
+        delRange.deleteContents();
         if (sel) {
-          const range = document.createRange();
-          range.selectNodeContents(target);
+          const caret = document.createRange();
+          caret.selectNodeContents(target);
+          caret.collapse(false);
           sel.removeAllRanges();
-          sel.addRange(range);
+          sel.addRange(caret);
         }
-        document.execCommand('selectAll', false);
-        document.execCommand('delete', false);
       } else if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
         target.value = '';
       }
@@ -1086,6 +1116,13 @@ async function probeSeOneLoadState(page: Page): Promise<{
     .catch(() => ({ ready: false, strong: false, box: null }));
 }
 
+/** 툴바·제목·본문이 모두 살아 있는지 — 붕괴 후 연쇄 클릭 방지 */
+export async function isSeOneEditorSurfaceHealthy(page: Page): Promise<boolean> {
+  if (await isDraftResumePopupVisible(page)) return false;
+  const state = await probeSeOneLoadState(page);
+  return state.strong;
+}
+
 /**
  * SE ONE 에디터 본체가 완전히 로딩·안정될 때까지 대기.
  * 발행 버튼만 보이는 스켈레톤·로딩 스피너 단계에서 제목을 조기 클릭해
@@ -1100,7 +1137,6 @@ export async function waitForSeOneEditorFullyLoaded(
   await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {});
 
   const deadline = Date.now() + maxMs;
-  const halfway = Date.now() + Math.round(maxMs / 2);
   let stableSince = 0;
   let lastBox: { x: number; y: number; w: number; h: number } | null = null;
 
@@ -1115,8 +1151,7 @@ export async function waitForSeOneEditorFullyLoaded(
     }
 
     const state = await probeSeOneLoadState(page);
-    // 전반부에는 toolbar까지(strong), 후반부에는 제목·본문만(ready) 충족하면 인정
-    const meets = Date.now() < halfway ? state.strong : state.ready;
+    const meets = state.strong;
 
     if (meets && state.box) {
       const b = state.box;

@@ -24,6 +24,7 @@ import {
   readBlogTitleText,
   waitForSeOneEditorFullyLoaded,
   isBlogTitleEditableVisible,
+  isSeOneEditorSurfaceHealthy,
 } from './naver-editor-locators.js';
 import {
   extractPublishedPostUrl,
@@ -110,9 +111,12 @@ export async function postNaverBlog(params: {
   const fullyLoaded = await waitForSeOneEditorFullyLoaded(page, 45_000, async () => {
     await waitAndDismissDraftResumePopup(page, 6_000).catch(() => {});
   });
+  if (!fullyLoaded) {
+    throw new Error('BLOG_EDITOR_NOT_READY');
+  }
   await logOperation({
     level: 'info',
-    message: `[post_blog] 본체 로딩 ${fullyLoaded ? '완료' : '대기 timeout(폴백 진행)'} — 제목칸 클릭·입력 시작`,
+    message: '[post_blog] 본체 로딩 완료 — 제목칸 클릭·입력 시작',
     account_id: params.accountId,
   });
 
@@ -133,6 +137,11 @@ export async function postNaverBlog(params: {
   }
 
   await typeBlogTitle(page, titleBox, params.title);
+
+  if (!(await isSeOneEditorSurfaceHealthy(page))) {
+    throw new Error('BLOG_EDITOR_NOT_READY');
+  }
+
   await logOperation({
     level: 'info',
     message: '[post_blog] 제목 입력 완료 — 본문 placeholder 클릭·입력 시작',

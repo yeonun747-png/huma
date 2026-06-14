@@ -1,8 +1,7 @@
-import type { BrowserContext, Locator, Page } from 'playwright';
+import type { BrowserContext, Page } from 'playwright';
 
 import { humanClickLocator } from '../../human-engine/mouse.js';
 import { humanSleep } from '../../human-engine/typing.js';
-import { showVncAutomationPointer } from '../../../lib/vnc-pointer.js';
 
 import type { HumanEngineConfig } from '../../../lib/settings.js';
 
@@ -94,20 +93,20 @@ async function clickIfVisible(root: Page | ReturnType<Page['frameLocator']>, sel
   return false;
 }
 
-/** 취소 버튼 위치에 VNC 포인터를 즉시 표시 — 클릭 전에 포인터가 바로 보이도록 */
-async function preShowPointerAtLocator(editorPage: Page, btn: Locator): Promise<void> {
-  const box = await btn.boundingBox().catch(() => null);
-  if (!box) return;
-  await showVncAutomationPointer(
-    editorPage,
-    box.x + box.width / 2,
-    box.y + box.height / 2,
-  ).catch(() => {});
-}
+type DraftDismissGuard = { inFlight: boolean; cooledUntil: number };
+const draftDismissGuardByPage = new WeakMap<Page, DraftDismissGuard>();
 
 /** 「작성 중인 글이 있습니다」 — 확인(이어쓰기) 금지, 취소만 마우스로 클릭해 새 글 작성 */
 async function dismissDraftResumePopup(editorPage: Page): Promise<boolean> {
   if (!(await isDraftResumePopupVisible(editorPage))) return false;
+
+  const guard = draftDismissGuardByPage.get(editorPage);
+  if (guard?.inFlight) return false;
+  if (guard && Date.now() < guard.cooledUntil) {
+    return !(await isDraftResumePopupVisible(editorPage));
+  }
+
+  draftDismissGuardByPage.set(editorPage, { inFlight: true, cooledUntil: 0 });
 
   // SE ONE 팝업은 메인 페이지에 렌더 — 취소 버튼을 곧바로 찾는다
   const cancelCandidates = [
@@ -129,18 +128,12 @@ async function dismissDraftResumePopup(editorPage: Page): Promise<boolean> {
       message: '[post_blog] 작성중 글 팝업 감지 — 취소 버튼 마우스 클릭',
     }).catch(() => {});
 
-    // 포인터를 취소 버튼 위에 즉시 표시한 뒤 사람처럼 이동·클릭
-    await preShowPointerAtLocator(editorPage, btn);
-    let clicked = false;
-    for (let attempt = 0; attempt < 2 && !clicked; attempt += 1) {
-      try {
-        await humanClickLocator(editorPage, btn, undefined, [80, 180]);
-        clicked = true;
-      } catch {
-        await sleep(250);
-      }
+    try {
+      await humanClickLocator(editorPage, btn, undefined, [80, 180]);
+    } catch {
+      draftDismissGuardByPage.set(editorPage, { inFlight: false, cooledUntil: 0 });
+      continue;
     }
-    if (!clicked) continue;
 
     // 취소 후 팝업이 닫힐 때까지 짧게 폴링
     for (let i = 0; i < 8; i += 1) {
@@ -150,11 +143,16 @@ async function dismissDraftResumePopup(editorPage: Page): Promise<boolean> {
           level: 'info',
           message: '[post_blog] 작성중 글 팝업 취소 완료',
         }).catch(() => {});
+        draftDismissGuardByPage.set(editorPage, {
+          inFlight: false,
+          cooledUntil: Date.now() + 900,
+        });
         return true;
       }
     }
   }
 
+  draftDismissGuardByPage.set(editorPage, { inFlight: false, cooledUntil: 0 });
   return !(await isDraftResumePopupVisible(editorPage));
 }
 
@@ -177,17 +175,20 @@ export async function waitAndDismissDraftResumePopup(
   }
 }
 
-/** 도움말·임시저장·dim 등 — 에디터 입력을 가리는 오버레이 제거 (발행 전에도 재호출) */
-export async function dismissNaverBlogEditorOverlays(editorPage: Page): Promise<void> {
-  await dismissDraftResumePopup(editorPage);
+/** 도움말·dim 등 — 에디터 입력을 가리는 오버레이 제거 (발행 전에도 재호출) */
+export async function dismissNaverBlogEditorOverlays(
+  editorPage: Page,
+  options?: { includeDraftPopup?: boolean },
+): Promise<void> {
+  if (options?.includeDraftPopup !== false) {
+    await dismissDraftResumePopup(editorPage);
+  }
 
   const frame = editorPage.frameLocator('#mainFrame');
   const scopes: Array<Page | ReturnType<Page['frameLocator']>> = [frame, editorPage];
 
   for (let round = 0; round < 4; round += 1) {
     let dismissed = false;
-
-    if (await dismissDraftResumePopup(editorPage)) dismissed = true;
 
     for (const scope of scopes) {
       for (const sel of HELP_CLOSE_SELECTORS) {
@@ -216,9 +217,8 @@ export async function dismissNaverBlogEditorOverlays(editorPage: Page): Promise<
 /** 키보드 입력 직전 — 임시저장 팝업·도움말이 없을 때까지 대기 */
 export async function prepareSeOneEditorSurface(editorPage: Page, maxMs = 25_000): Promise<void> {
   await waitAndDismissDraftResumePopup(editorPage, maxMs);
-  await dismissNaverBlogEditorOverlays(editorPage);
+  await dismissNaverBlogEditorOverlays(editorPage, { includeDraftPopup: false });
   await dismissSeOneMaterialPopup(editorPage);
-  await waitAndDismissDraftResumePopup(editorPage, 5_000);
   if (await isDraftResumePopupVisible(editorPage)) {
     throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
   }
@@ -233,9 +233,8 @@ async function waitForSmartEditor(editorPage: Page, timeoutMs = SMART_EDITOR_WAI
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
-    // 팝업이 있으면 취소(마우스)만 누르고, 없으면 즉시 통과 — throw 없이 폴링
-    await dismissDraftResumePopup(editorPage);
-    await dismissNaverBlogEditorOverlays(editorPage);
+    // 임시저장 팝업·도움말 — draft 팝업은 여기서 1회만 처리(중복 취소 클릭 방지)
+    await dismissNaverBlogEditorOverlays(editorPage, { includeDraftPopup: true });
     if (!(await isDraftResumePopupVisible(editorPage))) {
       if (await isSeOneEditorShellReady(editorPage)) return true;
       if (await isSmartEditorInteractable(editorPage)) return true;
@@ -256,7 +255,7 @@ async function tryEditorOnPage(page: Page, waitBudgetMs = SMART_EDITOR_WAIT_MS):
     (await isSeOneEditorShellReady(page))
   ) {
     if (await waitForSmartEditor(page, waitBudgetMs)) {
-      await dismissNaverBlogEditorOverlays(page);
+      await dismissNaverBlogEditorOverlays(page, { includeDraftPopup: false });
       await prepareSeOneEditorSurface(page, 20_000);
       return page;
     }
