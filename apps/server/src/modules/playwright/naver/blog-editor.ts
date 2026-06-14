@@ -33,7 +33,6 @@ import {
 import { pasteBlogLinkWithOgPreview } from './paste-blog-link.js';
 import { insertImageViaToolbar, insertVideoViaToolbar } from './naver-editor-media.js';
 import { completeNaverPublishDialog } from './naver-publish-dialog.js';
-import { randomBetween, sleep } from '../../../lib/utils.js';
 import { logOperation } from '../../../lib/log-emitter.js';
 
 function mergePersonaConfig(base: HumanEngineConfig, persona: AccountPersona): HumanEngineConfig {
@@ -55,7 +54,6 @@ async function typeBlogTitle(page: Page, titleLoc: Locator, title: string): Prom
   if (await verifyBlogTitleField(page, titleLoc, title)) return;
 
   await pasteBlogTitleField(page, titleLoc, title);
-  await sleep(randomBetween(200, 350));
   await assertTitleStable(page, titleLoc, title);
 }
 

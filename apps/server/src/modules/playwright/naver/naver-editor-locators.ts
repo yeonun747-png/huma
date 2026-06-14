@@ -467,6 +467,23 @@ export async function verifyBlogTitleField(
   return verifyBlogTitleInput(written, expected);
 }
 
+/** insertText 직후 DOM 반영 대기 — 팝업 취소 직후 readBlogTitleText 빈값 방지 */
+export async function waitForBlogTitleWritten(
+  page: Page,
+  titleLoc: Locator,
+  expected: string,
+  maxMs = 2000,
+): Promise<boolean> {
+  const editable = await resolveTitleEditableLocator(page, titleLoc);
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    const written = await readTitleForVerification(editable, titleLoc);
+    if (verifyBlogTitleInput(written, expected)) return true;
+    await sleep(100);
+  }
+  return verifyBlogTitleField(page, titleLoc, expected);
+}
+
 export async function readBlogTitleText(titleLoc: Locator): Promise<string> {
   const inputVal = await titleLoc.inputValue().catch(() => '');
   if (inputVal.trim() && !isTitlePlaceholderText(inputVal)) return inputVal.trim();
@@ -819,8 +836,8 @@ export async function clickBlogBodyPlaceholder(page: Page): Promise<void> {
 }
 
 /**
- * SE ONE 제목 — 제목칸을 마우스로 "단 1회"만 클릭한 뒤 입력.
- * insertText 성공 시 즉시 blur·반환(이중 붙여넣기 방지). 재삽입 폴백은 클립보드 1회만.
+ * SE ONE 제목 — 제목칸을 마우스로 "단 1회"만 클릭한 뒤 insertText 1회.
+ * 클립보드/재삽입 폴백 없음(이중 붙여넣기 방지). 팝업 취소 후 잔존 제목은 입력 전 1회만 비움.
  */
 export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: string): Promise<void> {
   if (await isDraftResumePopupVisible(page)) {
@@ -830,36 +847,29 @@ export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: s
   const editable = await resolveTitleEditableLocator(page, titleLoc);
   await editable.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
 
+  const existing = await readTitleForVerification(editable, titleLoc);
+  if (verifyBlogTitleInput(existing, text)) {
+    await blurBlogTitleField(page);
+    return;
+  }
+
+  if (existing.trim() && !isTitlePlaceholderText(existing)) {
+    await clearBlogTitleField(editable);
+    await sleep(120);
+  }
+
   await humanClickLocator(page, editable);
   await sleep(200);
 
   await focusTitleEditableNode(editable);
   await page.keyboard.insertText(text);
-  await sleep(350);
 
-  if (await verifyBlogTitleField(page, titleLoc, text)) {
+  if (await waitForBlogTitleWritten(page, titleLoc, text, 2500)) {
     await blurBlogTitleField(page);
     return;
   }
 
-  await focusTitleEditableNode(editable);
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
-  await page
-    .evaluate(async (t) => {
-      try {
-        await navigator.clipboard.writeText(t);
-      } catch {
-        /* 포커스·권한 실패 */
-      }
-    }, text)
-    .catch(() => {});
-  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+v' : 'Control+v');
-  await sleep(350);
-
-  if (!(await verifyBlogTitleField(page, titleLoc, text))) {
-    throw new Error('BLOG_TITLE_WRITE_FAILED');
-  }
-  await blurBlogTitleField(page);
+  throw new Error('BLOG_TITLE_WRITE_FAILED');
 }
 
 /** SE ONE 본문 — 본문칸 마우스 이동·클릭 후 단락별 붙여넣기형 입력(insertText) */
