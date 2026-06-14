@@ -125,6 +125,53 @@ async function focusTitleEditableNode(loc: Locator): Promise<void> {
     .catch(() => {});
 }
 
+async function focusBodyEditableNode(loc: Locator): Promise<void> {
+  await focusTitleEditableNode(loc);
+}
+
+/** 본문 contenteditable paragraph — section wrapper 제외 */
+async function findBlogBodyParagraphOnly(page: Page): Promise<Locator | null> {
+  await dismissSeOneMaterialPopup(page);
+
+  for (const scope of [page, editorFrame(page)] as Array<Page | FrameLocator>) {
+    const mainParagraph = await pickMainBodyParagraph(page, scope);
+    if (mainParagraph) return mainParagraph;
+
+    const paragraph = scope
+      .locator(
+        '.se-components-wrap .se-section-text:not(.se-section-documentTitle) .se-text-paragraph[contenteditable="true"]',
+      )
+      .first();
+    if (
+      (await paragraph.count()) > 0 &&
+      (await paragraph.isVisible({ timeout: 400 }).catch(() => false)) &&
+      (await isLocatorMainEditorBody(page, paragraph))
+    ) {
+      return paragraph;
+    }
+  }
+
+  return null;
+}
+
+/** placeholder 클릭 후 paragraph 생성 대기 */
+export async function waitForBlogBodyParagraphLocator(
+  page: Page,
+  maxMs = 10_000,
+): Promise<Locator | null> {
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    if (await isDraftResumePopupVisible(page)) {
+      await sleep(200);
+      continue;
+    }
+    const loc = await findBlogBodyParagraphOnly(page);
+    if (loc) return loc;
+    await sleep(120);
+  }
+  return null;
+}
+
 /** 제목 contenteditable 노출 — 임시저장 팝업만 제외 */
 export async function isBlogTitleEditableVisible(page: Page): Promise<boolean> {
   if (await isDraftResumePopupVisible(page)) return false;
@@ -384,7 +431,8 @@ export async function findBlogBodyLocator(page: Page): Promise<Locator | null> {
         ) {
           return paragraph;
         }
-        return bodySection;
+        // paragraph 미생성(placeholder만) — section wrapper 반환 시 insertText noop
+        return null;
       }
     } catch {
       /* ignore */
@@ -530,7 +578,14 @@ export async function ensureBlogTitleWritten(
   text: string,
 ): Promise<void> {
   const editable = await resolveTitleEditableLocator(page, titleLoc);
-  const domWritten = await readEditableTitleText(editable);
+  let domWritten = await readEditableTitleText(editable);
+
+  if (isDuplicatedBlogTitle(domWritten, text)) {
+    await clearBlogTitleField(editable);
+    await sleep(150);
+    domWritten = await readEditableTitleText(editable);
+  }
+
   if (titleAlreadyAcceptable(domWritten, text)) {
     await blurBlogTitleField(page);
     return;
@@ -841,8 +896,7 @@ export async function focusBlogTitleField(page: Page, titleLoc: Locator): Promis
   }
 }
 
-export async function focusBlogBodyField(page: Page, bodyLoc: Locator, maxAttempts = 6): Promise<void> {
-  const editable = await resolveBodyEditableLocator(bodyLoc);
+export async function focusBlogBodyField(page: Page, bodyLoc: Locator, maxAttempts = 2): Promise<void> {
   for (let i = 0; i < maxAttempts; i += 1) {
     if (await isDraftResumePopupVisible(page)) {
       await sleep(200);
@@ -850,11 +904,15 @@ export async function focusBlogBodyField(page: Page, bodyLoc: Locator, maxAttemp
     }
     await blurBlogTitleField(page);
     await dismissSeOneMaterialPopup(page);
-    await editable.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
-    await humanClickBodyParagraph(page, editable);
-    await editable.focus().catch(() => {});
-    await sleep(randomBetweenTitleFocus());
-    if ((await hasBodyFieldFocus(page, editable)) && !(await isFocusInTitleArea(page))) return;
+
+    const paragraph =
+      (await findBlogBodyParagraphOnly(page)) ?? (await resolveBodyEditableLocator(bodyLoc));
+    await paragraph.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+    await humanClickLocator(page, paragraph);
+    await sleep(200);
+    await focusBodyEditableNode(paragraph);
+
+    if (!(await isFocusInTitleArea(page))) return;
   }
   throw new Error('BLOG_BODY_WRITE_FAILED');
 }
@@ -997,20 +1055,29 @@ export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: s
   throw new Error('BLOG_TITLE_WRITE_FAILED');
 }
 
-/** SE ONE 본문 — 본문 포커스 확보 후 insertTextIntoBlogEditable(검증 포함) */
+/** SE ONE 본문 — 제목과 동일: 1회 클릭 + page.keyboard.insertText (execCommand noop 방지) */
 export async function pasteBlogBodyContent(page: Page, bodyLoc: Locator, content: string): Promise<void> {
   if (await isDraftResumePopupVisible(page)) {
     throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
   }
 
   await blurBlogTitleField(page);
-  await focusBlogBodyField(page, bodyLoc);
+
+  let editable =
+    (await findBlogBodyParagraphOnly(page)) ?? (await resolveBodyEditableLocator(bodyLoc));
+  if (!(await editable.evaluate((el) => el.matches('[contenteditable="true"]')).catch(() => false))) {
+    const ready = await waitForBlogBodyParagraphLocator(page, 4000);
+    if (ready) editable = ready;
+  }
+
+  await humanClickLocator(page, editable);
+  await sleep(200);
+  await focusBodyEditableNode(editable);
 
   if (await isFocusInTitleArea(page)) {
     throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
   }
 
-  const editable = await resolveBodyEditableLocator(bodyLoc);
   const paragraphs = content.split('\n\n').filter(Boolean);
   if (paragraphs.length === 0) {
     throw new Error('BLOG_BODY_WRITE_FAILED');
@@ -1020,10 +1087,11 @@ export async function pasteBlogBodyContent(page: Page, bodyLoc: Locator, content
     if (await isFocusInTitleArea(page)) {
       throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
     }
-    await insertTextIntoBlogEditable(page, editable, paragraphs[i]!);
+    await page.keyboard.insertText(paragraphs[i]!);
     await sleep(200);
     if (i < paragraphs.length - 1) {
-      await insertParagraphBreakInBlogEditable(page, editable, 2);
+      await page.keyboard.press('Enter');
+      await page.keyboard.press('Enter');
       await sleep(150);
     }
   }
@@ -1060,7 +1128,7 @@ async function clickSeOneBodyPlaceholder(page: Page, titleLoc: Locator | null): 
   await sleep(300);
 }
 
-/** 본문란 확보 — 제목 입력 직후 paragraph 미생성 시 placeholder 클릭 후 재탐색 */
+/** 본문란 확보 — contenteditable paragraph만 반환 */
 export async function ensureBlogBodyLocator(
   page: Page,
   titleLoc?: Locator | null,
@@ -1070,12 +1138,12 @@ export async function ensureBlogBodyLocator(
   const title = titleLoc ?? (await findBlogTitleLocator(page));
   for (let i = 0; i < 5; i += 1) {
     await prepareSeOneEditorSurfaceForBody(page);
-    const loc = await findBlogBodyLocator(page);
+    const loc = await findBlogBodyParagraphOnly(page);
     if (loc) return loc;
     await clickSeOneBodyPlaceholder(page, title);
     await sleep(350);
   }
-  return null;
+  return waitForBlogBodyParagraphLocator(page, 2000);
 }
 
 async function prepareSeOneEditorSurfaceForBody(page: Page): Promise<void> {

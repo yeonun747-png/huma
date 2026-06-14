@@ -18,6 +18,7 @@ import {
   pasteBlogBodyContent,
   ensureBlogTitleWritten,
   moveMouseToBlogPlaceholder,
+  waitForBlogBodyParagraphLocator,
   blurBlogTitleField,
   verifyBlogBodyField,
   verifyBlogTitleField,
@@ -33,6 +34,7 @@ import { pasteBlogLinkWithOgPreview } from './paste-blog-link.js';
 import { insertImageViaToolbar, insertVideoViaToolbar } from './naver-editor-media.js';
 import { completeNaverPublishDialog } from './naver-publish-dialog.js';
 import { logOperation } from '../../../lib/log-emitter.js';
+import { sleep } from '../../../lib/utils.js';
 
 function mergePersonaConfig(base: HumanEngineConfig, persona: AccountPersona): HumanEngineConfig {
   return {
@@ -113,8 +115,11 @@ export async function postNaverBlog(params: {
 
   await moveMouseToBlogPlaceholder(page, titleBox);
   await clickBlogBodyPlaceholder(page);
+  await sleep(400);
 
-  const editor = await ensureBlogBodyLocator(page, titleBox);
+  const editor =
+    (await waitForBlogBodyParagraphLocator(page, 10_000)) ??
+    (await ensureBlogBodyLocator(page, titleBox));
   if (!editor) {
     throw new Error('BLOG_BODY_NOT_FOUND');
   }
