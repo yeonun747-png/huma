@@ -46,33 +46,30 @@ const TITLE_PLACEHOLDER_RE = /^(제목|title)$/i;
 
 /** 임시저장 이어쓰기 팝업 — 취소 전에는 에디터 입력 금지 */
 export async function isDraftResumePopupVisible(page: Page): Promise<boolean> {
-  const patterns = [
-    page.locator('text=작성 중인 글이 있습니다').first(),
-    page.locator('text=작성중인 글이 있습니다').first(),
-    page.getByText(/작성\s*중인\s*글이/).first(),
-    page.getByText(/이어서\s*작성하시겠습니까/).first(),
-    page.locator('[class*="se-popup"]').filter({ hasText: /작성\s*중인\s*글/ }).first(),
-    page.locator('[class*="se-popup"]').filter({ hasText: /이어서\s*작성/ }).first(),
-    page.locator('[role="dialog"]').filter({ hasText: /작성\s*중인\s*글/ }).first(),
-    page
-      .locator('[class*="se-popup"]')
-      .filter({ hasText: /작성\s*중인\s*글/ })
-      .locator('xpath=ancestor-or-self::*[contains(@class,"se-popup")][1]')
-      .first(),
-  ];
-  for (const loc of patterns) {
-    if (await loc.isVisible({ timeout: 250 }).catch(() => false)) return true;
-  }
+  // DOM 한 번 평가로 빠르게 판정 — 패턴별 isVisible 폴링(느림) 제거
+  const fast = await page
+    .evaluate(() => {
+      const re = /작성\s*중인\s*글|이어서\s*작성하시겠습니까|이어서\s*작성/;
+      const nodes = document.querySelectorAll(
+        '[class*="se-popup"], [role="dialog"], [class*="popup"]',
+      );
+      for (const node of Array.from(nodes)) {
+        const el = node as HTMLElement;
+        if (!re.test(el.textContent ?? '')) continue;
+        const r = el.getBoundingClientRect();
+        if (el.offsetParent !== null && r.width > 0 && r.height > 0) return true;
+      }
+      return false;
+    })
+    .catch(() => null);
+  if (fast !== null) return fast;
 
-  const dim = page.locator('.se-popup-dim, .se_dim, [class*="popup-dim"]').first();
-  if (await dim.isVisible({ timeout: 150 }).catch(() => false)) {
-    const popupNearDim = page.locator('[class*="se-popup"], [role="dialog"]').filter({
-      hasText: /작성\s*중인\s*글|이어서\s*작성/,
-    });
-    if (await popupNearDim.first().isVisible({ timeout: 200 }).catch(() => false)) return true;
-  }
-
-  return false;
+  // evaluate 실패(네비게이션 중 등) 시 로케이터 폴백
+  const loc = page
+    .locator('[class*="se-popup"], [role="dialog"]')
+    .filter({ hasText: /작성\s*중인\s*글|이어서\s*작성/ })
+    .first();
+  return loc.isVisible({ timeout: 300 }).catch(() => false);
 }
 
 /** elementFromPoint — 임시저장 모달만 차단(툴바·잔여 dim 오탐 제외) */
@@ -788,7 +785,11 @@ async function clearFocusedTitleEditable(_page: Page, editable: Locator): Promis
   await sleep(80);
 }
 
-/** SE ONE 제목 — 제목칸 마우스 이동·클릭 → 비우기 → 붙여넣기형 입력(insertText) */
+/**
+ * SE ONE 제목 — 제목칸을 마우스로 "단 1회"만 클릭한 뒤 입력.
+ * 폴백도 절대 다시 클릭하지 않고(제목 2번 클릭 방지), 제목 노드에 한정해
+ * 재포커스 후 재삽입/클립보드 붙여넣기만 한다. 전역 키보드 선택·삭제는 쓰지 않는다.
+ */
 export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: string): Promise<void> {
   if (await isDraftResumePopupVisible(page)) {
     throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
@@ -796,19 +797,31 @@ export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: s
 
   const editable = await resolveTitleEditableLocator(page, titleLoc);
   await editable.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
+
+  // 제목칸 마우스 클릭 — 1회만
   await humanClickLocator(page, editable);
   await sleep(200);
 
-  // 입력 전 기존 내용·placeholder 제거 — 중복 입력 방지
+  // 입력 전 제목 노드에 한정해 비우고 캐럿을 제목 끝으로
   await clearFocusedTitleEditable(page, editable);
+  await focusTitleEditableNode(editable);
   await page.keyboard.insertText(text);
   await sleep(300);
 
   let written = await readBlogTitleText(titleLoc);
   if (!isBlogTitleWritten(written, text)) {
-    // 폴백 — 다시 비우고 클립보드 붙여넣기 (중복 방지)
-    await humanClickLocator(page, editable).catch(() => {});
+    // 폴백 ① — 재클릭 없이 제목 노드 재포커스 후 다시 insertText
     await clearFocusedTitleEditable(page, editable);
+    await focusTitleEditableNode(editable);
+    await page.keyboard.insertText(text);
+    await sleep(300);
+    written = await readBlogTitleText(titleLoc);
+  }
+
+  if (!isBlogTitleWritten(written, text)) {
+    // 폴백 ② — 재클릭 없이 클립보드 붙여넣기(캐럿 위치 붙여넣기, 파괴적 아님)
+    await clearFocusedTitleEditable(page, editable);
+    await focusTitleEditableNode(editable);
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
     await page
       .evaluate(async (t) => {

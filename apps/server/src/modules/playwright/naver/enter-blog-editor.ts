@@ -11,6 +11,7 @@ import { notifySlack } from '../../watcher/detector.js';
 import { vncFastSleepScale } from '../../../lib/vnc-session.js';
 import { PLAYWRIGHT_NAV_TIMEOUT_MS } from '../../../lib/playwright-nav-timeout.js';
 import { sleep } from '../../../lib/utils.js';
+import { logOperation } from '../../../lib/log-emitter.js';
 import { supabase } from '../../../middleware/auth.js';
 import {
   BLOG_BODY_SELECTORS,
@@ -123,6 +124,11 @@ async function dismissDraftResumePopup(editorPage: Page): Promise<boolean> {
   for (const btn of cancelCandidates) {
     if (!(await btn.isVisible({ timeout: 300 }).catch(() => false))) continue;
 
+    await logOperation({
+      level: 'info',
+      message: '[post_blog] 작성중 글 팝업 감지 — 취소 버튼 마우스 클릭',
+    }).catch(() => {});
+
     // 포인터를 취소 버튼 위에 즉시 표시한 뒤 사람처럼 이동·클릭
     await preShowPointerAtLocator(editorPage, btn);
     let clicked = false;
@@ -139,7 +145,13 @@ async function dismissDraftResumePopup(editorPage: Page): Promise<boolean> {
     // 취소 후 팝업이 닫힐 때까지 짧게 폴링
     for (let i = 0; i < 8; i += 1) {
       await sleep(200);
-      if (!(await isDraftResumePopupVisible(editorPage))) return true;
+      if (!(await isDraftResumePopupVisible(editorPage))) {
+        await logOperation({
+          level: 'info',
+          message: '[post_blog] 작성중 글 팝업 취소 완료',
+        }).catch(() => {});
+        return true;
+      }
     }
   }
 

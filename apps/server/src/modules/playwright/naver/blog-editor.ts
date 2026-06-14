@@ -114,6 +114,8 @@ export async function postNaverBlog(params: {
   });
 
   await prepareSeOneEditorSurface(page, 6_000);
+  // 제목 클릭은 pasteBlogTitleField가 1회만 수행 — 여기서 별도 복구 클릭을 하면
+  // 제목칸이 2번 클릭되므로, 보이지 않을 때만 가볍게 노출 대기(클릭 없음)
   if (!(await isBlogTitleEditableVisible(page))) {
     await waitForBlogTitleSectionReady(page, 8_000).catch(() => {});
   }
