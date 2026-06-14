@@ -777,7 +777,7 @@ export async function clickBlogBodyPlaceholder(page: Page): Promise<void> {
   }
 }
 
-/** SE ONE 제목 — 마우스 1회 클릭 후 붙여넣기 */
+/** SE ONE 제목 — 제목칸 마우스 이동·클릭 후 붙여넣기형 입력(insertText) */
 export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: string): Promise<void> {
   if (await isDraftResumePopupVisible(page)) {
     throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
@@ -788,19 +788,32 @@ export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: s
   await humanClickLocator(page, editable);
   await sleep(200);
 
-  const pasteMod = process.platform === 'darwin' ? 'Meta+v' : 'Control+v';
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
-  await page.evaluate(async (t) => navigator.clipboard.writeText(t), text).catch(() => {});
-  await page.keyboard.press(pasteMod);
+  await page.keyboard.insertText(text);
   await sleep(250);
 
-  const written = await readBlogTitleText(titleLoc);
+  let written = await readBlogTitleText(titleLoc);
+  if (!isBlogTitleWritten(written, text)) {
+    // 폴백 — 클립보드 붙여넣기
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
+    await page.evaluate(async (t) => {
+      try {
+        await navigator.clipboard.writeText(t);
+      } catch {
+        /* 포커스·권한 실패 */
+      }
+    }, text).catch(() => {});
+    await humanClickLocator(page, editable).catch(() => {});
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+v' : 'Control+v');
+    await sleep(300);
+    written = await readBlogTitleText(titleLoc);
+  }
+
   if (!isBlogTitleWritten(written, text)) {
     throw new Error('BLOG_TITLE_WRITE_FAILED');
   }
 }
 
-/** SE ONE 본문 — 마우스 클릭 후 붙여넣기 (단락별) */
+/** SE ONE 본문 — 본문칸 마우스 이동·클릭 후 단락별 붙여넣기형 입력(insertText) */
 export async function pasteBlogBodyContent(page: Page, bodyLoc: Locator, content: string): Promise<void> {
   if (await isDraftResumePopupVisible(page)) {
     throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
@@ -812,12 +825,8 @@ export async function pasteBlogBodyContent(page: Page, bodyLoc: Locator, content
   await sleep(200);
 
   const paragraphs = content.split('\n\n').filter(Boolean);
-  const pasteMod = process.platform === 'darwin' ? 'Meta+v' : 'Control+v';
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
-
   for (let i = 0; i < paragraphs.length; i += 1) {
-    await page.evaluate(async (t) => navigator.clipboard.writeText(t), paragraphs[i]!).catch(() => {});
-    await page.keyboard.press(pasteMod);
+    await page.keyboard.insertText(paragraphs[i]!);
     await sleep(300);
     if (i < paragraphs.length - 1) {
       await page.keyboard.press('Enter');

@@ -649,8 +649,14 @@ async function submitCaptcha(
 
   const confirmed = await clickCaptchaConfirm(page);
   if (!confirmed) {
-    await page.keyboard.press('Enter').catch(() => {});
-    await sleep(randomBetween(350, 700));
+    // nidlogin 캡차는 별도 확인 버튼이 없다 — Enter(코드 제출) 대신 로그인 버튼 마우스 클릭
+    if (page.url().includes('nidlogin')) {
+      await clickNaverLoginButton(page).catch(() => {});
+      await sleep(randomBetween(350, 700));
+    } else {
+      await page.keyboard.press('Enter').catch(() => {});
+      await sleep(randomBetween(350, 700));
+    }
   }
 
   if (ctx.autoLoginSubmit === true) {
@@ -671,24 +677,31 @@ export async function applyManualCaptchaAnswer(
   answer: string,
   ctx: NaverCaptchaVisionContext = {},
 ): Promise<{ filled: boolean; submitted: boolean; cleared: boolean; pending_login: boolean }> {
+  // ① 정답칸 마우스 이동·클릭 후 정답 입력 (비번 재입력 없음)
   const filled = await fillCaptchaAnswer(page, answer);
   if (!filled) return { filled: false, submitted: false, cleared: false, pending_login: false };
 
   await humanSleep(250, 600);
-  await submitCaptcha(page, ctx, { refillPassword: false });
-  let cleared = await waitForCaptchaCleared(page, 8_000);
-  let pending_login = cleared ? await isNaverLoginPendingAfterCaptcha(page) : false;
 
-  if (!cleared && (await isNaverLoginPendingAfterCaptcha(page))) {
-    cleared = true;
-    pending_login = true;
-  }
+  let cleared: boolean;
+  let pending_login: boolean;
 
-  if (pending_login && ctx.accountId) {
-    const loggedIn = await submitNaverLoginAfterCaptcha(page, ctx.accountId);
+  if (page.url().includes('nidlogin')) {
+    // ② nidlogin — 정답 입력 후 로그인 버튼 마우스 이동·클릭으로 제출 (Enter·코드 제출 금지)
+    const loggedIn = await submitNaverLoginAfterCaptcha(page, ctx.accountId ?? '');
     await humanSleep(500, 1200);
     cleared = loggedIn || !(await isNaverCaptchaVisible(page));
-    pending_login = cleared ? await isNaverLoginPendingAfterCaptcha(page) : true;
+    // 캡차는 통과했으나 아직 nidlogin에 머무는 경우만 pending_login
+    pending_login = cleared && !loggedIn;
+  } else {
+    // 비-nidlogin 챌린지(그리드·슬라이더 등) — 확인 버튼 클릭
+    await submitCaptcha(page, ctx, { refillPassword: false });
+    cleared = await waitForCaptchaCleared(page, 8_000);
+    pending_login = cleared ? await isNaverLoginPendingAfterCaptcha(page) : false;
+    if (!cleared && (await isNaverLoginPendingAfterCaptcha(page))) {
+      cleared = true;
+      pending_login = true;
+    }
   }
 
   return { filled: true, submitted: true, cleared, pending_login };

@@ -33,6 +33,7 @@ import { pasteBlogLinkWithOgPreview } from './paste-blog-link.js';
 import { insertImageViaToolbar, insertVideoViaToolbar } from './naver-editor-media.js';
 import { completeNaverPublishDialog } from './naver-publish-dialog.js';
 import { randomBetween, sleep } from '../../../lib/utils.js';
+import { logOperation } from '../../../lib/log-emitter.js';
 
 function mergePersonaConfig(base: HumanEngineConfig, persona: AccountPersona): HumanEngineConfig {
   return {
@@ -94,9 +95,15 @@ export async function postNaverBlog(params: {
     return { resultUrl: publishedEarly };
   }
 
+  await logOperation({
+    level: 'info',
+    message: '[post_blog] 에디터 진입 완료 — 제목칸 클릭·입력 시작',
+    account_id: params.accountId,
+  });
+
   await prepareSeOneEditorSurface(page, 12_000);
   if (!(await isBlogTitleEditableVisible(page))) {
-    await waitForBlogTitleSectionReady(page, 8_000);
+    await waitForBlogTitleSectionReady(page, 8_000).catch(() => {});
   }
 
   const titleBox = await findBlogTitleLocator(page);
@@ -105,6 +112,11 @@ export async function postNaverBlog(params: {
   }
 
   await typeBlogTitle(page, titleBox, params.title);
+  await logOperation({
+    level: 'info',
+    message: '[post_blog] 제목 입력 완료 — 본문 placeholder 클릭·입력 시작',
+    account_id: params.accountId,
+  });
   await scaledHumanSleep(300, 600, scale);
 
   await clickBlogBodyPlaceholder(page);
@@ -120,6 +132,11 @@ export async function postNaverBlog(params: {
   if (!isBlogBodySubstantiallyWritten(bodyWritten, params.content)) {
     await typeSeOneBlogBody(page, editor, params.content);
   }
+  await logOperation({
+    level: 'info',
+    message: '[post_blog] 본문 입력 완료',
+    account_id: params.accountId,
+  });
 
   if (params.linkUrl?.trim()) {
     await prepareSeOneEditorSurface(page, 6_000);
@@ -165,6 +182,11 @@ export async function postNaverBlog(params: {
   await prepareSeOneEditorSurface(page, 8_000);
 
   if (!isPostBlogPublishedUrl(page.url())) {
+    await logOperation({
+      level: 'info',
+      message: '[post_blog] 발행 버튼 클릭·게시판·해시태그 입력 시작',
+      account_id: params.accountId,
+    });
     const resultUrl = await completeNaverPublishDialog({
       page,
       workspace: params.workspace,
