@@ -145,7 +145,7 @@ async function findBlogBodyParagraphOnly(page: Page): Promise<Locator | null> {
     if (
       (await paragraph.count()) > 0 &&
       (await paragraph.isVisible({ timeout: 400 }).catch(() => false)) &&
-      (await isLocatorMainEditorBody(page, paragraph))
+      (await isBodyParagraphEditable(page, paragraph))
     ) {
       return paragraph;
     }
@@ -319,6 +319,17 @@ async function isLocatorInEditorChrome(loc: Locator): Promise<boolean> {
       return false;
     })
     .catch(() => false);
+}
+
+/** 빈 paragraph — isLocatorMainEditorBody(height>=16) 통과 전에도 본문 입력 가능 */
+async function isBodyParagraphEditable(page: Page, loc: Locator): Promise<boolean> {
+  if (await isLocatorInTitleSection(loc)) return false;
+  if (await isLocatorInEditorChrome(loc)) return false;
+  const box = await loc.boundingBox().catch(() => null);
+  if (!box || box.width < 40) return false;
+  const vp = page.viewportSize();
+  if (vp && box.y > vp.height * 0.85) return false;
+  return loc.evaluate((el) => el.matches('[contenteditable="true"]')).catch(() => false);
 }
 
 /** 제목 바로 아래 본문 — 하단 글감 독·툴바 제외 */
@@ -495,11 +506,41 @@ async function readEditableTitleText(editable: Locator): Promise<string> {
     .catch(() => '');
 }
 
+/** SE ONE 제목 paragraph — locator 오판 시 page DOM 직접 읽기 */
+async function readTitleFromEditorDom(page: Page): Promise<string> {
+  return page
+    .evaluate(() => {
+      const nodes = document.querySelectorAll(
+        '.se-section-documentTitle .se-text-paragraph[contenteditable="true"], .se-section-documentTitle [contenteditable="true"], .se-documentTitle [contenteditable="true"]',
+      );
+      for (const node of nodes) {
+        const clone = (node as HTMLElement).cloneNode(true) as HTMLElement;
+        for (const ph of clone.querySelectorAll('.se-placeholder, [class*="placeholder"]')) {
+          ph.remove();
+        }
+        const t = (clone.innerText ?? clone.textContent ?? '').replace(/\u00a0/g, ' ').trim();
+        if (t && !/^(제목|title)$/i.test(t)) return t;
+      }
+      return '';
+    })
+    .catch(() => '');
+}
+
 /** insertText 직후 — editable DOM 우선, wrapper(titleLoc) 보조 */
-async function readTitleForVerification(editable: Locator, titleLoc: Locator): Promise<string> {
+async function readTitleForVerification(
+  editable: Locator,
+  titleLoc: Locator,
+  page?: Page,
+): Promise<string> {
   const fromEditable = await readEditableTitleText(editable);
   if (fromEditable && !isTitlePlaceholderText(fromEditable)) return fromEditable;
-  return readBlogTitleText(titleLoc);
+  const fromWrap = await readBlogTitleText(titleLoc);
+  if (fromWrap && !isTitlePlaceholderText(fromWrap)) return fromWrap;
+  if (page) {
+    const fromDom = await readTitleFromEditorDom(page);
+    if (fromDom) return fromDom;
+  }
+  return '';
 }
 
 /** verifyBlogTitleInput 보완 — 화면에 1회 입력됐으나 wrapper 검증만 실패한 경우 */
@@ -547,8 +588,10 @@ export async function verifyBlogTitleField(
   titleLoc: Locator,
   expected: string,
 ): Promise<boolean> {
+  const fromSection = await readTitleFromEditorDom(page);
+  if (titleAlreadyAcceptable(fromSection, expected)) return true;
   const editable = await resolveTitleEditableLocator(page, titleLoc);
-  const written = await readTitleForVerification(editable, titleLoc);
+  const written = await readTitleForVerification(editable, titleLoc, page);
   return verifyBlogTitleInput(written, expected);
 }
 
@@ -564,7 +607,9 @@ export async function waitForBlogTitleWritten(
   while (Date.now() < deadline) {
     const domWritten = await readEditableTitleText(editable);
     if (titleAlreadyAcceptable(domWritten, expected)) return true;
-    const written = await readTitleForVerification(editable, titleLoc);
+    const sectionWritten = await readTitleFromEditorDom(page);
+    if (titleAlreadyAcceptable(sectionWritten, expected)) return true;
+    const written = await readTitleForVerification(editable, titleLoc, page);
     if (verifyBlogTitleInput(written, expected)) return true;
     await sleep(100);
   }
@@ -578,12 +623,12 @@ export async function ensureBlogTitleWritten(
   text: string,
 ): Promise<void> {
   const editable = await resolveTitleEditableLocator(page, titleLoc);
-  let domWritten = await readEditableTitleText(editable);
+  let domWritten = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
 
   if (isDuplicatedBlogTitle(domWritten, text)) {
     await clearBlogTitleField(editable);
     await sleep(150);
-    domWritten = await readEditableTitleText(editable);
+    domWritten = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
   }
 
   if (titleAlreadyAcceptable(domWritten, text)) {
@@ -1015,13 +1060,19 @@ export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: s
   const editable = await resolveTitleEditableLocator(page, titleLoc);
   await editable.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
 
-  const domWritten = await readEditableTitleText(editable);
+  const sectionWritten = await readTitleFromEditorDom(page);
+  if (titleAlreadyAcceptable(sectionWritten, text)) {
+    await blurBlogTitleField(page);
+    return;
+  }
+
+  const domWritten = (await readEditableTitleText(editable)) || sectionWritten;
   if (titleAlreadyAcceptable(domWritten, text)) {
     await blurBlogTitleField(page);
     return;
   }
 
-  if (isDuplicatedBlogTitle(domWritten, text)) {
+  if (isDuplicatedBlogTitle(domWritten, text) || isDuplicatedBlogTitle(sectionWritten, text)) {
     await clearBlogTitleField(editable);
     await sleep(120);
   } else if (domWritten.trim() && !isTitlePlaceholderText(domWritten)) {
@@ -1029,7 +1080,8 @@ export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: s
     await sleep(120);
   }
 
-  const afterClear = await readEditableTitleText(editable);
+  const afterClear =
+    (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
   if (titleAlreadyAcceptable(afterClear, text)) {
     await blurBlogTitleField(page);
     return;
@@ -1039,6 +1091,13 @@ export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: s
   await sleep(200);
 
   await focusTitleEditableNode(editable);
+
+  const beforeInsert = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
+  if (titleAlreadyAcceptable(beforeInsert, text)) {
+    await blurBlogTitleField(page);
+    return;
+  }
+
   await page.keyboard.insertText(text);
 
   if (await waitForBlogTitleWritten(page, titleLoc, text, 2500)) {
@@ -1046,13 +1105,25 @@ export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: s
     return;
   }
 
-  const afterInsert = await readEditableTitleText(editable);
+  const afterInsert =
+    (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
   if (titleAlreadyAcceptable(afterInsert, text)) {
     await blurBlogTitleField(page);
     return;
   }
 
   throw new Error('BLOG_TITLE_WRITE_FAILED');
+}
+
+async function ensureBodyFocusForPaste(page: Page, editable: Locator): Promise<void> {
+  if (!(await isFocusInTitleArea(page))) return;
+  await blurBlogTitleField(page);
+  await humanClickLocator(page, editable);
+  await sleep(200);
+  await focusBodyEditableNode(editable);
+  if (await isFocusInTitleArea(page)) {
+    throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
+  }
 }
 
 /** SE ONE 본문 — 제목과 동일: 1회 클릭 + page.keyboard.insertText (execCommand noop 방지) */
@@ -1073,10 +1144,7 @@ export async function pasteBlogBodyContent(page: Page, bodyLoc: Locator, content
   await humanClickLocator(page, editable);
   await sleep(200);
   await focusBodyEditableNode(editable);
-
-  if (await isFocusInTitleArea(page)) {
-    throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
-  }
+  await ensureBodyFocusForPaste(page, editable);
 
   const paragraphs = content.split('\n\n').filter(Boolean);
   if (paragraphs.length === 0) {
@@ -1084,9 +1152,7 @@ export async function pasteBlogBodyContent(page: Page, bodyLoc: Locator, content
   }
 
   for (let i = 0; i < paragraphs.length; i += 1) {
-    if (await isFocusInTitleArea(page)) {
-      throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
-    }
+    await ensureBodyFocusForPaste(page, editable);
     await page.keyboard.insertText(paragraphs[i]!);
     await sleep(200);
     if (i < paragraphs.length - 1) {
