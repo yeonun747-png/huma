@@ -18,9 +18,7 @@ import {
   pasteBlogBodyContent,
   pasteBlogTitleField,
   blurBlogTitleField,
-  resolveBodyEditableLocator,
-  isBlogBodySubstantiallyWritten,
-  readBlogBodyText,
+  verifyBlogBodyField,
   verifyBlogTitleField,
   waitForBlogTitleInputReady,
   isDraftResumePopupVisible,
@@ -134,10 +132,11 @@ export async function postNaverBlog(params: {
     throw new Error('BLOG_BODY_NOT_FOUND');
   }
 
-  const bodyEditable = await resolveBodyEditableLocator(editor);
-  const bodyWritten = await readBlogBodyText(bodyEditable);
-  if (!isBlogBodySubstantiallyWritten(bodyWritten, params.content)) {
+  if (!(await verifyBlogBodyField(page, editor, params.content))) {
     await typeSeOneBlogBody(page, editor, params.content);
+  }
+  if (!(await verifyBlogBodyField(page, editor, params.content))) {
+    throw new Error('BLOG_BODY_WRITE_FAILED');
   }
   await logOperation({
     level: 'info',

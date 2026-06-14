@@ -721,6 +721,31 @@ export function isBlogBodySubstantiallyWritten(bodyText: string, expectedContent
   return b.includes(e.slice(0, probe)) || e.includes(b.slice(0, Math.min(probe, b.length)));
 }
 
+export async function verifyBlogBodyField(
+  page: Page,
+  bodyLoc: Locator,
+  expected: string,
+): Promise<boolean> {
+  const editable = await resolveBodyEditableLocator(bodyLoc);
+  const written = await readBlogBodyText(editable);
+  return isBlogBodySubstantiallyWritten(written, expected);
+}
+
+/** insertText 직후 DOM 반영 대기 — placeholder 클릭 직후 readBlogBodyText 빈값 방지 */
+export async function waitForBlogBodyWritten(
+  page: Page,
+  bodyLoc: Locator,
+  expected: string,
+  maxMs = 3000,
+): Promise<boolean> {
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    if (await verifyBlogBodyField(page, bodyLoc, expected)) return true;
+    await sleep(100);
+  }
+  return verifyBlogBodyField(page, bodyLoc, expected);
+}
+
 export async function isFocusInBodyArea(page: Page): Promise<boolean> {
   return page
     .evaluate(
@@ -872,26 +897,39 @@ export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: s
   throw new Error('BLOG_TITLE_WRITE_FAILED');
 }
 
-/** SE ONE 본문 — 본문칸 마우스 이동·클릭 후 단락별 붙여넣기형 입력(insertText) */
+/** SE ONE 본문 — 본문 포커스 확보 후 insertTextIntoBlogEditable(검증 포함) */
 export async function pasteBlogBodyContent(page: Page, bodyLoc: Locator, content: string): Promise<void> {
   if (await isDraftResumePopupVisible(page)) {
     throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
   }
 
-  const editable = await resolveBodyEditableLocator(bodyLoc);
-  await editable.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
-  await humanClickLocator(page, editable);
-  await sleep(200);
+  await blurBlogTitleField(page);
+  await focusBlogBodyField(page, bodyLoc);
 
+  if (await isFocusInTitleArea(page)) {
+    throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
+  }
+
+  const editable = await resolveBodyEditableLocator(bodyLoc);
   const paragraphs = content.split('\n\n').filter(Boolean);
+  if (paragraphs.length === 0) {
+    throw new Error('BLOG_BODY_WRITE_FAILED');
+  }
+
   for (let i = 0; i < paragraphs.length; i += 1) {
-    await page.keyboard.insertText(paragraphs[i]!);
-    await sleep(300);
-    if (i < paragraphs.length - 1) {
-      await page.keyboard.press('Enter');
-      await page.keyboard.press('Enter');
-      await sleep(200);
+    if (await isFocusInTitleArea(page)) {
+      throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
     }
+    await insertTextIntoBlogEditable(page, editable, paragraphs[i]!);
+    await sleep(200);
+    if (i < paragraphs.length - 1) {
+      await insertParagraphBreakInBlogEditable(page, editable, 2);
+      await sleep(150);
+    }
+  }
+
+  if (!(await waitForBlogBodyWritten(page, bodyLoc, content, 3500))) {
+    throw new Error('BLOG_BODY_WRITE_FAILED');
   }
 }
 
