@@ -11,7 +11,7 @@ git pull
 echo "[deploy] npm install (workspace root)..."
 npm install
 
-echo "[deploy] build @huma/server..."
+echo "[deploy] build @huma/server (esbuild — i7 저메모리 대응)..."
 npm run build --workspace=@huma/server
 
 echo "[deploy] pm2 restart..."
