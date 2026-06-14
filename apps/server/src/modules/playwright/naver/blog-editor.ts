@@ -192,20 +192,28 @@ export async function postNaverBlog(params: {
     await scaledHumanSleep(1500, 3500, scale);
   }
 
-  await prepareSeOneEditorSurface(page, 8_000);
+  await prepareSeOneEditorSurface(page, 8_000, { destructiveDraftDismiss: false });
   if (!(await verifyBlogTitleField(page, titleBox, params.title))) {
+    await logOperation({
+      level: 'warn',
+      message: '[post_blog] 검토 전 제목 검증 실패 — BLOG_TITLE_LOST_BEFORE_REVIEW',
+      account_id: params.accountId,
+    }).catch(() => {});
     throw new Error('BLOG_TITLE_LOST_BEFORE_REVIEW');
   }
 
-  await scrollReview(
-    page,
-    calcReviewDurationMs(
-      params.title.length + params.content.length + (params.linkUrl?.length ?? 0),
-      config.review_duration_ms,
-    ),
+  const reviewMs = calcReviewDurationMs(
+    params.title.length + params.content.length + (params.linkUrl?.length ?? 0),
+    config.review_duration_ms,
   );
+  await logOperation({
+    level: 'info',
+    message: `[post_blog] 검토 스크롤 시작 (${Math.round(reviewMs / 1000)}초, 오탈자 수정 없음·휠만)`,
+    account_id: params.accountId,
+  }).catch(() => {});
+  await scrollReview(page, reviewMs);
 
-  await prepareSeOneEditorSurface(page, 8_000);
+  await prepareSeOneEditorSurface(page, 8_000, { destructiveDraftDismiss: false });
 
   if (!isPostBlogPublishedUrl(page.url())) {
     await logOperation({

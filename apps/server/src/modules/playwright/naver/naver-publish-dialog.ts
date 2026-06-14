@@ -8,7 +8,6 @@ import { scaledHumanSleep } from '../../human-engine/timing.js';
 import {
   dismissNaverBlogEditorOverlays,
   prepareSeOneEditorSurface,
-  waitAndDismissDraftResumePopup,
 } from './enter-blog-editor.js';
 import {
   findVisibleLocator,
@@ -167,9 +166,8 @@ export async function completeNaverPublishDialog(params: {
 }): Promise<string> {
   const scale = params.scale ?? 1;
 
-  await prepareSeOneEditorSurface(params.page, 12_000);
-  await waitAndDismissDraftResumePopup(params.page, 5_000);
-  await dismissNaverBlogEditorOverlays(params.page);
+  await prepareSeOneEditorSurface(params.page, 12_000, { destructiveDraftDismiss: false });
+  await dismissNaverBlogEditorOverlays(params.page, { includeDraftPopup: false });
 
   await clickTopPublishButton(params.page);
   await scaledHumanSleep(800, 1800, scale);

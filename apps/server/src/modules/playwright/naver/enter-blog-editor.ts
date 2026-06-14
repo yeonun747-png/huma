@@ -197,6 +197,18 @@ export async function waitAndDismissDraftResumePopup(
   }
 }
 
+/**
+ * 제목·본문 입력 후 — 「취소」는 새 글 작성(현재 글 파괴)이므로 금지.
+ * Escape만 시도해 팝업을 닫고, 남으면 그대로 진행(발행 단계에서 재처리).
+ */
+export async function dismissDraftResumePopupNonDestructive(editorPage: Page): Promise<void> {
+  for (let i = 0; i < 4; i += 1) {
+    if (!(await isDraftResumePopupVisible(editorPage))) return;
+    await editorPage.keyboard.press('Escape').catch(() => {});
+    await sleep(280);
+  }
+}
+
 /** 도움말·dim 등 — 에디터 입력을 가리는 오버레이 제거 (발행 전에도 재호출) */
 export async function dismissNaverBlogEditorOverlays(
   editorPage: Page,
@@ -236,11 +248,19 @@ export async function dismissNaverBlogEditorOverlays(
 }
 
 /** 키보드 입력 직전 — 임시저장 팝업·도움말이 없을 때까지 대기 */
-export async function prepareSeOneEditorSurface(editorPage: Page, maxMs = 25_000): Promise<void> {
-  await waitAndDismissDraftResumePopup(editorPage, maxMs);
+export async function prepareSeOneEditorSurface(
+  editorPage: Page,
+  maxMs = 25_000,
+  options?: { destructiveDraftDismiss?: boolean },
+): Promise<void> {
+  if (options?.destructiveDraftDismiss === false) {
+    await dismissDraftResumePopupNonDestructive(editorPage);
+  } else {
+    await waitAndDismissDraftResumePopup(editorPage, maxMs);
+  }
   await dismissNaverBlogEditorOverlays(editorPage, { includeDraftPopup: false });
   await dismissSeOneMaterialPopup(editorPage);
-  if (await isDraftResumePopupVisible(editorPage)) {
+  if (options?.destructiveDraftDismiss !== false && (await isDraftResumePopupVisible(editorPage))) {
     throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
   }
 }
