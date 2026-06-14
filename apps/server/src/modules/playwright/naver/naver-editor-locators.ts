@@ -137,7 +137,7 @@ export async function isBlogTitleEditableVisible(page: Page): Promise<boolean> {
   if (!(await title.isVisible({ timeout: 600 }).catch(() => false))) return false;
 
   const box = await title.boundingBox().catch(() => null);
-  return !!(box && box.height >= 12 && box.width >= 80);
+  return !!(box && box.height >= 8 && box.width >= 24);
 }
 
 /** 제목란 노출·클릭 유도 — 본문 포커스만 잡힌 채 제목 대기에서 멈출 때 */
@@ -1090,14 +1090,18 @@ async function probeSeOneLoadState(page: Page): Promise<{
         '.se-loading-indicator',
         '.__se_loading',
         '.se-spinner',
-        '[class*="loading-spinner"]',
       ];
       let spinnerVisible = false;
       for (const s of spinnerSel) {
-        if (visible(document.querySelector(s))) {
-          spinnerVisible = true;
-          break;
-        }
+        const node = document.querySelector(s);
+        if (!visible(node)) continue;
+        const r = (node as HTMLElement).getBoundingClientRect();
+        const style = getComputedStyle(node as HTMLElement);
+        if (r.width < 16 || r.height < 16) continue;
+        if (style.display === 'none' || style.visibility === 'hidden') continue;
+        if (parseFloat(style.opacity) < 0.05) continue;
+        spinnerVisible = true;
+        break;
       }
 
       const title = document.querySelector(
@@ -1112,7 +1116,7 @@ async function probeSeOneLoadState(page: Page): Promise<{
       const toolbar = document.querySelector('.se-toolbar, [class*="se-toolbar"], .se-menu, .se-toolbar-container');
 
       const tb = title instanceof HTMLElement ? title.getBoundingClientRect() : null;
-      const titleOk = visible(title) && !!tb && tb.height >= 12 && tb.width >= 80;
+      const titleOk = visible(title) && !!tb && tb.height >= 8 && tb.width >= 24;
       const bodyOk = visible(body) || visible(bodyPlaceholder);
 
       return {
@@ -1128,11 +1132,55 @@ async function probeSeOneLoadState(page: Page): Promise<{
     .catch(() => ({ ready: false, strong: false, titleReady: false, box: null }));
 }
 
-/** 제목 마우스 입력 직전 — 팝업 없고 제목란만 준비되면 true */
+/** 제목 마우스 입력 직전 — findBlogTitleLocator와 동일 기준(placeholder 포함) */
 export async function isSeOneEditorReadyForTitleInput(page: Page): Promise<boolean> {
   if (await isDraftResumePopupVisible(page)) return false;
-  const state = await probeSeOneLoadState(page);
-  return state.titleReady;
+  const title = await findBlogTitleLocator(page);
+  if (!title) return false;
+  const box = await title.boundingBox().catch(() => null);
+  return !!(box && box.height >= 8 && box.width >= 24);
+}
+
+/**
+ * 제목란 노출 시 즉시 VNC 포인터 이동 후 Locator 반환.
+ * probeSeOneLoadState(titleReady)와 findBlogTitleLocator 불일치로 무마우스 정체되는 문제 방지.
+ */
+export async function waitForBlogTitleInputReady(
+  page: Page,
+  maxMs = 45_000,
+  onDraftPopup?: () => Promise<void>,
+): Promise<Locator | null> {
+  const deadline = Date.now() + maxMs;
+  let pointerShown = false;
+
+  while (Date.now() < deadline) {
+    if (await isDraftResumePopupVisible(page)) {
+      if (onDraftPopup) await onDraftPopup();
+      pointerShown = false;
+      await sleep(200);
+      continue;
+    }
+
+    const title = await findBlogTitleLocator(page);
+    if (!title) {
+      await sleep(120);
+      continue;
+    }
+
+    const box = await title.boundingBox().catch(() => null);
+    if (!box || box.height < 8 || box.width < 24) {
+      await sleep(120);
+      continue;
+    }
+
+    if (!pointerShown) {
+      pointerShown = true;
+      await humanMouseMove(page, box.x + box.width / 2, box.y + box.height / 2).catch(() => {});
+    }
+    return title;
+  }
+
+  return null;
 }
 
 /** 툴바·제목·본문이 모두 살아 있는지 — 붕괴 후 연쇄 클릭 방지 */

@@ -1,7 +1,6 @@
 import type { Locator, Page } from 'playwright';
 
 import { humanSleep } from '../../human-engine/typing.js';
-import { humanMouseMove } from '../../human-engine/mouse.js';
 import { scrollReview, scaledHumanSleep } from '../../human-engine/timing.js';
 import { calcReviewDurationMs } from '../../../lib/review-duration.js';
 import type { HumanEngineConfig } from '../../../lib/settings.js';
@@ -24,8 +23,7 @@ import {
   isBlogBodySubstantiallyWritten,
   readBlogBodyText,
   readBlogTitleText,
-  waitForSeOneEditorFullyLoaded,
-  isSeOneEditorReadyForTitleInput,
+  waitForBlogTitleInputReady,
   isDraftResumePopupVisible,
 } from './naver-editor-locators.js';
 import {
@@ -52,14 +50,6 @@ async function assertTitleStable(page: Page, titleLoc: Locator, expected: string
   if (!isBlogTitleWritten(written, expected)) {
     throw new Error('BLOG_TITLE_WRITE_FAILED');
   }
-}
-
-async function showPointerOnTitleField(page: Page): Promise<void> {
-  const title = await findBlogTitleLocator(page);
-  if (!title) return;
-  const box = await title.boundingBox().catch(() => null);
-  if (!box) return;
-  await humanMouseMove(page, box.x + box.width / 2, box.y + box.height / 2).catch(() => {});
 }
 
 /** SE ONE 제목 — 마우스 1회 클릭 후 붙여넣기 */
@@ -117,30 +107,21 @@ export async function postNaverBlog(params: {
   await waitAndDismissDraftResumePopup(page, 3_000).catch(() => {});
   resetDraftDismissGuard(page);
 
-  let readyForTitle = await isSeOneEditorReadyForTitleInput(page);
-  if (!readyForTitle) {
-    readyForTitle = await waitForSeOneEditorFullyLoaded(page, 45_000, async () => {
-      await waitAndDismissDraftResumePopup(page, 8_000).catch(() => {});
-      resetDraftDismissGuard(page);
-    });
+  const titleBox = await waitForBlogTitleInputReady(page, 45_000, async () => {
+    await waitAndDismissDraftResumePopup(page, 8_000).catch(() => {});
+    resetDraftDismissGuard(page);
+  });
+  if (!titleBox) {
+    throw new Error('BLOG_TITLE_NOT_FOUND');
   }
-  if (!readyForTitle) {
-    throw new Error('BLOG_EDITOR_NOT_READY');
-  }
-  await showPointerOnTitleField(page);
   await logOperation({
     level: 'info',
-    message: '[post_blog] 본체 로딩 완료 — 제목칸 클릭·입력 시작',
+    message: '[post_blog] 제목칸 준비 — 클릭·입력 시작',
     account_id: params.accountId,
   });
 
   if (await isDraftResumePopupVisible(page)) {
     await prepareSeOneEditorSurface(page, 6_000);
-  }
-
-  const titleBox = await findBlogTitleLocator(page);
-  if (!titleBox) {
-    throw new Error('BLOG_TITLE_NOT_FOUND');
   }
 
   await typeBlogTitle(page, titleBox, params.title);

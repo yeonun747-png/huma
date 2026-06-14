@@ -244,6 +244,9 @@ async function waitForSmartEditor(editorPage: Page, timeoutMs = SMART_EDITOR_WAI
     if (!(await isDraftResumePopupVisible(editorPage))) {
       if (await isSeOneEditorShellReady(editorPage)) return true;
       if (await isSmartEditorInteractable(editorPage)) return true;
+      if (POSTWRITE_URL_RE.test(editorPage.url()) && (await findBlogTitleLocator(editorPage))) {
+        return true;
+      }
     }
     await sleep(EDITOR_POLL_MS);
   }
@@ -262,7 +265,11 @@ async function tryEditorOnPage(page: Page, waitBudgetMs = SMART_EDITOR_WAIT_MS):
   ) {
     if (await waitForSmartEditor(page, waitBudgetMs)) {
       await dismissNaverBlogEditorOverlays(page, { includeDraftPopup: false });
-      await prepareSeOneEditorSurface(page, 20_000);
+      if (await isDraftResumePopupVisible(page)) {
+        await prepareSeOneEditorSurface(page, 20_000);
+      } else {
+        await dismissSeOneMaterialPopup(page);
+      }
       return page;
     }
   }
