@@ -20,6 +20,22 @@ async function insertFileViaToolbar(
   return true;
 }
 
+const BLOG_IMAGE_SELECTORS = [
+  '.se-module-image',
+  '.se-image-module',
+  '.se-component-image',
+  '[data-module="image"]',
+  '[class*="se-image"]',
+];
+
+export async function isBlogImageInEditor(page: Page): Promise<boolean> {
+  for (const sel of BLOG_IMAGE_SELECTORS) {
+    if ((await page.locator(sel).count()) > 0) return true;
+    if ((await page.frameLocator('#mainFrame').locator(sel).count().catch(() => 0)) > 0) return true;
+  }
+  return false;
+}
+
 /** 툴바 「사진」 → filechooser. 실패 시 hidden input 폴백 */
 export async function insertImageViaToolbar(page: Page, localPath: string): Promise<boolean> {
   const viaToolbar = await insertFileViaToolbar(page, localPath, {

@@ -816,6 +816,19 @@ export async function resolveBodyEditableLocator(bodyLoc: Locator): Promise<Loca
   return resolveBodyEditableLocatorRelaxed(bodyLoc);
 }
 
+/** 본문 맨 끝으로 캐럿 이동 — 링크·이미지 삽입 전 */
+export async function focusBlogBodyEnd(page: Page, bodyLoc: Locator): Promise<void> {
+  await blurBlogTitleField(page);
+  const editable = await resolveBodyEditableLocator(bodyLoc);
+  await humanClickLocator(page, editable);
+  await sleep(200);
+  if (await isFocusInTitleArea(page)) {
+    throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
+  }
+  await page.keyboard.press('Control+End');
+  await sleep(120);
+}
+
 /** placeholder 클릭 직후 — 빈 paragraph는 isVisible false일 수 있어 attached만 확인 */
 async function resolveBodyEditableLocatorRelaxed(bodyLoc: Locator): Promise<Locator> {
   const paragraph = bodyLoc.locator('.se-text-paragraph[contenteditable="true"]').first();

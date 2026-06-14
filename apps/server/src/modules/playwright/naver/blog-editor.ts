@@ -19,6 +19,7 @@ import {
   ensureBlogTitleWritten,
   ensureBlogTitleBeforeReview,
   blurBlogTitleField,
+  focusBlogBodyEnd,
   verifyBlogBodyField,
   verifyBlogTitleField,
   waitForBlogTitleInputReady,
@@ -29,8 +30,12 @@ import {
   isPostBlogPublishedUrl,
   waitForNaverPublishSuccess,
 } from './blog-editor-pipeline.js';
-import { pasteBlogLinkWithOgPreview } from './paste-blog-link.js';
-import { insertImageViaToolbar, insertVideoViaToolbar } from './naver-editor-media.js';
+import { isOgLinkVisible, pasteBlogLinkWithOgPreview } from './paste-blog-link.js';
+import {
+  insertImageViaToolbar,
+  insertVideoViaToolbar,
+  isBlogImageInEditor,
+} from './naver-editor-media.js';
 import { completeNaverPublishDialog } from './naver-publish-dialog.js';
 import { logOperation } from '../../../lib/log-emitter.js';
 import { sleep } from '../../../lib/utils.js';
@@ -166,40 +171,68 @@ export async function postNaverBlog(params: {
     account_id: params.accountId,
   });
 
+  await focusBlogBodyEnd(page, editor);
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  await sleep(200);
+
+  const titleOkBeforeMedia = await verifyBlogTitleField(page, titleBox, params.title);
+
   if (params.linkUrl?.trim()) {
-    await logOperation({
-      level: 'info',
-      message: '[post_blog] 링크 삽입 시작',
-      account_id: params.accountId,
-    }).catch(() => {});
-    const { ogPreview } = await pasteBlogLinkWithOgPreview(page, editor, params.linkUrl.trim(), {
-      workspace: params.workspace ?? 'yeonun',
-      scale,
-      humanConfig: config,
-    });
-    await logOperation({
-      level: 'info',
-      message: `[post_blog] 링크 삽입 완료 (OG=${ogPreview ? 'Y' : 'N'})`,
-      account_id: params.accountId,
-    }).catch(() => {});
+    const linkAlready = await isOgLinkVisible(page);
+    if (linkAlready) {
+      await logOperation({
+        level: 'info',
+        message: '[post_blog] 링크 이미 삽입됨 — 건너뜀',
+        account_id: params.accountId,
+      }).catch(() => {});
+    } else {
+      await logOperation({
+        level: 'info',
+        message: '[post_blog] 링크 삽입 시작',
+        account_id: params.accountId,
+      }).catch(() => {});
+      const { ogPreview } = await pasteBlogLinkWithOgPreview(page, editor, params.linkUrl.trim(), {
+        workspace: params.workspace ?? 'yeonun',
+        scale,
+        humanConfig: config,
+        atCaret: true,
+      });
+      await logOperation({
+        level: 'info',
+        message: `[post_blog] 링크 삽입 완료 (OG=${ogPreview ? 'Y' : 'N'})`,
+        account_id: params.accountId,
+      }).catch(() => {});
+    }
   }
+
+  await page.keyboard.press('Enter');
+  await sleep(200);
 
   const firstImage = params.imageUrls?.[0];
   if (firstImage) {
-    await logOperation({
-      level: 'info',
-      message: '[post_blog] 이미지 삽입 시작',
-      account_id: params.accountId,
-    }).catch(() => {});
-    await prepareSeOneEditorSurface(page, 4_000, { destructiveDraftDismiss: false });
-    const ok = await insertImageViaToolbar(page, firstImage);
-    if (!ok) throw new Error('BLOG_IMAGE_INSERT_FAILED');
-    await scaledHumanSleep(1000, 3000, scale);
-    await logOperation({
-      level: 'info',
-      message: '[post_blog] 이미지 삽입 완료',
-      account_id: params.accountId,
-    }).catch(() => {});
+    const imageAlready = await isBlogImageInEditor(page);
+    if (imageAlready) {
+      await logOperation({
+        level: 'info',
+        message: '[post_blog] 이미지 이미 삽입됨 — 건너뜀',
+        account_id: params.accountId,
+      }).catch(() => {});
+    } else {
+      await logOperation({
+        level: 'info',
+        message: '[post_blog] 이미지 삽입 시작',
+        account_id: params.accountId,
+      }).catch(() => {});
+      const ok = await insertImageViaToolbar(page, firstImage);
+      if (!ok) throw new Error('BLOG_IMAGE_INSERT_FAILED');
+      await scaledHumanSleep(1000, 3000, scale);
+      await logOperation({
+        level: 'info',
+        message: '[post_blog] 이미지 삽입 완료',
+        account_id: params.accountId,
+      }).catch(() => {});
+    }
   }
 
   if (params.videoPath?.trim()) {
@@ -209,8 +242,18 @@ export async function postNaverBlog(params: {
     await scaledHumanSleep(1500, 3500, scale);
   }
 
+  if (!titleOkBeforeMedia) {
+    await prepareSeOneEditorSurface(page, 8_000, { destructiveDraftDismiss: false });
+    await ensureBlogTitleBeforeReview(page, titleBox, params.title);
+  } else {
+    await logOperation({
+      level: 'info',
+      message: '[post_blog] 미디어 전 제목 검증 완료 — 검토·발행으로 진행',
+      account_id: params.accountId,
+    }).catch(() => {});
+  }
+
   await prepareSeOneEditorSurface(page, 8_000, { destructiveDraftDismiss: false });
-  await ensureBlogTitleBeforeReview(page, titleBox, params.title);
 
   const reviewMs = calcReviewDurationMs(
     params.title.length + params.content.length + (params.linkUrl?.length ?? 0),

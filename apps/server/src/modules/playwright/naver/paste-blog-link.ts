@@ -22,7 +22,7 @@ const OG_LINK_SELECTORS = [
   '[data-module="oglink"]',
 ];
 
-async function isOgLinkVisible(page: Page): Promise<boolean> {
+export async function isOgLinkVisible(page: Page): Promise<boolean> {
   for (const sel of OG_LINK_SELECTORS) {
     if ((await page.locator(sel).count()) > 0) return true;
     if ((await page.frameLocator('#mainFrame').locator(sel).count().catch(() => 0)) > 0) return true;
@@ -43,24 +43,28 @@ export async function pasteBlogLinkWithOgPreview(
     workspace?: string;
     scale?: number;
     humanConfig: HumanEngineConfig;
+    /** blog-editor에서 본문 끝 Enter×2 후 — 캐럿 이동·줄바꿈 생략 */
+    atCaret?: boolean;
   },
 ): Promise<{ ogPreview: boolean }> {
   const scale = options.scale ?? 1;
   const workspace = options.workspace ?? 'yeonun';
   const insertUrl = resolveBlogLinkUrl(workspace, linkUrl, linkUrl);
 
-  await blurBlogTitleField(page);
-  const editable = await resolveBodyEditableLocator(editor);
-  await humanClickLocator(page, editable);
-  await sleep(200);
-  if (await isFocusInTitleArea(page)) {
-    throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
+  if (!options.atCaret) {
+    await blurBlogTitleField(page);
+    const editable = await resolveBodyEditableLocator(editor);
+    await humanClickLocator(page, editable);
+    await sleep(200);
+    if (await isFocusInTitleArea(page)) {
+      throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
+    }
+    await page.keyboard.press('Control+End');
+    await sleep(120);
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Enter');
+    await sleep(200);
   }
-  await page.keyboard.press('Control+End');
-  await sleep(120);
-  await page.keyboard.press('Enter');
-  await page.keyboard.press('Enter');
-  await sleep(200);
 
   if (workspace === 'yeonun') {
     await page.keyboard.insertText(insertUrl);
