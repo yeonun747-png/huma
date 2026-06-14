@@ -81,7 +81,7 @@ async function isPointBlockedByDraftModal(page: Page, x: number, y: number): Pro
     .evaluate(
       ({ px, py }) => {
         const hit = document.elementFromPoint(px, py);
-        if (!hit) return true;
+        if (!hit) return false;
         if (
           hit.closest(
             '.se-section-documentTitle, .se-documentTitle, .se-section-text, .se-text-paragraph[contenteditable="true"]',
@@ -96,7 +96,45 @@ async function isPointBlockedByDraftModal(page: Page, x: number, y: number): Pro
       },
       { px: x, py: y },
     )
-    .catch(() => true);
+    .catch(() => false);
+}
+
+async function focusTitleEditableNode(loc: Locator): Promise<void> {
+  await loc
+    .evaluate((el) => {
+      const node = el as HTMLElement;
+      const target =
+        node.matches('[contenteditable="true"]')
+          ? node
+          : ((node.querySelector(
+              '.se-text-paragraph[contenteditable="true"], [contenteditable="true"]',
+            ) as HTMLElement | null) ?? node);
+      target.focus();
+      const sel = window.getSelection();
+      if (sel && target.isContentEditable) {
+        const range = document.createRange();
+        range.selectNodeContents(target);
+        range.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    })
+    .catch(() => {});
+}
+
+/** 제목 contenteditable 노출 — 임시저장 팝업만 제외 */
+export async function isBlogTitleEditableVisible(page: Page): Promise<boolean> {
+  if (await isDraftResumePopupVisible(page)) return false;
+
+  const title = page
+    .locator(
+      '.se-section-documentTitle [contenteditable="true"], .se-documentTitle [contenteditable="true"], .se-section-documentTitle .se-text-paragraph[contenteditable="true"], .se-documentTitle .se-text-paragraph[contenteditable="true"]',
+    )
+    .first();
+  if (!(await title.isVisible({ timeout: 600 }).catch(() => false))) return false;
+
+  const box = await title.boundingBox().catch(() => null);
+  return !!(box && box.height >= 12 && box.width >= 80);
 }
 
 /** 제목란 노출·클릭 유도 — 본문 포커스만 잡힌 채 제목 대기에서 멈출 때 */
@@ -122,6 +160,7 @@ export async function recoverBlogTitleSection(page: Page): Promise<void> {
     await titleEditable.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
     await humanClickLocator(page, titleEditable);
     await sleep(250);
+    await focusTitleEditableNode(titleEditable);
     return;
   }
 
@@ -130,43 +169,36 @@ export async function recoverBlogTitleSection(page: Page): Promise<void> {
     await titleSection.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
     await humanClickLocator(page, titleSection);
     await sleep(250);
+    const paragraph = titleSection.locator('.se-text-paragraph[contenteditable="true"]').first();
+    if ((await paragraph.count()) > 0) {
+      await focusTitleEditableNode(paragraph);
+    }
   }
 }
 
-/** 제목란 클릭·입력 가능 — 팝업 dim 뒤가 아님 */
+/** 제목란 클릭·입력 가능 — 임시저장 팝업 없고 제목 노드가 보이면 준비 완료 */
 export async function isBlogTitleSectionReady(page: Page): Promise<boolean> {
-  if (await isDraftResumePopupVisible(page)) return false;
-
-  const title = page
-    .locator(
-      '.se-section-documentTitle [contenteditable="true"], .se-documentTitle [contenteditable="true"]',
-    )
-    .first();
-  if (!(await title.isVisible({ timeout: 600 }).catch(() => false))) return false;
-
-  const box = await title.boundingBox().catch(() => null);
-  if (!box || box.height < 12 || box.width < 80) return false;
-
-  if (await isFocusInTitleArea(page)) return true;
-
-  const blocked = await isPointBlockedByDraftModal(
-    page,
-    box.x + box.width / 2,
-    box.y + Math.min(box.height / 2, 24),
-  );
-
-  return !blocked;
+  return isBlogTitleEditableVisible(page);
 }
 
 /** 팝업 닫힌 뒤 제목란 interactable 될 때까지 대기 */
 export async function waitForBlogTitleSectionReady(page: Page, maxMs = 35_000): Promise<void> {
   const deadline = Date.now() + maxMs;
   let lastRecover = 0;
+  let recoverCount = 0;
+
   while (Date.now() < deadline) {
     if (await isBlogTitleSectionReady(page)) return;
-    if (Date.now() - lastRecover > 900) {
+    if (recoverCount < 4 && Date.now() - lastRecover > 900) {
       await recoverBlogTitleSection(page);
       lastRecover = Date.now();
+      recoverCount += 1;
+      await sleep(350);
+      if (await isBlogTitleSectionReady(page)) return;
+      continue;
+    }
+    if (!(await isDraftResumePopupVisible(page)) && (await isBlogTitleEditableVisible(page))) {
+      return;
     }
     await sleep(250);
   }
@@ -182,31 +214,24 @@ export async function findBlogTitleLocator(page: Page): Promise<Locator | null> 
 
   const titleEditable = page
     .locator(
-      '.se-section-documentTitle [contenteditable="true"], .se-documentTitle [contenteditable="true"]',
+      '.se-section-documentTitle [contenteditable="true"], .se-documentTitle [contenteditable="true"], .se-section-documentTitle .se-text-paragraph[contenteditable="true"], .se-documentTitle .se-text-paragraph[contenteditable="true"]',
     )
     .first();
   if (
     (await titleEditable.count()) > 0 &&
-    (await titleEditable.isVisible({ timeout: 800 }).catch(() => false)) &&
-    (await isBlogTitleSectionReady(page))
+    (await titleEditable.isVisible({ timeout: 800 }).catch(() => false))
   ) {
     return titleEditable;
   }
 
   try {
     const ph = page.getByPlaceholder('제목').first();
-    if (
-      (await ph.count()) > 0 &&
-      (await ph.isVisible({ timeout: 800 }).catch(() => false)) &&
-      (await isBlogTitleSectionReady(page))
-    ) {
+    if ((await ph.count()) > 0 && (await ph.isVisible({ timeout: 800 }).catch(() => false))) {
       return ph;
     }
   } catch {
     /* ignore */
   }
-
-  if (!(await isBlogTitleSectionReady(page))) return null;
 
   const titleOnly = [
     '.se-section-documentTitle [contenteditable="true"]',
@@ -515,7 +540,7 @@ export async function insertTextIntoBlogEditable(
     box.x + box.width / 2,
     box.y + Math.min(box.height / 2, 28),
   );
-  if (blocked) {
+  if (blocked && (await isDraftResumePopupVisible(page))) {
     throw new Error('BLOG_EDITABLE_BLOCKED_BY_OVERLAY');
   }
 
@@ -661,27 +686,21 @@ export async function focusBlogTitleField(page: Page, titleLoc: Locator): Promis
   if (await isDraftResumePopupVisible(page)) {
     throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
   }
-  if (!(await isBlogTitleSectionReady(page))) {
-    throw new Error('BLOG_TITLE_SECTION_NOT_READY');
-  }
 
   await titleLoc.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
 
-  const editable = page
-    .locator(
-      '.se-section-documentTitle [contenteditable="true"], .se-documentTitle [contenteditable="true"]',
-    )
-    .first();
-  const hasEditable =
-    (await editable.count()) > 0 && (await editable.isVisible({ timeout: 500 }).catch(() => false));
+  const editable = await resolveTitleEditableLocator(page, titleLoc);
+  const hasEditable = (await editable.count()) > 0 && (await editable.isVisible({ timeout: 500 }).catch(() => false));
   const target = hasEditable ? editable : titleLoc;
 
   await humanClickLocator(page, target);
   await sleep(randomBetweenTitleFocus());
+  await focusTitleEditableNode(target);
 
   if (!(await hasTitleFieldFocus(page, target)) && !(await isFocusInTitleArea(page))) {
-    await humanClickLocator(page, titleLoc);
+    await humanClickLocator(page, editable);
     await sleep(180);
+    await focusTitleEditableNode(editable);
   }
 }
 
@@ -894,8 +913,18 @@ export async function typeTextIntoBlogTitleField(
   }, text);
 
   let written = await readBlogTitleText(titleLoc);
-  if (!isBlogTitleWritten(written, text) && (await isFocusInTitleArea(page))) {
+  if (!isBlogTitleWritten(written, text)) {
+    await focusTitleEditableNode(editable);
     await page.keyboard.insertText(text);
+    await sleep(150);
+    written = await readBlogTitleText(titleLoc);
+  }
+
+  if (!isBlogTitleWritten(written, text)) {
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
+    await page.evaluate(async (t) => navigator.clipboard.writeText(t), text).catch(() => {});
+    await focusTitleEditableNode(editable);
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+v' : 'Control+v');
     await sleep(150);
     written = await readBlogTitleText(titleLoc);
   }

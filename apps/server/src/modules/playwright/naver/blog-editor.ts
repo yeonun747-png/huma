@@ -30,6 +30,7 @@ import {
   waitForBlogTitleSectionReady,
   recoverBlogTitleSection,
   isBlogTitleSectionReady,
+  isBlogTitleEditableVisible,
   typeTextIntoBlogTitleField,
 } from './naver-editor-locators.js';
 import {
@@ -67,9 +68,9 @@ async function typeBlogTitle(page: Page, titleLoc: Locator, title: string): Prom
   if (isBlogTitleWritten(existing, title)) return;
 
   const freshTitleLoc = (await findBlogTitleLocator(page)) ?? titleLoc;
-  if (!(await isBlogTitleSectionReady(page))) {
+  if (!(await isBlogTitleEditableVisible(page))) {
     await recoverBlogTitleSection(page);
-    await waitForBlogTitleSectionReady(page, 12_000);
+    await waitForBlogTitleSectionReady(page, 8_000);
   }
 
   await typeTextIntoBlogTitleField(page, freshTitleLoc, title);

@@ -2,10 +2,7 @@ import type { BrowserContext, Page } from 'playwright';
 
 import { resolveBlogLinkUrl } from './blog-link.js';
 import { humanSleep } from '../modules/human-engine/typing.js';
-import {
-  clickNaverLoginButton,
-  ensureNaverLoginCredentialsForCaptcha,
-} from './naver-login-fields.js';
+import { submitNaverLoginAfterCaptcha } from './naver-login-fields.js';
 import { isNaverCaptchaVisible, isNaverLoginPendingAfterCaptcha, pickNaverCaptchaPage } from './naver-captcha-vision.js';
 import { gotoBlogPortal, waitForBlogPortalReady } from './naver-blog-portal.js';
 import { findNaverPostwritePage } from '../modules/playwright/naver/enter-blog-editor.js';
@@ -229,13 +226,8 @@ export async function ensurePostingSessionAfterCaptcha(
   if (await isNaverCaptchaVisible(page)) return false;
   if (await isNaverAuthChallengePage(page)) return false;
 
-  if (allowAutoLoginSubmit && page.url().includes('nidlogin.login')) {
-    await ensureNaverLoginCredentialsForCaptcha(page, accountId, { fast: true });
-    await clickNaverLoginButton(page);
-    await page
-      .waitForURL((u) => !u.href.includes('nidlogin.login'), { timeout: 25_000 })
-      .catch(() => {});
-    if (page.url().includes('nidlogin.login')) return false;
+  if (allowAutoLoginSubmit && page.url().includes('nidlogin')) {
+    await submitNaverLoginAfterCaptcha(page, accountId);
     await humanSleep(...scaleMs(800, 1500));
   } else if (page.url().includes('nidlogin')) {
     const nidPage = (await pickNaverCaptchaPage(context)) ?? page;

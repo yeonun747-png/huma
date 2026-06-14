@@ -25,6 +25,7 @@ export async function typeIntoNaverLoginField(
   page: Page,
   selector: string,
   value: string,
+  options?: { fast?: boolean; clear?: boolean },
 ): Promise<void> {
   await ensureNaverLoginIdPhoneTab(page);
 
@@ -36,10 +37,22 @@ export async function typeIntoNaverLoginField(
   } else {
     await loc.focus().catch(() => {});
   }
-  await sleep(randomBetween(150, 400));
+  await sleep(options?.fast ? randomBetween(80, 180) : randomBetween(150, 400));
+
+  if (options?.clear !== false) {
+    const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
+    await page.keyboard.press(`${mod}+a`).catch(() => {});
+    await page.keyboard.press('Backspace').catch(() => {});
+    await sleep(options?.fast ? randomBetween(40, 90) : randomBetween(80, 160));
+  }
+
+  const delayMin = options?.fast ? 35 : 55;
+  const delayMax = options?.fast ? 95 : 175;
   for (const ch of value) {
-    await page.keyboard.type(ch, { delay: randomBetween(55, 175) });
-    if (Math.random() < 0.08) await sleep(randomBetween(180, 520));
+    await page.keyboard.type(ch, { delay: randomBetween(delayMin, delayMax) });
+    if (Math.random() < (options?.fast ? 0.04 : 0.08)) {
+      await sleep(randomBetween(options?.fast ? 100 : 180, options?.fast ? 280 : 520));
+    }
   }
 }
 
@@ -63,18 +76,34 @@ export async function ensureNaverLoginCredentialsForCaptcha(
   if (!account) return;
 
   const password = decrypt(account.naver_pw_enc);
-  const pw = page.locator('#pw');
-  await pw.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
-  await pw.fill('').catch(() => {});
+  await typeIntoNaverLoginField(page, '#pw', password, { fast: options?.fast });
+  await humanSleep(options?.fast ? 120 : 400, options?.fast ? 280 : 900);
+}
 
-  if (options?.fast) {
-    await pw.fill(password);
-    await humanSleep(120, 280);
-    return;
+/**
+ * CAPTCHA 통과 후 nidlogin — 비번(필요 시) 마우스 입력·로그인 버튼 마우스 클릭.
+ * @returns nidlogin 이탈 여부
+ */
+export async function submitNaverLoginAfterCaptcha(
+  page: Page,
+  accountId: string,
+): Promise<boolean> {
+  if (!page.url().includes('nidlogin')) return false;
+
+  await ensureNaverLoginIdPhoneTab(page);
+
+  const pwVal = await page.locator('#pw').inputValue().catch(() => '');
+  if (!pwVal.trim()) {
+    await ensureNaverLoginCredentialsForCaptcha(page, accountId, { fast: true });
+  } else {
+    await humanSleep(180, 380);
   }
 
-  await typeIntoNaverLoginField(page, '#pw', password);
-  await humanSleep(400, 900);
+  await clickNaverLoginButton(page);
+  await page
+    .waitForURL((u) => !u.href.includes('nidlogin'), { timeout: 25_000 })
+    .catch(() => {});
+  return !page.url().includes('nidlogin');
 }
 
 /** 로그인 버튼 — bbox 없을 때 force click 폴백. */

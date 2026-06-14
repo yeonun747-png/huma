@@ -5,6 +5,7 @@ import { shouldAutoSolveCaptchaVision } from './human-engine-policy.js';
 import {
   clickNaverLoginButton,
   ensureNaverLoginCredentialsForCaptcha,
+  submitNaverLoginAfterCaptcha,
 } from './naver-login-fields.js';
 import { logOperation } from './log-emitter.js';
 import { humanSleep } from '../modules/human-engine/typing.js';
@@ -677,6 +678,13 @@ export async function applyManualCaptchaAnswer(
   if (!cleared && (await isNaverLoginPendingAfterCaptcha(page))) {
     cleared = true;
     pending_login = true;
+  }
+
+  if (pending_login && ctx.accountId) {
+    const loggedIn = await submitNaverLoginAfterCaptcha(page, ctx.accountId);
+    await humanSleep(500, 1200);
+    cleared = loggedIn || !(await isNaverCaptchaVisible(page));
+    pending_login = cleared ? await isNaverLoginPendingAfterCaptcha(page) : true;
   }
 
   return { filled: true, submitted: true, cleared, pending_login };
