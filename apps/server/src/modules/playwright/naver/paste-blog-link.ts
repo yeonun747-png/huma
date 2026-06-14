@@ -14,6 +14,9 @@ import {
   resolveBodyEditableLocator,
 } from './naver-editor-locators.js';
 
+const BODY_SECTION =
+  '.se-components-wrap .se-section-text:not(.se-section-documentTitle)';
+
 const OG_LINK_SELECTORS = [
   '.se-module-oglink',
   '.se-oglink-module',
@@ -22,12 +25,17 @@ const OG_LINK_SELECTORS = [
   '[data-module="oglink"]',
 ];
 
-export async function isOgLinkVisible(page: Page): Promise<boolean> {
+export async function isOgLinkInBodySection(page: Page): Promise<boolean> {
   for (const sel of OG_LINK_SELECTORS) {
-    if ((await page.locator(sel).count()) > 0) return true;
-    if ((await page.frameLocator('#mainFrame').locator(sel).count().catch(() => 0)) > 0) return true;
+    const scoped = `${BODY_SECTION} ${sel}`;
+    if ((await page.locator(scoped).count()) > 0) return true;
   }
   return false;
+}
+
+/** @deprecated 툴바 oglink 버튼 오탐 — isOgLinkInBodySection / isBlogLinkUrlInBodyText 사용 */
+export async function isOgLinkVisible(page: Page): Promise<boolean> {
+  return isOgLinkInBodySection(page);
 }
 
 /**
@@ -78,7 +86,7 @@ export async function pasteBlogLinkWithOgPreview(
   const deadline = Date.now() + 20_000;
   let ogPreview = false;
   while (Date.now() < deadline) {
-    if (await isOgLinkVisible(page)) {
+    if (await isOgLinkInBodySection(page)) {
       ogPreview = true;
       break;
     }

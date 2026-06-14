@@ -1,7 +1,13 @@
+import { readFileSync } from 'fs';
+import { extname } from 'path';
 import type { Page } from 'playwright';
 
 import { humanSleep } from '../../human-engine/typing.js';
-import { clickEditorToolbar, findVisibleLocator } from './naver-editor-locators.js';
+import {
+  clickEditorToolbar,
+  findVisibleLocator,
+  isBlogImageInBodySection,
+} from './naver-editor-locators.js';
 
 async function insertFileViaToolbar(
   page: Page,
@@ -20,20 +26,46 @@ async function insertFileViaToolbar(
   return true;
 }
 
-const BLOG_IMAGE_SELECTORS = [
-  '.se-module-image',
-  '.se-image-module',
-  '.se-component-image',
-  '[data-module="image"]',
-  '[class*="se-image"]',
-];
+function mimeForImagePath(localPath: string): string {
+  const ext = extname(localPath).toLowerCase();
+  if (ext === '.png') return 'image/png';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.gif') return 'image/gif';
+  return 'image/jpeg';
+}
 
-export async function isBlogImageInEditor(page: Page): Promise<boolean> {
-  for (const sel of BLOG_IMAGE_SELECTORS) {
-    if ((await page.locator(sel).count()) > 0) return true;
-    if ((await page.frameLocator('#mainFrame').locator(sel).count().catch(() => 0)) > 0) return true;
+/** 캐럿 위치에 클립보드 붙여넣기 — 실패 시 툴바 filechooser */
+export async function pasteBlogImageAtCaret(page: Page, localPath: string): Promise<boolean> {
+  const mime = mimeForImagePath(localPath);
+  const bytes = readFileSync(localPath);
+
+  const clipboardReady = await page
+    .evaluate(
+      async ({ data, mimeType }) => {
+        try {
+          const blob = new Blob([new Uint8Array(data)], { type: mimeType });
+          await navigator.clipboard.write([new ClipboardItem({ [mimeType]: blob })]);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { data: Array.from(bytes), mimeType: mime },
+    )
+    .catch(() => false);
+
+  if (clipboardReady) {
+    await page.keyboard.press('Control+v');
+    await humanSleep(2500, 4500);
+    if (await isBlogImageInBodySection(page)) return true;
   }
-  return false;
+
+  return insertImageViaToolbar(page, localPath);
+}
+
+/** @deprecated 툴바 se-image 오탐 — isBlogImageInBodySection 사용 */
+export async function isBlogImageInEditor(page: Page): Promise<boolean> {
+  return isBlogImageInBodySection(page);
 }
 
 /** 툴바 「사진」 → filechooser. 실패 시 hidden input 폴백 */

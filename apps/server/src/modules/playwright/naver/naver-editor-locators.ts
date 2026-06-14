@@ -816,17 +816,80 @@ export async function resolveBodyEditableLocator(bodyLoc: Locator): Promise<Loca
   return resolveBodyEditableLocatorRelaxed(bodyLoc);
 }
 
-/** 본문 맨 끝으로 캐럿 이동 — 링크·이미지 삽입 전 */
+/** 본문 맨 끝으로 캐럿 이동 — 마우스 클릭 없이 마지막 paragraph DOM 포커스 */
 export async function focusBlogBodyEnd(page: Page, bodyLoc: Locator): Promise<void> {
   await blurBlogTitleField(page);
-  const editable = await resolveBodyEditableLocator(bodyLoc);
-  await humanClickLocator(page, editable);
-  await sleep(200);
+
+  const focused = await page
+    .evaluate((sectionSel) => {
+      const wrap = document.querySelector(sectionSel) as HTMLElement | null;
+      if (!wrap) return false;
+      const paragraphs = wrap.querySelectorAll('.se-text-paragraph[contenteditable="true"]');
+      const target =
+        paragraphs.length > 0
+          ? (paragraphs[paragraphs.length - 1] as HTMLElement)
+          : (wrap.querySelector('[contenteditable="true"]') as HTMLElement | null);
+      if (!target) return false;
+      target.scrollIntoView({ block: 'end' });
+      target.focus();
+      const sel = window.getSelection();
+      if (sel) {
+        const range = document.createRange();
+        range.selectNodeContents(target);
+        range.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+      return true;
+    }, BLOG_BODY_SECTION_LOCATOR)
+    .catch(() => false);
+
+  if (!focused) {
+    throw new Error('BLOG_BODY_END_FOCUS_FAILED');
+  }
+
+  await sleep(150);
+  await page.keyboard.press('End');
+  await sleep(80);
+
   if (await isFocusInTitleArea(page)) {
     throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
   }
-  await page.keyboard.press('Control+End');
-  await sleep(120);
+}
+
+/** 본문 섹션 전체 텍스트 (링크 URL 검증용) */
+export async function readBlogBodySectionText(page: Page): Promise<string> {
+  return page
+    .evaluate((sectionSel) => {
+      const wrap = document.querySelector(sectionSel) as HTMLElement | null;
+      if (!wrap) return '';
+      const clone = wrap.cloneNode(true) as HTMLElement;
+      for (const ph of clone.querySelectorAll('.se-placeholder, [class*="placeholder"]')) {
+        ph.remove();
+      }
+      return (clone.innerText ?? clone.textContent ?? '').replace(/\u00a0/g, ' ').trim();
+    }, BLOG_BODY_SECTION_LOCATOR)
+    .catch(() => '');
+}
+
+export function isBlogLinkUrlInBodyText(bodyText: string, linkUrl: string): boolean {
+  const normalized = bodyText.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+  const url = linkUrl.trim();
+  if (!url) return false;
+  if (normalized.includes(url)) return true;
+  try {
+    const host = new URL(url.startsWith('http') ? url : `https://${url}`).hostname.replace(/^www\./, '');
+    if (host && normalized.includes(host)) return true;
+  } catch {
+    /* ignore */
+  }
+  return /yeonun\.(com|ai)/i.test(normalized);
+}
+
+/** 본문 섹션 안에만 이미지 모듈 존재 여부 (툴바 se-image 오탐 제외) */
+export async function isBlogImageInBodySection(page: Page): Promise<boolean> {
+  const scoped = `${BLOG_BODY_SECTION_LOCATOR} .se-module-image, ${BLOG_BODY_SECTION_LOCATOR} .se-component-image, ${BLOG_BODY_SECTION_LOCATOR} [data-module="image"]`;
+  return (await page.locator(scoped).count()) > 0;
 }
 
 /** placeholder 클릭 직후 — 빈 paragraph는 isVisible false일 수 있어 attached만 확인 */
