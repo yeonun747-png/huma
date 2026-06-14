@@ -9,6 +9,7 @@ import {
   enterBlogEditor,
   prepareSeOneEditorSurface,
   waitAndDismissDraftResumePopup,
+  resetDraftDismissGuard,
 } from './enter-blog-editor.js';
 import {
   findBlogTitleLocator,
@@ -103,13 +104,15 @@ export async function postNaverBlog(params: {
     account_id: params.accountId,
   });
 
-  await prepareSeOneEditorSurface(page, 12_000);
+  // enterBlogEditor에서 이미 팝업·오버레이 처리 — 중복 12s 대기 제거
+  await waitAndDismissDraftResumePopup(page, 8_000).catch(() => {});
+  resetDraftDismissGuard(page);
 
-  // 발행 버튼만 보이는 스켈레톤·로딩 스피너 단계에서 조기 클릭 방지 —
-  // 툴바·제목·본문이 모두 그려지고 제목 위치가 안정될 때까지 대기.
   // 대기 도중 "작성 중인 글" 팝업이 다시 뜨면 콜백으로 즉시 취소(마우스) 클릭.
-  const fullyLoaded = await waitForSeOneEditorFullyLoaded(page, 45_000, async () => {
-    await waitAndDismissDraftResumePopup(page, 6_000).catch(() => {});
+  // 취소 후에는 제목·본문만 안정되면 바로 제목 입력(마우스)으로 진행.
+  const fullyLoaded = await waitForSeOneEditorFullyLoaded(page, 60_000, async () => {
+    await waitAndDismissDraftResumePopup(page, 8_000).catch(() => {});
+    resetDraftDismissGuard(page);
   });
   if (!fullyLoaded) {
     throw new Error('BLOG_EDITOR_NOT_READY');

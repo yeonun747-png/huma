@@ -96,6 +96,11 @@ async function clickIfVisible(root: Page | ReturnType<Page['frameLocator']>, sel
 type DraftDismissGuard = { inFlight: boolean; cooledUntil: number };
 const draftDismissGuardByPage = new WeakMap<Page, DraftDismissGuard>();
 
+/** 팝업 취소 완료 후 가드 해제 — 로딩 대기 루프가 즉시 재개되도록 */
+export function resetDraftDismissGuard(editorPage: Page): void {
+  draftDismissGuardByPage.delete(editorPage);
+}
+
 /** 「작성 중인 글이 있습니다」 — 확인(이어쓰기) 금지, 취소만 마우스로 클릭해 새 글 작성 */
 async function dismissDraftResumePopup(editorPage: Page): Promise<boolean> {
   if (!(await isDraftResumePopupVisible(editorPage))) return false;
@@ -143,6 +148,7 @@ async function dismissDraftResumePopup(editorPage: Page): Promise<boolean> {
           level: 'info',
           message: '[post_blog] 작성중 글 팝업 취소 완료',
         }).catch(() => {});
+        resetDraftDismissGuard(editorPage);
         draftDismissGuardByPage.set(editorPage, {
           inFlight: false,
           cooledUntil: Date.now() + 900,

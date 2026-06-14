@@ -44,9 +44,8 @@ const BODY_SECTION_SELECTOR =
 
 const TITLE_PLACEHOLDER_RE = /^(제목|title)$/i;
 
-/** 임시저장 이어쓰기 팝업 — 취소 전에는 에디터 입력 금지 */
+/** 임시저장 이어쓰기 팝업 — 취소/확인 버튼이 실제로 보일 때만 true (닫힌 뒤 DOM 잔여 오탐 방지) */
 export async function isDraftResumePopupVisible(page: Page): Promise<boolean> {
-  // DOM 한 번 평가로 빠르게 판정 — 패턴별 isVisible 폴링(느림) 제거
   const fast = await page
     .evaluate(() => {
       const re = /작성\s*중인\s*글|이어서\s*작성하시겠습니까|이어서\s*작성/;
@@ -57,17 +56,24 @@ export async function isDraftResumePopupVisible(page: Page): Promise<boolean> {
         const el = node as HTMLElement;
         if (!re.test(el.textContent ?? '')) continue;
         const r = el.getBoundingClientRect();
-        if (el.offsetParent !== null && r.width > 0 && r.height > 0) return true;
+        if (el.offsetParent === null || r.width <= 0 || r.height <= 0) continue;
+        const actionBtn = el.querySelector(
+          'button.se-popup-button-cancel, .se-popup-button-cancel, button.se-popup-button-confirm, .se-popup-button-confirm',
+        ) as HTMLElement | null;
+        if (actionBtn && actionBtn.offsetParent !== null) {
+          const br = actionBtn.getBoundingClientRect();
+          if (br.width > 0 && br.height > 0) return true;
+        }
       }
       return false;
     })
     .catch(() => null);
   if (fast !== null) return fast;
 
-  // evaluate 실패(네비게이션 중 등) 시 로케이터 폴백
   const loc = page
     .locator('[class*="se-popup"], [role="dialog"]')
     .filter({ hasText: /작성\s*중인\s*글|이어서\s*작성/ })
+    .locator('button.se-popup-button-cancel, .se-popup-button-cancel, button.se-popup-button-confirm')
     .first();
   return loc.isVisible({ timeout: 300 }).catch(() => false);
 }
@@ -1120,7 +1126,7 @@ async function probeSeOneLoadState(page: Page): Promise<{
 export async function isSeOneEditorSurfaceHealthy(page: Page): Promise<boolean> {
   if (await isDraftResumePopupVisible(page)) return false;
   const state = await probeSeOneLoadState(page);
-  return state.strong;
+  return state.ready;
 }
 
 /**
@@ -1134,27 +1140,29 @@ export async function waitForSeOneEditorFullyLoaded(
   onDraftPopup?: () => Promise<void>,
 ): Promise<boolean> {
   await page.waitForLoadState('domcontentloaded').catch(() => {});
-  await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {});
 
   const deadline = Date.now() + maxMs;
   let stableSince = 0;
   let lastBox: { x: number; y: number; w: number; h: number } | null = null;
+  let postDraftCancel = false;
 
   while (Date.now() < deadline) {
     if (await isDraftResumePopupVisible(page)) {
-      // 팝업이 뜨면 그냥 대기하지 말고 즉시 취소(마우스) — 콜백으로 위임
       if (onDraftPopup) await onDraftPopup();
+      postDraftCancel = true;
       stableSince = 0;
       lastBox = null;
-      await sleep(200);
+      await sleep(300);
       continue;
     }
 
     const state = await probeSeOneLoadState(page);
-    const meets = state.strong;
+    // 취소 후 새 글 로딩: 툴바 probe가 늦거나 실패해도 제목·본문만 안정되면 진행
+    const meets = postDraftCancel ? state.ready : state.strong || state.ready;
 
     if (meets && state.box) {
       const b = state.box;
+      const stableMs = postDraftCancel ? 350 : 700;
       if (
         lastBox &&
         Math.abs(lastBox.x - b.x) < 2 &&
@@ -1163,7 +1171,7 @@ export async function waitForSeOneEditorFullyLoaded(
         Math.abs(lastBox.h - b.h) < 2
       ) {
         if (stableSince === 0) stableSince = Date.now();
-        if (Date.now() - stableSince >= 700) return true;
+        if (Date.now() - stableSince >= stableMs) return true;
       } else {
         stableSince = Date.now();
       }
@@ -1172,7 +1180,7 @@ export async function waitForSeOneEditorFullyLoaded(
       stableSince = 0;
       lastBox = null;
     }
-    await sleep(250);
+    await sleep(200);
   }
 
   return false;
