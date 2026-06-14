@@ -777,7 +777,16 @@ export async function clickBlogBodyPlaceholder(page: Page): Promise<void> {
   }
 }
 
-/** SE ONE 제목 — 제목칸 마우스 이동·클릭 후 붙여넣기형 입력(insertText) */
+/** 포커스된 제목칸 비우기 — 중복 입력 방지(Ctrl+A·Delete + selectAll 폴백) */
+async function clearFocusedTitleEditable(page: Page, editable: Locator): Promise<void> {
+  const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
+  await page.keyboard.press(`${mod}+a`).catch(() => {});
+  await page.keyboard.press('Delete').catch(() => {});
+  await clearBlogTitleField(editable);
+  await sleep(80);
+}
+
+/** SE ONE 제목 — 제목칸 마우스 이동·클릭 → 비우기 → 붙여넣기형 입력(insertText) */
 export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: string): Promise<void> {
   if (await isDraftResumePopupVisible(page)) {
     throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
@@ -788,23 +797,28 @@ export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: s
   await humanClickLocator(page, editable);
   await sleep(200);
 
+  // 입력 전 기존 내용·placeholder 제거 — 중복 입력 방지
+  await clearFocusedTitleEditable(page, editable);
   await page.keyboard.insertText(text);
-  await sleep(250);
+  await sleep(300);
 
   let written = await readBlogTitleText(titleLoc);
   if (!isBlogTitleWritten(written, text)) {
-    // 폴백 — 클립보드 붙여넣기
-    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
-    await page.evaluate(async (t) => {
-      try {
-        await navigator.clipboard.writeText(t);
-      } catch {
-        /* 포커스·권한 실패 */
-      }
-    }, text).catch(() => {});
+    // 폴백 — 다시 비우고 클립보드 붙여넣기 (중복 방지)
     await humanClickLocator(page, editable).catch(() => {});
+    await clearFocusedTitleEditable(page, editable);
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
+    await page
+      .evaluate(async (t) => {
+        try {
+          await navigator.clipboard.writeText(t);
+        } catch {
+          /* 포커스·권한 실패 */
+        }
+      }, text)
+      .catch(() => {});
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+v' : 'Control+v');
-    await sleep(300);
+    await sleep(350);
     written = await readBlogTitleText(titleLoc);
   }
 
