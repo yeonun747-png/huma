@@ -13,11 +13,10 @@ import {
 } from './enter-blog-editor.js';
 import {
   findBlogTitleLocator,
+  blogBodySectionLocator,
   clickBlogBodyPlaceholder,
   pasteBlogBodyContent,
   ensureBlogTitleWritten,
-  findBlogBodyParagraphAfterClick,
-  waitForBlogBodyParagraphLocator,
   blurBlogTitleField,
   verifyBlogBodyField,
   verifyBlogTitleField,
@@ -48,7 +47,7 @@ async function typeSeOneBlogBody(
   bodyLoc: Locator,
   content: string,
 ): Promise<void> {
-  await pasteBlogBodyContent(page, bodyLoc, content, { skipClick: true });
+  await pasteBlogBodyContent(page, bodyLoc, content, { afterPlaceholderClick: true });
 }
 
 export async function postNaverBlog(params: {
@@ -125,32 +124,16 @@ export async function postNaverBlog(params: {
     account_id: params.accountId,
   });
 
-  let editor = await waitForBlogBodyParagraphLocator(page, 800);
-  const bodyAlreadyOk =
-    editor != null && (await verifyBlogBodyField(page, editor, params.content));
+  const editor = blogBodySectionLocator(page);
+  const bodyAlreadyOk = await verifyBlogBodyField(page, editor, params.content);
 
   if (!bodyAlreadyOk) {
-    if (!editor) {
-      await clickBlogBodyPlaceholder(page);
-      editor =
-        (await waitForBlogBodyParagraphLocator(page, 2_000)) ??
-        (await findBlogBodyParagraphAfterClick(page));
-      if (editor) {
-        await logOperation({
-          level: 'info',
-          message: '[post_blog][body] placeholder 클릭 후 paragraph 확보(relaxed 탐색 포함)',
-          account_id: params.accountId,
-        }).catch(() => {});
-      }
-    }
-    if (!editor) {
-      await logOperation({
-        level: 'warn',
-        message: '[post_blog][body] paragraph 미검출 — BLOG_BODY_NOT_FOUND',
-        account_id: params.accountId,
-      }).catch(() => {});
-      throw new Error('BLOG_BODY_NOT_FOUND');
-    }
+    await clickBlogBodyPlaceholder(page);
+    await logOperation({
+      level: 'info',
+      message: '[post_blog][body] placeholder 클릭 직후 insertText(탐색 대기 없음)',
+      account_id: params.accountId,
+    }).catch(() => {});
 
     try {
       await typeSeOneBlogBody(page, editor, params.content);
@@ -164,9 +147,6 @@ export async function postNaverBlog(params: {
     }
   }
 
-  if (!editor) {
-    throw new Error('BLOG_BODY_NOT_FOUND');
-  }
   if (!titleBox) {
     throw new Error('BLOG_TITLE_NOT_FOUND');
   }

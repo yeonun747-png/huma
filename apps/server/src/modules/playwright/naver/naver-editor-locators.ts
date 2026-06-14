@@ -57,6 +57,14 @@ const TITLE_SECTION_SELECTOR =
 const BODY_SECTION_SELECTOR =
   '.se-section-text:not(.se-section-documentTitle), .se-text-paragraph[contenteditable="true"], .se-content';
 
+const BLOG_BODY_SECTION_LOCATOR =
+  '.se-components-wrap .se-section-text:not(.se-section-documentTitle)';
+
+/** SE ONE 본문 섹션 — visibility·height 필터 없이 locator만 반환(placeholder 클릭 직후 즉시 입력용) */
+export function blogBodySectionLocator(page: Page): Locator {
+  return page.locator(BLOG_BODY_SECTION_LOCATOR).first();
+}
+
 const TITLE_PLACEHOLDER_RE = /^(제목|title)$/i;
 
 /** 임시저장 이어쓰기 팝업 — 취소/확인 버튼이 실제로 보일 때만 true (닫힌 뒤 DOM 잔여 오탐 방지) */
@@ -780,6 +788,15 @@ export async function resolveBodyEditableLocator(bodyLoc: Locator): Promise<Loca
   ) {
     return nested;
   }
+  return resolveBodyEditableLocatorRelaxed(bodyLoc);
+}
+
+/** placeholder 클릭 직후 — 빈 paragraph는 isVisible false일 수 있어 attached만 확인 */
+async function resolveBodyEditableLocatorRelaxed(bodyLoc: Locator): Promise<Locator> {
+  const paragraph = bodyLoc.locator('.se-text-paragraph[contenteditable="true"]').first();
+  if ((await paragraph.count()) > 0) return paragraph;
+  const nested = bodyLoc.locator('[contenteditable="true"], [contenteditable]').first();
+  if ((await nested.count()) > 0) return nested;
   return bodyLoc;
 }
 
@@ -1170,35 +1187,38 @@ async function ensureBodyFocusForPaste(page: Page, editable: Locator): Promise<v
 }
 
 /**
- * SE ONE 본문 — skipClick이면 placeholder는 이미 클릭됨.
- * placeholder 클릭 ≠ contenteditable paragraph 키보드 입력 준비 — SE ONE은 humanClick 후 insertText만 신뢰.
- * (제목 pasteBlogTitleField와 동일: humanClickLocator → insertText)
+ * SE ONE 본문 입력.
+ * afterPlaceholderClick: placeholder humanClick 직후 — 재탐색·재클릭 없이 insertText만.
  */
 export async function pasteBlogBodyContent(
   page: Page,
   bodyLoc: Locator,
   content: string,
-  options?: { skipClick?: boolean },
+  options?: { skipClick?: boolean; afterPlaceholderClick?: boolean },
 ): Promise<void> {
   if (await isDraftResumePopupVisible(page)) {
     throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
   }
 
-  const editable = await resolveBodyEditableLocator(bodyLoc);
-
-  if (options?.skipClick) {
+  if (options?.afterPlaceholderClick) {
     if (await isFocusInTitleArea(page)) {
       await blurBlogTitleField(page);
     }
-    // placeholder 클릭 후에도 paragraph contenteditable에 humanClick해야 insertText가 SE ONE에 전달됨
-    await humanClickLocator(page, editable);
-    await sleep(200);
   } else {
-    await blurBlogTitleField(page);
-    await humanClickLocator(page, editable);
-    await sleep(200);
-    await focusBodyEditableNode(editable);
-    await ensureBodyFocusForPaste(page, editable);
+    const editable = await resolveBodyEditableLocator(bodyLoc);
+    if (options?.skipClick) {
+      if (await isFocusInTitleArea(page)) {
+        await blurBlogTitleField(page);
+      }
+      await humanClickLocator(page, editable);
+      await sleep(200);
+    } else {
+      await blurBlogTitleField(page);
+      await humanClickLocator(page, editable);
+      await sleep(200);
+      await focusBodyEditableNode(editable);
+      await ensureBodyFocusForPaste(page, editable);
+    }
   }
 
   if (await isFocusInTitleArea(page)) {
@@ -1213,8 +1233,11 @@ export async function pasteBlogBodyContent(
   for (let i = 0; i < paragraphs.length; i += 1) {
     if (await isFocusInTitleArea(page)) {
       await blurBlogTitleField(page);
-      await humanClickLocator(page, editable);
-      await sleep(150);
+      if (!options?.afterPlaceholderClick) {
+        const editable = await resolveBodyEditableLocatorRelaxed(bodyLoc);
+        await humanClickLocator(page, editable);
+        await sleep(150);
+      }
       if (await isFocusInTitleArea(page)) {
         throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
       }
