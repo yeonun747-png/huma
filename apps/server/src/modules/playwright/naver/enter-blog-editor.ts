@@ -18,6 +18,7 @@ import {
   dismissSeOneMaterialPopup,
   findBlogTitleLocator,
   findVisibleLocator,
+  editorLocatorScopes,
   isDraftResumePopupVisible,
   isNaverBlogEditorInteractable,
   isSeOneEditorShellReady,
@@ -205,8 +206,7 @@ export async function dismissNaverBlogEditorOverlays(
     await dismissDraftResumePopup(editorPage);
   }
 
-  const frame = editorPage.frameLocator('#mainFrame');
-  const scopes: Array<Page | ReturnType<Page['frameLocator']>> = [frame, editorPage];
+  const scopes = await editorLocatorScopes(editorPage);
 
   for (let round = 0; round < 4; round += 1) {
     let dismissed = false;

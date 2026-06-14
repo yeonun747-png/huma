@@ -8,6 +8,20 @@ export function editorFrame(page: Page): FrameLocator {
   return page.frameLocator('#mainFrame');
 }
 
+/** 구형 postwrite iframe — 현행 SE ONE(postwrite URL, #mainFrame 없음)에서는 false */
+export async function hasLegacyMainFrame(page: Page): Promise<boolean> {
+  return (await page.locator('#mainFrame').count().catch(() => 0)) > 0;
+}
+
+/** SE ONE은 page 직접, 구형만 #mainFrame iframe 추가(page 우선) */
+export async function editorLocatorScopes(page: Page): Promise<Array<Page | FrameLocator>> {
+  const scopes: Array<Page | FrameLocator> = [page];
+  if (await hasLegacyMainFrame(page)) {
+    scopes.push(editorFrame(page));
+  }
+  return scopes;
+}
+
 /** 현행 SE ONE + 구형 postwrite 공통 제목 셀렉터 */
 export const BLOG_TITLE_SELECTORS = [
   '#subjectTextBox',
@@ -134,7 +148,7 @@ async function focusBodyEditableNode(loc: Locator): Promise<void> {
 async function findBlogBodyParagraphOnly(page: Page): Promise<Locator | null> {
   await dismissSeOneMaterialPopup(page);
 
-  for (const scope of [page, editorFrame(page)] as Array<Page | FrameLocator>) {
+  for (const scope of await editorLocatorScopes(page)) {
     const mainParagraph = await pickMainBodyParagraph(page, scope);
     if (mainParagraph) return mainParagraph;
 
@@ -144,7 +158,7 @@ async function findBlogBodyParagraphOnly(page: Page): Promise<Locator | null> {
       )
       .first();
     if (
-      (await paragraph.count()) > 0 &&
+      (await paragraph.count().catch(() => 0)) > 0 &&
       (await paragraph.isVisible({ timeout: 400 }).catch(() => false)) &&
       (await isBodyParagraphEditable(page, paragraph))
     ) {
@@ -422,7 +436,7 @@ export async function findBlogBodyLocator(page: Page): Promise<Locator | null> {
     /* ignore */
   }
 
-  for (const scope of [page, editorFrame(page)] as Array<Page | FrameLocator>) {
+  for (const scope of await editorLocatorScopes(page)) {
     const mainParagraph = await pickMainBodyParagraph(page, scope);
     if (mainParagraph) return mainParagraph;
 
@@ -431,13 +445,13 @@ export async function findBlogBodyLocator(page: Page): Promise<Locator | null> {
       .first();
     try {
       if (
-        (await bodySection.count()) > 0 &&
+        (await bodySection.count().catch(() => 0)) > 0 &&
         (await bodySection.isVisible({ timeout: 600 }).catch(() => false)) &&
         (await isLocatorBodySection(page, bodySection))
       ) {
         const paragraph = bodySection.locator('.se-text-paragraph[contenteditable="true"]').first();
         if (
-          (await paragraph.count()) > 0 &&
+          (await paragraph.count().catch(() => 0)) > 0 &&
           (await paragraph.isVisible({ timeout: 300 }).catch(() => false)) &&
           (await isLocatorMainEditorBody(page, paragraph))
         ) {
@@ -453,7 +467,10 @@ export async function findBlogBodyLocator(page: Page): Promise<Locator | null> {
     for (const sel of BLOG_BODY_SELECTORS) {
       const loc = scope.locator(sel).first();
       try {
-        if ((await loc.count()) > 0 && (await loc.isVisible().catch(() => false))) {
+        if (
+          (await loc.count().catch(() => 0)) > 0 &&
+          (await loc.isVisible().catch(() => false))
+        ) {
           if (await isLocatorMainEditorBody(page, loc)) return loc;
         }
       } catch {
@@ -462,7 +479,7 @@ export async function findBlogBodyLocator(page: Page): Promise<Locator | null> {
     }
   }
 
-  if ((await page.locator('#mainFrame').count().catch(() => 0)) > 0) {
+  if (await hasLegacyMainFrame(page)) {
     const legacy = page
       .frameLocator('#mainFrame')
       .locator('.se-content, .se-text-paragraph, [contenteditable="true"]')
@@ -1290,13 +1307,13 @@ export async function findVisibleLocator(
   options?: { inFrame?: boolean },
 ): Promise<Locator | null> {
   const scopes: Array<Page | FrameLocator> =
-    options?.inFrame === false ? [page] : [editorFrame(page), page];
+    options?.inFrame === false ? [page] : await editorLocatorScopes(page);
 
   for (const scope of scopes) {
     for (const sel of selectors) {
       const loc = scope.locator(sel).first();
       try {
-        if ((await loc.count()) > 0 && (await loc.isVisible())) {
+        if ((await loc.count().catch(() => 0)) > 0 && (await loc.isVisible().catch(() => false))) {
           return loc;
         }
       } catch {
@@ -1564,12 +1581,14 @@ export async function clickEditorToolbar(
     }
   }
 
-  const frame = editorFrame(page);
   for (const label of ariaLabels) {
-    for (const scope of [frame, page]) {
+    for (const scope of await editorLocatorScopes(page)) {
       const loc = scope.getByRole('button', { name: label }).first();
       try {
-        if ((await loc.count()) > 0 && (await loc.isVisible())) {
+        if (
+          (await loc.count().catch(() => 0)) > 0 &&
+          (await loc.isVisible().catch(() => false))
+        ) {
           await clickVisibleLocator(page, loc);
           return true;
         }
@@ -1580,10 +1599,13 @@ export async function clickEditorToolbar(
   }
 
   for (const text of buttonTexts) {
-    for (const scope of [frame, page]) {
+    for (const scope of await editorLocatorScopes(page)) {
       const loc = scope.locator(`button:has-text("${text}")`).first();
       try {
-        if ((await loc.count()) > 0 && (await loc.isVisible())) {
+        if (
+          (await loc.count().catch(() => 0)) > 0 &&
+          (await loc.isVisible().catch(() => false))
+        ) {
           await clickVisibleLocator(page, loc);
           return true;
         }
