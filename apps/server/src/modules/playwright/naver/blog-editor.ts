@@ -16,7 +16,8 @@ import {
   ensureBlogBodyLocator,
   clickBlogBodyPlaceholder,
   pasteBlogBodyContent,
-  pasteBlogTitleField,
+  ensureBlogTitleWritten,
+  moveMouseToBlogPlaceholder,
   blurBlogTitleField,
   verifyBlogBodyField,
   verifyBlogTitleField,
@@ -41,21 +42,6 @@ function mergePersonaConfig(base: HumanEngineConfig, persona: AccountPersona): H
   };
 }
 
-async function assertTitleStable(page: Page, titleLoc: Locator, expected: string): Promise<void> {
-  if (!(await verifyBlogTitleField(page, titleLoc, expected))) {
-    throw new Error('BLOG_TITLE_WRITE_FAILED');
-  }
-}
-
-/** SE ONE 제목 — 마우스 1회 클릭 후 붙여넣기 */
-async function typeBlogTitle(page: Page, titleLoc: Locator, title: string): Promise<void> {
-  if (await verifyBlogTitleField(page, titleLoc, title)) return;
-
-  await pasteBlogTitleField(page, titleLoc, title);
-  await assertTitleStable(page, titleLoc, title);
-}
-
-/** SE ONE 본문 — placeholder 클릭 후 붙여넣기 */
 async function typeSeOneBlogBody(
   page: Page,
   bodyLoc: Locator,
@@ -117,7 +103,7 @@ export async function postNaverBlog(params: {
     await prepareSeOneEditorSurface(page, 6_000);
   }
 
-  await typeBlogTitle(page, titleBox, params.title);
+  await ensureBlogTitleWritten(page, titleBox, params.title);
 
   await logOperation({
     level: 'info',
@@ -125,6 +111,7 @@ export async function postNaverBlog(params: {
     account_id: params.accountId,
   });
 
+  await moveMouseToBlogPlaceholder(page, titleBox);
   await clickBlogBodyPlaceholder(page);
 
   const editor = await ensureBlogBodyLocator(page, titleBox);
