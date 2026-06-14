@@ -9,6 +9,9 @@
     "build": "node scripts/build.mjs",
     "lint": "tsc --noEmit -p tsconfig.json"
   },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

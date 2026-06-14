@@ -2,6 +2,7 @@ import { spawnSync } from 'child_process';
 import { readdir, readFile, writeFile } from 'fs/promises';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { resolveTscBin } from './resolve-tsc.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
@@ -29,7 +30,16 @@ async function patchDistImports() {
   }
 }
 
-const tsc = spawnSync('npx', ['tsc'], { cwd: root, stdio: 'inherit', shell: true });
+const tscBin = resolveTscBin(root);
+if (!tscBin) {
+  console.error('[@huma/shared] ERROR: typescript not found — cd ~/huma && npm install');
+  process.exit(1);
+}
+
+console.log('[@huma/shared] TypeScript compile...');
+const tsc = spawnSync(process.execPath, [tscBin], { cwd: root, stdio: 'inherit' });
 if (tsc.status !== 0) process.exit(tsc.status ?? 1);
 
+console.log('[@huma/shared] patch dist imports...');
 await patchDistImports();
+console.log('[@huma/shared] build OK');
