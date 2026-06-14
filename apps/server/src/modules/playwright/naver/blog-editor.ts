@@ -8,6 +8,7 @@ import { parsePersona, type AccountPersona } from '../persona.js';
 import {
   enterBlogEditor,
   prepareSeOneEditorSurface,
+  waitAndDismissDraftResumePopup,
 } from './enter-blog-editor.js';
 import {
   findBlogTitleLocator,
@@ -21,7 +22,6 @@ import {
   isBlogBodySubstantiallyWritten,
   readBlogBodyText,
   readBlogTitleText,
-  waitForBlogTitleSectionReady,
   waitForSeOneEditorFullyLoaded,
   isBlogTitleEditableVisible,
 } from './naver-editor-locators.js';
@@ -105,8 +105,11 @@ export async function postNaverBlog(params: {
   await prepareSeOneEditorSurface(page, 12_000);
 
   // 발행 버튼만 보이는 스켈레톤·로딩 스피너 단계에서 조기 클릭 방지 —
-  // 툴바·제목·본문이 모두 그려지고 제목 위치가 안정될 때까지 대기
-  const fullyLoaded = await waitForSeOneEditorFullyLoaded(page, 45_000);
+  // 툴바·제목·본문이 모두 그려지고 제목 위치가 안정될 때까지 대기.
+  // 대기 도중 "작성 중인 글" 팝업이 다시 뜨면 콜백으로 즉시 취소(마우스) 클릭.
+  const fullyLoaded = await waitForSeOneEditorFullyLoaded(page, 45_000, async () => {
+    await waitAndDismissDraftResumePopup(page, 6_000).catch(() => {});
+  });
   await logOperation({
     level: 'info',
     message: `[post_blog] 본체 로딩 ${fullyLoaded ? '완료' : '대기 timeout(폴백 진행)'} — 제목칸 클릭·입력 시작`,
@@ -114,10 +117,14 @@ export async function postNaverBlog(params: {
   });
 
   await prepareSeOneEditorSurface(page, 6_000);
-  // 제목 클릭은 pasteBlogTitleField가 1회만 수행 — 여기서 별도 복구 클릭을 하면
-  // 제목칸이 2번 클릭되므로, 보이지 않을 때만 가볍게 노출 대기(클릭 없음)
+  // 제목 클릭은 pasteBlogTitleField가 "1회만" 수행한다.
+  // 여기서 recover(클릭)를 호출하면 제목칸이 2~3번 클릭되므로,
+  // 보이지 않을 때는 클릭 없이 노출만 폴링한다.
   if (!(await isBlogTitleEditableVisible(page))) {
-    await waitForBlogTitleSectionReady(page, 8_000).catch(() => {});
+    const titleWaitEnd = Date.now() + 8_000;
+    while (Date.now() < titleWaitEnd && !(await isBlogTitleEditableVisible(page))) {
+      await sleep(300);
+    }
   }
 
   const titleBox = await findBlogTitleLocator(page);

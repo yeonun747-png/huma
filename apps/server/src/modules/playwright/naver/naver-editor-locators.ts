@@ -1091,7 +1091,11 @@ async function probeSeOneLoadState(page: Page): Promise<{
  * 발행 버튼만 보이는 스켈레톤·로딩 스피너 단계에서 제목을 조기 클릭해
  * 입력이 날아가는 문제를 막는다. (제목 위치가 흔들리지 않을 때까지 대기)
  */
-export async function waitForSeOneEditorFullyLoaded(page: Page, maxMs = 45_000): Promise<boolean> {
+export async function waitForSeOneEditorFullyLoaded(
+  page: Page,
+  maxMs = 45_000,
+  onDraftPopup?: () => Promise<void>,
+): Promise<boolean> {
   await page.waitForLoadState('domcontentloaded').catch(() => {});
   await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {});
 
@@ -1102,9 +1106,11 @@ export async function waitForSeOneEditorFullyLoaded(page: Page, maxMs = 45_000):
 
   while (Date.now() < deadline) {
     if (await isDraftResumePopupVisible(page)) {
+      // 팝업이 뜨면 그냥 대기하지 말고 즉시 취소(마우스) — 콜백으로 위임
+      if (onDraftPopup) await onDraftPopup();
       stableSince = 0;
       lastBox = null;
-      await sleep(300);
+      await sleep(200);
       continue;
     }
 
