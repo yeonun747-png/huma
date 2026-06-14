@@ -1,7 +1,7 @@
 import type { Locator, Page } from 'playwright';
 
 import { humanSleep } from '../../human-engine/typing.js';
-import { scrollReview, scaledHumanSleep } from '../../human-engine/timing.js';
+import { scaledHumanSleep } from '../../human-engine/timing.js';
 import { calcReviewDurationMs } from '../../../lib/review-duration.js';
 import type { HumanEngineConfig } from '../../../lib/settings.js';
 import { parsePersona, type AccountPersona } from '../persona.js';

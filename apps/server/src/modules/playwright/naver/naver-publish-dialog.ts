@@ -2,6 +2,7 @@ import type { Page } from 'playwright';
 
 import { sleep } from '../../../lib/utils.js';
 import type { HumanEngineConfig } from '../../../lib/settings.js';
+import { normalizeHashtagTag } from '../../../lib/hashtag-sanitize.js';
 import { humanClickLocator } from '../../human-engine/mouse.js';
 import { humanSleep } from '../../human-engine/typing.js';
 import { scaledHumanSleep } from '../../human-engine/timing.js';
@@ -12,7 +13,6 @@ import {
 import {
   findVisibleLocator,
   clickVisibleLocator,
-  insertTextIntoInputLocator,
 } from './naver-editor-locators.js';
 import { waitForNaverPublishSuccess } from './blog-editor-pipeline.js';
 
@@ -48,6 +48,10 @@ const TAG_INPUT_SELECTORS = [
 ];
 
 const CONFIRM_PUBLISH_SELECTORS = [
+  '.se-popup-publish .btn_publish',
+  '.se-popup-publish button[class*="publish"]',
+  '.se-popup-publish .confirm_btn',
+  '[class*="publish_layer"] .btn_publish',
   '[class*="publish_layer"] button[class*="confirm"]',
   '[class*="publish_layer"] .confirm_btn',
   '[class*="PublishLayer"] button:has-text("발행")',
@@ -119,9 +123,7 @@ export async function typePublishTags(
   _humanConfig: HumanEngineConfig,
   scale = 1,
 ): Promise<boolean> {
-  const tags = hashtags
-    .map((t) => t.replace(/^#/, '').trim())
-    .filter(Boolean);
+  const tags = hashtags.map((t) => normalizeHashtagTag(t)).filter(Boolean);
   if (!tags.length) return false;
 
   const input = await findVisibleLocator(page, TAG_INPUT_SELECTORS, { inFrame: false });
@@ -129,10 +131,12 @@ export async function typePublishTags(
 
   await humanClickLocator(page, input);
 
-  for (let i = 0; i < tags.length; i++) {
-    await insertTextIntoInputLocator(input, `#${tags[i]!}`);
+  for (let i = 0; i < tags.length; i += 1) {
+    const tag = tags[i]!;
+    await humanClickLocator(page, input);
+    await page.keyboard.insertText(tag);
     await scaledHumanSleep(200, 550, scale);
-    await input.press(i < tags.length - 1 || Math.random() < 0.75 ? 'Space' : 'Enter');
+    await page.keyboard.press(i < tags.length - 1 || Math.random() < 0.75 ? 'Space' : 'Enter');
     await scaledHumanSleep(400, 900, scale);
   }
 
@@ -141,9 +145,20 @@ export async function typePublishTags(
 }
 
 export async function clickConfirmPublish(page: Page): Promise<void> {
+  const layer = await findVisibleLocator(page, PUBLISH_LAYER_SELECTORS, { inFrame: false });
+  if (layer) {
+    const footerPublish = layer.locator('button').filter({ hasText: /^발행$/ }).last();
+    if (
+      (await footerPublish.count()) > 0 &&
+      (await footerPublish.isVisible({ timeout: 2000 }).catch(() => false))
+    ) {
+      await clickVisibleLocator(page, footerPublish);
+      return;
+    }
+  }
+
   const confirm = await findVisibleLocator(page, CONFIRM_PUBLISH_SELECTORS, { inFrame: false });
   if (!confirm) {
-    const layer = await findVisibleLocator(page, PUBLISH_LAYER_SELECTORS, { inFrame: false });
     if (layer) {
       const fallback = layer.locator('button:has-text("발행")').last();
       if ((await fallback.count()) > 0) {
