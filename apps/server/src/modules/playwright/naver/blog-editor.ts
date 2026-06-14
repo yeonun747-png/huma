@@ -1,6 +1,7 @@
 import type { Locator, Page } from 'playwright';
 
 import { humanSleep } from '../../human-engine/typing.js';
+import { humanMouseMove } from '../../human-engine/mouse.js';
 import { scrollReview, scaledHumanSleep } from '../../human-engine/timing.js';
 import { calcReviewDurationMs } from '../../../lib/review-duration.js';
 import type { HumanEngineConfig } from '../../../lib/settings.js';
@@ -24,8 +25,8 @@ import {
   readBlogBodyText,
   readBlogTitleText,
   waitForSeOneEditorFullyLoaded,
-  isBlogTitleEditableVisible,
-  isSeOneEditorSurfaceHealthy,
+  isSeOneEditorReadyForTitleInput,
+  isDraftResumePopupVisible,
 } from './naver-editor-locators.js';
 import {
   extractPublishedPostUrl,
@@ -51,6 +52,14 @@ async function assertTitleStable(page: Page, titleLoc: Locator, expected: string
   if (!isBlogTitleWritten(written, expected)) {
     throw new Error('BLOG_TITLE_WRITE_FAILED');
   }
+}
+
+async function showPointerOnTitleField(page: Page): Promise<void> {
+  const title = await findBlogTitleLocator(page);
+  if (!title) return;
+  const box = await title.boundingBox().catch(() => null);
+  if (!box) return;
+  await humanMouseMove(page, box.x + box.width / 2, box.y + box.height / 2).catch(() => {});
 }
 
 /** SE ONE 제목 — 마우스 1회 클릭 후 붙여넣기 */
@@ -104,34 +113,29 @@ export async function postNaverBlog(params: {
     account_id: params.accountId,
   });
 
-  // enterBlogEditor에서 이미 팝업·오버레이 처리 — 중복 12s 대기 제거
-  await waitAndDismissDraftResumePopup(page, 8_000).catch(() => {});
+  // 팝업 없으면 즉시 통과 — 이후 titleReady 대기에서 제목 위치로 포인터 이동
+  await waitAndDismissDraftResumePopup(page, 3_000).catch(() => {});
   resetDraftDismissGuard(page);
 
-  // 대기 도중 "작성 중인 글" 팝업이 다시 뜨면 콜백으로 즉시 취소(마우스) 클릭.
-  // 취소 후에는 제목·본문만 안정되면 바로 제목 입력(마우스)으로 진행.
-  const fullyLoaded = await waitForSeOneEditorFullyLoaded(page, 60_000, async () => {
-    await waitAndDismissDraftResumePopup(page, 8_000).catch(() => {});
-    resetDraftDismissGuard(page);
-  });
-  if (!fullyLoaded) {
+  let readyForTitle = await isSeOneEditorReadyForTitleInput(page);
+  if (!readyForTitle) {
+    readyForTitle = await waitForSeOneEditorFullyLoaded(page, 45_000, async () => {
+      await waitAndDismissDraftResumePopup(page, 8_000).catch(() => {});
+      resetDraftDismissGuard(page);
+    });
+  }
+  if (!readyForTitle) {
     throw new Error('BLOG_EDITOR_NOT_READY');
   }
+  await showPointerOnTitleField(page);
   await logOperation({
     level: 'info',
     message: '[post_blog] 본체 로딩 완료 — 제목칸 클릭·입력 시작',
     account_id: params.accountId,
   });
 
-  await prepareSeOneEditorSurface(page, 6_000);
-  // 제목 클릭은 pasteBlogTitleField가 "1회만" 수행한다.
-  // 여기서 recover(클릭)를 호출하면 제목칸이 2~3번 클릭되므로,
-  // 보이지 않을 때는 클릭 없이 노출만 폴링한다.
-  if (!(await isBlogTitleEditableVisible(page))) {
-    const titleWaitEnd = Date.now() + 8_000;
-    while (Date.now() < titleWaitEnd && !(await isBlogTitleEditableVisible(page))) {
-      await sleep(300);
-    }
+  if (await isDraftResumePopupVisible(page)) {
+    await prepareSeOneEditorSurface(page, 6_000);
   }
 
   const titleBox = await findBlogTitleLocator(page);
@@ -140,10 +144,6 @@ export async function postNaverBlog(params: {
   }
 
   await typeBlogTitle(page, titleBox, params.title);
-
-  if (!(await isSeOneEditorSurfaceHealthy(page))) {
-    throw new Error('BLOG_EDITOR_NOT_READY');
-  }
 
   await logOperation({
     level: 'info',

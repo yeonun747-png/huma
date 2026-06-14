@@ -1068,12 +1068,13 @@ export async function isSeOneEditorShellReady(page: Page): Promise<boolean> {
 async function probeSeOneLoadState(page: Page): Promise<{
   ready: boolean;
   strong: boolean;
+  titleReady: boolean;
   box: { x: number; y: number; w: number; h: number } | null;
 }> {
   return page
     .evaluate(() => {
       const onWrite = /postwrite|PostWriteForm|GoBlogWrite/i.test(location.href);
-      if (!onWrite) return { ready: false, strong: false, box: null };
+      if (!onWrite) return { ready: false, strong: false, titleReady: false, box: null };
 
       const visible = (el: Element | null): el is HTMLElement => {
         if (!el) return false;
@@ -1105,21 +1106,33 @@ async function probeSeOneLoadState(page: Page): Promise<{
       const body = document.querySelector(
         '.se-section-text:not(.se-section-documentTitle), .se-component-content .se-text-paragraph, .se-components-wrap .se-section-text',
       );
+      const bodyPlaceholder = document.querySelector(
+        '.se-section-text:not(.se-section-documentTitle) .se-placeholder, .se-section-text:not(.se-section-documentTitle) [class*="placeholder"]',
+      );
       const toolbar = document.querySelector('.se-toolbar, [class*="se-toolbar"], .se-menu, .se-toolbar-container');
 
       const tb = title instanceof HTMLElement ? title.getBoundingClientRect() : null;
       const titleOk = visible(title) && !!tb && tb.height >= 12 && tb.width >= 80;
-      const bodyOk = visible(body);
+      const bodyOk = visible(body) || visible(bodyPlaceholder);
 
       return {
         // strong: 툴바까지 — 본체가 완전히 그려진 상태
         strong: !spinnerVisible && titleOk && bodyOk && visible(toolbar),
-        // ready(완화): 스피너 없고 제목·본문이 보이면 입력 가능
+        // ready: 스피너 없고 제목·본문(또는 placeholder)이 보이면 본문 입력 가능
         ready: !spinnerVisible && titleOk && bodyOk,
+        // titleReady: 제목 입력만 — 본문은 제목 입력·클릭 후 생성되는 경우가 많음
+        titleReady: !spinnerVisible && titleOk,
         box: tb ? { x: tb.x, y: tb.y, w: tb.width, h: tb.height } : null,
       };
     })
-    .catch(() => ({ ready: false, strong: false, box: null }));
+    .catch(() => ({ ready: false, strong: false, titleReady: false, box: null }));
+}
+
+/** 제목 마우스 입력 직전 — 팝업 없고 제목란만 준비되면 true */
+export async function isSeOneEditorReadyForTitleInput(page: Page): Promise<boolean> {
+  if (await isDraftResumePopupVisible(page)) return false;
+  const state = await probeSeOneLoadState(page);
+  return state.titleReady;
 }
 
 /** 툴바·제목·본문이 모두 살아 있는지 — 붕괴 후 연쇄 클릭 방지 */
@@ -1130,9 +1143,8 @@ export async function isSeOneEditorSurfaceHealthy(page: Page): Promise<boolean> 
 }
 
 /**
- * SE ONE 에디터 본체가 완전히 로딩·안정될 때까지 대기.
- * 발행 버튼만 보이는 스켈레톤·로딩 스피너 단계에서 제목을 조기 클릭해
- * 입력이 날아가는 문제를 막는다. (제목 위치가 흔들리지 않을 때까지 대기)
+ * SE ONE 제목 입력 가능할 때까지 대기.
+ * 팝업 없을 때는 titleReady(제목만)로 즉시 진행 — bodyOk 대기로 60초 무마우스 정체 방지.
  */
 export async function waitForSeOneEditorFullyLoaded(
   page: Page,
@@ -1145,6 +1157,7 @@ export async function waitForSeOneEditorFullyLoaded(
   let stableSince = 0;
   let lastBox: { x: number; y: number; w: number; h: number } | null = null;
   let postDraftCancel = false;
+  let pointerAtTitle = false;
 
   while (Date.now() < deadline) {
     if (await isDraftResumePopupVisible(page)) {
@@ -1152,17 +1165,21 @@ export async function waitForSeOneEditorFullyLoaded(
       postDraftCancel = true;
       stableSince = 0;
       lastBox = null;
+      pointerAtTitle = false;
       await sleep(300);
       continue;
     }
 
     const state = await probeSeOneLoadState(page);
-    // 취소 후 새 글 로딩: 툴바 probe가 늦거나 실패해도 제목·본문만 안정되면 진행
-    const meets = postDraftCancel ? state.ready : state.strong || state.ready;
+    const meets = postDraftCancel ? state.ready || state.titleReady : state.titleReady;
 
     if (meets && state.box) {
       const b = state.box;
-      const stableMs = postDraftCancel ? 350 : 700;
+      if (!pointerAtTitle) {
+        pointerAtTitle = true;
+        await humanMouseMove(page, b.x + b.w / 2, b.y + b.h / 2).catch(() => {});
+      }
+      const stableMs = postDraftCancel ? 350 : 250;
       if (
         lastBox &&
         Math.abs(lastBox.x - b.x) < 2 &&
@@ -1180,7 +1197,7 @@ export async function waitForSeOneEditorFullyLoaded(
       stableSince = 0;
       lastBox = null;
     }
-    await sleep(200);
+    await sleep(150);
   }
 
   return false;
