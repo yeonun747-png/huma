@@ -1,6 +1,6 @@
 import type { BrowserContext, Page } from 'playwright';
 
-import { humanClickLocator } from '../../human-engine/mouse.js';
+import { humanClickLocator, humanMouseMove } from '../../human-engine/mouse.js';
 import { humanSleep } from '../../human-engine/typing.js';
 
 import type { HumanEngineConfig } from '../../../lib/settings.js';
@@ -96,6 +96,19 @@ async function clickIfVisible(root: Page | ReturnType<Page['frameLocator']>, sel
 type DraftDismissGuard = { inFlight: boolean; cooledUntil: number };
 const draftDismissGuardByPage = new WeakMap<Page, DraftDismissGuard>();
 
+/** 팝업 취소 직후 — 제목칸이 보이면 포인터를 곧바로 제목으로 이동(best-effort, 클릭 없음) */
+async function moveMouseToTitleIfReady(editorPage: Page): Promise<void> {
+  try {
+    const title = await findBlogTitleLocator(editorPage);
+    if (!title) return;
+    const box = await title.boundingBox().catch(() => null);
+    if (!box || box.height < 8 || box.width < 24) return;
+    await humanMouseMove(editorPage, box.x + box.width / 2, box.y + box.height / 2);
+  } catch {
+    /* best-effort */
+  }
+}
+
 /** 팝업 취소 완료 후 가드 해제 — 로딩 대기 루프가 즉시 재개되도록 */
 export function resetDraftDismissGuard(editorPage: Page): void {
   draftDismissGuardByPage.delete(editorPage);
@@ -148,6 +161,8 @@ async function dismissDraftResumePopup(editorPage: Page): Promise<boolean> {
           level: 'info',
           message: '[post_blog] 작성중 글 팝업 취소 완료',
         }).catch(() => {});
+        // 팝업이 사라지면 포인터를 즉시 제목칸으로 이동(취소 버튼 위치 정체 방지)
+        await moveMouseToTitleIfReady(editorPage);
         resetDraftDismissGuard(editorPage);
         draftDismissGuardByPage.set(editorPage, {
           inFlight: false,

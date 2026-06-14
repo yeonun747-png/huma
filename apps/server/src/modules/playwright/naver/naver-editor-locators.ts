@@ -1039,9 +1039,8 @@ export async function clickBlogBodyPlaceholder(page: Page): Promise<void> {
 }
 
 /**
- * SE ONE 제목 — 제목칸을 마우스로 1회 클릭 → 전체 선택 → insertText로 치환.
- * 기존 내용(잔존·중복·본문 누수)은 선택 상태로 한 번에 교체되므로 백스페이스/raw-DOM 삭제가
- * 필요 없고 화면 thrashing·이중 붙여넣기가 발생하지 않는다.
+ * SE ONE 제목 — insertText는 캐럿 끝에 append되므로(검증됨) 반드시 "빈 칸"으로 만든 뒤 1회만 삽입.
+ * 제목칸 1회 클릭 → 실제 키로 비우기 → insertText 1회. 누적/이중 붙여넣기 구조적으로 차단.
  */
 export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: string): Promise<void> {
   if (await isDraftResumePopupVisible(page)) {
@@ -1057,30 +1056,26 @@ export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: s
     return;
   }
 
-  // 제목칸 1회 클릭 후 전체 선택 → insertText 치환 (선택분 교체)
   await humanClickLocator(page, editable);
-  await sleep(180);
-  await focusAndSelectAllTitle(editable);
-  await page.keyboard.insertText(text);
+  await sleep(150);
 
-  if (await waitForBlogTitleWritten(page, titleLoc, text, 2500)) {
-    await blurBlogTitleField(page);
-    return;
-  }
-
-  // 치환 실패·중복 시 1회만 재선택 후 재치환 (재클릭 없이)
-  const after = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
-  if (!titleAlreadyAcceptable(after, text) || isDuplicatedBlogTitle(after, text)) {
-    await focusAndSelectAllTitle(editable);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    // append 방지 — insertText 전에 칸을 실제 키로 비운다(빈 칸이면 키 입력 0회)
+    await clearTitleFieldViaKeyboard(page, editable);
+    await focusTitleEditableNode(editable);
     await page.keyboard.insertText(text);
+
     if (await waitForBlogTitleWritten(page, titleLoc, text, 2500)) {
-      await blurBlogTitleField(page);
-      return;
+      const check = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
+      if (!isDuplicatedBlogTitle(check, text)) {
+        await blurBlogTitleField(page);
+        return;
+      }
     }
   }
 
   const final = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
-  if (titleAlreadyAcceptable(final, text)) {
+  if (titleAlreadyAcceptable(final, text) && !isDuplicatedBlogTitle(final, text)) {
     await blurBlogTitleField(page);
     return;
   }
@@ -1234,34 +1229,34 @@ export async function resolveTitleEditableLocator(page: Page, titleLoc: Locator)
 }
 
 /**
- * 제목 editable 포커스 + 전체 선택.
- * SE ONE은 JS로 설정한 selection을 insertText 위치로 신뢰하므로, 비-collapsed 선택 후
- * insertText를 보내면 선택분을 교체한다. 백스페이스/raw-DOM 삭제 없이 atomic 치환용.
+ * 제목 editable 비움 — SE ONE은 JS selection·raw-DOM 삭제를 무시하므로(검증됨) 실제 키 입력으로만
+ * 삭제 가능. insertText는 캐럿 끝에 append되므로, 입력 전 반드시 빈 칸으로 만든다.
+ * End→Shift+Home→Backspace(라인 선택 삭제)를 빈 값이 될 때까지 반복 — 라인 단위라 본문 침범 없음.
+ * 칸이 이미 비어 있으면 키 입력 0회(화면 변화 없음).
  */
-async function focusAndSelectAllTitle(editable: Locator): Promise<boolean> {
-  return editable
-    .evaluate((el) => {
-      const node = el as HTMLElement;
-      const target = node.matches('[contenteditable="true"]')
-        ? node
-        : ((node.querySelector('[contenteditable="true"]') as HTMLElement | null) ?? node);
-      target.focus();
-      if (!target.isContentEditable) {
-        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
-          target.select();
-          return true;
-        }
-        return false;
+async function clearTitleFieldViaKeyboard(page: Page, editable: Locator): Promise<boolean> {
+  for (let round = 0; round < 12; round += 1) {
+    const before = await readEditableTitleText(editable);
+    if (!before || isTitlePlaceholderText(before)) return true;
+
+    await focusTitleEditableNode(editable);
+    await page.keyboard.press('End');
+    await page.keyboard.press('Shift+Home');
+    await page.keyboard.press('Backspace');
+    await sleep(60);
+
+    const after = await readEditableTitleText(editable);
+    if (after === before) {
+      // 라인 선택 삭제가 진전 없으면 남은 길이만큼 단일 Backspace로 강제
+      const presses = Math.min(after.length + 2, 160);
+      for (let i = 0; i < presses; i += 1) {
+        await page.keyboard.press('Backspace');
       }
-      const sel = window.getSelection();
-      if (!sel) return false;
-      const range = document.createRange();
-      range.selectNodeContents(target);
-      sel.removeAllRanges();
-      sel.addRange(range);
-      return true;
-    })
-    .catch(() => false);
+      await sleep(60);
+    }
+  }
+  const final = await readEditableTitleText(editable);
+  return !final || isTitlePlaceholderText(final);
 }
 
 /** SE ONE 제목 — pasteBlogTitleField 위임 (execCommand 체인 제거) */
