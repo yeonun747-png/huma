@@ -8,30 +8,21 @@ import { parsePersona, type AccountPersona } from '../persona.js';
 import {
   enterBlogEditor,
   prepareSeOneEditorSurface,
-  waitAndDismissDraftResumePopup,
 } from './enter-blog-editor.js';
 import {
-  clearSeOneEditorFormatting,
-  clearBlogTitleField,
   findBlogTitleLocator,
   ensureBlogBodyLocator,
-  focusBlogBodyField,
-  focusBlogTitleField,
+  clickBlogBodyPlaceholder,
+  pasteBlogBodyContent,
+  pasteBlogTitleField,
   blurBlogTitleField,
   resolveBodyEditableLocator,
-  insertTextIntoBlogEditable,
-  insertParagraphBreakInBlogEditable,
   isBlogTitleWritten,
   isBlogBodySubstantiallyWritten,
   readBlogBodyText,
-  isDraftResumePopupVisible,
-  isFocusInTitleArea,
   readBlogTitleText,
   waitForBlogTitleSectionReady,
-  recoverBlogTitleSection,
-  isBlogTitleSectionReady,
   isBlogTitleEditableVisible,
-  typeTextIntoBlogTitleField,
 } from './naver-editor-locators.js';
 import {
   extractPublishedPostUrl,
@@ -58,82 +49,23 @@ async function assertTitleStable(page: Page, titleLoc: Locator, expected: string
   }
 }
 
-/** SE ONE 제목 — 이미 입력됐으면 스킵(CAPTCHA 재개·재시도 중복 방지) */
+/** SE ONE 제목 — 마우스 1회 클릭 후 붙여넣기 */
 async function typeBlogTitle(page: Page, titleLoc: Locator, title: string): Promise<void> {
-  if (!(await isBlogTitleSectionReady(page))) {
-    await recoverBlogTitleSection(page);
-  }
-
   const existing = await readBlogTitleText(titleLoc);
   if (isBlogTitleWritten(existing, title)) return;
 
-  const freshTitleLoc = (await findBlogTitleLocator(page)) ?? titleLoc;
-  if (!(await isBlogTitleEditableVisible(page))) {
-    await recoverBlogTitleSection(page);
-    await waitForBlogTitleSectionReady(page, 8_000);
-  }
-
-  await typeTextIntoBlogTitleField(page, freshTitleLoc, title);
+  await pasteBlogTitleField(page, titleLoc, title);
   await sleep(randomBetween(300, 500));
-  await assertTitleStable(page, freshTitleLoc, title);
+  await assertTitleStable(page, titleLoc, title);
 }
 
-/** SE ONE 본문 — locator 직접 입력만 사용 (page.keyboard 금지) */
+/** SE ONE 본문 — placeholder 클릭 후 붙여넣기 */
 async function typeSeOneBlogBody(
   page: Page,
   bodyLoc: Locator,
-  titleLoc: Locator,
   content: string,
-  config: HumanEngineConfig,
 ): Promise<void> {
-  const paragraphs = content.split('\n\n').filter(Boolean);
-  if (paragraphs.length === 0) return;
-
-  const paraPauseMin = Math.min(config.paragraph_pause_ms[0], 1200);
-  const paraPauseMax = Math.min(config.paragraph_pause_ms[1], 3500);
-
-  await prepareSeOneEditorSurface(page, 12_000);
-  await blurBlogTitleField(page);
-  await clearSeOneEditorFormatting(page);
-  await focusBlogBodyField(page, bodyLoc);
-
-  const titleSnapshot = await readBlogTitleText(titleLoc);
-
-  for (let i = 0; i < paragraphs.length; i += 1) {
-    if (await isDraftResumePopupVisible(page)) {
-      await waitAndDismissDraftResumePopup(page, 10_000);
-      await prepareSeOneEditorSurface(page, 8_000);
-      await blurBlogTitleField(page);
-      await focusBlogBodyField(page, bodyLoc);
-    }
-
-    await clearSeOneEditorFormatting(page);
-    await blurBlogTitleField(page);
-    await focusBlogBodyField(page, bodyLoc);
-
-    const editable = await resolveBodyEditableLocator(bodyLoc);
-    if (await isFocusInTitleArea(page)) {
-      await blurBlogTitleField(page);
-      await focusBlogBodyField(page, bodyLoc);
-    }
-
-    await sleep(randomBetween(120, 240));
-    await insertTextIntoBlogEditable(page, editable, paragraphs[i]!);
-    await sleep(randomBetween(200, 400));
-
-    const titleAfter = await readBlogTitleText(titleLoc);
-    if (titleAfter.length > titleSnapshot.length + 8) {
-      throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
-    }
-
-    if (i < paragraphs.length - 1) {
-      await blurBlogTitleField(page);
-      await focusBlogBodyField(page, bodyLoc);
-      const breakTarget = await resolveBodyEditableLocator(bodyLoc);
-      await insertParagraphBreakInBlogEditable(page, breakTarget, 2);
-      await humanSleep(paraPauseMin, paraPauseMax);
-    }
-  }
+  await pasteBlogBodyContent(page, bodyLoc, content);
 }
 
 export async function postNaverBlog(params: {
@@ -162,8 +94,10 @@ export async function postNaverBlog(params: {
     return { resultUrl: publishedEarly };
   }
 
-  await prepareSeOneEditorSurface(page, 25_000);
-  await waitForBlogTitleSectionReady(page, 35_000);
+  await prepareSeOneEditorSurface(page, 12_000);
+  if (!(await isBlogTitleEditableVisible(page))) {
+    await waitForBlogTitleSectionReady(page, 8_000);
+  }
 
   const titleBox = await findBlogTitleLocator(page);
   if (!titleBox) {
@@ -171,10 +105,9 @@ export async function postNaverBlog(params: {
   }
 
   await typeBlogTitle(page, titleBox, params.title);
-  await scaledHumanSleep(400, 900, scale);
-  await assertTitleStable(page, titleBox, params.title);
+  await scaledHumanSleep(300, 600, scale);
 
-  await prepareSeOneEditorSurface(page, 10_000);
+  await clickBlogBodyPlaceholder(page);
   await blurBlogTitleField(page);
 
   const editor = await ensureBlogBodyLocator(page, titleBox);
@@ -185,13 +118,13 @@ export async function postNaverBlog(params: {
   const bodyEditable = await resolveBodyEditableLocator(editor);
   const bodyWritten = await readBlogBodyText(bodyEditable);
   if (!isBlogBodySubstantiallyWritten(bodyWritten, params.content)) {
-    await typeSeOneBlogBody(page, editor, titleBox, params.content, config);
+    await typeSeOneBlogBody(page, editor, params.content);
   }
 
   if (params.linkUrl?.trim()) {
     await prepareSeOneEditorSurface(page, 6_000);
     await blurBlogTitleField(page);
-    await focusBlogBodyField(page, editor);
+    await clickBlogBodyPlaceholder(page);
     await pasteBlogLinkWithOgPreview(page, editor, params.linkUrl.trim(), {
       workspace: params.workspace ?? 'yeonun',
       scale,

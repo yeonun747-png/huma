@@ -518,21 +518,18 @@ async function humanTypeCaptchaAnswer(page: Page, input: Locator, text: string):
     await sleep(randomBetween(100, 300));
   }
 
-  await input.fill('');
+  const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
+  await page.keyboard.press(`${mod}+a`).catch(() => {});
+  await page.keyboard.press('Backspace').catch(() => {});
+  await sleep(randomBetween(80, 160));
+
   if (/^\d+$/.test(text)) {
     await page.keyboard.insertText(text);
-    const val = await input.inputValue().catch(() => '');
-    if (val !== text) await input.fill(text);
     return;
   }
 
-  const hasHangul = /[가-힣]/.test(text);
-  if (hasHangul) {
+  if (/[가-힣]/.test(text)) {
     await page.keyboard.insertText(text);
-    const val = await input.inputValue().catch(() => '');
-    if (!val?.includes(text[0] ?? '')) {
-      await input.fill(text);
-    }
     return;
   }
 
@@ -637,10 +634,17 @@ async function clickCaptchaConfirm(page: Page): Promise<boolean> {
   return false;
 }
 
-async function submitCaptcha(page: Page, ctx: NaverCaptchaVisionContext): Promise<void> {
-  if (ctx.accountId && page.url().includes('nidlogin')) {
-    await ensureNaverLoginCredentialsForCaptcha(page, ctx.accountId, { fast: true });
-    await humanSleep(150, 350);
+async function submitCaptcha(
+  page: Page,
+  ctx: NaverCaptchaVisionContext,
+  options?: { refillPassword?: boolean },
+): Promise<void> {
+  if (options?.refillPassword === true && ctx.accountId && page.url().includes('nidlogin')) {
+    const pwVal = await page.locator('#pw').inputValue().catch(() => '');
+    if (!pwVal.trim()) {
+      await ensureNaverLoginCredentialsForCaptcha(page, ctx.accountId, { fast: true });
+      await humanSleep(150, 350);
+    }
   }
 
   const confirmed = await clickCaptchaConfirm(page);
@@ -671,7 +675,7 @@ export async function applyManualCaptchaAnswer(
   if (!filled) return { filled: false, submitted: false, cleared: false, pending_login: false };
 
   await humanSleep(250, 600);
-  await submitCaptcha(page, ctx);
+  await submitCaptcha(page, ctx, { refillPassword: false });
   let cleared = await waitForCaptchaCleared(page, 8_000);
   let pending_login = cleared ? await isNaverLoginPendingAfterCaptcha(page) : false;
 
@@ -768,7 +772,7 @@ export async function tryAutoSolveNaverCaptcha(
       if (!applied) break;
 
       await humanSleep(300, 700);
-      await submitCaptcha(page, ctx);
+      await submitCaptcha(page, ctx, { refillPassword: true });
 
       await sleep(randomBetween(800, 1500));
       if (await captchaCleared(page)) {

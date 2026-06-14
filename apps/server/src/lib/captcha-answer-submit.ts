@@ -54,7 +54,6 @@ export async function submitCaptchaAnswerForJob(
     await syncCaptchaHoldState(hold, page, {
       treatAsSecondRound: !result.cleared,
       captureScreenshot: true,
-      refillPassword: true,
     });
   }
 

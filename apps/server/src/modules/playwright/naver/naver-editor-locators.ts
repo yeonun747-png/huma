@@ -189,7 +189,7 @@ export async function waitForBlogTitleSectionReady(page: Page, maxMs = 35_000): 
 
   while (Date.now() < deadline) {
     if (await isBlogTitleSectionReady(page)) return;
-    if (recoverCount < 4 && Date.now() - lastRecover > 900) {
+    if (recoverCount < 2 && Date.now() - lastRecover > 900) {
       await recoverBlogTitleSection(page);
       lastRecover = Date.now();
       recoverCount += 1;
@@ -738,6 +738,95 @@ async function humanClickBodyParagraph(page: Page, bodyLoc: Locator): Promise<vo
   await page.mouse.click(x, y);
 }
 
+/** 본문 placeholder — 「글감과 함께 나의 일상을 기록해보세요!」 마우스 클릭 */
+export async function clickBlogBodyPlaceholder(page: Page): Promise<void> {
+  await dismissSeOneMaterialPopup(page);
+
+  const byText = page
+    .locator(
+      '.se-section-text:not(.se-section-documentTitle) .se-placeholder, .se-section-text:not(.se-section-documentTitle) [class*="placeholder"]',
+    )
+    .filter({ hasText: /글감과 함께|나의 일상을 기록/ })
+    .first();
+  if (await byText.isVisible({ timeout: 2000 }).catch(() => false)) {
+    await humanClickLocator(page, byText);
+    await sleep(300);
+    return;
+  }
+
+  try {
+    const ph = page.getByPlaceholder(/나의 일상|일상을 기록|본문/).first();
+    if (await ph.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await humanClickLocator(page, ph);
+      await sleep(300);
+      return;
+    }
+  } catch {
+    /* ignore */
+  }
+
+  const section = page
+    .locator('.se-components-wrap .se-section-text:not(.se-section-documentTitle)')
+    .first();
+  if (
+    (await section.isVisible({ timeout: 1000 }).catch(() => false)) &&
+    (await isLocatorBodySection(page, section))
+  ) {
+    await humanClickBodyParagraph(page, section);
+    await sleep(300);
+  }
+}
+
+/** SE ONE 제목 — 마우스 1회 클릭 후 붙여넣기 */
+export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: string): Promise<void> {
+  if (await isDraftResumePopupVisible(page)) {
+    throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
+  }
+
+  const editable = await resolveTitleEditableLocator(page, titleLoc);
+  await editable.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
+  await humanClickLocator(page, editable);
+  await sleep(200);
+
+  const pasteMod = process.platform === 'darwin' ? 'Meta+v' : 'Control+v';
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
+  await page.evaluate(async (t) => navigator.clipboard.writeText(t), text).catch(() => {});
+  await page.keyboard.press(pasteMod);
+  await sleep(250);
+
+  const written = await readBlogTitleText(titleLoc);
+  if (!isBlogTitleWritten(written, text)) {
+    throw new Error('BLOG_TITLE_WRITE_FAILED');
+  }
+}
+
+/** SE ONE 본문 — 마우스 클릭 후 붙여넣기 (단락별) */
+export async function pasteBlogBodyContent(page: Page, bodyLoc: Locator, content: string): Promise<void> {
+  if (await isDraftResumePopupVisible(page)) {
+    throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
+  }
+
+  const editable = await resolveBodyEditableLocator(bodyLoc);
+  await editable.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
+  await humanClickLocator(page, editable);
+  await sleep(200);
+
+  const paragraphs = content.split('\n\n').filter(Boolean);
+  const pasteMod = process.platform === 'darwin' ? 'Meta+v' : 'Control+v';
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
+
+  for (let i = 0; i < paragraphs.length; i += 1) {
+    await page.evaluate(async (t) => navigator.clipboard.writeText(t), paragraphs[i]!).catch(() => {});
+    await page.keyboard.press(pasteMod);
+    await sleep(300);
+    if (i < paragraphs.length - 1) {
+      await page.keyboard.press('Enter');
+      await page.keyboard.press('Enter');
+      await sleep(200);
+    }
+  }
+}
+
 /** 제목 아래 본문 placeholder 클릭 — contenteditable paragraph 생성 유도 */
 async function clickSeOneBodyPlaceholder(page: Page, titleLoc: Locator | null): Promise<void> {
   await dismissSeOneMaterialPopup(page);
@@ -859,90 +948,13 @@ export async function clearBlogTitleField(titleLoc: Locator): Promise<void> {
     .catch(() => {});
 }
 
-/** SE ONE 제목 — innerHTML 비우기 금지(placeholder paragraph 구조 유지) */
+/** SE ONE 제목 — pasteBlogTitleField 위임 (execCommand 체인 제거) */
 export async function typeTextIntoBlogTitleField(
   page: Page,
   titleLoc: Locator,
   text: string,
 ): Promise<void> {
-  if (await isDraftResumePopupVisible(page)) {
-    throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
-  }
-
-  const editable = await resolveTitleEditableLocator(page, titleLoc);
-  await focusBlogTitleField(page, titleLoc);
-  await sleep(120);
-
-  await editable.evaluate((el) => {
-    const target = el as HTMLElement;
-    target.focus();
-    for (const ph of target.querySelectorAll('.se-placeholder, [class*="placeholder"]')) {
-      ph.remove();
-    }
-    const sel = window.getSelection();
-    if (sel) {
-      const range = document.createRange();
-      range.selectNodeContents(target);
-      sel.removeAllRanges();
-      sel.addRange(range);
-    }
-    document.execCommand('selectAll', false);
-    document.execCommand('delete', false);
-  });
-
-  await sleep(80);
-
-  const execOk = await editable.evaluate((el, t) => {
-    const target = el as HTMLElement;
-    target.focus();
-    const sel = window.getSelection();
-    if (sel) {
-      const range = document.createRange();
-      range.selectNodeContents(target);
-      range.collapse(false);
-      sel.removeAllRanges();
-      sel.addRange(range);
-    }
-    const ok = document.execCommand('insertText', false, t);
-    if (!ok) {
-      target.textContent = t;
-    }
-    target.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true }));
-    target.dispatchEvent(new Event('change', { bubbles: true }));
-    return ok;
-  }, text);
-
-  let written = await readBlogTitleText(titleLoc);
-  if (!isBlogTitleWritten(written, text)) {
-    await focusTitleEditableNode(editable);
-    await page.keyboard.insertText(text);
-    await sleep(150);
-    written = await readBlogTitleText(titleLoc);
-  }
-
-  if (!isBlogTitleWritten(written, text)) {
-    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
-    await page.evaluate(async (t) => navigator.clipboard.writeText(t), text).catch(() => {});
-    await focusTitleEditableNode(editable);
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+v' : 'Control+v');
-    await sleep(150);
-    written = await readBlogTitleText(titleLoc);
-  }
-
-  if (!isBlogTitleWritten(written, text)) {
-    await editable.evaluate((el, t) => {
-      const target = el as HTMLElement;
-      target.focus();
-      target.textContent = t;
-      target.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true }));
-      target.dispatchEvent(new Event('change', { bubbles: true }));
-    }, text);
-    written = await readBlogTitleText(titleLoc);
-  }
-
-  if (!isBlogTitleWritten(written, text)) {
-    throw new Error(execOk ? 'BLOG_TITLE_WRITE_FAILED' : 'BLOG_EDITABLE_INSERT_NOOP');
-  }
+  await pasteBlogTitleField(page, titleLoc, text);
 }
 
 export async function findVisibleLocator(
@@ -985,12 +997,9 @@ export async function isNaverBlogEditorInteractable(page: Page): Promise<boolean
   const hasLegacyFrame = (await page.locator('#mainFrame').count().catch(() => 0)) > 0;
   if (!onPostwrite && !hasLegacyFrame) return false;
 
+  if (onPostwrite && (await isSeOneEditorShellReady(page))) return true;
   if (await isBlogTitleSectionReady(page)) return true;
   if ((await findBlogBodyLocator(page)) !== null) return true;
-
-  if (onPostwrite && (await isSeOneEditorShellReady(page))) {
-    return (await isBlogTitleSectionReady(page)) || (await findBlogBodyLocator(page)) !== null;
-  }
 
   return false;
 }

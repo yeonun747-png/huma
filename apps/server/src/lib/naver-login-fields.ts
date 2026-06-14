@@ -81,24 +81,16 @@ export async function ensureNaverLoginCredentialsForCaptcha(
 }
 
 /**
- * CAPTCHA 통과 후 nidlogin — 비번(필요 시) 마우스 입력·로그인 버튼 마우스 클릭.
- * @returns nidlogin 이탈 여부
+ * CAPTCHA 통과 후 nidlogin — 로그인 버튼만 마우스 클릭 (비번은 hold 진입 시 1회만 입력).
  */
 export async function submitNaverLoginAfterCaptcha(
   page: Page,
-  accountId: string,
+  _accountId: string,
 ): Promise<boolean> {
   if (!page.url().includes('nidlogin')) return false;
 
   await ensureNaverLoginIdPhoneTab(page);
-
-  const pwVal = await page.locator('#pw').inputValue().catch(() => '');
-  if (!pwVal.trim()) {
-    await ensureNaverLoginCredentialsForCaptcha(page, accountId, { fast: true });
-  } else {
-    await humanSleep(180, 380);
-  }
-
+  await humanSleep(250, 500);
   await clickNaverLoginButton(page);
   await page
     .waitForURL((u) => !u.href.includes('nidlogin'), { timeout: 25_000 })
@@ -106,20 +98,22 @@ export async function submitNaverLoginAfterCaptcha(
   return !page.url().includes('nidlogin');
 }
 
-/** 로그인 버튼 — bbox 없을 때 force click 폴백. */
+/** 로그인 버튼 — humanClickLocator만 사용 (force click 금지). */
 export async function clickNaverLoginButton(page: Page): Promise<void> {
   await ensureNaverLoginIdPhoneTab(page);
 
   for (const sel of NAVER_LOGIN_BTN_SELECTORS) {
     const btn = page.locator(sel).first();
     if (!(await btn.isVisible().catch(() => false))) continue;
-    const box = await btn.boundingBox().catch(() => null);
-    if (box && box.width > 0 && box.height > 0) {
-      await humanClickLocator(page, btn);
-      return;
+    await btn.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const box = await btn.boundingBox().catch(() => null);
+      if (box && box.width > 0 && box.height > 0) {
+        await humanClickLocator(page, btn);
+        return;
+      }
+      await sleep(250);
     }
-    await btn.click({ force: true, timeout: 8000 });
-    return;
   }
   throw new Error('NAVER_LOGIN_BTN_NOT_FOUND');
 }
