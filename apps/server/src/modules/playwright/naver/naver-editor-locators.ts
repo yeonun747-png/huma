@@ -1136,7 +1136,11 @@ async function ensureBodyFocusForPaste(page: Page, editable: Locator): Promise<v
   }
 }
 
-/** SE ONE 본문 — skipClick이면 placeholder 클릭 직후: 재탐색·재클릭·마우스 이동 없이 insertText만 */
+/**
+ * SE ONE 본문 — skipClick이면 placeholder는 이미 클릭됨.
+ * placeholder 클릭 ≠ contenteditable paragraph 키보드 입력 준비 — SE ONE은 humanClick 후 insertText만 신뢰.
+ * (제목 pasteBlogTitleField와 동일: humanClickLocator → insertText)
+ */
 export async function pasteBlogBodyContent(
   page: Page,
   bodyLoc: Locator,
@@ -1153,7 +1157,9 @@ export async function pasteBlogBodyContent(
     if (await isFocusInTitleArea(page)) {
       await blurBlogTitleField(page);
     }
-    await focusBodyEditableNode(editable);
+    // placeholder 클릭 후에도 paragraph contenteditable에 humanClick해야 insertText가 SE ONE에 전달됨
+    await humanClickLocator(page, editable);
+    await sleep(200);
   } else {
     await blurBlogTitleField(page);
     await humanClickLocator(page, editable);
@@ -1174,7 +1180,8 @@ export async function pasteBlogBodyContent(
   for (let i = 0; i < paragraphs.length; i += 1) {
     if (await isFocusInTitleArea(page)) {
       await blurBlogTitleField(page);
-      await focusBodyEditableNode(editable);
+      await humanClickLocator(page, editable);
+      await sleep(150);
       if (await isFocusInTitleArea(page)) {
         throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
       }
