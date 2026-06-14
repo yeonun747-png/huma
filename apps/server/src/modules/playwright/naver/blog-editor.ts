@@ -121,13 +121,32 @@ export async function postNaverBlog(params: {
     (await waitForBlogBodyParagraphLocator(page, 10_000)) ??
     (await ensureBlogBodyLocator(page, titleBox));
   if (!editor) {
+    await logOperation({
+      level: 'warn',
+      message: '[post_blog][body] paragraph 미검출 — BLOG_BODY_NOT_FOUND',
+      account_id: params.accountId,
+    }).catch(() => {});
     throw new Error('BLOG_BODY_NOT_FOUND');
   }
 
   if (!(await verifyBlogBodyField(page, editor, params.content))) {
-    await typeSeOneBlogBody(page, editor, params.content);
+    try {
+      await typeSeOneBlogBody(page, editor, params.content);
+    } catch (bodyErr) {
+      await logOperation({
+        level: 'warn',
+        message: `[post_blog][body] 입력 실패 — ${(bodyErr as Error).message}`,
+        account_id: params.accountId,
+      }).catch(() => {});
+      throw bodyErr;
+    }
   }
   if (!(await verifyBlogBodyField(page, editor, params.content))) {
+    await logOperation({
+      level: 'warn',
+      message: '[post_blog][body] 입력 후 검증 실패 — BLOG_BODY_WRITE_FAILED',
+      account_id: params.accountId,
+    }).catch(() => {});
     throw new Error('BLOG_BODY_WRITE_FAILED');
   }
   await logOperation({

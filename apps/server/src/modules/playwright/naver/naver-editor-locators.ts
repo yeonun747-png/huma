@@ -2,6 +2,7 @@ import type { FrameLocator, Locator, Page } from 'playwright';
 
 import { humanClickLocator, humanMouseMove } from '../../human-engine/mouse.js';
 import { sleep } from '../../../lib/utils.js';
+import { logOperation } from '../../../lib/log-emitter.js';
 
 export function editorFrame(page: Page): FrameLocator {
   return page.frameLocator('#mainFrame');
@@ -566,6 +567,17 @@ function isDuplicatedBlogTitle(written: string, expected: string): boolean {
   return w.startsWith(e + e) || w.includes(e + e);
 }
 
+/** 제목칸에 기대 제목이 이미 들어있는지(중복 포함) — 재삽입은 append 누적이므로 금지 판단용 */
+function titleContainsExpected(written: string, expected: string): boolean {
+  const w = written.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+  const e = expected.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!w || !e || isTitlePlaceholderText(w)) return false;
+  if (/이어서\s*작성|작성\s*중인\s*글/.test(w)) return false;
+  if (w.includes(e)) return true;
+  const probe = Math.min(Math.max(8, Math.floor(e.length * 0.6)), e.length);
+  return probe >= 4 && w.includes(e.slice(0, probe));
+}
+
 /** isBlogTitleWritten 보완 — wrapper 읽기 불일치 시 길이·앞부분으로 완화 */
 export function verifyBlogTitleInput(written: string, expected: string): boolean {
   if (isBlogTitleWritten(written, expected)) return true;
@@ -616,7 +628,7 @@ export async function waitForBlogTitleWritten(
   return verifyBlogTitleField(page, titleLoc, expected);
 }
 
-/** 제목 1회 입력 확정 — 이미 정확히 채워졌으면 재입력 금지(재시도 시 즉시 본문으로 진행) */
+/** 제목 1회 입력 확정 — 기대 제목이 이미 들어있으면(중복 제외) 재입력 금지(재시도 시 즉시 본문으로) */
 export async function ensureBlogTitleWritten(
   page: Page,
   titleLoc: Locator,
@@ -625,7 +637,7 @@ export async function ensureBlogTitleWritten(
   const editable = await resolveTitleEditableLocator(page, titleLoc);
   const domWritten = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
 
-  if (titleAlreadyAcceptable(domWritten, text) && !isDuplicatedBlogTitle(domWritten, text)) {
+  if (titleContainsExpected(domWritten, text) && !isDuplicatedBlogTitle(domWritten, text)) {
     await blurBlogTitleField(page);
     return;
   }
@@ -1038,9 +1050,15 @@ export async function clickBlogBodyPlaceholder(page: Page): Promise<void> {
   }
 }
 
+async function logTitleDebug(message: string): Promise<void> {
+  await logOperation({ level: 'info', message: `[post_blog][title] ${message}` }).catch(() => {});
+}
+
 /**
- * SE ONE 제목 — insertText는 캐럿 끝에 append되므로(검증됨) 반드시 "빈 칸"으로 만든 뒤 1회만 삽입.
- * 제목칸 1회 클릭 → 실제 키로 비우기 → insertText 1회. 누적/이중 붙여넣기 구조적으로 차단.
+ * SE ONE 제목 — insertText는 캐럿 끝에 append됨(확정). 따라서:
+ *  1) 기대 제목이 이미 있으면(중복 제외) 절대 재삽입하지 않음(append 누적 방지).
+ *  2) 삽입은 "비어 있음을 확인한 칸"에만 1회. 비우기 실패 시 삽입하지 않음(누적 방지).
+ *  3) 멀쩡한 제목을 지우고 다시 붙이는 파괴적 재시도 루프 없음(호출당 최대 1회 삽입).
  */
 export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: string): Promise<void> {
   if (await isDraftResumePopupVisible(page)) {
@@ -1051,7 +1069,11 @@ export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: s
   await editable.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
 
   const current = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
-  if (titleAlreadyAcceptable(current, text) && !isDuplicatedBlogTitle(current, text)) {
+  const dup = isDuplicatedBlogTitle(current, text);
+  await logTitleDebug(`진입 현재값="${current}" 중복=${dup}`);
+
+  // 기대 제목이 이미 들어있고 중복이 아니면 그대로 둠(재삽입=append 누적이므로 금지)
+  if (titleContainsExpected(current, text) && !dup) {
     await blurBlogTitleField(page);
     return;
   }
@@ -1059,27 +1081,32 @@ export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: s
   await humanClickLocator(page, editable);
   await sleep(150);
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    // append 방지 — insertText 전에 칸을 실제 키로 비운다(빈 칸이면 키 입력 0회)
-    await clearTitleFieldViaKeyboard(page, editable);
-    await focusTitleEditableNode(editable);
-    await page.keyboard.insertText(text);
+  // 삽입 전 반드시 빈 칸 확보 — 비어 있어야만 insertText가 단일 제목이 된다
+  await clearTitleFieldViaKeyboard(page, editable);
+  const afterClear = await readEditableTitleText(editable);
+  const cleared = !afterClear || isTitlePlaceholderText(afterClear);
+  await logTitleDebug(`비우기 결과="${afterClear}" cleared=${cleared}`);
 
-    if (await waitForBlogTitleWritten(page, titleLoc, text, 2500)) {
-      const check = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
-      if (!isDuplicatedBlogTitle(check, text)) {
-        await blurBlogTitleField(page);
-        return;
-      }
+  if (!cleared) {
+    // 비우기 실패: append되면 누적되므로 삽입하지 않음.
+    // 기대 제목이 이미 들어있으면(중복 아님) 수용, 아니면 실패로 재시도에 위임.
+    if (titleContainsExpected(afterClear, text) && !isDuplicatedBlogTitle(afterClear, text)) {
+      await blurBlogTitleField(page);
+      return;
     }
+    throw new Error('BLOG_TITLE_WRITE_FAILED');
   }
 
-  const final = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
-  if (titleAlreadyAcceptable(final, text) && !isDuplicatedBlogTitle(final, text)) {
-    await blurBlogTitleField(page);
+  await focusTitleEditableNode(editable);
+  await page.keyboard.insertText(text);
+  const ok = await waitForBlogTitleWritten(page, titleLoc, text, 2500);
+  const after = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
+  await logTitleDebug(`삽입 후="${after}" ok=${ok}`);
+  await blurBlogTitleField(page);
+
+  if (titleContainsExpected(after, text) && !isDuplicatedBlogTitle(after, text)) {
     return;
   }
-
   throw new Error('BLOG_TITLE_WRITE_FAILED');
 }
 
