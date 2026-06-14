@@ -29,10 +29,19 @@ guess_gateway() {
     return
   fi
 
-  # Samsung USB 테더 — 게이트웨이가 .1 이 아닌 경우가 많음 (ARP REACHABLE)
+  # Samsung USB 테더 — 커널이 고른 nexthop (10.x·192.168.42.x 에서 .1 오탐 방지)
+  gw=$(ip route get 1.1.1.1 from "$ip" iif "$iface" 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "via") { print $(i + 1); exit }}')
+  if [ -n "$gw" ] && [ "$gw" != "$ip" ]; then
+    echo "$gw"
+    return
+  fi
+
+  # Samsung USB 테더 — 게이트웨이가 .1 이 아닌 경우 (ARP)
   gw=$(
     ip neigh show dev "$iface" 2>/dev/null | awk -v self="$ip" '
-      $1 ~ /^[0-9]+\./ && $1 != self && $NF == "REACHABLE" { print $1; exit }
+      $1 ~ /^[0-9]+\./ && $1 != self && $NF != "FAILED" {
+        if ($NF == "REACHABLE" || $NF == "STALE" || $NF == "DELAY") { print $1; exit }
+      }
     '
   )
   if [ -n "$gw" ]; then
@@ -50,8 +59,33 @@ guess_gateway() {
     return
   fi
 
+  # Samsung RNDIS — 폰 측 게이트웨이 (192.168.42.129 등)
+  if [[ "$ip" =~ ^192\.168\.42\. ]]; then
+    echo "192.168.42.129"
+    return
+  fi
+
   # ZTE RNDIS 동글: 보통 서브넷 .1
   echo "$ip" | awk -F. '{printf "%s.%s.%s.1\n", $1, $2, $3}'
+}
+
+warm_tether_arp() {
+  local iface="$1" ip="$2"
+  if [[ ! "$iface" =~ ^enx ]]; then
+    return 0
+  fi
+  if [[ "$ip" =~ ^192\.168\.42\. ]]; then
+    ping -c 1 -W 2 -I "$iface" 192.168.42.129 >/dev/null 2>&1 || true
+    return 0
+  fi
+  if [[ "$ip" =~ ^10\. ]]; then
+    ping -c 1 -W 2 -I "$iface" "${ip%.*}.1" >/dev/null 2>&1 || true
+    local neigh
+    neigh=$(ip neigh show dev "$iface" 2>/dev/null | awk -v self="$ip" '$1 ~ /^[0-9]+\./ && $1 != self {print $1; exit}')
+    if [ -n "$neigh" ]; then
+      ping -c 1 -W 2 -I "$iface" "$neigh" >/dev/null 2>&1 || true
+    fi
+  fi
 }
 
 add_default_route() {
@@ -83,6 +117,7 @@ setup_slot_route() {
   fi
 
   ip_only="${ip_cidr%%/*}"
+  warm_tether_arp "$iface" "$ip_only"
   gw=$(guess_gateway "$iface" "$ip_only")
 
   while ip rule del from "${ip_only}/32" table "$table" 2>/dev/null; do :; done
