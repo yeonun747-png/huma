@@ -1055,10 +1055,10 @@ async function logTitleDebug(message: string): Promise<void> {
 }
 
 /**
- * SE ONE 제목 — insertText는 캐럿 끝에 append됨(확정). 따라서:
- *  1) 기대 제목이 이미 있으면(중복 제외) 절대 재삽입하지 않음(append 누적 방지).
- *  2) 삽입은 "비어 있음을 확인한 칸"에만 1회. 비우기 실패 시 삽입하지 않음(누적 방지).
- *  3) 멀쩡한 제목을 지우고 다시 붙이는 파괴적 재시도 루프 없음(호출당 최대 1회 삽입).
+ * SE ONE 제목 — insertText는 캐럿 끝에 append됨(확정). 동작 원칙:
+ *  1) 기대 제목이 이미 있으면(중복 제외) 그대로 둠(append 누적 방지).
+ *  2) 그 외엔 "기존 내용 가벼운 비우기 → insertText 1회"를 항상 실행(복붙 누락 방지).
+ *  3) 삽입 결과가 중복/불일치면 1회만 비우고 재삽입(루프·캐럿 멈춤 폭주 없음).
  */
 export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: string): Promise<void> {
   if (await isDraftResumePopupVisible(page)) {
@@ -1072,7 +1072,6 @@ export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: s
   const dup = isDuplicatedBlogTitle(current, text);
   await logTitleDebug(`진입 현재값="${current}" 중복=${dup}`);
 
-  // 기대 제목이 이미 들어있고 중복이 아니면 그대로 둠(재삽입=append 누적이므로 금지)
   if (titleContainsExpected(current, text) && !dup) {
     await blurBlogTitleField(page);
     return;
@@ -1081,27 +1080,27 @@ export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: s
   await humanClickLocator(page, editable);
   await sleep(150);
 
-  // 삽입 전 반드시 빈 칸 확보 — 비어 있어야만 insertText가 단일 제목이 된다
-  await clearTitleFieldViaKeyboard(page, editable);
-  const afterClear = await readEditableTitleText(editable);
-  const cleared = !afterClear || isTitlePlaceholderText(afterClear);
-  await logTitleDebug(`비우기 결과="${afterClear}" cleared=${cleared}`);
-
-  if (!cleared) {
-    // 비우기 실패: append되면 누적되므로 삽입하지 않음.
-    // 기대 제목이 이미 들어있으면(중복 아님) 수용, 아니면 실패로 재시도에 위임.
-    if (titleContainsExpected(afterClear, text) && !isDuplicatedBlogTitle(afterClear, text)) {
-      await blurBlogTitleField(page);
-      return;
-    }
-    throw new Error('BLOG_TITLE_WRITE_FAILED');
+  // 기존 내용이 있으면 가볍게 비운 뒤(빈 칸이면 0키) insertText 1회 — 삽입은 항상 실행
+  if (current && !isTitlePlaceholderText(current)) {
+    await clearTitleFieldViaKeyboard(page, editable);
   }
-
   await focusTitleEditableNode(editable);
   await page.keyboard.insertText(text);
-  const ok = await waitForBlogTitleWritten(page, titleLoc, text, 2500);
-  const after = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
-  await logTitleDebug(`삽입 후="${after}" ok=${ok}`);
+  await waitForBlogTitleWritten(page, titleLoc, text, 2500);
+
+  let after = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
+  await logTitleDebug(`삽입 후="${after}"`);
+
+  // 누적/불일치면 단 1회만 교정 (비우기 → 재삽입)
+  if (isDuplicatedBlogTitle(after, text) || !titleContainsExpected(after, text)) {
+    await clearTitleFieldViaKeyboard(page, editable);
+    await focusTitleEditableNode(editable);
+    await page.keyboard.insertText(text);
+    await waitForBlogTitleWritten(page, titleLoc, text, 2500);
+    after = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
+    await logTitleDebug(`교정 후="${after}"`);
+  }
+
   await blurBlogTitleField(page);
 
   if (titleContainsExpected(after, text) && !isDuplicatedBlogTitle(after, text)) {
@@ -1256,31 +1255,21 @@ export async function resolveTitleEditableLocator(page: Page, titleLoc: Locator)
 }
 
 /**
- * 제목 editable 비움 — SE ONE은 JS selection·raw-DOM 삭제를 무시하므로(검증됨) 실제 키 입력으로만
- * 삭제 가능. insertText는 캐럿 끝에 append되므로, 입력 전 반드시 빈 칸으로 만든다.
- * End→Shift+Home→Backspace(라인 선택 삭제)를 빈 값이 될 때까지 반복 — 라인 단위라 본문 침범 없음.
- * 칸이 이미 비어 있으면 키 입력 0회(화면 변화 없음).
+ * 제목 editable 비움 — SE ONE은 JS selection·raw-DOM 삭제를 무시하므로(검증됨) 실제 키로만 삭제.
+ * 가벼운 bounded 방식: 빈 칸이면 키 입력 0회, 내용 있으면 최대 2패스·패스당 ≤120키(캐럿 멈춤·폭주 방지).
  */
 async function clearTitleFieldViaKeyboard(page: Page, editable: Locator): Promise<boolean> {
-  for (let round = 0; round < 12; round += 1) {
+  for (let pass = 0; pass < 2; pass += 1) {
     const before = await readEditableTitleText(editable);
     if (!before || isTitlePlaceholderText(before)) return true;
 
     await focusTitleEditableNode(editable);
     await page.keyboard.press('End');
-    await page.keyboard.press('Shift+Home');
-    await page.keyboard.press('Backspace');
-    await sleep(60);
-
-    const after = await readEditableTitleText(editable);
-    if (after === before) {
-      // 라인 선택 삭제가 진전 없으면 남은 길이만큼 단일 Backspace로 강제
-      const presses = Math.min(after.length + 2, 160);
-      for (let i = 0; i < presses; i += 1) {
-        await page.keyboard.press('Backspace');
-      }
-      await sleep(60);
+    const presses = Math.min(before.length + 4, 120);
+    for (let i = 0; i < presses; i += 1) {
+      await page.keyboard.press('Backspace');
     }
+    await sleep(80);
   }
   const final = await readEditableTitleText(editable);
   return !final || isTitlePlaceholderText(final);
