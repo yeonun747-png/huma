@@ -6,6 +6,7 @@ ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 cd "$ROOT"
 
 echo "[deploy] repo: $ROOT"
+git checkout -- package-lock.json 2>/dev/null || true
 git pull
 
 echo "[deploy] npm install (workspace root)..."
