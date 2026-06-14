@@ -665,6 +665,31 @@ export async function verifyBlogTitleField(
   return verifyBlogTitleInput(written, expected);
 }
 
+/** 링크·이미지 삽입 후 — locator stale·OG DOM 갱신으로 verifyBlogTitleField 오탐 방지 */
+export async function ensureBlogTitleBeforeReview(
+  page: Page,
+  titleLoc: Locator,
+  expected: string,
+): Promise<void> {
+  let loc = titleLoc;
+  for (let i = 0; i < 5; i += 1) {
+    const fresh = await findBlogTitleLocator(page);
+    if (fresh) loc = fresh;
+    if (await verifyBlogTitleField(page, loc, expected)) return;
+    await sleep(350);
+  }
+
+  const dom = await readTitleFromEditorDom(page);
+  if (titleContainsExpected(dom, expected) && !isDuplicatedBlogTitle(dom, expected)) {
+    return;
+  }
+
+  await ensureBlogTitleWritten(page, loc, expected);
+  if (await verifyBlogTitleField(page, loc, expected)) return;
+
+  throw new Error('BLOG_TITLE_LOST_BEFORE_REVIEW');
+}
+
 /** insertText 직후 DOM 반영 대기 — 팝업 취소 직후 readBlogTitleText 빈값 방지 */
 export async function waitForBlogTitleWritten(
   page: Page,

@@ -56,6 +56,8 @@ export async function pasteBlogLinkWithOgPreview(
   if (await isFocusInTitleArea(page)) {
     throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
   }
+  await page.keyboard.press('Control+End');
+  await sleep(120);
   await page.keyboard.press('Enter');
   await page.keyboard.press('Enter');
   await sleep(200);

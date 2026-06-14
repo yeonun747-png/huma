@@ -17,6 +17,7 @@ import {
   clickBlogBodyPlaceholder,
   pasteBlogBodyContent,
   ensureBlogTitleWritten,
+  ensureBlogTitleBeforeReview,
   blurBlogTitleField,
   verifyBlogBodyField,
   verifyBlogTitleField,
@@ -171,23 +172,34 @@ export async function postNaverBlog(params: {
       message: '[post_blog] 링크 삽입 시작',
       account_id: params.accountId,
     }).catch(() => {});
-    await prepareSeOneEditorSurface(page, 6_000, { destructiveDraftDismiss: false });
-    await blurBlogTitleField(page);
-    await clickBlogBodyPlaceholder(page);
-    await pasteBlogLinkWithOgPreview(page, editor, params.linkUrl.trim(), {
+    const { ogPreview } = await pasteBlogLinkWithOgPreview(page, editor, params.linkUrl.trim(), {
       workspace: params.workspace ?? 'yeonun',
       scale,
       humanConfig: config,
     });
+    await logOperation({
+      level: 'info',
+      message: `[post_blog] 링크 삽입 완료 (OG=${ogPreview ? 'Y' : 'N'})`,
+      account_id: params.accountId,
+    }).catch(() => {});
   }
 
-  if (params.imageUrls?.length) {
-    for (const imagePath of params.imageUrls) {
-      await prepareSeOneEditorSurface(page, 4_000, { destructiveDraftDismiss: false });
-      const ok = await insertImageViaToolbar(page, imagePath);
-      if (!ok) throw new Error('BLOG_IMAGE_INSERT_FAILED');
-      await scaledHumanSleep(1000, 3000, scale);
-    }
+  const firstImage = params.imageUrls?.[0];
+  if (firstImage) {
+    await logOperation({
+      level: 'info',
+      message: '[post_blog] 이미지 삽입 시작',
+      account_id: params.accountId,
+    }).catch(() => {});
+    await prepareSeOneEditorSurface(page, 4_000, { destructiveDraftDismiss: false });
+    const ok = await insertImageViaToolbar(page, firstImage);
+    if (!ok) throw new Error('BLOG_IMAGE_INSERT_FAILED');
+    await scaledHumanSleep(1000, 3000, scale);
+    await logOperation({
+      level: 'info',
+      message: '[post_blog] 이미지 삽입 완료',
+      account_id: params.accountId,
+    }).catch(() => {});
   }
 
   if (params.videoPath?.trim()) {
@@ -198,14 +210,7 @@ export async function postNaverBlog(params: {
   }
 
   await prepareSeOneEditorSurface(page, 8_000, { destructiveDraftDismiss: false });
-  if (!(await verifyBlogTitleField(page, titleBox, params.title))) {
-    await logOperation({
-      level: 'warn',
-      message: '[post_blog] 검토 전 제목 검증 실패 — BLOG_TITLE_LOST_BEFORE_REVIEW',
-      account_id: params.accountId,
-    }).catch(() => {});
-    throw new Error('BLOG_TITLE_LOST_BEFORE_REVIEW');
-  }
+  await ensureBlogTitleBeforeReview(page, titleBox, params.title);
 
   const reviewMs = calcReviewDurationMs(
     params.title.length + params.content.length + (params.linkUrl?.length ?? 0),
