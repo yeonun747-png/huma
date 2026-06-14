@@ -626,7 +626,7 @@ export async function ensureBlogTitleWritten(
   let domWritten = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
 
   if (isDuplicatedBlogTitle(domWritten, text)) {
-    await clearBlogTitleField(editable);
+    await clearBlogTitleField(page, editable);
     await sleep(150);
     domWritten = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
   }
@@ -1073,10 +1073,10 @@ export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: s
   }
 
   if (isDuplicatedBlogTitle(domWritten, text) || isDuplicatedBlogTitle(sectionWritten, text)) {
-    await clearBlogTitleField(editable);
+    await clearBlogTitleField(page, editable);
     await sleep(120);
   } else if (domWritten.trim() && !isTitlePlaceholderText(domWritten)) {
-    await clearBlogTitleField(editable);
+    await clearBlogTitleField(page, editable);
     await sleep(120);
   }
 
@@ -1103,6 +1103,20 @@ export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: s
   if (await waitForBlogTitleWritten(page, titleLoc, text, 2500)) {
     await blurBlogTitleField(page);
     return;
+  }
+
+  // append 등으로 중복됐으면 키보드로 모델을 비우고 1회만 재삽입 (재시도 없이 자가 교정)
+  const afterFirst =
+    (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
+  if (isDuplicatedBlogTitle(afterFirst, text)) {
+    await clearBlogTitleField(page, editable);
+    await sleep(120);
+    await focusTitleEditableNode(editable);
+    await page.keyboard.insertText(text);
+    if (await waitForBlogTitleWritten(page, titleLoc, text, 2500)) {
+      await blurBlogTitleField(page);
+      return;
+    }
   }
 
   const afterInsert =
@@ -1260,53 +1274,51 @@ export async function resolveTitleEditableLocator(page: Page, titleLoc: Locator)
   return titleLoc;
 }
 
-/** 제목란만 비움 — placeholder DOM 제거 금지(SE ONE 구조 파괴 방지) */
-export async function clearBlogTitleField(titleLoc: Locator): Promise<void> {
-  await titleLoc
+/** 제목 editable에 포커스 + 캐럿을 끝으로 이동 (raw DOM — 선택/포커스만, 내용 변경 없음) */
+async function focusTitleCaretToEnd(editable: Locator): Promise<void> {
+  await editable
     .evaluate((el) => {
       const node = el as HTMLElement;
-      const target =
-        node.matches('[contenteditable="true"]')
-          ? node
-          : (node.querySelector('[contenteditable="true"]') as HTMLElement | null) ?? node;
+      const target = node.matches('[contenteditable="true"]')
+        ? node
+        : ((node.querySelector('[contenteditable="true"]') as HTMLElement | null) ?? node);
       target.focus();
-
-      const clone = target.cloneNode(true) as HTMLElement;
-      for (const ph of clone.querySelectorAll('.se-placeholder, [class*="placeholder"]')) {
-        ph.remove();
-      }
-      const existing = (clone.innerText ?? clone.textContent ?? '').replace(/\u00a0/g, ' ').trim();
-      const isEmptyOrPlaceholder = !existing || /^(제목|title)$/i.test(existing);
-
-      if (isEmptyOrPlaceholder) {
-        const sel = window.getSelection();
-        if (sel && target.isContentEditable) {
-          const caret = document.createRange();
-          caret.selectNodeContents(target);
-          caret.collapse(false);
-          sel.removeAllRanges();
-          sel.addRange(caret);
-        }
-        return;
-      }
-
-      if (target.isContentEditable) {
-        const sel = window.getSelection();
-        const delRange = document.createRange();
-        delRange.selectNodeContents(target);
-        delRange.deleteContents();
-        if (sel) {
-          const caret = document.createRange();
-          caret.selectNodeContents(target);
-          caret.collapse(false);
-          sel.removeAllRanges();
-          sel.addRange(caret);
-        }
-      } else if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
-        target.value = '';
-      }
+      if (!target.isContentEditable) return;
+      const sel = window.getSelection();
+      if (!sel) return;
+      const caret = document.createRange();
+      caret.selectNodeContents(target);
+      caret.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(caret);
     })
     .catch(() => {});
+}
+
+/**
+ * 제목란 비움 — SE ONE에서 raw-DOM deleteContents는 에디터 모델을 비우지 못해
+ * 이후 insertText가 append되며 제목이 중복된다. 입력과 동일하게 page.keyboard로 삭제해
+ * 모델을 실제로 비운다. placeholder DOM은 건드리지 않는다.
+ */
+export async function clearBlogTitleField(page: Page, titleLoc: Locator): Promise<void> {
+  const editable = await resolveTitleEditableLocator(page, titleLoc);
+
+  for (let round = 0; round < 3; round += 1) {
+    const text = await readEditableTitleText(editable);
+    if (!text || isTitlePlaceholderText(text)) {
+      await focusTitleCaretToEnd(editable);
+      return;
+    }
+
+    await focusTitleCaretToEnd(editable);
+    const presses = Math.min(text.length + 4, 240);
+    for (let i = 0; i < presses; i += 1) {
+      await page.keyboard.press('Backspace');
+    }
+    await sleep(80);
+  }
+
+  await focusTitleCaretToEnd(editable);
 }
 
 /** SE ONE 제목 — pasteBlogTitleField 위임 (execCommand 체인 제거) */
