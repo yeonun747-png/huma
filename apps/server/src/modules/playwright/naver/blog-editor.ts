@@ -22,6 +22,7 @@ import {
   readBlogBodyText,
   readBlogTitleText,
   waitForBlogTitleSectionReady,
+  waitForSeOneEditorFullyLoaded,
   isBlogTitleEditableVisible,
 } from './naver-editor-locators.js';
 import {
@@ -97,11 +98,22 @@ export async function postNaverBlog(params: {
 
   await logOperation({
     level: 'info',
-    message: '[post_blog] 에디터 진입 완료 — 제목칸 클릭·입력 시작',
+    message: '[post_blog] 에디터 진입 완료 — 본체 로딩 대기',
     account_id: params.accountId,
   });
 
   await prepareSeOneEditorSurface(page, 12_000);
+
+  // 발행 버튼만 보이는 스켈레톤·로딩 스피너 단계에서 조기 클릭 방지 —
+  // 툴바·제목·본문이 모두 그려지고 제목 위치가 안정될 때까지 대기
+  const fullyLoaded = await waitForSeOneEditorFullyLoaded(page, 45_000);
+  await logOperation({
+    level: 'info',
+    message: `[post_blog] 본체 로딩 ${fullyLoaded ? '완료' : '대기 timeout(폴백 진행)'} — 제목칸 클릭·입력 시작`,
+    account_id: params.accountId,
+  });
+
+  await prepareSeOneEditorSurface(page, 6_000);
   if (!(await isBlogTitleEditableVisible(page))) {
     await waitForBlogTitleSectionReady(page, 8_000).catch(() => {});
   }

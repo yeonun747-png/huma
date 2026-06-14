@@ -777,11 +777,13 @@ export async function clickBlogBodyPlaceholder(page: Page): Promise<void> {
   }
 }
 
-/** 포커스된 제목칸 비우기 — 중복 입력 방지(Ctrl+A·Delete + selectAll 폴백) */
-async function clearFocusedTitleEditable(page: Page, editable: Locator): Promise<void> {
-  const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
-  await page.keyboard.press(`${mod}+a`).catch(() => {});
-  await page.keyboard.press('Delete').catch(() => {});
+/**
+ * 제목칸만 비움 — 중복 입력 방지.
+ * 전역 Ctrl+A/Delete는 포커스가 제목 밖일 때 에디터 전체를 선택·삭제해
+ * 본문이 통째로 지워지는 사고가 발생하므로 절대 사용하지 않는다.
+ * 반드시 제목 contenteditable 노드 내부로 한정된 selection·delete만 수행한다.
+ */
+async function clearFocusedTitleEditable(_page: Page, editable: Locator): Promise<void> {
   await clearBlogTitleField(editable);
   await sleep(80);
 }
@@ -1011,6 +1013,115 @@ export async function isSeOneEditorShellReady(page: Page): Promise<boolean> {
     .first()
     .isVisible({ timeout: 800 })
     .catch(() => false);
+}
+
+/** SE ONE 본체 로딩 상태 — 툴바·제목·본문 존재, 로딩 스피너 없음, 제목 위치 측정 */
+async function probeSeOneLoadState(page: Page): Promise<{
+  ready: boolean;
+  strong: boolean;
+  box: { x: number; y: number; w: number; h: number } | null;
+}> {
+  return page
+    .evaluate(() => {
+      const onWrite = /postwrite|PostWriteForm|GoBlogWrite/i.test(location.href);
+      if (!onWrite) return { ready: false, strong: false, box: null };
+
+      const visible = (el: Element | null): el is HTMLElement => {
+        if (!el) return false;
+        const node = el as HTMLElement;
+        const r = node.getBoundingClientRect();
+        return node.offsetParent !== null && r.width > 0 && r.height > 0;
+      };
+
+      // 로딩 스피너 — 회전 인디케이터(placeholder 클래스는 제외)
+      const spinnerSel = [
+        '.se-loading',
+        '.se-loading-layer',
+        '.se-loading-indicator',
+        '.__se_loading',
+        '.se-spinner',
+        '[class*="loading-spinner"]',
+      ];
+      let spinnerVisible = false;
+      for (const s of spinnerSel) {
+        if (visible(document.querySelector(s))) {
+          spinnerVisible = true;
+          break;
+        }
+      }
+
+      const title = document.querySelector(
+        '.se-section-documentTitle [contenteditable="true"], .se-documentTitle [contenteditable="true"]',
+      );
+      const body = document.querySelector(
+        '.se-section-text:not(.se-section-documentTitle), .se-component-content .se-text-paragraph, .se-components-wrap .se-section-text',
+      );
+      const toolbar = document.querySelector('.se-toolbar, [class*="se-toolbar"], .se-menu, .se-toolbar-container');
+
+      const tb = title instanceof HTMLElement ? title.getBoundingClientRect() : null;
+      const titleOk = visible(title) && !!tb && tb.height >= 12 && tb.width >= 80;
+      const bodyOk = visible(body);
+
+      return {
+        // strong: 툴바까지 — 본체가 완전히 그려진 상태
+        strong: !spinnerVisible && titleOk && bodyOk && visible(toolbar),
+        // ready(완화): 스피너 없고 제목·본문이 보이면 입력 가능
+        ready: !spinnerVisible && titleOk && bodyOk,
+        box: tb ? { x: tb.x, y: tb.y, w: tb.width, h: tb.height } : null,
+      };
+    })
+    .catch(() => ({ ready: false, strong: false, box: null }));
+}
+
+/**
+ * SE ONE 에디터 본체가 완전히 로딩·안정될 때까지 대기.
+ * 발행 버튼만 보이는 스켈레톤·로딩 스피너 단계에서 제목을 조기 클릭해
+ * 입력이 날아가는 문제를 막는다. (제목 위치가 흔들리지 않을 때까지 대기)
+ */
+export async function waitForSeOneEditorFullyLoaded(page: Page, maxMs = 45_000): Promise<boolean> {
+  await page.waitForLoadState('domcontentloaded').catch(() => {});
+  await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {});
+
+  const deadline = Date.now() + maxMs;
+  const halfway = Date.now() + Math.round(maxMs / 2);
+  let stableSince = 0;
+  let lastBox: { x: number; y: number; w: number; h: number } | null = null;
+
+  while (Date.now() < deadline) {
+    if (await isDraftResumePopupVisible(page)) {
+      stableSince = 0;
+      lastBox = null;
+      await sleep(300);
+      continue;
+    }
+
+    const state = await probeSeOneLoadState(page);
+    // 전반부에는 toolbar까지(strong), 후반부에는 제목·본문만(ready) 충족하면 인정
+    const meets = Date.now() < halfway ? state.strong : state.ready;
+
+    if (meets && state.box) {
+      const b = state.box;
+      if (
+        lastBox &&
+        Math.abs(lastBox.x - b.x) < 2 &&
+        Math.abs(lastBox.y - b.y) < 2 &&
+        Math.abs(lastBox.w - b.w) < 2 &&
+        Math.abs(lastBox.h - b.h) < 2
+      ) {
+        if (stableSince === 0) stableSince = Date.now();
+        if (Date.now() - stableSince >= 700) return true;
+      } else {
+        stableSince = Date.now();
+      }
+      lastBox = b;
+    } else {
+      stableSince = 0;
+      lastBox = null;
+    }
+    await sleep(250);
+  }
+
+  return false;
 }
 
 export async function isNaverBlogEditorInteractable(page: Page): Promise<boolean> {
