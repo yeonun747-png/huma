@@ -82,28 +82,41 @@ export async function postNaverBlog(params: {
     account_id: params.accountId,
   });
 
-  // 팝업 없으면 즉시 통과 — 이후 titleReady 대기에서 제목 위치로 포인터 이동
+  // 팝업 없으면 즉시 통과
   await waitAndDismissDraftResumePopup(page, 3_000).catch(() => {});
   resetDraftDismissGuard(page);
 
-  const titleBox = await waitForBlogTitleInputReady(page, 45_000, async () => {
-    await waitAndDismissDraftResumePopup(page, 8_000).catch(() => {});
-    resetDraftDismissGuard(page);
-  });
-  if (!titleBox) {
-    throw new Error('BLOG_TITLE_NOT_FOUND');
-  }
-  await logOperation({
-    level: 'info',
-    message: '[post_blog] 제목칸 준비 — 클릭·입력 시작',
-    account_id: params.accountId,
-  });
+  let titleBox = await findBlogTitleLocator(page);
+  const titleAlreadyOk =
+    titleBox != null && (await verifyBlogTitleField(page, titleBox, params.title));
 
-  if (await isDraftResumePopupVisible(page)) {
-    await prepareSeOneEditorSurface(page, 6_000);
-  }
+  if (!titleAlreadyOk) {
+    titleBox = await waitForBlogTitleInputReady(page, 45_000, async () => {
+      await waitAndDismissDraftResumePopup(page, 8_000).catch(() => {});
+      resetDraftDismissGuard(page);
+    });
+    if (!titleBox) {
+      throw new Error('BLOG_TITLE_NOT_FOUND');
+    }
+    await logOperation({
+      level: 'info',
+      message: '[post_blog] 제목칸 준비 — 클릭·입력 시작',
+      account_id: params.accountId,
+    });
 
-  await ensureBlogTitleWritten(page, titleBox, params.title);
+    if (await isDraftResumePopupVisible(page)) {
+      await prepareSeOneEditorSurface(page, 6_000);
+    }
+
+    await ensureBlogTitleWritten(page, titleBox, params.title);
+  } else {
+    await blurBlogTitleField(page);
+    await logOperation({
+      level: 'info',
+      message: '[post_blog] 제목 이미 입력됨 — 본문 입력으로 진행(재시도 시 제목 마우스 이동 없음)',
+      account_id: params.accountId,
+    });
+  }
 
   await logOperation({
     level: 'info',
@@ -111,20 +124,24 @@ export async function postNaverBlog(params: {
     account_id: params.accountId,
   });
 
-  await clickBlogBodyPlaceholder(page);
-  await sleep(200);
+  let editor = await waitForBlogBodyParagraphLocator(page, 800);
+  const bodyAlreadyOk =
+    editor != null && (await verifyBlogBodyField(page, editor, params.content));
 
-  const editor = await waitForBlogBodyParagraphLocator(page, 10_000);
-  if (!editor) {
-    await logOperation({
-      level: 'warn',
-      message: '[post_blog][body] paragraph 미검출 — BLOG_BODY_NOT_FOUND',
-      account_id: params.accountId,
-    }).catch(() => {});
-    throw new Error('BLOG_BODY_NOT_FOUND');
-  }
+  if (!bodyAlreadyOk) {
+    if (!editor) {
+      await clickBlogBodyPlaceholder(page);
+      editor = await waitForBlogBodyParagraphLocator(page, 3_000);
+    }
+    if (!editor) {
+      await logOperation({
+        level: 'warn',
+        message: '[post_blog][body] paragraph 미검출 — BLOG_BODY_NOT_FOUND',
+        account_id: params.accountId,
+      }).catch(() => {});
+      throw new Error('BLOG_BODY_NOT_FOUND');
+    }
 
-  if (!(await verifyBlogBodyField(page, editor, params.content))) {
     try {
       await typeSeOneBlogBody(page, editor, params.content);
     } catch (bodyErr) {
@@ -136,6 +153,14 @@ export async function postNaverBlog(params: {
       throw bodyErr;
     }
   }
+
+  if (!editor) {
+    throw new Error('BLOG_BODY_NOT_FOUND');
+  }
+  if (!titleBox) {
+    throw new Error('BLOG_TITLE_NOT_FOUND');
+  }
+
   if (!(await verifyBlogBodyField(page, editor, params.content))) {
     await logOperation({
       level: 'warn',

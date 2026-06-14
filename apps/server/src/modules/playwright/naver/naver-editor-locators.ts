@@ -892,8 +892,9 @@ export async function readBlogBodyText(bodyLoc: Locator): Promise<string> {
 export function isBlogBodySubstantiallyWritten(bodyText: string, expectedContent: string): boolean {
   const b = bodyText.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
   const e = expectedContent.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
-  if (b.length < 60) return false;
   if (!e) return b.length >= 60;
+  const minLen = Math.min(60, Math.max(20, Math.floor(e.length * 0.45)));
+  if (b.length < minLen) return false;
   const probe = Math.min(48, e.length);
   return b.includes(e.slice(0, probe)) || e.includes(b.slice(0, Math.min(probe, b.length)));
 }
@@ -1135,7 +1136,7 @@ async function ensureBodyFocusForPaste(page: Page, editable: Locator): Promise<v
   }
 }
 
-/** SE ONE 본문 — placeholder 1회 클릭 후 skipClick이면 재클릭·마우스 이동 없이 insertText만 */
+/** SE ONE 본문 — skipClick이면 placeholder 클릭 직후: 재탐색·재클릭·마우스 이동 없이 insertText만 */
 export async function pasteBlogBodyContent(
   page: Page,
   bodyLoc: Locator,
@@ -1146,21 +1147,24 @@ export async function pasteBlogBodyContent(
     throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
   }
 
-  await blurBlogTitleField(page);
+  const editable = await resolveBodyEditableLocator(bodyLoc);
 
-  let editable =
-    (await findBlogBodyParagraphOnly(page)) ?? (await resolveBodyEditableLocator(bodyLoc));
-  if (!(await editable.evaluate((el) => el.matches('[contenteditable="true"]')).catch(() => false))) {
-    const ready = await waitForBlogBodyParagraphLocator(page, 4000);
-    if (ready) editable = ready;
-  }
-
-  if (!options?.skipClick) {
+  if (options?.skipClick) {
+    if (await isFocusInTitleArea(page)) {
+      await blurBlogTitleField(page);
+    }
+    await focusBodyEditableNode(editable);
+  } else {
+    await blurBlogTitleField(page);
     await humanClickLocator(page, editable);
     await sleep(200);
+    await focusBodyEditableNode(editable);
+    await ensureBodyFocusForPaste(page, editable);
   }
-  await focusBodyEditableNode(editable);
-  await ensureBodyFocusForPaste(page, editable);
+
+  if (await isFocusInTitleArea(page)) {
+    throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
+  }
 
   const paragraphs = content.split('\n\n').filter(Boolean);
   if (paragraphs.length === 0) {
@@ -1169,7 +1173,11 @@ export async function pasteBlogBodyContent(
 
   for (let i = 0; i < paragraphs.length; i += 1) {
     if (await isFocusInTitleArea(page)) {
-      await ensureBodyFocusForPaste(page, editable);
+      await blurBlogTitleField(page);
+      await focusBodyEditableNode(editable);
+      if (await isFocusInTitleArea(page)) {
+        throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
+      }
     }
     await page.keyboard.insertText(paragraphs[i]!);
     await sleep(200);
