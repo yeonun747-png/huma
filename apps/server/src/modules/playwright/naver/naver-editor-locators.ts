@@ -816,19 +816,38 @@ export async function resolveBodyEditableLocator(bodyLoc: Locator): Promise<Loca
   return resolveBodyEditableLocatorRelaxed(bodyLoc);
 }
 
-/** 본문 맨 끝으로 캐럿 이동 — 마우스 클릭 없이 마지막 paragraph DOM 포커스 */
-export async function focusBlogBodyEnd(page: Page, bodyLoc: Locator): Promise<void> {
-  await blurBlogTitleField(page);
+/** SE ONE — components-wrap 안 마지막 contenteditable paragraph */
+async function focusLastBodyParagraphViaDom(page: Page): Promise<boolean> {
+  return page
+    .evaluate(() => {
+      const all = document.querySelectorAll(
+        '.se-components-wrap .se-text-paragraph[contenteditable="true"], .se-main-container .se-text-paragraph[contenteditable="true"]',
+      );
+      const target = all.length > 0 ? (all[all.length - 1] as HTMLElement) : null;
+      if (!target) return false;
+      if (target.closest('.se-section-documentTitle, .se-documentTitle')) return false;
+      target.scrollIntoView({ block: 'end' });
+      target.focus();
+      const sel = window.getSelection();
+      if (sel) {
+        const range = document.createRange();
+        range.selectNodeContents(target);
+        range.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+      return true;
+    })
+    .catch(() => false);
+}
 
-  const focused = await page
-    .evaluate((sectionSel) => {
-      const wrap = document.querySelector(sectionSel) as HTMLElement | null;
-      if (!wrap) return false;
-      const paragraphs = wrap.querySelectorAll('.se-text-paragraph[contenteditable="true"]');
-      const target =
-        paragraphs.length > 0
-          ? (paragraphs[paragraphs.length - 1] as HTMLElement)
-          : (wrap.querySelector('[contenteditable="true"]') as HTMLElement | null);
+async function focusCaretAtLocatorEnd(loc: Locator): Promise<boolean> {
+  return loc
+    .evaluate((el) => {
+      const node = el as HTMLElement;
+      const target = node.matches('[contenteditable="true"]')
+        ? node
+        : (node.querySelector('[contenteditable="true"]') as HTMLElement | null);
       if (!target) return false;
       target.scrollIntoView({ block: 'end' });
       target.focus();
@@ -841,34 +860,86 @@ export async function focusBlogBodyEnd(page: Page, bodyLoc: Locator): Promise<vo
         sel.addRange(range);
       }
       return true;
-    }, BLOG_BODY_SECTION_LOCATOR)
+    })
     .catch(() => false);
+}
 
-  if (!focused) {
-    throw new Error('BLOG_BODY_END_FOCUS_FAILED');
+async function resolveBodyEditableLocatorLast(page: Page, bodyLoc: Locator): Promise<Locator> {
+  const inSection = bodyLoc.locator('.se-text-paragraph[contenteditable="true"]').last();
+  if ((await inSection.count()) > 0) return inSection;
+  const globalLast = page
+    .locator('.se-components-wrap .se-text-paragraph[contenteditable="true"]')
+    .last();
+  if ((await globalLast.count()) > 0) return globalLast;
+  return resolveBodyEditableLocatorRelaxed(bodyLoc);
+}
+
+/** 본문 맨 끝으로 캐럿 이동 — 마지막 paragraph (다중 section 대응) */
+export async function focusBlogBodyEnd(page: Page, bodyLoc: Locator): Promise<void> {
+  await blurBlogTitleField(page);
+
+  if (await isFocusInBodyArea(page)) {
+    await page.keyboard.press('End');
+    await sleep(80);
+    await page.keyboard.press('Control+End');
+    await sleep(80);
+    if (!(await isFocusInTitleArea(page))) return;
   }
 
-  await sleep(150);
-  await page.keyboard.press('End');
-  await sleep(80);
+  if (await focusLastBodyParagraphViaDom(page)) {
+    await sleep(120);
+    await page.keyboard.press('End');
+    await sleep(80);
+    if (!(await isFocusInTitleArea(page))) return;
+  }
 
+  const lastEditable = await resolveBodyEditableLocatorLast(page, bodyLoc);
+  if (await focusCaretAtLocatorEnd(lastEditable)) {
+    await sleep(120);
+    await page.keyboard.press('End');
+    await sleep(80);
+    if (!(await isFocusInTitleArea(page))) return;
+  }
+
+  const box = await bodyLoc.boundingBox().catch(() => null);
+  if (box && box.height > 16) {
+    await humanMouseMove(page, box.x + box.width / 2, box.y + box.height - 8);
+    await sleep(80);
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height - 8);
+    await sleep(150);
+    await page.keyboard.press('Control+End');
+    await sleep(80);
+    if (!(await isFocusInTitleArea(page))) return;
+  }
+
+  await page.keyboard.press('Control+End');
+  await sleep(100);
   if (await isFocusInTitleArea(page)) {
     throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
   }
+  if (await isFocusInBodyArea(page)) return;
+
+  throw new Error('BLOG_BODY_END_FOCUS_FAILED');
 }
 
 /** 본문 섹션 전체 텍스트 (링크 URL 검증용) */
 export async function readBlogBodySectionText(page: Page): Promise<string> {
   return page
-    .evaluate((sectionSel) => {
-      const wrap = document.querySelector(sectionSel) as HTMLElement | null;
-      if (!wrap) return '';
-      const clone = wrap.cloneNode(true) as HTMLElement;
-      for (const ph of clone.querySelectorAll('.se-placeholder, [class*="placeholder"]')) {
-        ph.remove();
+    .evaluate(() => {
+      const wraps = document.querySelectorAll(
+        '.se-components-wrap .se-section-text:not(.se-section-documentTitle)',
+      );
+      const parts: string[] = [];
+      for (const wrap of Array.from(wraps)) {
+        const clone = (wrap as HTMLElement).cloneNode(true) as HTMLElement;
+        for (const ph of clone.querySelectorAll('.se-placeholder, [class*="placeholder"]')) {
+          ph.remove();
+        }
+        const t = (clone.innerText ?? clone.textContent ?? '').replace(/\u00a0/g, ' ').trim();
+        if (t) parts.push(t);
       }
-      return (clone.innerText ?? clone.textContent ?? '').replace(/\u00a0/g, ' ').trim();
-    }, BLOG_BODY_SECTION_LOCATOR)
+      return parts.join('\n').trim();
+    })
     .catch(() => '');
 }
 
