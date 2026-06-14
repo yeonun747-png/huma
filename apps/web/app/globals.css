@@ -498,6 +498,49 @@
   .m-tw:last-child { border-bottom: none; }
   .m-tw-label { font-size: 13.5px; color: var(--t2); }
   .m-tw-sub { font-size: 11px; color: var(--t3); }
+
+  .m-pct-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    min-width: 72px;
+    padding: 4px 10px 4px 12px;
+    background: var(--bg3);
+    border: 1px solid var(--bdr2);
+    border-radius: 8px;
+    transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+  }
+  .m-pct-field:focus-within {
+    border-color: var(--acc);
+    background: var(--glow);
+    box-shadow: 0 0 0 1px rgba(192, 80, 110, 0.15);
+  }
+  .m-pct-input {
+    width: 2.5rem;
+    padding: 0;
+    border: none;
+    background: transparent;
+    outline: none;
+    font-family: var(--font-ui);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--acc);
+    text-align: right;
+    line-height: 1.4;
+    -moz-appearance: textfield;
+  }
+  .m-pct-input::-webkit-outer-spin-button,
+  .m-pct-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  .m-pct-suffix {
+    font-family: var(--font-ui);
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--t3);
+    user-select: none;
+  }
   .m-tgl { width: 30px; height: 17px; background: var(--bg4); border-radius: 99px; position: relative; cursor: pointer; border: 1px solid var(--bdr); transition: background 0.2s; flex-shrink: 0; }
   .m-tgl::after { content: ''; position: absolute; width: 11px; height: 11px; background: #fff; border-radius: 50%; top: 2px; left: 2px; transition: transform 0.2s; }
   .m-tgl.on { background: var(--acc); border-color: var(--acc); }

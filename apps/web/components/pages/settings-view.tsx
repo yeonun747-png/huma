@@ -104,6 +104,100 @@ function SettingsToggle({
 
 
 
+type PostingWarmupSettings = {
+  skip_pct: number;
+  light_pct: number;
+  full_pct: number;
+};
+
+const DEFAULT_POSTING_WARMUP: PostingWarmupSettings = {
+  skip_pct: 80,
+  light_pct: 15,
+  full_pct: 5,
+};
+
+function normalizePostingWarmup(raw: unknown): PostingWarmupSettings {
+  const row = (raw && typeof raw === 'object' ? raw : {}) as Partial<PostingWarmupSettings>;
+  const clamp = (v: unknown, fallback: number) => {
+    const n = typeof v === 'number' ? v : Number(v);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.min(100, Math.max(0, Math.round(n)));
+  };
+  return {
+    skip_pct: clamp(row.skip_pct, DEFAULT_POSTING_WARMUP.skip_pct),
+    light_pct: clamp(row.light_pct, DEFAULT_POSTING_WARMUP.light_pct),
+    full_pct: clamp(row.full_pct, DEFAULT_POSTING_WARMUP.full_pct),
+  };
+}
+
+function SettingsPercentRow({
+  label,
+  sub,
+  value,
+  onChange,
+}: {
+  label: string;
+  sub?: string;
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
+
+  const commitDraft = (raw: string) => {
+    if (raw === '' || raw === '-') {
+      onChange(0);
+      setDraft('0');
+      return;
+    }
+    const n = Math.min(100, Math.max(0, Number(raw) || 0));
+    onChange(n);
+    setDraft(String(n));
+  };
+
+  return (
+    <div className="m-tw">
+      <div>
+        <div className="m-tw-label">{label}</div>
+        {sub && <div className="m-tw-sub">{sub}</div>}
+      </div>
+      <label className="m-pct-field">
+        <input
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          value={draft}
+          aria-label={`${label} 확률`}
+          onChange={(e) => {
+            const raw = e.target.value;
+            if (raw === '') {
+              setDraft('');
+              return;
+            }
+            if (!/^\d+$/.test(raw)) return;
+            const n = Math.min(100, Number(raw));
+            setDraft(String(n));
+            onChange(n);
+          }}
+          onBlur={() => commitDraft(draft)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+          className="m-pct-input"
+        />
+        <span className="m-pct-suffix">%</span>
+      </label>
+    </div>
+  );
+}
+
+
+
 export function SettingsView() {
 
   const [app, setApp] = useState<Record<string, unknown>>({});
@@ -114,6 +208,7 @@ export function SettingsView() {
     crank_enabled: true,
     posting_enabled: true,
   });
+  const [postingWarmup, setPostingWarmup] = useState<PostingWarmupSettings>(DEFAULT_POSTING_WARMUP);
 
 
 
@@ -148,6 +243,7 @@ export function SettingsView() {
       delete appSettings.clova_tts;
 
       setApp(appSettings);
+      setPostingWarmup(normalizePostingWarmup(appSettings.posting_warmup));
 
       setWatcher(w as Record<string, unknown>);
 
@@ -197,6 +293,16 @@ export function SettingsView() {
     const next = { ...activity, [key]: val };
     setActivity(next);
     await api.updateSetting('activity_control', next);
+  };
+
+  const warmupSum = postingWarmup.skip_pct + postingWarmup.light_pct + postingWarmup.full_pct;
+
+  const patchPostingWarmup = async (key: keyof PostingWarmupSettings, val: number) => {
+    const nextWarmup = { ...postingWarmup, [key]: val };
+    setPostingWarmup(nextWarmup);
+    const nextApp = { ...app, posting_warmup: nextWarmup };
+    setApp(nextApp);
+    await api.updateSetting('app_settings', nextApp);
   };
 
 
@@ -290,6 +396,38 @@ export function SettingsView() {
 
           />
 
+        </MPanel>
+
+        <MPanel title="포스팅 워밍업">
+          <p className="mb-3 text-[11px] leading-relaxed text-huma-t3">
+            post_blog 로그인 전 네이버 검색·체류 횟수 확률. 세 값 합계는 100% 권장.
+          </p>
+          <SettingsPercentRow
+            label="워밍업 없이 바로 로그인"
+            sub="0회 — 검색 생략 후 로그인"
+            value={postingWarmup.skip_pct}
+            onChange={(v) => void patchPostingWarmup('skip_pct', v)}
+          />
+          <SettingsPercentRow
+            label="1~2회 워밍업"
+            sub="네이버 검색·링크 체류 1~2라운드"
+            value={postingWarmup.light_pct}
+            onChange={(v) => void patchPostingWarmup('light_pct', v)}
+          />
+          <SettingsPercentRow
+            label="2~3회 워밍업"
+            sub="네이버 검색·링크 체류 2~3라운드"
+            value={postingWarmup.full_pct}
+            onChange={(v) => void patchPostingWarmup('full_pct', v)}
+          />
+          <div
+            className={cn(
+              'mt-2 font-mono text-[11px]',
+              warmupSum === 100 ? 'text-huma-ok' : 'text-huma-warn',
+            )}
+          >
+            합계: {warmupSum}% {warmupSum !== 100 ? '(100%가 아니면 비율로 정규화됨)' : ''}
+          </div>
         </MPanel>
 
         <MPanel title="발행 제한">

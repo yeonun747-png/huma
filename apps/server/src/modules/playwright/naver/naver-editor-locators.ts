@@ -1129,16 +1129,19 @@ export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: s
 async function ensureBodyFocusForPaste(page: Page, editable: Locator): Promise<void> {
   if (!(await isFocusInTitleArea(page))) return;
   await blurBlogTitleField(page);
-  await humanClickLocator(page, editable);
-  await sleep(200);
   await focusBodyEditableNode(editable);
   if (await isFocusInTitleArea(page)) {
     throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
   }
 }
 
-/** SE ONE 본문 — 제목과 동일: 1회 클릭 + page.keyboard.insertText (execCommand noop 방지) */
-export async function pasteBlogBodyContent(page: Page, bodyLoc: Locator, content: string): Promise<void> {
+/** SE ONE 본문 — placeholder 1회 클릭 후 skipClick이면 재클릭·마우스 이동 없이 insertText만 */
+export async function pasteBlogBodyContent(
+  page: Page,
+  bodyLoc: Locator,
+  content: string,
+  options?: { skipClick?: boolean },
+): Promise<void> {
   if (await isDraftResumePopupVisible(page)) {
     throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
   }
@@ -1152,8 +1155,10 @@ export async function pasteBlogBodyContent(page: Page, bodyLoc: Locator, content
     if (ready) editable = ready;
   }
 
-  await humanClickLocator(page, editable);
-  await sleep(200);
+  if (!options?.skipClick) {
+    await humanClickLocator(page, editable);
+    await sleep(200);
+  }
   await focusBodyEditableNode(editable);
   await ensureBodyFocusForPaste(page, editable);
 
@@ -1163,7 +1168,9 @@ export async function pasteBlogBodyContent(page: Page, bodyLoc: Locator, content
   }
 
   for (let i = 0; i < paragraphs.length; i += 1) {
-    await ensureBodyFocusForPaste(page, editable);
+    if (await isFocusInTitleArea(page)) {
+      await ensureBodyFocusForPaste(page, editable);
+    }
     await page.keyboard.insertText(paragraphs[i]!);
     await sleep(200);
     if (i < paragraphs.length - 1) {

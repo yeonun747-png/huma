@@ -13,11 +13,9 @@ import {
 } from './enter-blog-editor.js';
 import {
   findBlogTitleLocator,
-  ensureBlogBodyLocator,
   clickBlogBodyPlaceholder,
   pasteBlogBodyContent,
   ensureBlogTitleWritten,
-  moveMouseToBlogPlaceholder,
   waitForBlogBodyParagraphLocator,
   blurBlogTitleField,
   verifyBlogBodyField,
@@ -49,7 +47,7 @@ async function typeSeOneBlogBody(
   bodyLoc: Locator,
   content: string,
 ): Promise<void> {
-  await pasteBlogBodyContent(page, bodyLoc, content);
+  await pasteBlogBodyContent(page, bodyLoc, content, { skipClick: true });
 }
 
 export async function postNaverBlog(params: {
@@ -113,13 +111,10 @@ export async function postNaverBlog(params: {
     account_id: params.accountId,
   });
 
-  await moveMouseToBlogPlaceholder(page, titleBox);
   await clickBlogBodyPlaceholder(page);
-  await sleep(400);
+  await sleep(200);
 
-  const editor =
-    (await waitForBlogBodyParagraphLocator(page, 10_000)) ??
-    (await ensureBlogBodyLocator(page, titleBox));
+  const editor = await waitForBlogBodyParagraphLocator(page, 10_000);
   if (!editor) {
     await logOperation({
       level: 'warn',

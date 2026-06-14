@@ -14,7 +14,22 @@ export interface AppSettings {
   slack_webhook?: boolean;
   daily_limit?: boolean;
   night_ban?: boolean;
+  /** post_blog 로그인 전 네이버 검색 워밍업 확률(%) — 합계 100 */
+  posting_warmup?: PostingWarmupSettings;
 }
+
+/** post_blog 세션 워밍업 — skip=0회, light=1~2회, full=2~3회 */
+export interface PostingWarmupSettings {
+  skip_pct: number;
+  light_pct: number;
+  full_pct: number;
+}
+
+export const DEFAULT_POSTING_WARMUP: PostingWarmupSettings = {
+  skip_pct: 80,
+  light_pct: 15,
+  full_pct: 5,
+};
 
 export interface WatcherSettings {
   slack_webhook?: string;
@@ -51,7 +66,30 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   daily_limit: true,
   night_ban: true,
   slack_webhook: true,
+  posting_warmup: { ...DEFAULT_POSTING_WARMUP },
 };
+
+function clampWarmupPct(value: unknown, fallback: number): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(100, Math.max(0, Math.round(n)));
+}
+
+export function normalizePostingWarmupSettings(
+  raw?: Partial<PostingWarmupSettings> | null,
+): PostingWarmupSettings {
+  return {
+    skip_pct: clampWarmupPct(raw?.skip_pct, DEFAULT_POSTING_WARMUP.skip_pct),
+    light_pct: clampWarmupPct(raw?.light_pct, DEFAULT_POSTING_WARMUP.light_pct),
+    full_pct: clampWarmupPct(raw?.full_pct, DEFAULT_POSTING_WARMUP.full_pct),
+  };
+}
+
+/** post_blog preSessionWarmup — app_settings.posting_warmup 확률 */
+export async function getPostingWarmupSettings(): Promise<PostingWarmupSettings> {
+  const app = await getAppSettings();
+  return normalizePostingWarmupSettings(app.posting_warmup);
+}
 
 const DEFAULT_WATCHER: WatcherSettings = {
   cooldown_429_min: 15,
@@ -71,6 +109,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     claude_haiku_api: raw.claude_haiku_api ?? raw.claude_api ?? true,
     google_imagen_api: raw.google_imagen_api ?? legacyMedia,
     higgsfield_api: raw.higgsfield_api ?? legacyMedia,
+    posting_warmup: normalizePostingWarmupSettings(raw.posting_warmup ?? DEFAULT_APP_SETTINGS.posting_warmup),
   };
 }
 

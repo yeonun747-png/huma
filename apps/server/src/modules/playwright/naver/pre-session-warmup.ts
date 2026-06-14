@@ -6,6 +6,7 @@ import type { HumanEngineConfig } from '../../../lib/settings.js';
 import type { AccountPersona } from '../persona.js';
 import { collectNaverSearchUrlsDetailed } from '../../../lib/naver-search-links.js';
 import { CRANK_NAV_TIMEOUT_MS, PLAYWRIGHT_NAV_TIMEOUT_MS } from '../../../lib/playwright-nav-timeout.js';
+import { getPostingWarmupSettings } from '../../../lib/human-engine-policy.js';
 import { throwWarmupFailure } from '../../../lib/warmup-failure.js';
 
 export type WarmupAccountType = 'posting' | 'crank';
@@ -263,10 +264,15 @@ export type PreSessionWarmupOptions = {
   express?: boolean;
 };
 
-function resolvePostingWarmupRounds(): number {
-  const roll = Math.random();
-  if (roll < 0.8) return 0;
-  if (roll < 0.95) return randomBetween(1, 2);
+async function resolvePostingWarmupRounds(): Promise<number> {
+  const cfg = await getPostingWarmupSettings();
+  const skip = Math.max(0, cfg.skip_pct);
+  const light = Math.max(0, cfg.light_pct);
+  const full = Math.max(0, cfg.full_pct);
+  const total = skip + light + full || 100;
+  const roll = Math.random() * total;
+  if (roll < skip) return 0;
+  if (roll < skip + light) return randomBetween(1, 2);
   return randomBetween(2, 3);
 }
 
@@ -281,10 +287,10 @@ export async function preSessionWarmup(
     accountType === 'crank' ? CRANK_NAV_TIMEOUT_MS : PLAYWRIGHT_NAV_TIMEOUT_MS;
   const expressCrank = accountType === 'crank' && options?.express === true;
 
-  /** post_blog — 80% 생략 · 15% 1~2회 · 5% 2~3회 (블로거는 바로 발행하는 경우가 많음) */
+  /** post_blog — app_settings.posting_warmup 확률(기본 80% 생략 · 15% 1~2회 · 5% 2~3회) */
   const roundCount =
     accountType === 'posting'
-      ? resolvePostingWarmupRounds()
+      ? await resolvePostingWarmupRounds()
       : expressCrank
         ? 1
         : randomBetween(2, 3);
