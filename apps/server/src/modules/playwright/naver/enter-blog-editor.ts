@@ -1,7 +1,8 @@
-import type { BrowserContext, Page } from 'playwright';
+import type { BrowserContext, Locator, Page } from 'playwright';
 
 import { humanClickLocator } from '../../human-engine/mouse.js';
 import { humanSleep } from '../../human-engine/typing.js';
+import { showVncAutomationPointer } from '../../../lib/vnc-pointer.js';
 
 import type { HumanEngineConfig } from '../../../lib/settings.js';
 
@@ -92,49 +93,57 @@ async function clickIfVisible(root: Page | ReturnType<Page['frameLocator']>, sel
   return false;
 }
 
-/** 「작성 중인 글이 있습니다」 — 확인(이어쓰기) 금지, 취소만 클릭해 새 글 작성 */
+/** 취소 버튼 위치에 VNC 포인터를 즉시 표시 — 클릭 전에 포인터가 바로 보이도록 */
+async function preShowPointerAtLocator(editorPage: Page, btn: Locator): Promise<void> {
+  const box = await btn.boundingBox().catch(() => null);
+  if (!box) return;
+  await showVncAutomationPointer(
+    editorPage,
+    box.x + box.width / 2,
+    box.y + box.height / 2,
+  ).catch(() => {});
+}
+
+/** 「작성 중인 글이 있습니다」 — 확인(이어쓰기) 금지, 취소만 마우스로 클릭해 새 글 작성 */
 async function dismissDraftResumePopup(editorPage: Page): Promise<boolean> {
-  const scopes: Array<Page | ReturnType<Page['frameLocator']>> = [editorPage];
-  if ((await editorPage.locator('#mainFrame').count().catch(() => 0)) > 0) {
-    scopes.push(editorPage.frameLocator('#mainFrame'));
-  }
+  if (!(await isDraftResumePopupVisible(editorPage))) return false;
 
-  for (const scope of scopes) {
-    const popupRoot = scope
+  // SE ONE 팝업은 메인 페이지에 렌더 — 취소 버튼을 곧바로 찾는다
+  const cancelCandidates = [
+    editorPage.locator('button.se-popup-button-cancel').first(),
+    editorPage.locator('.se-popup-button-cancel').first(),
+    editorPage
       .locator('[class*="se-popup"], [role="dialog"]')
-      .filter({ hasText: /작성\s*중인\s*글/ })
-      .first();
+      .filter({ hasText: /작성\s*중인\s*글|이어서\s*작성/ })
+      .getByRole('button', { name: '취소', exact: true })
+      .first(),
+    editorPage.getByRole('button', { name: '취소', exact: true }).first(),
+  ];
 
-    const roots = [popupRoot];
-    for (const popup of [
-      scope.locator('text=작성 중인 글이 있습니다').first(),
-      scope.getByText(/작성\s*중인\s*글이/).first(),
-    ]) {
-      if (await popup.isVisible({ timeout: 200 }).catch(() => false)) {
-        roots.push(popup.locator('xpath=ancestor::*[contains(@class,"popup") or @role="dialog"][1]').first());
+  for (const btn of cancelCandidates) {
+    if (!(await btn.isVisible({ timeout: 300 }).catch(() => false))) continue;
+
+    // 포인터를 취소 버튼 위에 즉시 표시한 뒤 사람처럼 이동·클릭
+    await preShowPointerAtLocator(editorPage, btn);
+    let clicked = false;
+    for (let attempt = 0; attempt < 2 && !clicked; attempt += 1) {
+      try {
+        await humanClickLocator(editorPage, btn, undefined, [80, 180]);
+        clicked = true;
+      } catch {
+        await sleep(250);
       }
     }
+    if (!clicked) continue;
 
-    for (const root of roots) {
-      if (!(await root.isVisible({ timeout: 300 }).catch(() => false))) continue;
-
-      const cancelCandidates = [
-        root.locator('button.se-popup-button-cancel').first(),
-        root.locator('.se-popup-button-cancel').first(),
-        root.getByRole('button', { name: '취소', exact: true }).first(),
-      ];
-
-      for (const btn of cancelCandidates) {
-        if (!(await btn.isVisible({ timeout: 400 }).catch(() => false))) continue;
-        await humanClickLocator(editorPage, btn).catch(() =>
-          btn.click({ timeout: 3000, force: true }).catch(() => {}),
-        );
-        await sleep(500);
-        if (!(await isDraftResumePopupVisible(editorPage))) return true;
-      }
+    // 취소 후 팝업이 닫힐 때까지 짧게 폴링
+    for (let i = 0; i < 8; i += 1) {
+      await sleep(200);
+      if (!(await isDraftResumePopupVisible(editorPage))) return true;
     }
   }
-  return false;
+
+  return !(await isDraftResumePopupVisible(editorPage));
 }
 
 /** 팝업이 뜨거나 사라질 때까지 빠르게 폴링하며 취소 클릭 */
@@ -212,10 +221,13 @@ async function waitForSmartEditor(editorPage: Page, timeoutMs = SMART_EDITOR_WAI
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
-    await waitAndDismissDraftResumePopup(editorPage, 3_000);
+    // 팝업이 있으면 취소(마우스)만 누르고, 없으면 즉시 통과 — throw 없이 폴링
+    await dismissDraftResumePopup(editorPage);
     await dismissNaverBlogEditorOverlays(editorPage);
-    if (await isSeOneEditorShellReady(editorPage)) return true;
-    if (await isSmartEditorInteractable(editorPage)) return true;
+    if (!(await isDraftResumePopupVisible(editorPage))) {
+      if (await isSeOneEditorShellReady(editorPage)) return true;
+      if (await isSmartEditorInteractable(editorPage)) return true;
+    }
     await sleep(EDITOR_POLL_MS);
   }
 
@@ -293,7 +305,8 @@ export async function enterBlogEditor(
     if (!navOk) continue;
 
     await scaledSleep(1500, 3000);
-    await waitAndDismissDraftResumePopup(workflowPage, 15_000);
+    // 팝업이 있으면 취소(마우스) — 못 닫아도 throw 금지, 이후 폴링이 재시도
+    await waitAndDismissDraftResumePopup(workflowPage, 15_000).catch(() => {});
 
     const ready = await tryEditorOnPage(workflowPage, remainingMs());
     if (ready) return ready;
