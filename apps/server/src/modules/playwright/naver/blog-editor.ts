@@ -16,6 +16,7 @@ import {
   clickBlogBodyPlaceholder,
   pasteBlogBodyContent,
   ensureBlogTitleWritten,
+  findBlogBodyParagraphAfterClick,
   waitForBlogBodyParagraphLocator,
   blurBlogTitleField,
   verifyBlogBodyField,
@@ -131,7 +132,16 @@ export async function postNaverBlog(params: {
   if (!bodyAlreadyOk) {
     if (!editor) {
       await clickBlogBodyPlaceholder(page);
-      editor = await waitForBlogBodyParagraphLocator(page, 3_000);
+      editor =
+        (await waitForBlogBodyParagraphLocator(page, 2_000)) ??
+        (await findBlogBodyParagraphAfterClick(page));
+      if (editor) {
+        await logOperation({
+          level: 'info',
+          message: '[post_blog][body] placeholder 클릭 후 paragraph 확보(relaxed 탐색 포함)',
+          account_id: params.accountId,
+        }).catch(() => {});
+      }
     }
     if (!editor) {
       await logOperation({

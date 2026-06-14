@@ -187,6 +187,39 @@ export async function waitForBlogBodyParagraphLocator(
   return null;
 }
 
+/**
+ * placeholder 클릭 직후 — 빈 paragraph는 boundingBox height 0·isVisible false일 수 있음.
+ * findBlogBodyParagraphOnly(isVisible + height>=16)는 이 상태를 BLOG_BODY_NOT_FOUND로 오탐한다.
+ */
+export async function findBlogBodyParagraphAfterClick(page: Page): Promise<Locator | null> {
+  await dismissSeOneMaterialPopup(page);
+
+  for (const scope of await editorLocatorScopes(page)) {
+    const paragraphs = scope.locator(
+      '.se-components-wrap .se-section-text:not(.se-section-documentTitle) .se-text-paragraph[contenteditable="true"]',
+    );
+    const count = await paragraphs.count().catch(() => 0);
+    for (let i = 0; i < count; i += 1) {
+      const loc = paragraphs.nth(i);
+      if (await isLocatorInTitleSection(loc)) continue;
+      if (await isLocatorInEditorChrome(loc)) continue;
+      const ok = await loc.evaluate((el) => el.matches('[contenteditable="true"]')).catch(() => false);
+      if (ok) return loc;
+    }
+
+    const section = scope
+      .locator('.se-components-wrap .se-section-text:not(.se-section-documentTitle)')
+      .first();
+    if ((await section.count().catch(() => 0)) === 0) continue;
+    if (await isLocatorInTitleSection(section)) continue;
+    if (await isLocatorInEditorChrome(section)) continue;
+    const nested = section.locator('.se-text-paragraph[contenteditable="true"]').first();
+    if ((await nested.count().catch(() => 0)) > 0) return nested;
+  }
+
+  return null;
+}
+
 /** 제목 contenteditable 노출 — 임시저장 팝업만 제외 */
 export async function isBlogTitleEditableVisible(page: Page): Promise<boolean> {
   if (await isDraftResumePopupVisible(page)) return false;
