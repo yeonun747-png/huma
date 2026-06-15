@@ -74,6 +74,7 @@ import {
   isRetryableCrankError,
   isScheduledCrankPayload,
 } from '../../lib/crank-worker-defer.js';
+import { purgePostBlogStorageMedia } from '../../lib/cleanup-post-blog-storage.js';
 
 async function getTodayCount(accountId: string, field: 'post_count_today' | 'crank_count_today'): Promise<number> {
   const { data } = await supabase.from('huma_accounts').select(`${field}`).eq('id', accountId).single();
@@ -88,12 +89,22 @@ async function incrementAccountCount(accountId: string, field: 'post_count_today
 
 async function completeJob(jobId: string, resultUrl?: string) {
   const { data: job } = await supabase.from('huma_jobs').select('*').eq('id', jobId).single();
+  const published = Boolean(resultUrl?.trim());
+
+  if (job?.job_type === 'post_blog' && published) {
+    await purgePostBlogStorageMedia(job.image_urls as string[] | null, {
+      jobId,
+      accountId: job.account_id as string | undefined,
+    });
+  }
+
   await supabase
     .from('huma_jobs')
     .update({
       status: 'completed',
       ...(resultUrl ? { result_url: resultUrl } : {}),
       completed_at: new Date().toISOString(),
+      ...(job?.job_type === 'post_blog' && published ? { image_urls: null } : {}),
     })
     .eq('id', jobId);
   if (job) await scheduleRepeatIfNeeded(job as import('../../lib/job-scheduler.js').JobRecord);

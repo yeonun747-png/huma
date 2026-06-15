@@ -2,6 +2,38 @@ import { createClient } from '@supabase/supabase-js';
 
 const BUCKET = 'huma-media';
 
+/** 포스팅 완료 후 삭제 대상 — jobs(슬롯 업로드)·images(Imagen) */
+const POST_MEDIA_PREFIXES = ['jobs/', 'images/'];
+
+export function isDeletablePostMediaPath(storagePath: string): boolean {
+  return POST_MEDIA_PREFIXES.some((prefix) => storagePath.startsWith(prefix));
+}
+
+export function collectDeletableMediaPaths(urls: string[] | null | undefined): string[] {
+  if (!urls?.length) return [];
+  const paths = new Set<string>();
+  for (const url of urls) {
+    const path = parseHumaMediaStoragePath(url);
+    if (path && isDeletablePostMediaPath(path)) paths.add(path);
+  }
+  return [...paths];
+}
+
+export async function deleteHumaMediaPaths(
+  storagePaths: string[],
+): Promise<{ deleted: number; failed: string[] }> {
+  const paths = [...new Set(storagePaths.filter(Boolean))];
+  if (!paths.length) return { deleted: 0, failed: [] };
+
+  const supa = supabaseAdmin();
+  const { data, error } = await supa.storage.from(BUCKET).remove(paths);
+  if (error) return { deleted: 0, failed: paths };
+
+  const removed = new Set((data ?? []).map((o) => o.name));
+  const failed = paths.filter((p) => !removed.has(p));
+  return { deleted: removed.size, failed };
+}
+
 function supabaseAdmin() {
   const url = process.env.SUPABASE_URL?.trim();
   const key = process.env.SUPABASE_SERVICE_KEY?.trim();

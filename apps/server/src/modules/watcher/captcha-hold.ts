@@ -23,6 +23,7 @@ import {
 import { ensureNaverLoginCredentialsForCaptcha } from '../../lib/naver-login-fields.js';
 import { vncSlotLabelKo } from '../../lib/vnc-window-layout.js';
 import { enforceVncWindowBounds } from '../../lib/vnc-window-guard.js';
+import { purgePostBlogStorageMedia } from '../../lib/cleanup-post-blog-storage.js';
 import { notifyCaptchaTelegram, resolveVncUrl, buildJobWebUrl } from './telegram.js';
 import { deleteCaptchaHoldScreenshot, saveCaptchaHoldScreenshot } from '../../lib/captcha-hold-screenshot.js';
 import { clearCaptchaTelegramMessagesForJob } from '../../lib/captcha-telegram-registry.js';
@@ -222,6 +223,20 @@ async function markJobFailed(jobId: string, message: string): Promise<void> {
 }
 
 async function completeJobRecord(jobId: string, resultUrl?: string): Promise<void> {
+  const published = Boolean(resultUrl?.trim());
+  const { data: job } = await supabase
+    .from('huma_jobs')
+    .select('job_type, image_urls, account_id')
+    .eq('id', jobId)
+    .maybeSingle();
+
+  if (job?.job_type === 'post_blog' && published) {
+    await purgePostBlogStorageMedia(job.image_urls as string[] | null, {
+      jobId,
+      accountId: job.account_id as string | undefined,
+    });
+  }
+
   await supabase
     .from('huma_jobs')
     .update({
@@ -229,6 +244,7 @@ async function completeJobRecord(jobId: string, resultUrl?: string): Promise<voi
       error_message: null,
       ...(resultUrl?.trim() ? { result_url: resultUrl.trim() } : {}),
       completed_at: new Date().toISOString(),
+      ...(job?.job_type === 'post_blog' && published ? { image_urls: null } : {}),
     })
     .eq('id', jobId);
 }
