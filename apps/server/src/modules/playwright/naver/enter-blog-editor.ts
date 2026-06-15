@@ -20,10 +20,10 @@ import {
   findBlogTitleLocator,
   findVisibleLocator,
   editorLocatorScopes,
-  hasExistingBlogEditorContent,
   isDraftResumePopupVisible,
   isNaverBlogEditorInteractable,
   isSeOneEditorShellReady,
+  shouldResumeDraftForJob,
 } from './naver-editor-locators.js';
 
 function scaledSleep(min: number, max: number): Promise<void> {
@@ -117,6 +117,62 @@ export function resetDraftDismissGuard(editorPage: Page): void {
   draftDismissGuardByPage.delete(editorPage);
 }
 
+function draftResumePopupRoot(editorPage: Page) {
+  return editorPage
+    .locator('[class*="se-popup"], [role="dialog"]')
+    .filter({ hasText: /작성\s*중인\s*글|이어서\s*작성/ })
+    .first();
+}
+
+async function clickDraftResumePopupButton(
+  editorPage: Page,
+  label: '취소' | '확인',
+): Promise<boolean> {
+  if (!(await isDraftResumePopupVisible(editorPage))) return false;
+
+  const popup = draftResumePopupRoot(editorPage);
+  const classHint = label === '취소' ? 'cancel' : 'confirm';
+  const candidates = [
+    popup.locator(`button.se-popup-button-${classHint}`).first(),
+    popup.locator(`.se-popup-button-${classHint}`).first(),
+    popup.getByRole('button', { name: label, exact: true }).first(),
+    editorPage.locator(`button.se-popup-button-${classHint}`).first(),
+    editorPage.locator(`.se-popup-button-${classHint}`).first(),
+    editorPage.getByRole('button', { name: label, exact: true }).first(),
+  ];
+
+  for (const btn of candidates) {
+    if (!(await btn.isVisible({ timeout: 500 }).catch(() => false))) continue;
+
+    await logOperation({
+      level: 'info',
+      message: `[post_blog] 작성중 글 팝업 — ${label} 버튼 마우스 클릭`,
+    }).catch(() => {});
+
+    try {
+      await humanClickLocator(editorPage, btn, undefined, [60, 160]);
+    } catch {
+      const box = await btn.boundingBox().catch(() => null);
+      if (!box) continue;
+      await humanMouseMove(editorPage, box.x + box.width / 2, box.y + box.height / 2);
+      await editorPage.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    }
+
+    for (let i = 0; i < 12; i += 1) {
+      await sleep(200);
+      if (!(await isDraftResumePopupVisible(editorPage))) {
+        await logOperation({
+          level: 'info',
+          message: `[post_blog] 작성중 글 팝업 ${label} 완료`,
+        }).catch(() => {});
+        return true;
+      }
+    }
+  }
+
+  return !(await isDraftResumePopupVisible(editorPage));
+}
+
 /** 「작성 중인 글이 있습니다」 — 확인(이어쓰기) 금지, 취소만 마우스로 클릭해 새 글 작성 */
 async function dismissDraftResumePopup(
   editorPage: Page,
@@ -127,62 +183,62 @@ async function dismissDraftResumePopup(
   const guard = draftDismissGuardByPage.get(editorPage);
   if (guard?.inFlight) return false;
   if (guard && Date.now() < guard.cooledUntil) {
-    return !(await isDraftResumePopupVisible(editorPage));
+    if (!(await isDraftResumePopupVisible(editorPage))) return true;
+    draftDismissGuardByPage.delete(editorPage);
   }
 
   draftDismissGuardByPage.set(editorPage, { inFlight: true, cooledUntil: 0 });
 
-  // SE ONE 팝업은 메인 페이지에 렌더 — 취소 버튼을 곧바로 찾는다
-  const cancelCandidates = [
-    editorPage.locator('button.se-popup-button-cancel').first(),
-    editorPage.locator('.se-popup-button-cancel').first(),
-    editorPage
-      .locator('[class*="se-popup"], [role="dialog"]')
-      .filter({ hasText: /작성\s*중인\s*글|이어서\s*작성/ })
-      .getByRole('button', { name: '취소', exact: true })
-      .first(),
-    editorPage.getByRole('button', { name: '취소', exact: true }).first(),
-  ];
-
-  for (const btn of cancelCandidates) {
-    if (!(await btn.isVisible({ timeout: 300 }).catch(() => false))) continue;
-
-    await logOperation({
-      level: 'info',
-      message: '[post_blog] 작성중 글 팝업 감지 — 취소 버튼 마우스 클릭',
-    }).catch(() => {});
-
-    try {
-      await humanClickLocator(editorPage, btn, undefined, [80, 180]);
-    } catch {
-      draftDismissGuardByPage.set(editorPage, { inFlight: false, cooledUntil: 0 });
-      continue;
+  const clicked = await clickDraftResumePopupButton(editorPage, '취소');
+  if (clicked) {
+    if (options?.moveMouseToTitle !== false) {
+      await moveMouseToTitleIfReady(editorPage);
     }
-
-    // 취소 후 팝업이 닫힐 때까지 짧게 폴링
-    for (let i = 0; i < 8; i += 1) {
-      await sleep(200);
-      if (!(await isDraftResumePopupVisible(editorPage))) {
-        await logOperation({
-          level: 'info',
-          message: '[post_blog] 작성중 글 팝업 취소 완료',
-        }).catch(() => {});
-        // 팝업이 사라지면 포인터를 즉시 제목칸으로 이동(취소 버튼 위치 정체 방지)
-        if (options?.moveMouseToTitle !== false) {
-          await moveMouseToTitleIfReady(editorPage);
-        }
-        resetDraftDismissGuard(editorPage);
-        draftDismissGuardByPage.set(editorPage, {
-          inFlight: false,
-          cooledUntil: Date.now() + 900,
-        });
-        return true;
-      }
-    }
+    resetDraftDismissGuard(editorPage);
+    draftDismissGuardByPage.set(editorPage, {
+      inFlight: false,
+      cooledUntil: Date.now() + 900,
+    });
+    return true;
   }
 
   draftDismissGuardByPage.set(editorPage, { inFlight: false, cooledUntil: 0 });
   return !(await isDraftResumePopupVisible(editorPage));
+}
+
+export async function dismissDraftResumePopupConfirm(editorPage: Page): Promise<boolean> {
+  if (!(await isDraftResumePopupVisible(editorPage))) return false;
+  return clickDraftResumePopupButton(editorPage, '확인');
+}
+
+export async function dismissDraftResumePopupCancel(
+  editorPage: Page,
+  options?: { moveMouseToTitle?: boolean },
+): Promise<boolean> {
+  return dismissDraftResumePopup(editorPage, options);
+}
+
+/** job 제목·본문 기준 — 이어쓰기(확인) vs 새 글(취소) */
+export async function resolveDraftResumePopupForJob(
+  editorPage: Page,
+  opts: {
+    expectedTitle: string;
+    expectedContent?: string;
+    preferResume?: boolean;
+  },
+): Promise<void> {
+  if (!(await isDraftResumePopupVisible(editorPage))) return;
+
+  const resume =
+    opts.preferResume ||
+    (await shouldResumeDraftForJob(editorPage, opts.expectedTitle, opts.expectedContent));
+
+  if (resume) {
+    await dismissDraftResumePopupConfirm(editorPage);
+    return;
+  }
+
+  await waitAndDismissDraftResumePopup(editorPage, 20_000);
 }
 
 /** 팝업이 뜨거나 사라질 때까지 빠르게 폴링하며 취소 클릭 */
@@ -205,28 +261,50 @@ export async function waitAndDismissDraftResumePopup(
 }
 
 /**
- * 제목·본문 입력 후 — 「취소」는 새 글 작성(현재 글 파괴)이므로 금지.
- * Escape만 시도해 팝업을 닫고, 남으면 그대로 진행(발행 단계에서 재처리).
+ * 입력 중 재등장 — 현재 글 유지를 위해 확인(이어쓰기) 클릭. Escape는 이 팝업에 통하지 않음.
  */
 export async function dismissDraftResumePopupNonDestructive(editorPage: Page): Promise<void> {
-  for (let i = 0; i < 4; i += 1) {
-    if (!(await isDraftResumePopupVisible(editorPage))) return;
-    await editorPage.keyboard.press('Escape').catch(() => {});
-    await sleep(280);
+  if (!(await isDraftResumePopupVisible(editorPage))) return;
+  await dismissDraftResumePopupConfirm(editorPage);
+}
+
+type EditorWaitOptions = {
+  expectedTitle?: string;
+  expectedContent?: string;
+  preferResumeDraft?: boolean;
+};
+
+async function dismissDraftPopupIfVisible(
+  editorPage: Page,
+  options?: EditorWaitOptions,
+): Promise<void> {
+  if (!(await isDraftResumePopupVisible(editorPage))) return;
+
+  let resume = options?.preferResumeDraft;
+  if (resume === undefined && options?.expectedTitle) {
+    resume = await shouldResumeDraftForJob(
+      editorPage,
+      options.expectedTitle,
+      options.expectedContent,
+    );
+  }
+
+  if (resume) {
+    await dismissDraftResumePopupConfirm(editorPage);
+  } else {
+    await dismissDraftResumePopupCancel(editorPage, { moveMouseToTitle: true });
   }
 }
 
 /** 도움말·dim 등 — 에디터 입력을 가리는 오버레이 제거 (발행 전에도 재호출) */
 export async function dismissNaverBlogEditorOverlays(
   editorPage: Page,
-  options?: { includeDraftPopup?: boolean; preserveDraft?: boolean },
+  options?: { includeDraftPopup?: boolean } & EditorWaitOptions,
 ): Promise<void> {
   await dismissSeOneHelpPanel(editorPage);
 
-  if (options?.includeDraftPopup !== false && !options?.preserveDraft) {
-    await dismissDraftResumePopup(editorPage, { moveMouseToTitle: true });
-  } else if (options?.preserveDraft) {
-    await dismissDraftResumePopupNonDestructive(editorPage);
+  if (options?.includeDraftPopup !== false) {
+    await dismissDraftPopupIfVisible(editorPage, options);
   }
 
   const scopes = await editorLocatorScopes(editorPage);
@@ -264,10 +342,14 @@ export async function dismissNaverBlogEditorOverlays(
 export async function prepareSeOneEditorSurface(
   editorPage: Page,
   maxMs = 25_000,
-  options?: { destructiveDraftDismiss?: boolean },
+  options?: { destructiveDraftDismiss?: boolean; expectedTitle?: string; expectedContent?: string },
 ): Promise<void> {
   if (options?.destructiveDraftDismiss === false) {
-    await dismissDraftResumePopupNonDestructive(editorPage);
+    await dismissDraftPopupIfVisible(editorPage, {
+      expectedTitle: options.expectedTitle,
+      expectedContent: options.expectedContent,
+      preferResumeDraft: true,
+    });
   } else {
     await waitAndDismissDraftResumePopup(editorPage, maxMs);
   }
@@ -287,15 +369,13 @@ async function isSmartEditorInteractable(editorPage: Page): Promise<boolean> {
 async function waitForSmartEditor(
   editorPage: Page,
   timeoutMs = SMART_EDITOR_WAIT_MS,
-  options?: { preserveDraft?: boolean },
+  options?: EditorWaitOptions,
 ): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
-    await dismissNaverBlogEditorOverlays(editorPage, {
-      includeDraftPopup: !options?.preserveDraft,
-      preserveDraft: options?.preserveDraft,
-    });
+    await dismissDraftPopupIfVisible(editorPage, options);
+    await dismissSeOneHelpPanel(editorPage);
     if (!(await isDraftResumePopupVisible(editorPage))) {
       if (await isSeOneEditorShellReady(editorPage)) return true;
       if (await isSmartEditorInteractable(editorPage)) return true;
@@ -312,7 +392,7 @@ async function waitForSmartEditor(
 async function tryEditorOnPage(
   page: Page,
   waitBudgetMs = SMART_EDITOR_WAIT_MS,
-  options?: { preserveDraft?: boolean },
+  options?: EditorWaitOptions,
 ): Promise<Page | null> {
   await page.bringToFront().catch(() => {});
   await page.waitForLoadState('domcontentloaded').catch(() => {});
@@ -324,16 +404,9 @@ async function tryEditorOnPage(
   ) {
     if (await waitForSmartEditor(page, waitBudgetMs, options)) {
       await dismissSeOneHelpPanel(page);
-      await dismissNaverBlogEditorOverlays(page, {
-        includeDraftPopup: false,
-        preserveDraft: options?.preserveDraft,
-      });
+      await dismissNaverBlogEditorOverlays(page, { includeDraftPopup: false, ...options });
       if (await isDraftResumePopupVisible(page)) {
-        if (options?.preserveDraft) {
-          await dismissDraftResumePopupNonDestructive(page);
-        } else {
-          await prepareSeOneEditorSurface(page, 20_000);
-        }
+        await dismissDraftPopupIfVisible(page, options);
       } else {
         await dismissSeOneMaterialPopup(page);
       }
@@ -351,26 +424,23 @@ async function tryEditorOnPage(
 export async function enterBlogEditor(
   page: Page,
   _humanEngine: HumanEngineConfig,
-  options?: { accountId?: string; preserveDraft?: boolean },
+  options?: { accountId?: string; expectedTitle?: string; expectedContent?: string },
 ): Promise<Page> {
   const context = page.context();
-  const preserveDraft =
-    options?.preserveDraft ??
-    (POSTWRITE_URL_RE.test(page.url()) ? await hasExistingBlogEditorContent(page) : false);
+  const waitOpts: EditorWaitOptions = {
+    expectedTitle: options?.expectedTitle,
+    expectedContent: options?.expectedContent,
+  };
 
   // ① 이미 postwrite 로딩 중인 탭 — goto 없이 대기만
   const existingPostwrite = findNaverPostwritePage(context);
   if (existingPostwrite) {
-    const preserve =
-      preserveDraft || (await hasExistingBlogEditorContent(existingPostwrite));
-    const ready = await tryEditorOnPage(existingPostwrite, SMART_EDITOR_WAIT_MS, {
-      preserveDraft: preserve,
-    });
+    const ready = await tryEditorOnPage(existingPostwrite, SMART_EDITOR_WAIT_MS, waitOpts);
     if (ready) return ready;
   }
 
   if (POSTWRITE_URL_RE.test(page.url())) {
-    const ready = await tryEditorOnPage(page, SMART_EDITOR_WAIT_MS, { preserveDraft });
+    const ready = await tryEditorOnPage(page, SMART_EDITOR_WAIT_MS, waitOpts);
     if (ready) return ready;
   }
 

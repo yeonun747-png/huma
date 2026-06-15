@@ -8,9 +8,8 @@ import { parsePersona, type AccountPersona } from '../persona.js';
 import {
   enterBlogEditor,
   prepareSeOneEditorSurface,
-  waitAndDismissDraftResumePopup,
   resetDraftDismissGuard,
-  dismissDraftResumePopupNonDestructive,
+  resolveDraftResumePopupForJob,
 } from './enter-blog-editor.js';
 import {
   findBlogTitleLocator,
@@ -224,7 +223,8 @@ export async function postNaverBlog(params: {
 
   const page = await enterBlogEditor(params.page, config, {
     accountId: params.accountId,
-    preserveDraft: /postwrite|PostWriteForm|GoBlogWrite/i.test(params.page.url()),
+    expectedTitle: params.title,
+    expectedContent: params.content,
   });
 
   const publishedEarly = extractPublishedPostUrl(page.url());
@@ -250,9 +250,16 @@ export async function postNaverBlog(params: {
   });
 
   if (bodyResumeReady || mediaStageComplete) {
-    await dismissDraftResumePopupNonDestructive(page);
+    await resolveDraftResumePopupForJob(page, {
+      expectedTitle: params.title,
+      expectedContent: params.content,
+      preferResume: true,
+    });
   } else {
-    await waitAndDismissDraftResumePopup(page, 3_000).catch(() => {});
+    await resolveDraftResumePopupForJob(page, {
+      expectedTitle: params.title,
+      expectedContent: params.content,
+    });
   }
   resetDraftDismissGuard(page);
 
@@ -288,7 +295,11 @@ export async function postNaverBlog(params: {
 
     if (!titleAlreadyOk) {
       titleBox = await waitForBlogTitleInputReady(page, 45_000, async () => {
-        await dismissDraftResumePopupNonDestructive(page);
+        await resolveDraftResumePopupForJob(page, {
+          expectedTitle: params.title,
+          expectedContent: params.content,
+          preferResume: bodyResumeReady || mediaStageComplete,
+        });
         resetDraftDismissGuard(page);
       });
       if (!titleBox) {
@@ -301,7 +312,10 @@ export async function postNaverBlog(params: {
       });
 
       if (await isDraftResumePopupVisible(page)) {
-        await prepareSeOneEditorSurface(page, 6_000, { destructiveDraftDismiss: false });
+        await prepareSeOneEditorSurface(page, 15_000, {
+          expectedTitle: params.title,
+          expectedContent: params.content,
+        });
       }
 
       await ensureBlogTitleWritten(page, titleBox, params.title, config);

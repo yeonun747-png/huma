@@ -1342,6 +1342,27 @@ export async function isBlogImagePresentInBody(page: Page): Promise<boolean> {
   return isBlogImageModuleInBodySection(page);
 }
 
+/** 재시도·CAPTCHA 재개 — 현재 job 제목·본문과 임시저장 초안이 일치하면 이어쓰기(확인) */
+export async function shouldResumeDraftForJob(
+  page: Page,
+  expectedTitle: string,
+  expectedContent?: string,
+): Promise<boolean> {
+  const titleLoc = await findBlogTitleLocator(page);
+  if (titleLoc) {
+    const editable = await resolveTitleEditableLocator(page, titleLoc);
+    const written = await readBlogTitleTextAll(page, titleLoc, editable);
+    if (written && isDuplicatedBlogTitle(written, expectedTitle)) return true;
+    if (written && titleContainsExpected(written, expectedTitle)) return true;
+  }
+  const content = expectedContent?.trim();
+  if (content) {
+    const body = await readBlogBodySectionText(page);
+    if (isBlogBodySubstantiallyWritten(body, content)) return true;
+  }
+  return false;
+}
+
 /** postwrite 탭에 제목·본문이 이미 채워졌는지 — 재진입 시 임시저장 취소·제목 재입력 방지 */
 export async function hasExistingBlogEditorContent(page: Page): Promise<boolean> {
   const bodyText = await readBlogBodySectionText(page);
