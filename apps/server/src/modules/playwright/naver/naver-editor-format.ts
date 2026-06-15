@@ -2,6 +2,7 @@ import type { Locator, Page } from 'playwright';
 import { planParagraphPaste } from '@huma/shared';
 
 import type { HumanEngineConfig } from '../../../lib/settings.js';
+import { resolvePasteRatio } from '../../../lib/settings.js';
 import { humanSleep, humanType } from '../../human-engine/typing.js';
 import { humanClickLocator } from '../../human-engine/mouse.js';
 import { clickEditorToolbar, editorFrame, findVisibleLocator } from './naver-editor-locators.js';
@@ -118,7 +119,7 @@ export async function typeNaverPostContent(
   const total = paragraphs.length;
   if (total === 0) return;
 
-  const pasteCount = Math.floor(total * 0.3);
+  const pasteCount = Math.floor(total * resolvePasteRatio(humanConfig));
   const pasteIndices = new Set<number>();
   while (pasteIndices.size < pasteCount) {
     pasteIndices.add(Math.floor(Math.random() * total));

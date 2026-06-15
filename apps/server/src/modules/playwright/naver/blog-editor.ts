@@ -3,6 +3,7 @@ import type { Locator, Page } from 'playwright';
 import { humanSleep } from '../../human-engine/typing.js';
 import { scaledHumanSleep } from '../../human-engine/timing.js';
 import type { HumanEngineConfig } from '../../../lib/settings.js';
+import { resolvePasteRatio } from '../../../lib/settings.js';
 import { parsePersona, type AccountPersona } from '../persona.js';
 import {
   enterBlogEditor,
@@ -14,7 +15,7 @@ import {
   findBlogTitleLocator,
   blogBodySectionLocator,
   clickBlogBodyPlaceholder,
-  pasteBlogBodyContent,
+  typeBlogBodyContent,
   ensureBlogTitleWritten,
   blurBlogTitleField,
   readBlogBodySectionText,
@@ -53,8 +54,9 @@ async function typeSeOneBlogBody(
   page: Page,
   bodyLoc: Locator,
   content: string,
+  humanConfig: HumanEngineConfig,
 ): Promise<void> {
-  await pasteBlogBodyContent(page, bodyLoc, content, { afterPlaceholderClick: true });
+  await typeBlogBodyContent(page, bodyLoc, content, humanConfig, { afterPlaceholderClick: true });
 }
 
 /** 본문 insertText 직후 — Enter×2 → 링크 → Enter×1 → 이미지 (포커스·마우스 이동 없음) */
@@ -201,7 +203,7 @@ export async function postNaverBlog(params: {
     }
     await logOperation({
       level: 'info',
-      message: '[post_blog] 제목칸 준비 — 클릭·입력 시작',
+      message: '[post_blog] 제목칸 준비 — IME 타이핑 시작',
       account_id: params.accountId,
     });
 
@@ -209,7 +211,7 @@ export async function postNaverBlog(params: {
       await prepareSeOneEditorSurface(page, 6_000);
     }
 
-    await ensureBlogTitleWritten(page, titleBox, params.title);
+    await ensureBlogTitleWritten(page, titleBox, params.title, config);
     titleOkThisRun = await verifyBlogTitleField(page, titleBox, params.title);
   } else {
     await blurBlogTitleField(page);
@@ -231,14 +233,15 @@ export async function postNaverBlog(params: {
 
   if (!bodyAlreadyOk) {
     await clickBlogBodyPlaceholder(page);
+    const pastePct = Math.round(resolvePasteRatio(config) * 100);
     await logOperation({
       level: 'info',
-      message: '[post_blog][body] placeholder 클릭 직후 insertText(탐색 대기 없음)',
+      message: `[post_blog] 본문 입력 시작 (복붙${pastePct}%·타이핑${100 - pastePct}%)`,
       account_id: params.accountId,
     }).catch(() => {});
 
     try {
-      await typeSeOneBlogBody(page, editor, params.content);
+      await typeSeOneBlogBody(page, editor, params.content, config);
     } catch (bodyErr) {
       await logOperation({
         level: 'warn',

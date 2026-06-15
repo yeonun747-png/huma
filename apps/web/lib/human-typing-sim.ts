@@ -298,10 +298,7 @@ export function pickPasteIndices(total: number, ratio = 0.55): Set<number> {
   return indices;
 }
 
-export function formatPasteTypeRatio(ratio = 0.55): string {
-  const pastePct = Math.round(ratio * 100);
-  return `복붙${pastePct}%·OS IME/타이핑${100 - pastePct}%`;
-}
+export { formatPasteTypeRatio } from '@huma/shared';
 
 /** typePostContent — paste_ratio(기본55%) 단락 복붙 · 나머지 IME 타이핑 */
 export async function typePostContentSim(

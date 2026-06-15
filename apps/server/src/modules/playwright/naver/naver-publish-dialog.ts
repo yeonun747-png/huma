@@ -4,6 +4,7 @@ import { sleep } from '../../../lib/utils.js';
 import type { HumanEngineConfig } from '../../../lib/settings.js';
 import { normalizeHashtagTag } from '../../../lib/hashtag-sanitize.js';
 import { humanClickLocator } from '../../human-engine/mouse.js';
+import { humanTypeIntoElement } from '../../human-engine/korean-ime.js';
 import { humanSleep } from '../../human-engine/typing.js';
 import { scaledHumanSleep } from '../../human-engine/timing.js';
 import { prepareSeOneEditorSurface } from './enter-blog-editor.js';
@@ -129,7 +130,7 @@ export async function selectPublishCategory(
 export async function typePublishTags(
   page: Page,
   hashtags: string[],
-  _humanConfig: HumanEngineConfig,
+  humanConfig: HumanEngineConfig,
   scale = 1,
 ): Promise<boolean> {
   const tags = hashtags.map((t) => normalizeHashtagTag(t)).filter(Boolean);
@@ -138,11 +139,12 @@ export async function typePublishTags(
   const input = await findVisibleLocator(page, TAG_INPUT_SELECTORS, { inFrame: false });
   if (!input) return false;
 
-  await humanClickLocator(page, input);
-  await scaledHumanSleep(300, 600, scale);
-
   for (let i = 0; i < tags.length; i += 1) {
-    await page.keyboard.insertText(tags[i]!);
+    if (i === 0) {
+      await humanClickLocator(page, input);
+      await scaledHumanSleep(300, 600, scale);
+    }
+    await humanTypeIntoElement(page, input, tags[i]!, humanConfig, { skipFocus: i > 0 });
     await scaledHumanSleep(180, 450, scale);
     await page.keyboard.press('Enter');
     await scaledHumanSleep(350, 750, scale);

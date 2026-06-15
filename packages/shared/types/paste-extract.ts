@@ -1,5 +1,11 @@
 export type PasteSegment = { kind: 'paste' | 'type'; text: string };
 
+/** 복붙 비율(0~1) → UI 라벨. 타이핑 비율은 100% − 복붙% */
+export function formatPasteTypeRatio(ratio = 0.55): string {
+  const pastePct = Math.round(Math.min(1, Math.max(0, ratio)) * 100);
+  return `복붙${pastePct}%·타이핑${100 - pastePct}%`;
+}
+
 export type ParagraphPastePlan = {
   segments: PasteSegment[];
   hasPaste: boolean;

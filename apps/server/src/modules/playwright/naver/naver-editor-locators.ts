@@ -1,7 +1,12 @@
 import type { FrameLocator, Locator, Page } from 'playwright';
+import { planParagraphPaste } from '@huma/shared';
 
 import { humanClickLocator, humanMouseMove } from '../../human-engine/mouse.js';
-import { sleep } from '../../../lib/utils.js';
+import { humanTypeIntoElement } from '../../human-engine/korean-ime.js';
+import { humanSleep } from '../../human-engine/typing.js';
+import type { HumanEngineConfig } from '../../../lib/settings.js';
+import { resolvePasteRatio } from '../../../lib/settings.js';
+import { randomBetween, sleep } from '../../../lib/utils.js';
 import { logOperation } from '../../../lib/log-emitter.js';
 
 export function editorFrame(page: Page): FrameLocator {
@@ -670,6 +675,7 @@ export async function ensureBlogTitleBeforeReview(
   page: Page,
   titleLoc: Locator,
   expected: string,
+  humanConfig: HumanEngineConfig,
 ): Promise<void> {
   let loc = titleLoc;
   for (let i = 0; i < 5; i += 1) {
@@ -684,7 +690,7 @@ export async function ensureBlogTitleBeforeReview(
     return;
   }
 
-  await ensureBlogTitleWritten(page, loc, expected);
+  await ensureBlogTitleWritten(page, loc, expected, humanConfig);
   if (await verifyBlogTitleField(page, loc, expected)) return;
 
   throw new Error('BLOG_TITLE_LOST_BEFORE_REVIEW');
@@ -711,11 +717,12 @@ export async function waitForBlogTitleWritten(
   return verifyBlogTitleField(page, titleLoc, expected);
 }
 
-/** 제목 1회 입력 확정 — 기대 제목이 이미 들어있으면(중복 제외) 재입력 금지(재시도 시 즉시 본문으로) */
+/** 제목 1회 입력 확정 — IME 타이핑. 기대 제목이 이미 있으면 재입력 금지 */
 export async function ensureBlogTitleWritten(
   page: Page,
   titleLoc: Locator,
   text: string,
+  humanConfig: HumanEngineConfig,
 ): Promise<void> {
   const editable = await resolveTitleEditableLocator(page, titleLoc);
   const domWritten = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
@@ -724,7 +731,7 @@ export async function ensureBlogTitleWritten(
     await blurBlogTitleField(page);
     return;
   }
-  await pasteBlogTitleField(page, titleLoc, text);
+  await typeBlogTitleField(page, titleLoc, text, humanConfig);
 }
 
 export async function readBlogTitleText(titleLoc: Locator): Promise<string> {
@@ -1313,13 +1320,30 @@ async function logTitleDebug(message: string): Promise<void> {
   await logOperation({ level: 'info', message: `[post_blog][title] ${message}` }).catch(() => {});
 }
 
+async function pastePlainTextAtCaret(page: Page, text: string): Promise<void> {
+  const plain = text.replace(/\*\*([^*]+)\*\*/g, '$1');
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
+  await page.evaluate(async (t) => {
+    await navigator.clipboard.writeText(t);
+  }, plain);
+  await sleep(randomBetween(80, 200));
+  await page.keyboard.press('Control+v');
+  await sleep(randomBetween(400, 900));
+}
+
+function titleVerifyTimeoutMs(text: string): number {
+  return Math.min(120_000, Math.max(10_000, text.length * 100));
+}
+
 /**
- * SE ONE 제목 — insertText는 캐럿 끝에 append됨(확정). 동작 원칙:
- *  1) 기대 제목이 이미 있으면(중복 제외) 그대로 둠(append 누적 방지).
- *  2) 그 외엔 "기존 내용 가벼운 비우기 → insertText 1회"를 항상 실행(복붙 누락 방지).
- *  3) 삽입 결과가 중복/불일치면 1회만 비우고 재삽입(루프·캐럿 멈춤 폭주 없음).
+ * SE ONE 제목 — IME 타이핑 (복붙 없음).
  */
-export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: string): Promise<void> {
+export async function typeBlogTitleField(
+  page: Page,
+  titleLoc: Locator,
+  text: string,
+  humanConfig: HumanEngineConfig,
+): Promise<void> {
   if (await isDraftResumePopupVisible(page)) {
     throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
   }
@@ -1339,25 +1363,23 @@ export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: s
   await humanClickLocator(page, editable);
   await sleep(150);
 
-  // 기존 내용이 있으면 가볍게 비운 뒤(빈 칸이면 0키) insertText 1회 — 삽입은 항상 실행
   if (current && !isTitlePlaceholderText(current)) {
     await clearTitleFieldViaKeyboard(page, editable);
   }
   await focusTitleEditableNode(editable);
-  await page.keyboard.insertText(text);
-  await waitForBlogTitleWritten(page, titleLoc, text, 2500);
+  await humanTypeIntoElement(page, editable, text, humanConfig, { skipFocus: true });
+  await waitForBlogTitleWritten(page, titleLoc, text, titleVerifyTimeoutMs(text));
 
   let after = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
-  await logTitleDebug(`삽입 후="${after}"`);
+  await logTitleDebug(`타이핑 후="${after}"`);
 
-  // 누적/불일치면 단 1회만 교정 (비우기 → 재삽입)
   if (isDuplicatedBlogTitle(after, text) || !titleContainsExpected(after, text)) {
     await clearTitleFieldViaKeyboard(page, editable);
     await focusTitleEditableNode(editable);
-    await page.keyboard.insertText(text);
-    await waitForBlogTitleWritten(page, titleLoc, text, 2500);
+    await humanTypeIntoElement(page, editable, text, humanConfig, { skipFocus: true });
+    await waitForBlogTitleWritten(page, titleLoc, text, titleVerifyTimeoutMs(text));
     after = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
-    await logTitleDebug(`교정 후="${after}"`);
+    await logTitleDebug(`교정 타이핑 후="${after}"`);
   }
 
   await blurBlogTitleField(page);
@@ -1366,6 +1388,16 @@ export async function pasteBlogTitleField(page: Page, titleLoc: Locator, text: s
     return;
   }
   throw new Error('BLOG_TITLE_WRITE_FAILED');
+}
+
+/** @deprecated typeBlogTitleField 사용 */
+export async function pasteBlogTitleField(
+  page: Page,
+  titleLoc: Locator,
+  text: string,
+  humanConfig: HumanEngineConfig,
+): Promise<void> {
+  await typeBlogTitleField(page, titleLoc, text, humanConfig);
 }
 
 async function ensureBodyFocusForPaste(page: Page, editable: Locator): Promise<void> {
@@ -1443,6 +1475,106 @@ export async function pasteBlogBodyContent(
   }
 
   if (!(await waitForBlogBodyWritten(page, bodyLoc, content, 3500))) {
+    throw new Error('BLOG_BODY_WRITE_FAILED');
+  }
+}
+
+/**
+ * SE ONE 본문 — paste_ratio 단락 복붙 · 나머지 IME 타이핑.
+ * afterPlaceholderClick: placeholder humanClick 직후 — 재탐색·재클릭 없이 캐럿 유지.
+ */
+export async function typeBlogBodyContent(
+  page: Page,
+  bodyLoc: Locator,
+  content: string,
+  humanConfig: HumanEngineConfig,
+  options?: { skipClick?: boolean; afterPlaceholderClick?: boolean },
+): Promise<void> {
+  if (await isDraftResumePopupVisible(page)) {
+    throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
+  }
+
+  if (options?.afterPlaceholderClick) {
+    if (await isFocusInTitleArea(page)) {
+      await blurBlogTitleField(page);
+    }
+  } else {
+    const editable = await resolveBodyEditableLocator(bodyLoc);
+    if (options?.skipClick) {
+      if (await isFocusInTitleArea(page)) {
+        await blurBlogTitleField(page);
+      }
+      await humanClickLocator(page, editable);
+      await sleep(200);
+    } else {
+      await blurBlogTitleField(page);
+      await humanClickLocator(page, editable);
+      await sleep(200);
+      await focusBodyEditableNode(editable);
+      await ensureBodyFocusForPaste(page, editable);
+    }
+  }
+
+  if (await isFocusInTitleArea(page)) {
+    throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
+  }
+
+  const paragraphs = content.split('\n\n').filter(Boolean);
+  if (paragraphs.length === 0) {
+    throw new Error('BLOG_BODY_WRITE_FAILED');
+  }
+
+  const editable = await resolveBodyEditableLocatorRelaxed(bodyLoc);
+  const pasteRatio = resolvePasteRatio(humanConfig);
+  const pasteCount = Math.floor(paragraphs.length * pasteRatio);
+  const pasteIndices = new Set<number>();
+  while (pasteIndices.size < pasteCount) {
+    pasteIndices.add(Math.floor(Math.random() * paragraphs.length));
+  }
+
+  let focused = Boolean(options?.afterPlaceholderClick);
+
+  for (let i = 0; i < paragraphs.length; i += 1) {
+    if (await isFocusInTitleArea(page)) {
+      await blurBlogTitleField(page);
+      if (!options?.afterPlaceholderClick) {
+        await humanClickLocator(page, editable);
+        await sleep(150);
+        focused = true;
+      }
+      if (await isFocusInTitleArea(page)) {
+        throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
+      }
+    }
+
+    const para = paragraphs[i]!;
+
+    if (pasteIndices.has(i)) {
+      const plan = planParagraphPaste(para);
+      const segments = plan.hasPaste ? plan.segments : [{ kind: 'paste' as const, text: para }];
+      for (const seg of segments) {
+        if (seg.kind === 'paste') {
+          await pastePlainTextAtCaret(page, seg.text);
+          focused = true;
+        } else {
+          await humanTypeIntoElement(page, editable, seg.text, humanConfig, { skipFocus: focused });
+          focused = true;
+        }
+      }
+    } else {
+      await humanTypeIntoElement(page, editable, para, humanConfig, { skipFocus: focused });
+      focused = true;
+    }
+
+    if (i < paragraphs.length - 1) {
+      await page.keyboard.press('Enter');
+      await page.keyboard.press('Enter');
+      await humanSleep(humanConfig.paragraph_pause_ms[0], humanConfig.paragraph_pause_ms[1]);
+    }
+  }
+
+  const verifyMs = Math.min(30_000, Math.max(8000, content.length * 40));
+  if (!(await waitForBlogBodyWritten(page, bodyLoc, content, verifyMs))) {
     throw new Error('BLOG_BODY_WRITE_FAILED');
   }
 }
@@ -1561,13 +1693,14 @@ async function clearTitleFieldViaKeyboard(page: Page, editable: Locator): Promis
   return !final || isTitlePlaceholderText(final);
 }
 
-/** SE ONE 제목 — pasteBlogTitleField 위임 (execCommand 체인 제거) */
+/** SE ONE 제목 — typeBlogTitleField 위임 */
 export async function typeTextIntoBlogTitleField(
   page: Page,
   titleLoc: Locator,
   text: string,
+  humanConfig: HumanEngineConfig,
 ): Promise<void> {
-  await pasteBlogTitleField(page, titleLoc, text);
+  await typeBlogTitleField(page, titleLoc, text, humanConfig);
 }
 
 export async function findVisibleLocator(
