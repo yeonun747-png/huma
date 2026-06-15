@@ -6,6 +6,7 @@ import type { HumaJob } from '@huma/shared';
 import { api } from '@/lib/api';
 import { refreshNavBadges } from '@/lib/nav-badge-events';
 import { formatScheduledAt } from '@/components/queue/job-schedule-form';
+import { monitorJobAccountLabel, monitorJobPlatformLabel } from '@/lib/monitor-account-label';
 
 type MonitorSessions = Awaited<ReturnType<typeof api.monitorSessions>>;
 
@@ -63,7 +64,8 @@ export function MonitorView() {
               {live ? (generating ? 'AI' : 'LIVE') : '대기'}
             </span>
             <span className="ml-1.5 font-mono text-[11px] text-huma-t3">
-              {job.title ?? job.job_type} · {job.workspace} · {generating ? 'Claude/Imagen' : job.platform ?? 'naver'}
+              {monitorJobAccountLabel(job)} · {monitorJobPlatformLabel(job)}
+              {generating ? ' · Claude/Imagen' : ''}
             </span>
             {live && !generating && <span className="ml-auto font-mono text-[11px] text-huma-t3">WPM —</span>}
           </div>

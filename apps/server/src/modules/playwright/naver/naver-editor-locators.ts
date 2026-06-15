@@ -27,6 +27,140 @@ export async function editorLocatorScopes(page: Page): Promise<Array<Page | Fram
   return scopes;
 }
 
+const HELP_PANEL_ROOT_SELECTORS = [
+  '.se-help-panel',
+  '[class*="se-help-panel"]',
+  '[class*="help-panel"]',
+  '.se-sidebar',
+];
+
+const HELP_PANEL_CLOSE_SELECTORS = [
+  '.se-help-panel-close-button',
+  'button.se-help-panel-close-button',
+  '.btn_close_help',
+  '.se-help-panel button[aria-label="닫기"]',
+  '.se-help-panel button[aria-label*="닫"]',
+  '.se-help-panel button[class*="close"]',
+  '.se-sidebar button[aria-label="닫기"]',
+  '.se-sidebar button[aria-label*="닫"]',
+  '.se-sidebar button[class*="close"]',
+  '.se-guide-close-button',
+  '.se-onboarding-close-button',
+  'button.se-help-toolbar-button[aria-pressed="true"]',
+  'button[class*="help"][class*="toolbar"][aria-pressed="true"]',
+];
+
+/** SE ONE 우측 「도움말」 사이드바 — 글쓰기 영역을 가리면 true */
+export async function isSeOneHelpPanelVisible(page: Page): Promise<boolean> {
+  for (const scope of await editorLocatorScopes(page)) {
+    for (const rootSel of HELP_PANEL_ROOT_SELECTORS) {
+      const root = scope.locator(rootSel).first();
+      if (!(await root.isVisible({ timeout: 250 }).catch(() => false))) continue;
+
+      const box = await root.boundingBox().catch(() => null);
+      const vp = page.viewportSize();
+      const onRight = !vp || !box || box.x + box.width / 2 > vp.width * 0.45;
+      if (!onRight) continue;
+
+      const hasHelpTitle = await root
+        .evaluate((el) => {
+          const text = (el.textContent ?? '').replace(/\s+/g, '');
+          return text.includes('도움말') || text.includes('WhatsNew') || text.includes('시작하기');
+        })
+        .catch(() => false);
+      if (hasHelpTitle || rootSel.includes('help')) return true;
+    }
+  }
+  return false;
+}
+
+async function clickHelpCloseInScope(page: Page, scope: Page | FrameLocator): Promise<boolean> {
+  for (const sel of HELP_PANEL_CLOSE_SELECTORS) {
+    const btn = scope.locator(sel).first();
+    if (!(await btn.isVisible({ timeout: 350 }).catch(() => false))) continue;
+    try {
+      await humanClickLocator(page, btn, undefined, [70, 160]);
+      return true;
+    } catch {
+      await btn.click({ timeout: 2500, force: true }).catch(() => {});
+      return true;
+    }
+  }
+  return false;
+}
+
+/** 도움말 사이드바 닫기 — 에디터 진입 직후·입력 직전 최우선 */
+export async function dismissSeOneHelpPanel(page: Page): Promise<boolean> {
+  if (!(await isSeOneHelpPanelVisible(page))) return false;
+
+  await logOperation({
+    level: 'info',
+    message: '[post_blog] 도움말 패널 감지 — 닫기 시도',
+  }).catch(() => {});
+
+  for (let round = 0; round < 5; round += 1) {
+    let acted = false;
+
+    for (const scope of await editorLocatorScopes(page)) {
+      if (await clickHelpCloseInScope(page, scope)) acted = true;
+    }
+
+    const jsClosed = await page
+      .evaluate(() => {
+        const roots = [
+          ...document.querySelectorAll(
+            '.se-help-panel, [class*="se-help-panel"], [class*="help-panel"], .se-sidebar',
+          ),
+        ];
+        for (const root of roots) {
+          const rect = root.getBoundingClientRect();
+          if (rect.width < 80 || rect.height < 80) continue;
+          if (rect.left < window.innerWidth * 0.45) continue;
+
+          const close = root.querySelector<HTMLElement>(
+            'button[class*="close"], .se-help-panel-close-button, [aria-label="닫기"], [aria-label*="닫"]',
+          );
+          if (close) {
+            close.click();
+            return true;
+          }
+
+          const heading = [...root.querySelectorAll('h1,h2,h3,strong,span,div,p')].find(
+            (el) => (el.textContent ?? '').trim() === '도움말',
+          );
+          if (heading) {
+            const panel = heading.closest('.se-help-panel, .se-sidebar, aside, [class*="sidebar"]');
+            const panelClose = panel?.querySelector<HTMLElement>(
+              'button[class*="close"], [aria-label="닫기"], [aria-label*="닫"]',
+            );
+            if (panelClose) {
+              panelClose.click();
+              return true;
+            }
+          }
+
+          root.remove();
+          return true;
+        }
+        return false;
+      })
+      .catch(() => false);
+    if (jsClosed) acted = true;
+
+    await sleep(280);
+    if (!(await isSeOneHelpPanelVisible(page))) {
+      await logOperation({
+        level: 'info',
+        message: '[post_blog] 도움말 패널 닫기 완료',
+      }).catch(() => {});
+      return true;
+    }
+    if (!acted) break;
+  }
+
+  return !(await isSeOneHelpPanelVisible(page));
+}
+
 /** 현행 SE ONE + 구형 postwrite 공통 제목 셀렉터 */
 export const BLOG_TITLE_SELECTORS = [
   '#subjectTextBox',
@@ -1811,6 +1945,7 @@ export async function ensureBlogBodyLocator(
 }
 
 async function prepareSeOneEditorSurfaceForBody(page: Page): Promise<void> {
+  await dismissSeOneHelpPanel(page);
   await dismissSeOneMaterialPopup(page);
   if (await isDraftResumePopupVisible(page)) {
     await sleep(200);

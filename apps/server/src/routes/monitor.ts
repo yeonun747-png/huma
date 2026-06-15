@@ -2,6 +2,10 @@ import type { FastifyInstance } from 'fastify';
 import { authMiddleware, getWorkspaceFilter, supabase } from '../middleware/auth.js';
 import { formatKstHm } from '../lib/dashboard-period.js';
 import { getCrankSessionProgress } from '../lib/crank-session-progress.js';
+import {
+  monitorSessionAccountLabel,
+  monitorSessionPlatformLabel,
+} from '../lib/monitor-account-label.js';
 
 function contentFullPhase(job: {
   title?: string | null;
@@ -74,7 +78,7 @@ export async function registerMonitorRoutes(app: FastifyInstance) {
         .limit(6),
       supabase
         .from('huma_jobs')
-        .select('id, title, job_type, workspace, platform, scheduled_at, huma_accounts(name)')
+        .select('id, title, job_type, workspace, platform, scheduled_at, account_id, huma_accounts(name)')
         .in('workspace', workspaces)
         .eq('status', 'scheduled')
         .not('scheduled_at', 'is', null)
@@ -103,8 +107,17 @@ export async function registerMonitorRoutes(app: FastifyInstance) {
         const acct = job.huma_accounts as { name?: string; wpm?: number } | null;
         const base = {
           jobId: job.id,
-          account: acct?.name ?? '계정',
-          platform: job.platform ?? job.workspace ?? 'naver',
+          account: monitorSessionAccountLabel({
+            workspace: job.workspace,
+            accountName: acct?.name,
+            jobType: job.job_type,
+            hasAccountId: Boolean(job.account_id),
+          }),
+          platform: monitorSessionPlatformLabel({
+            workspace: job.workspace,
+            platform: job.platform,
+            jobType: job.job_type,
+          }),
           workspace: job.workspace,
           title: job.title ?? job.job_type,
           jobType: job.job_type,
@@ -161,8 +174,12 @@ export async function registerMonitorRoutes(app: FastifyInstance) {
     const idle = nextScheduled
       ? {
           jobId: nextScheduled.id,
-          account:
-            (nextScheduled.huma_accounts as { name?: string } | null)?.name ?? '예약 작업',
+          account: monitorSessionAccountLabel({
+            workspace: nextScheduled.workspace,
+            accountName: (nextScheduled.huma_accounts as { name?: string } | null)?.name,
+            jobType: nextScheduled.job_type,
+            hasAccountId: Boolean(nextScheduled.account_id),
+          }),
           schedule: formatKstHm(nextScheduled.scheduled_at) ?? '—',
           title: nextScheduled.title ?? nextScheduled.job_type,
           workspace: nextScheduled.workspace,

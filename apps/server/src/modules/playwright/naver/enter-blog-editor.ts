@@ -16,6 +16,7 @@ import {
   BLOG_BODY_SELECTORS,
   BLOG_TITLE_SELECTORS,
   dismissSeOneMaterialPopup,
+  dismissSeOneHelpPanel,
   findBlogTitleLocator,
   findVisibleLocator,
   editorLocatorScopes,
@@ -48,7 +49,7 @@ const TITLE_EDITOR_SELECTORS = BLOG_TITLE_SELECTORS;
 
 const CONTENT_EDITOR_SELECTORS = BLOG_BODY_SELECTORS;
 
-const HELP_CLOSE_SELECTORS = [
+const LEGACY_HELP_CLOSE_SELECTORS = [
   '.se-help-panel-close-button',
   'button.se-help-panel-close-button',
   '.btn_close_help',
@@ -214,6 +215,8 @@ export async function dismissNaverBlogEditorOverlays(
   editorPage: Page,
   options?: { includeDraftPopup?: boolean },
 ): Promise<void> {
+  await dismissSeOneHelpPanel(editorPage);
+
   if (options?.includeDraftPopup !== false) {
     await dismissDraftResumePopup(editorPage);
   }
@@ -223,8 +226,10 @@ export async function dismissNaverBlogEditorOverlays(
   for (let round = 0; round < 4; round += 1) {
     let dismissed = false;
 
+    await dismissSeOneHelpPanel(editorPage);
+
     for (const scope of scopes) {
-      for (const sel of HELP_CLOSE_SELECTORS) {
+      for (const sel of LEGACY_HELP_CLOSE_SELECTORS) {
         if (await clickIfVisible(scope, sel)) dismissed = true;
       }
       if (
@@ -258,6 +263,7 @@ export async function prepareSeOneEditorSurface(
   } else {
     await waitAndDismissDraftResumePopup(editorPage, maxMs);
   }
+  await dismissSeOneHelpPanel(editorPage);
   await dismissNaverBlogEditorOverlays(editorPage, { includeDraftPopup: false });
   await dismissSeOneMaterialPopup(editorPage);
   if (options?.destructiveDraftDismiss !== false && (await isDraftResumePopupVisible(editorPage))) {
@@ -299,6 +305,7 @@ async function tryEditorOnPage(page: Page, waitBudgetMs = SMART_EDITOR_WAIT_MS):
     (await isSeOneEditorShellReady(page))
   ) {
     if (await waitForSmartEditor(page, waitBudgetMs)) {
+      await dismissSeOneHelpPanel(page);
       await dismissNaverBlogEditorOverlays(page, { includeDraftPopup: false });
       if (await isDraftResumePopupVisible(page)) {
         await prepareSeOneEditorSurface(page, 20_000);
@@ -364,6 +371,7 @@ export async function enterBlogEditor(
     if (!navOk) continue;
 
     await scaledSleep(1500, 3000);
+    await dismissSeOneHelpPanel(workflowPage);
     // 팝업이 있으면 취소(마우스) — 못 닫아도 throw 금지, 이후 폴링이 재시도
     await waitAndDismissDraftResumePopup(workflowPage, 15_000).catch(() => {});
 
