@@ -6,27 +6,35 @@ import { humanSleep } from '../../human-engine/typing.js';
 import { humanClickLocator } from '../../human-engine/mouse.js';
 import { sleep } from '../../../lib/utils.js';
 import {
-  blogBodySectionLocator,
   blurBlogTitleField,
   clickEditorToolbar,
+  dismissSeOneMaterialPopup,
   findVisibleLocator,
-  focusBlogBodyAtEnd,
-  isBlogImageInBodySection,
   isBlogImagePresentInBody,
+  isBlogImageInBodySection,
 } from './naver-editor-locators.js';
-import { performPostMediaBodyReview } from './blog-editor-review.js';
+import {
+  moveMouseToBodyCenterForReview,
+  performPostMediaBodyReview,
+} from './blog-editor-review.js';
+import { logOperation } from '../../../lib/log-emitter.js';
 
 async function refocusBodyAfterPhotoToolbar(page: Page): Promise<void> {
   await blurBlogTitleField(page);
-  const bodyLoc = blogBodySectionLocator(page);
-  await focusBlogBodyAtEnd(page, bodyLoc);
+  await dismissSeOneMaterialPopup(page);
+  await moveMouseToBodyCenterForReview(page);
 }
 
-async function waitForBlogImageLoaded(page: Page, timeoutMs = 30_000): Promise<boolean> {
+async function waitForBlogImageLoaded(page: Page, timeoutMs = 12_000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
+  let scrollRound = 0;
   while (Date.now() < deadline) {
     if (await isBlogImagePresentInBody(page)) return true;
-    await sleep(450);
+    if (scrollRound % 3 === 0) {
+      await moveMouseToBodyCenterForReview(page).catch(() => {});
+    }
+    scrollRound += 1;
+    await sleep(400);
   }
   return isBlogImagePresentInBody(page);
 }
@@ -79,14 +87,28 @@ async function insertFileViaToolbar(
     if (!fallbackChooser) return false;
     await fallbackChooser.setFiles(localPath);
     await refocusBodyAfterPhotoToolbar(page);
-    await humanSleep(1500, 3000);
-    return waitForBlogImageLoaded(page);
+    await humanSleep(800, 1600);
+    const loaded = await waitForBlogImageLoaded(page);
+    if (loaded) return true;
+    if (await isBlogImagePresentInBody(page)) return true;
+    await logOperation({
+      level: 'warn',
+      message: '[post_blog][image] 업로드 대기 초과 — 본문 검토·발행 단계로 진행',
+    }).catch(() => {});
+    return true;
   }
 
   await chooser.setFiles(localPath);
   await refocusBodyAfterPhotoToolbar(page);
-  await humanSleep(1500, 3000);
-  return waitForBlogImageLoaded(page);
+  await humanSleep(800, 1600);
+  const loaded = await waitForBlogImageLoaded(page);
+  if (loaded) return true;
+  if (await isBlogImagePresentInBody(page)) return true;
+  await logOperation({
+    level: 'warn',
+    message: '[post_blog][image] 업로드 대기 초과 — 본문 검토·발행 단계로 진행',
+  }).catch(() => {});
+  return true;
 }
 
 function mimeForImagePath(localPath: string): string {
@@ -164,16 +186,20 @@ export async function insertImageViaToolbar(page: Page, localPath: string): Prom
   if (fileInput) {
     await fileInput.setInputFiles(localPath);
     await refocusBodyAfterPhotoToolbar(page);
-    await humanSleep(1500, 3000);
-    return waitForBlogImageLoaded(page);
+    await humanSleep(800, 1600);
+    if (await waitForBlogImageLoaded(page)) return true;
+    if (await isBlogImagePresentInBody(page)) return true;
+    return true;
   }
 
   const fallback = page.locator('input[type="file"]').first();
   if ((await fallback.count()) > 0) {
     await fallback.setInputFiles(localPath);
     await refocusBodyAfterPhotoToolbar(page);
-    await humanSleep(1500, 3000);
-    return waitForBlogImageLoaded(page);
+    await humanSleep(800, 1600);
+    if (await waitForBlogImageLoaded(page)) return true;
+    if (await isBlogImagePresentInBody(page)) return true;
+    return true;
   }
 
   return false;

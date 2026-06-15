@@ -1778,6 +1778,27 @@ export async function typeBlogTitleField(
     return;
   }
 
+  const domTitleEarly = (await readTitleFromEditorDom(page)).trim();
+  if (domTitleEarly.length >= 8 && /[가-힣]{4,}/.test(domTitleEarly)) {
+    if (
+      titleContainsExpected(domTitleEarly, titleText) ||
+      isDuplicatedBlogTitle(domTitleEarly, titleText)
+    ) {
+      await blurBlogTitleField(page);
+      await logTitleDebug(`제목 DOM "${domTitleEarly.slice(0, 24)}…" — 재입력 생략`);
+      return;
+    }
+    const probe = Math.min(8, titleText.replace(/\s+/g, '').length);
+    if (
+      probe >= 4 &&
+      domTitleEarly.replace(/\s+/g, '').includes(titleText.replace(/\s+/g, '').slice(0, probe))
+    ) {
+      await blurBlogTitleField(page);
+      await logTitleDebug('제목 DOM 앞부분 일치 — 재입력 생략');
+      return;
+    }
+  }
+
   if (await isBlogTitlePlaceholderGone(page)) {
     const domTitle = (await readTitleFromEditorDom(page)).trim();
     if (domTitle.length >= 6 && /[가-힣]/.test(domTitle)) {

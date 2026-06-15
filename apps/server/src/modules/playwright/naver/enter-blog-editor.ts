@@ -292,7 +292,7 @@ async function dismissDraftPopupIfVisible(
   if (resume) {
     await dismissDraftResumePopupConfirm(editorPage);
   } else {
-    await dismissDraftResumePopupCancel(editorPage, { moveMouseToTitle: true });
+    await dismissDraftResumePopupCancel(editorPage, { moveMouseToTitle: false });
   }
 }
 

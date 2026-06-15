@@ -15,11 +15,35 @@ async function moveMouseToEditorCanvas(page: Page): Promise<void> {
     const loc = page.locator(sel).first();
     const box = await loc.boundingBox().catch(() => null);
     if (box && box.width > 120 && box.height > 120) {
-      await humanMouseMove(page, box.x + box.width * 0.55, box.y + box.height * 0.5);
+      await humanMouseMove(page, box.x + box.width * 0.5, box.y + box.height * 0.52);
       await sleep(180);
       return;
     }
   }
+}
+
+/** 사진 툴바 직후 — 본문 섹션 중앙 클릭·포커스 (제목·툴바 이탈) */
+export async function moveMouseToBodyCenterForReview(page: Page): Promise<void> {
+  const candidates = [
+    '.se-section-text',
+    '.se-components-wrap',
+    '.se-main-container',
+    '.se-container',
+  ];
+  for (const sel of candidates) {
+    const loc = page.locator(sel).first();
+    const box = await loc.boundingBox().catch(() => null);
+    if (box && box.width > 160 && box.height > 120) {
+      const x = box.x + box.width * 0.5;
+      const y = box.y + Math.min(box.height * 0.55, box.height - 80);
+      await humanMouseMove(page, x, y);
+      await sleep(120);
+      await page.mouse.click(x, y);
+      await sleep(200);
+      return;
+    }
+  }
+  await moveMouseToEditorCanvas(page);
 }
 
 async function scrollEditorCanvas(page: Page, durationMs: number): Promise<void> {
@@ -44,7 +68,7 @@ async function scrollEditorCanvas(page: Page, durationMs: number): Promise<void>
 
 /** 이미지·링크 삽입 직후 — 툴바에서 본문으로 포인터 이동 후 읽듯 스크롤 */
 export async function performPostMediaBodyReview(page: Page, scale = 1): Promise<void> {
-  await moveMouseToEditorCanvas(page);
+  await moveMouseToBodyCenterForReview(page);
   const rounds = randomBetween(3, 5);
   for (let i = 0; i < rounds; i += 1) {
     const reverse = i > 0 && Math.random() < 0.45;

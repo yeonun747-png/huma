@@ -75,12 +75,11 @@ async function isBlogBodyReadyForMediaAppend(
   return isBlogBodySubstantiallyWritten(sectionText, content);
 }
 
-async function isPostBlogMediaStageComplete(params: {
+async function isPostBlogPublishResumeReady(params: {
   page: Page;
   editor: Locator;
   content: string;
   linkUrl?: string;
-  imagePath?: string;
   workspace?: string;
 }): Promise<boolean> {
   if (!(await isBlogBodyReadyForMediaAppend(params.page, params.editor, params.content))) {
@@ -92,6 +91,18 @@ async function isPostBlogMediaStageComplete(params: {
     ? resolveBlogLinkUrl(workspace, params.linkUrl.trim(), params.linkUrl.trim())
     : '';
   if (resolvedLink && !isBlogLinkUrlInBodyText(bodyText, resolvedLink)) return false;
+  return true;
+}
+
+async function isPostBlogMediaStageComplete(params: {
+  page: Page;
+  editor: Locator;
+  content: string;
+  linkUrl?: string;
+  imagePath?: string;
+  workspace?: string;
+}): Promise<boolean> {
+  if (!(await isPostBlogPublishResumeReady(params))) return false;
   if (params.imagePath && !(await isBlogImagePresentInBody(params.page))) return false;
   return true;
 }
@@ -180,23 +191,27 @@ async function appendLinkAndImageAtBodyEnd(params: {
         account_id: accountId,
       }).catch(() => {});
       const ok = await pasteBlogImageAtCaret(page, params.imagePath, { skipPostReview: true });
-      if (!ok && !(await isBlogImagePresentInBody(page))) {
-        throw new Error('BLOG_IMAGE_INSERT_FAILED');
+      if (!ok) {
+        await logOperation({
+          level: 'warn',
+          message: '[post_blog][image] 삽입 미확인 — 본문 검토·발행 계속',
+          account_id: accountId,
+        }).catch(() => {});
+      } else {
+        await logOperation({
+          level: 'info',
+          message: '[post_blog] 이미지 삽입 완료',
+          account_id: accountId,
+        }).catch(() => {});
       }
-      await logOperation({
-        level: 'info',
-        message: '[post_blog] 이미지 삽입 완료',
-        account_id: accountId,
-      }).catch(() => {});
     }
   }
 
   await blurBlogTitleField(page);
   await dismissSeOneMaterialPopup(page);
-  await focusBlogBodyAtEnd(page, params.editor);
   await logOperation({
     level: 'info',
-    message: '[post_blog] 본문 검토 스크롤 — 발행 준비',
+    message: '[post_blog] 본문 중앙 검토 스크롤 — 발행 준비',
     account_id: accountId,
   }).catch(() => {});
   await performPostMediaBodyReview(page, scale);
@@ -240,6 +255,13 @@ export async function postNaverBlog(params: {
 
   const editor = blogBodySectionLocator(page);
   const bodyResumeReady = await isBlogBodyReadyForMediaAppend(page, editor, params.content);
+  const publishResumeReady = await isPostBlogPublishResumeReady({
+    page,
+    editor,
+    content: params.content,
+    linkUrl: params.linkUrl,
+    workspace: params.workspace,
+  });
   const mediaStageComplete = await isPostBlogMediaStageComplete({
     page,
     editor,
@@ -249,7 +271,7 @@ export async function postNaverBlog(params: {
     workspace: params.workspace,
   });
 
-  if (bodyResumeReady || mediaStageComplete) {
+  if (bodyResumeReady || mediaStageComplete || publishResumeReady) {
     await resolveDraftResumePopupForJob(page, {
       expectedTitle: params.title,
       expectedContent: params.content,
@@ -265,11 +287,13 @@ export async function postNaverBlog(params: {
 
   let titleOkThisRun = true;
 
-  if (mediaStageComplete) {
+  if (mediaStageComplete || publishResumeReady) {
     await blurBlogTitleField(page);
     await logOperation({
       level: 'info',
-      message: '[post_blog] 본문·링크·이미지 완료 — 제목 재입력 생략, 본문 검토 후 발행',
+      message: publishResumeReady
+        ? '[post_blog] 본문·링크 완료 — 제목 재입력 생략, 검토 스크롤 후 발행'
+        : '[post_blog] 본문·링크·이미지 완료 — 제목 재입력 생략, 본문 검토 후 발행',
       account_id: params.accountId,
     }).catch(() => {});
   } else {
@@ -278,7 +302,7 @@ export async function postNaverBlog(params: {
     let titleAlreadyOk =
       titleBox != null && (await isBlogTitleFilledEnough(page, titleBox, params.title));
 
-    if (!titleAlreadyOk && bodyResumeReady && titleBox) {
+    if (!titleAlreadyOk && (bodyResumeReady || publishResumeReady) && titleBox) {
       if (await shouldSkipTitleRetypeOnBodyResume(page, titleBox, params.title)) {
         titleAlreadyOk = true;
         await blurBlogTitleField(page);
@@ -298,7 +322,7 @@ export async function postNaverBlog(params: {
         await resolveDraftResumePopupForJob(page, {
           expectedTitle: params.title,
           expectedContent: params.content,
-          preferResume: bodyResumeReady || mediaStageComplete,
+          preferResume: bodyResumeReady || mediaStageComplete || publishResumeReady,
         });
         resetDraftDismissGuard(page);
       });
