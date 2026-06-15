@@ -111,7 +111,7 @@ function mergeHuman(raw: Record<string, unknown>): HumanEngineConfig {
     ...raw,
     wpm_mean: Math.round(Number(raw.wpm_mean) || DEFAULT_HUMAN.wpm_mean),
     wpm_sigma: Math.round(Number(raw.wpm_sigma) || DEFAULT_HUMAN.wpm_sigma),
-    typo_rate: Math.round(Number(raw.typo_rate ?? DEFAULT_HUMAN.typo_rate) * 1000) / 1000,
+    typo_rate: Math.min(0.1, Math.max(0, Math.round(Number(raw.typo_rate ?? DEFAULT_HUMAN.typo_rate) * 1000) / 1000)),
     paste_ratio:
       typeof raw.paste_ratio === 'number'
         ? Math.min(1, Math.max(0, Math.round(raw.paste_ratio * 100) / 100))
@@ -256,6 +256,7 @@ export function HumanEngineSettings() {
   const chartBars = useMemo(() => wpmBars(human.wpm_mean, human.wpm_sigma), [human.wpm_mean, human.wpm_sigma]);
   const pastePct = Math.round((human.paste_ratio ?? 0.55) * 100);
   const typePct = 100 - pastePct;
+  const typoPct = Math.round(human.typo_rate * 100);
 
   const persistAll = useCallback(
     async (h: HumanEngineConfig, img: ImageEngineConfig, med: MediaConfig) => {
@@ -307,8 +308,8 @@ export function HumanEngineSettings() {
           <HeSliderRow label="속도 편차 (σ)" value={human.wpm_sigma} min={2} max={30} onChange={(v) => { setHuman((h) => { const next = { ...h, wpm_sigma: v }; humanRef.current = next; return next; }); scheduleSave(); }} />
           <HeSliderRow
             label="오타 발생률"
-            value={Math.round(human.typo_rate * 100)}
-            min={1}
+            value={typoPct}
+            min={0}
             max={10}
             suffix="%"
             onChange={(v) => { setHuman((h) => { const next = { ...h, typo_rate: v / 100 }; humanRef.current = next; return next; }); scheduleSave(); }}
@@ -329,9 +330,19 @@ export function HumanEngineSettings() {
             }}
           />
           <HeStaticRow label="본문 타이핑 비율" value={`${typePct}% (자동)`} />
-          <HeStaticRow label="제목 · 본문 타이핑" value="IME + 오타·백스페이스 (위 발생률)" />
+          <HeStaticRow
+            label="제목 · 본문 타이핑"
+            value={
+              typoPct <= 0
+                ? 'pressSequentially 유니코드 (오타 없음)'
+                : `IME + 오타·백스페이스 (${typoPct}%)`
+            }
+          />
           <HeStaticRow label="해시태그" value="항상 IME 타이핑 (오타 없음)" />
-          <HeStaticRow label="백스페이스 딜레이" value="200~800ms" />
+          <HeStaticRow
+            label="백스페이스 딜레이"
+            value={typoPct <= 0 ? '오타 0% — 미사용' : '200~800ms (오타 보정 시)'}
+          />
           <HeStaticRow label="문단 간 사고 정지" value="2~8초" />
           <HeStaticRow label="발행 전 검토" value={REVIEW_DURATION_SUMMARY} />
           <div className="he-wpm-chart">

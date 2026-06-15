@@ -1,4 +1,4 @@
-import type { Page } from 'playwright';
+import type { Locator, Page } from 'playwright';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 
@@ -6,6 +6,7 @@ import { gaussianRandom, randomBetween, sleep, wpmToDelay } from '../../lib/util
 import type { HumanEngineConfig } from '../../lib/settings.js';
 import { hangulToJamoSequence } from './hangul.js';
 import { jamoToKeyPresses } from './dubeolsik-keymap.js';
+import { getAdjacentJamo } from './typing-adjacent.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -55,6 +56,56 @@ async function pressKeyPress(page: Page, press: { key: string; shift?: boolean }
   if (press.shift) await page.keyboard.down('Shift');
   await page.keyboard.press(press.key);
   if (press.shift) await page.keyboard.up('Shift');
+}
+
+async function pressDubeolsikJamo(page: Page, jamo: string): Promise<void> {
+  for (const press of jamoToKeyPresses(jamo)) {
+    await pressKeyPress(page, press);
+    await sleep(randomBetween(20, 55));
+  }
+}
+
+async function pressTypoBackspaceOs(page: Page, locator: Locator, config: HumanEngineConfig): Promise<void> {
+  await locator.focus().catch(() => {});
+  await sleep(randomBetween(80, 180));
+  await sleep(randomBetween(...config.backspace_delay_ms));
+  await page.keyboard.press('Backspace');
+  await sleep(randomBetween(120, 280));
+}
+
+/**
+ * 한글 오타 — 두벌식 물리키로 IME 조합 (pressSequentially(자모)는 ㅇㅕㄹ 분리 버그).
+ */
+export async function typeHangulViaOsImeWithJamoTypos(
+  page: Page,
+  locator: Locator,
+  char: string,
+  config: HumanEngineConfig,
+): Promise<void> {
+  await locator.focus().catch(() => {});
+  await ensureOsHangulMode(page);
+  const jamos = hangulToJamoSequence(char);
+  if (jamos.length < 2) {
+    await locator.pressSequentially(char, { delay: 0 });
+    await sleep(wpmToDelay(gaussianRandom(config.wpm_mean, config.wpm_sigma)));
+    return;
+  }
+
+  const perJamoMs = Math.max(
+    35,
+    Math.round(wpmToDelay(gaussianRandom(config.wpm_mean, config.wpm_sigma)) / jamos.length),
+  );
+  for (const jamo of jamos) {
+    if (config.typo_rate > 0 && Math.random() < config.typo_rate) {
+      const wrong = getAdjacentJamo(jamo);
+      if (wrong !== jamo) {
+        await pressDubeolsikJamo(page, wrong);
+        await pressTypoBackspaceOs(page, locator, config);
+      }
+    }
+    await pressDubeolsikJamo(page, jamo);
+    await sleep(perJamoMs);
+  }
 }
 
 /** OS fcitx-hangul — 두벌식 물리키 → 진짜 IME composition */
