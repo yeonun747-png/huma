@@ -40,3 +40,8 @@ export function getAdjacentKey(char: string): string {
   if (isHangul(char)) return getAdjacentKeyKorean(char);
   return getAdjacentKeyLatin(char);
 }
+
+/** 두벌식 인접 자모 — 한글 오타 시 자모 단위 백스페이스용 */
+export function getAdjacentJamo(jamo: string): string {
+  return pickWrong(jamo, DUBEOLSIK_ADJACENT[jamo]) || jamo;
+}

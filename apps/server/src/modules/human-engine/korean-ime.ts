@@ -3,7 +3,7 @@ import type { Locator, Page } from 'playwright';
 import { gaussianRandom, randomBetween, sleep, wpmToDelay } from '../../lib/utils.js';
 import type { HumanEngineConfig } from '../../lib/settings.js';
 import { hangulToJamoSequence, isHangul, recomposeHangul } from './hangul.js';
-import { getAdjacentKey } from './typing-adjacent.js';
+import { getAdjacentJamo, getAdjacentKey } from './typing-adjacent.js';
 import { humanClickLocator } from './mouse.js';
 import { ensureOsHangulMode, resolveUseOsIme, typeHangulViaOsIme } from './os-ime.js';
 
@@ -254,6 +254,42 @@ export function humanBriefPauseMs(
 }
 
 /** SE ONE·발행 태그 — 유니코드 pressSequentially + 글자별 WPM (합성 IME·OS IME 미사용) */
+async function pressTypoBackspace(page: Page, locator: Locator, config: HumanEngineConfig): Promise<void> {
+  await locator.focus().catch(() => {});
+  await sleep(randomBetween(80, 180));
+  await sleep(randomBetween(...config.backspace_delay_ms));
+  await page.keyboard.press('Backspace');
+  await sleep(randomBetween(120, 280));
+}
+
+/** 한글 — 자모 단위 입력·인접자모 오타·자모 단위 백스페이스 */
+async function pressSequentiallyHangulWithTypos(
+  page: Page,
+  locator: Locator,
+  char: string,
+  config: HumanEngineConfig,
+): Promise<void> {
+  const jamos = hangulToJamoSequence(char);
+  if (jamos.length < 2) {
+    await locator.pressSequentially(char, { delay: 0 });
+    await sleep(humanCharDelayMs(config));
+    return;
+  }
+
+  const perJamoMs = Math.max(35, Math.round(humanCharDelayMs(config) / jamos.length));
+  for (const jamo of jamos) {
+    if (Math.random() < config.typo_rate) {
+      const wrong = getAdjacentJamo(jamo);
+      if (wrong !== jamo) {
+        await locator.pressSequentially(wrong, { delay: 0 });
+        await pressTypoBackspace(page, locator, config);
+      }
+    }
+    await locator.pressSequentially(jamo, { delay: 0 });
+    await sleep(perJamoMs);
+  }
+}
+
 export async function humanPressSequentially(
   page: Page,
   locator: Locator,
@@ -271,14 +307,16 @@ export async function humanPressSequentially(
       continue;
     }
 
+    if (typos && isHangul(char)) {
+      await pressSequentiallyHangulWithTypos(page, locator, char, config);
+      continue;
+    }
+
     if (typos && Math.random() < config.typo_rate) {
       const wrong = getAdjacentKey(char);
       if (wrong !== char) {
         await locator.pressSequentially(wrong, { delay: 0 });
-        await sleep(randomBetween(80, 180));
-        await sleep(randomBetween(...config.backspace_delay_ms));
-        await page.keyboard.press('Backspace');
-        await sleep(randomBetween(120, 280));
+        await pressTypoBackspace(page, locator, config);
       }
     }
 

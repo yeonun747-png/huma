@@ -790,6 +790,7 @@ export async function isBlogTitleFilledEnough(
       if (probeDom >= 4 && dom.replace(/\s+/g, '').includes(expected.replace(/\s+/g, '').slice(0, probeDom))) {
         return true;
       }
+      if (dom.replace(/\s+/g, '').length >= 6) return true;
     }
   }
   return false;
@@ -821,6 +822,9 @@ export async function ensureBlogTitleBeforeReview(
 
   const dom = await readTitleFromEditorDom(page);
   if (titleContainsExpected(dom, expected) && !isDuplicatedBlogTitle(dom, expected)) {
+    return;
+  }
+  if (dom && dom.replace(/\s+/g, '').length >= 6 && /[가-힣]/.test(dom)) {
     return;
   }
 
@@ -1303,9 +1307,11 @@ export async function verifyBlogBodyField(
   bodyLoc: Locator,
   expected: string,
 ): Promise<boolean> {
+  const written = await readBlogBodySectionText(page);
+  if (isBlogBodySubstantiallyWritten(written, expected)) return true;
   const editable = await resolveBodyEditableLocator(bodyLoc);
-  const written = await readBlogBodyText(editable);
-  return isBlogBodySubstantiallyWritten(written, expected);
+  const fallback = await readBlogBodyText(editable);
+  return isBlogBodySubstantiallyWritten(fallback, expected);
 }
 
 /** insertText 직후 DOM 반영 대기 — placeholder 클릭 직후 readBlogBodyText 빈값 방지 */
@@ -1519,6 +1525,15 @@ export async function typeBlogTitleField(
   if (titleContainsExpected(current, titleText)) {
     await blurBlogTitleField(page);
     return;
+  }
+
+  if (await isBlogTitlePlaceholderGone(page)) {
+    const domTitle = (await readTitleFromEditorDom(page)).trim();
+    if (domTitle.length >= 6 && /[가-힣]/.test(domTitle)) {
+      await blurBlogTitleField(page);
+      await logTitleDebug(`제목 DOM ${domTitle.length}자 — 재입력·클릭 생략`);
+      return;
+    }
   }
 
   await humanClickLocator(page, editable);
