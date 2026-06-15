@@ -1,5 +1,50 @@
 export type DashboardPeriod = 'today' | 'week' | 'month';
 
+const KST = 'Asia/Seoul';
+
+function kstYmd(from: Date = new Date()): { year: number; month: number; day: number } {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: KST,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(from);
+  const pick = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((p) => p.type === type)?.value ?? 0);
+  return { year: pick('year'), month: pick('month'), day: pick('day') };
+}
+
+/** KST YYYY-MM-DD */
+export function kstDateKeyFromIso(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  try {
+    return new Intl.DateTimeFormat('sv-SE', {
+      timeZone: KST,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(iso));
+  } catch {
+    return null;
+  }
+}
+
+export function kstTodayDateKey(from: Date = new Date()): string {
+  const { year, month, day } = kstYmd(from);
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/** KST 자정 → UTC ISO (jobs API와 동일) */
+export function kstTodayStartIso(from: Date = new Date()): string {
+  const { year, month, day } = kstYmd(from);
+  return new Date(Date.UTC(year, month - 1, day, -9, 0, 0)).toISOString();
+}
+
+export function kstDayStartIso(daysAgo: number, from: Date = new Date()): string {
+  const anchor = kstTodayStartIso(from);
+  return new Date(new Date(anchor).getTime() - daysAgo * 86400000).toISOString();
+}
+
 export function parseDashboardPeriod(raw?: string): DashboardPeriod {
   if (raw === 'week' || raw === 'month') return raw;
   return 'today';
@@ -15,67 +60,63 @@ export function getPeriodRange(period: DashboardPeriod): {
   const end = now.toISOString();
 
   if (period === 'today') {
-    const start = new Date(now);
-    start.setHours(0, 0, 0, 0);
-    const prevEnd = new Date(start.getTime() - 1);
-    const prevStart = new Date(prevEnd);
-    prevStart.setHours(0, 0, 0, 0);
-    return {
-      start: start.toISOString(),
-      end,
-      prevStart: prevStart.toISOString(),
-      prevEnd: prevEnd.toISOString(),
-    };
+    const start = kstTodayStartIso(now);
+    const prevEnd = new Date(new Date(start).getTime() - 1).toISOString();
+    const prevStart = kstDayStartIso(1, now);
+    return { start, end, prevStart, prevEnd };
   }
 
   if (period === 'week') {
-    const start = new Date(now.getTime() - 7 * 86400000);
-    const prevEnd = new Date(start.getTime() - 1);
-    const prevStart = new Date(prevEnd.getTime() - 7 * 86400000);
-    return {
-      start: start.toISOString(),
-      end,
-      prevStart: prevStart.toISOString(),
-      prevEnd: prevEnd.toISOString(),
-    };
+    const start = kstDayStartIso(6, now);
+    const prevEnd = new Date(new Date(start).getTime() - 1).toISOString();
+    const prevStart = kstDayStartIso(13, now);
+    return { start, end, prevStart, prevEnd };
   }
 
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
-  const prevEnd = new Date(start.getTime() - 1);
-  const prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  return {
-    start: start.toISOString(),
-    end,
-    prevStart: prevStart.toISOString(),
-    prevEnd: prevEnd.toISOString(),
-  };
+  const { year, month } = kstYmd(now);
+  const start = new Date(Date.UTC(year, month - 1, 1, -9, 0, 0)).toISOString();
+  const prevEnd = new Date(new Date(start).getTime() - 1).toISOString();
+  const prevMonth = month === 1 ? 12 : month - 1;
+  const prevYear = month === 1 ? year - 1 : year;
+  const prevStart = new Date(Date.UTC(prevYear, prevMonth - 1, 1, -9, 0, 0)).toISOString();
+  return { start, end, prevStart, prevEnd };
 }
 
-export function buildChartBuckets(period: DashboardPeriod): Array<{ key: string; label: string }> {
-  const now = new Date();
+export function buildChartBuckets(
+  period: DashboardPeriod,
+): Array<{ key: string; label: string; isToday?: boolean }> {
   const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+  const todayKey = kstTodayDateKey();
 
   if (period === 'month') {
-    const buckets: Array<{ key: string; label: string }> = [];
+    const { year, month } = kstYmd();
+    const buckets: Array<{ key: string; label: string; isToday?: boolean }> = [];
     for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      buckets.push({ key, label: `${d.getMonth() + 1}월` });
+      let m = month - i;
+      let y = year;
+      while (m <= 0) {
+        m += 12;
+        y -= 1;
+      }
+      const key = `${y}-${String(m).padStart(2, '0')}`;
+      buckets.push({ key, label: `${m}월`, isToday: key === `${year}-${String(month).padStart(2, '0')}` });
     }
     buckets.push({ key: 'forecast', label: '(예상)' });
     return buckets;
   }
 
-  const buckets: Array<{ key: string; label: string }> = [];
+  const buckets: Array<{ key: string; label: string; isToday?: boolean }> = [];
   for (let i = 6; i >= 0; i--) {
-    const d = new Date(now);
-    d.setDate(d.getDate() - i);
-    const key = d.toISOString().slice(0, 10);
+    const startIso = kstDayStartIso(i);
+    const key = kstDateKeyFromIso(startIso);
+    if (!key) continue;
+    const wd = new Intl.DateTimeFormat('en-US', { timeZone: KST, weekday: 'short' }).format(new Date(startIso));
+    const wdMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
     const label =
       period === 'week'
-        ? `${d.getMonth() + 1}/${d.getDate()}`
-        : dayNames[d.getDay()];
-    buckets.push({ key, label });
+        ? `${Number(key.slice(5, 7))}/${Number(key.slice(8, 10))}`
+        : dayNames[wdMap[wd] ?? 0] ?? key.slice(5);
+    buckets.push({ key, label, isToday: key === todayKey });
   }
   return buckets;
 }

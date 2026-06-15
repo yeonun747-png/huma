@@ -409,7 +409,7 @@
 
   /* ── Mockup v7 shared UI ── */
   .m-g1 { display: grid; grid-template-columns: 1fr; gap: 10px; margin-bottom: 12px; max-width: 420px; }
-  .m-g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 12px; }
+  .m-g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 12px; align-items: stretch; }
   .m-g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px; }
   .m-g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }
 
@@ -432,6 +432,33 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-shrink: 0;
+  }
+
+  .m-panel-fill {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    margin-bottom: 0;
+  }
+
+  .m-bar-chart-wrap {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .m-bar-chart {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+    flex: 1;
+    min-height: 160px;
+    padding: 8px 4px 4px;
+    border-radius: 8px;
+    background: linear-gradient(to top, var(--bg3) 0%, transparent 55%);
+    position: relative;
   }
 
   .m-sc {
@@ -469,10 +496,80 @@
   .m-st-jobs-l { font-size: 9.5px; color: var(--t3); }
   .m-svc-stop { font-size: 10.5px; padding: 3px 8px; border-radius: 4px; border: 1px solid var(--err); background: var(--err-bg); color: var(--err); cursor: pointer; margin-top: 3px; font-family: var(--font-ui); }
 
-  .m-bar-chart { display: flex; align-items: flex-end; gap: 6px; height: 80px; padding-bottom: 2px; }
-  .m-bar-col { display: flex; flex-direction: column; align-items: center; gap: 3px; flex: 1; }
-  .m-bar-fill { width: 100%; border-radius: 3px 3px 0 0; background: var(--acc); opacity: 0.75; min-height: 3px; }
-  .m-bar-label { font-size: 9px; color: var(--t2); font-family: var(--font-ui); }
+  .m-bar-chart-avg {
+    position: absolute;
+    left: 0;
+    right: 0;
+    border-top: 1px dashed var(--t4);
+    pointer-events: none;
+    z-index: 1;
+  }
+  .m-bar-chart-avg-label {
+    position: absolute;
+    right: 0;
+    top: -14px;
+    font-size: 9px;
+    color: var(--t3);
+    font-family: var(--font-ui);
+  }
+  .m-bar-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+    position: relative;
+    z-index: 2;
+  }
+  .m-bar-col.is-today .m-bar-label-today { text-decoration: underline; text-underline-offset: 3px; }
+  .m-bar-col.is-max .m-bar-fill { opacity: 1; box-shadow: 0 0 12px color-mix(in srgb, var(--acc) 45%, transparent); }
+  .m-bar-val {
+    font-size: 11px;
+    font-weight: 700;
+    font-family: var(--font-ui);
+    color: var(--t);
+    line-height: 1;
+    min-height: 13px;
+  }
+  .m-bar-val-zero { color: var(--t4); font-weight: 500; }
+  .m-bar-track {
+    width: 100%;
+    flex: 1 1 auto;
+    min-height: 48px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+  }
+  .m-bar-fill {
+    width: 72%;
+    max-width: 44px;
+    height: 100%;
+    max-height: 100%;
+    border-radius: 4px 4px 0 0;
+    background: linear-gradient(to top, color-mix(in srgb, var(--acc) 55%, var(--bg3)), var(--acc));
+    opacity: 0.82;
+    min-height: 4px;
+    transition: height 0.35s ease;
+  }
+  .m-bar-col.is-today .m-bar-fill {
+    opacity: 1;
+    background: linear-gradient(to top, var(--acc), color-mix(in srgb, var(--acc) 70%, #fff));
+  }
+  .m-bar-label { font-size: 9.5px; color: var(--t2); font-family: var(--font-ui); }
+  .m-bar-chart-foot {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid var(--bdr2);
+    font-size: 9.5px;
+    color: var(--t3);
+    font-family: var(--font-ui);
+    flex-shrink: 0;
+  }
 
   .m-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
   .m-tbl th { text-align: left; padding: 6px 9px; font-size: 13px; color: var(--t3); letter-spacing: 1.5px; text-transform: uppercase; font-family: var(--font-ui); border-bottom: 1px solid var(--bdr); }

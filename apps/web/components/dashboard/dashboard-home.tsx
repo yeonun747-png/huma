@@ -8,6 +8,8 @@ import { useAuth } from '@/lib/auth-context';
 import { useWorkspace } from '@/components/dashboard/workspace-context';
 import { useDashboardPeriod } from '@/components/dashboard/dashboard-period-context';
 import { roasBarWidth, type PostRow } from '@/lib/dashboard-mock-data';
+import { weekdayColorClass } from '@/lib/format-kst';
+import { cn } from '@/lib/constants';
 import { MGrid, MPanel, MStat, MTable, MTag, MUrlLink } from '@/components/mockup/primitives';
 import type { Workspace } from '@huma/shared';
 
@@ -114,10 +116,14 @@ export function DashboardHome() {
     accountSub: '—',
   };
   const chartValues = stats?.chart?.map((c) => c.value) ?? [0, 0, 0, 0, 0, 0, 0];
-  const labels = stats?.chart?.map((c) => c.day) ?? ['—', '—', '—', '—', '—', '—', '—'];
+  const chartMeta = stats?.chart ?? [];
+  const labels = chartMeta.map((c) => c.day).length ? chartMeta.map((c) => c.day) : ['—', '—', '—', '—', '—', '—', '—'];
   const chartLabel = stats?.chartLabel ?? '데이터 로딩';
+  const chartAverage = stats?.chartAverage ?? 0;
 
   const maxChart = Math.max(...chartValues, 1);
+  const maxValue = Math.max(...chartValues, 0);
+  const avgLinePct = maxChart > 0 ? (chartAverage / maxChart) * 100 : 0;
   const roasSource = stats?.roasItems ?? [];
   const maxRoas = roasSource[0]?.views ?? 1;
 
@@ -225,31 +231,63 @@ export function DashboardHome() {
 
       <MGrid cols={2}>
         <MPanel
+          className="m-panel-fill"
           title={
             <>
               <span>7일 발행수 추이</span>
-              <span className="ml-auto text-[10.5px] font-normal normal-case tracking-normal text-huma-acc">
-                {chartLabel}
+              <span className="ml-auto text-[10.5px] font-normal normal-case tracking-normal text-huma-t3">
+                AI 블로그 발행 · {chartLabel}
               </span>
             </>
           }
         >
-          <div className="m-bar-chart">
-            {chartValues.map((value, i) => (
-              <div key={`${labels[i]}-${i}`} className="m-bar-col">
-                <div className="m-bar-val">{value}</div>
-                <div
-                  className="m-bar-fill"
-                  style={{ height: `${Math.max(3, (value / maxChart) * 100)}%` }}
-                  title={String(value)}
-                />
-                <div className="m-bar-label">{labels[i]}</div>
-              </div>
-            ))}
+          <div className="m-bar-chart-wrap">
+            <div className="m-bar-chart">
+              {chartAverage > 0 && maxChart > 0 ? (
+                <div className="m-bar-chart-avg" style={{ bottom: `${Math.max(8, avgLinePct * 0.88 + 8)}%` }}>
+                  <span className="m-bar-chart-avg-label">평균 {chartAverage}</span>
+                </div>
+              ) : null}
+              {chartValues.map((value, i) => {
+                const isToday = chartMeta[i]?.isToday ?? false;
+                const isMax = value > 0 && value === maxValue;
+                const barPct = Math.max(value > 0 ? 8 : 0, (value / maxChart) * 100);
+                return (
+                  <div
+                    key={`${labels[i]}-${i}`}
+                    className={`m-bar-col${isToday ? ' is-today' : ''}${isMax ? ' is-max' : ''}`}
+                  >
+                    <div className={`m-bar-val${value === 0 ? ' m-bar-val-zero' : ''}`}>{value}</div>
+                    <div className="m-bar-track">
+                      <div
+                        className="m-bar-fill"
+                        style={{ height: `${barPct}%` }}
+                        title={`${labels[i]} · ${value}건`}
+                      />
+                    </div>
+                    <div
+                      className={cn(
+                        'm-bar-label',
+                        /^[월화수목금토일]$/.test(labels[i] ?? '') && weekdayColorClass(labels[i]!),
+                        isToday && 'm-bar-label-today',
+                      )}
+                    >
+                      {labels[i]}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="m-bar-chart-foot">
+              <span>최근 7일 · post_blog (파이프라인)</span>
+              <span>
+                합계 {chartValues.reduce((s, v) => s + v, 0)} · 최대 {maxValue}
+              </span>
+            </div>
           </div>
         </MPanel>
 
-        <MPanel title="콘텐츠 효율 (ROAS) · 상위 5">
+        <MPanel className="m-panel-fill" title="콘텐츠 효율 (ROAS) · 상위 5">
           {roasRows.length === 0 ? (
             <p className="py-4 text-center text-[12px] text-huma-t3">완료된 발행이 없습니다.</p>
           ) : (

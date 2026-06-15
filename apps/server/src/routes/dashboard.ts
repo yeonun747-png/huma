@@ -1,13 +1,15 @@
 import type { FastifyInstance } from 'fastify';
 import { authMiddleware, getWorkspaceFilter, supabase } from '../middleware/auth.js';
 import { getSetting } from '../lib/settings.js';
-import { isContentFullPipelineShell } from '@huma/shared';
-import { countContentFullPipelineShells } from '../lib/job-pipeline-shell.js';
+import { isDashboardPublishCountJob, isDashboardPublishListJob } from '@huma/shared';
 import {
   buildChartBuckets,
   formatKstHm,
   formatKstYmdHm,
   getPeriodRange,
+  kstDateKeyFromIso,
+  kstDayStartIso,
+  kstTodayStartIso,
   parseDashboardPeriod,
 } from '../lib/dashboard-period.js';
 import type { Workspace } from '@huma/shared';
@@ -36,8 +38,11 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
     const { period: periodRaw } = request.query as { period?: string };
     const period = parseDashboardPeriod(periodRaw);
     const range = getPeriodRange(period);
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
+    const todayStart = kstTodayStartIso();
+    const chartRangeStart = kstDayStartIso(6);
+
+    const publishJobSelect =
+      'completed_at, job_type, status, result_url, platform_schedule, link_url, content_type, title, workspace';
 
     const [
       { count: pendingJobs },
@@ -45,10 +50,10 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
       { count: activeAccounts },
       { count: totalAccounts },
       { count: periodErrors },
-      { count: periodCompleted },
-      { count: prevCompleted },
       { data: nextScheduled },
       { data: periodJobs },
+      { data: prevPeriodJobs },
+      { data: chartJobs },
       { data: recentCompleted },
       { data: workspaceJobRows },
       { data: crankAccounts },
@@ -60,8 +65,6 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
       supabase.from('huma_accounts').select('*', { count: 'exact', head: true }).in('workspace', workspaces).eq('is_active', true),
       supabase.from('huma_accounts').select('*', { count: 'exact', head: true }).in('workspace', workspaces),
       supabase.from('huma_logs').select('*', { count: 'exact', head: true }).in('workspace', workspaces).eq('level', 'ERROR').gte('created_at', range.start).lte('created_at', range.end),
-      supabase.from('huma_jobs').select('*', { count: 'exact', head: true }).in('workspace', workspaces).eq('status', 'completed').gte('completed_at', range.start).lte('completed_at', range.end),
-      supabase.from('huma_jobs').select('*', { count: 'exact', head: true }).in('workspace', workspaces).eq('status', 'completed').gte('completed_at', range.prevStart).lte('completed_at', range.prevEnd),
       supabase
         .from('huma_jobs')
         .select('scheduled_at')
@@ -74,11 +77,24 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
         .maybeSingle(),
       supabase
         .from('huma_jobs')
-        .select('completed_at, job_type, result_url, platform_schedule')
+        .select(publishJobSelect)
         .in('workspace', workspaces)
         .eq('status', 'completed')
         .gte('completed_at', range.start)
         .lte('completed_at', range.end),
+      supabase
+        .from('huma_jobs')
+        .select(publishJobSelect)
+        .in('workspace', workspaces)
+        .eq('status', 'completed')
+        .gte('completed_at', range.prevStart)
+        .lte('completed_at', range.prevEnd),
+      supabase
+        .from('huma_jobs')
+        .select(publishJobSelect)
+        .in('workspace', workspaces)
+        .eq('status', 'completed')
+        .gte('completed_at', chartRangeStart),
       supabase
         .from('huma_jobs')
         .select('title, platform, content, completed_at, workspace')
@@ -89,10 +105,14 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
         .limit(20),
       supabase
         .from('huma_jobs')
-        .select('title, status, result_url, workspace, platform, account_id, huma_accounts(name)')
+        .select(
+          'title, status, result_url, workspace, platform, account_id, job_type, link_url, content_type, platform_schedule, completed_at, huma_accounts(name)',
+        )
         .in('workspace', workspaces)
-        .order('created_at', { ascending: false })
-        .limit(30),
+        .eq('status', 'completed')
+        .gte('completed_at', todayStart)
+        .order('completed_at', { ascending: false })
+        .limit(80),
       supabase.from('huma_accounts').select('crank_count_today, warmup_day, is_active').eq('account_type', 'crank').eq('is_active', true),
       supabase.from('huma_accounts').select('id, name, workspace').in('workspace', workspaces).eq('account_type', 'posting').eq('is_active', true),
       supabase.from('huma_platform_accounts').select('workspace, platform, username, is_active, post_count_today').in('workspace', workspaces),
@@ -100,34 +120,26 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
 
     const serviceStatsRaw = await Promise.all(
       workspaces.map(async (ws) => {
-        const [{ count: jobs }, { count: pending }, { count: errCount }, { count: running }] =
-          await Promise.all([
-            supabase
-              .from('huma_jobs')
-              .select('*', { count: 'exact', head: true })
-              .eq('workspace', ws)
-              .eq('status', 'completed')
-              .gte('completed_at', todayStart.toISOString()),
-            supabase
-              .from('huma_jobs')
-              .select('*', { count: 'exact', head: true })
-              .eq('workspace', ws)
-              .in('status', ['pending', 'scheduled']),
-            supabase
-              .from('huma_logs')
-              .select('*', { count: 'exact', head: true })
-              .eq('workspace', ws)
-              .eq('level', 'ERROR')
-              .gte('created_at', todayStart.toISOString()),
-            supabase
-              .from('huma_jobs')
-              .select('*', { count: 'exact', head: true })
-              .eq('workspace', ws)
-              .eq('status', 'running'),
-          ]);
+        const [{ count: pending }, { count: errCount }, { count: running }] = await Promise.all([
+          supabase
+            .from('huma_jobs')
+            .select('*', { count: 'exact', head: true })
+            .eq('workspace', ws)
+            .in('status', ['pending', 'scheduled']),
+          supabase
+            .from('huma_logs')
+            .select('*', { count: 'exact', head: true })
+            .eq('workspace', ws)
+            .eq('level', 'ERROR')
+            .gte('created_at', todayStart),
+          supabase
+            .from('huma_jobs')
+            .select('*', { count: 'exact', head: true })
+            .eq('workspace', ws)
+            .eq('status', 'running'),
+        ]);
         return {
           workspace: ws,
-          todayJobs: jobs ?? 0,
           pending: pending ?? 0,
           errors: errCount ?? 0,
           running: running ?? 0,
@@ -135,46 +147,37 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
       }),
     );
 
-    const [shellsPeriod, shellsPrev, ...shellTodayByWs] = await Promise.all([
-      countContentFullPipelineShells(workspaces, {
-        completedSince: range.start,
-        completedUntil: range.end,
-      }),
-      countContentFullPipelineShells(workspaces, {
-        completedSince: range.prevStart,
-        completedUntil: range.prevEnd,
-      }),
-      ...workspaces.map((ws) =>
-        countContentFullPipelineShells(ws, { completedSince: todayStart.toISOString() }),
-      ),
-    ]);
+    const periodPublishJobs = (periodJobs ?? []).filter(isDashboardPublishCountJob);
+    const prevPublishJobs = (prevPeriodJobs ?? []).filter(isDashboardPublishCountJob);
+    const chartPublishJobs = (chartJobs ?? []).filter(isDashboardPublishCountJob);
+    const adjustedPeriodCompleted = periodPublishJobs.length;
+    const adjustedPrevCompleted = prevPublishJobs.length;
 
-    const serviceStats = workspaces.map((ws, i) => {
-      const shellToday = shellTodayByWs[i] ?? 0;
+    const serviceStats = workspaces.map((ws) => {
       const pending = serviceStatsRaw.find((s) => s.workspace === ws);
+      const todayPublish = chartPublishJobs.filter(
+        (j) => j.workspace === ws && j.completed_at && j.completed_at >= todayStart,
+      ).length;
       return {
         workspace: ws,
-        todayJobs: Math.max(0, (pending?.todayJobs ?? 0) - shellToday),
+        todayJobs: todayPublish,
         pending: pending?.pending ?? 0,
         errors: pending?.errors ?? 0,
         running: pending?.running ?? 0,
       };
     });
 
-    const adjustedPeriodCompleted = Math.max(0, (periodCompleted ?? 0) - shellsPeriod);
-    const adjustedPrevCompleted = Math.max(0, (prevCompleted ?? 0) - shellsPrev);
-
     const chartBuckets = buildChartBuckets(period);
     const chartMap: Record<string, number> = Object.fromEntries(chartBuckets.map((b) => [b.key, 0]));
 
-    for (const j of periodJobs ?? []) {
-      if (!j.completed_at || isContentFullPipelineShell(j)) continue;
+    for (const j of chartPublishJobs) {
+      if (!j.completed_at) continue;
       if (period === 'month') {
-        const key = j.completed_at.slice(0, 7);
-        if (key in chartMap) chartMap[key]++;
+        const key = kstDateKeyFromIso(j.completed_at)?.slice(0, 7);
+        if (key && key in chartMap) chartMap[key]++;
       } else {
-        const key = j.completed_at.slice(0, 10);
-        if (key in chartMap) chartMap[key]++;
+        const key = kstDateKeyFromIso(j.completed_at);
+        if (key && key in chartMap) chartMap[key]++;
       }
     }
 
@@ -191,16 +194,18 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
     const workspacePosts: Record<string, Array<Record<string, unknown>>> = {};
     for (const ws of workspaces) {
       workspacePosts[ws] = (workspaceJobRows ?? [])
-        .filter((j) => j.workspace === ws)
+        .filter((j) => j.workspace === ws && isDashboardPublishListJob(j))
         .slice(0, 5)
         .map((j) => {
           const mapped = mapJobStatus(j.status);
           const acct = j.huma_accounts as { name?: string } | null;
+          const rawUrl = j.result_url?.trim() ?? '';
+          const url = /^https?:\/\//i.test(rawUrl) ? rawUrl : rawUrl ? `https://${rawUrl.replace(/^\/\//, '')}` : undefined;
           return {
             title: j.title ?? '제목 없음',
             meta: acct?.name ?? j.platform ?? ws,
             ...mapped,
-            url: j.result_url ?? undefined,
+            url,
           };
         });
     }
@@ -264,7 +269,16 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
       serviceStats,
       chart: chartBuckets
         .filter((b) => b.key !== 'forecast')
-        .map((b) => ({ day: b.label, value: chartMap[b.key] ?? 0 })),
+        .map((b) => ({
+          day: b.label,
+          value: chartMap[b.key] ?? 0,
+          isToday: b.isToday ?? false,
+        })),
+      chartAverage: (() => {
+        const vals = chartBuckets.filter((b) => b.key !== 'forecast').map((b) => chartMap[b.key] ?? 0);
+        if (vals.length === 0) return 0;
+        return Math.round((vals.reduce((s, v) => s + v, 0) / vals.length) * 10) / 10;
+      })(),
       period,
       integrated: {
         todayPublish: adjustedPeriodCompleted,

@@ -16,6 +16,7 @@ import {
   kstToUtcMs,
   kstYearMonthDay,
   parseLogTimestamp,
+  weekdayColorClass,
 } from '@/lib/format-kst';
 
 import { MPanel } from '@/components/mockup/primitives';
@@ -271,13 +272,9 @@ export function CalendarView() {
         <div className="m-cal-grid">
 
           {DAYS.map((d) => (
-
-            <div key={d} className="m-cal-head">
-
+            <div key={d} className={cn('m-cal-head', weekdayColorClass(d))}>
               {d}
-
             </div>
-
           ))}
 
           {cells.map((d, i) => {

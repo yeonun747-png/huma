@@ -374,7 +374,8 @@ export const api = {
       errors: number;
       todayCompleted: number;
       serviceStats: Array<{ workspace: string; todayJobs: number; pending: number; errors: number; running?: number }>;
-      chart: Array<{ day: string; value: number }>;
+      chart: Array<{ day: string; value: number; isToday?: boolean }>;
+      chartAverage?: number;
       period?: 'today' | 'week' | 'month';
       chartLabel?: string;
       nextPublish?: string | null;
