@@ -35,6 +35,9 @@ import {
   countContentFullPipelineShells,
   filterOutPipelineShells,
 } from '../lib/job-pipeline-shell.js';
+import { attachPostingAccountLabels } from '../lib/posting-accounts.js';
+
+const JOB_ACCOUNT_SELECT = '*, huma_accounts(name, slot_label)';
 
 async function assertJobWorkspaceAccess(
   jobId: string,
@@ -93,7 +96,7 @@ export async function registerJobRoutes(app: FastifyInstance) {
 
     let query = supabase
       .from('huma_jobs')
-      .select('*')
+      .select(JOB_ACCOUNT_SELECT)
       .in('workspace', allowedWorkspaces)
       .order('created_at', { ascending: false })
       .limit(Number(limit));
@@ -105,7 +108,7 @@ export async function registerJobRoutes(app: FastifyInstance) {
 
     const { data, error } = await query;
     if (error) return [];
-    return data;
+    return attachPostingAccountLabels(data ?? []);
   });
 
   app.get('/api/jobs/page', { preHandler: authMiddleware }, async (request, reply) => {
@@ -127,13 +130,13 @@ export async function registerJobRoutes(app: FastifyInstance) {
     const [{ data: liveJobs }, { data, error, count }] = await Promise.all([
       supabase
         .from('huma_jobs')
-        .select('*')
+        .select(JOB_ACCOUNT_SELECT)
         .eq('workspace', workspace)
         .in('status', ['running', 'awaiting_captcha'])
         .order('started_at', { ascending: false }),
       supabase
         .from('huma_jobs')
-        .select('*', { count: 'exact' })
+        .select(JOB_ACCOUNT_SELECT, { count: 'exact' })
         .eq('workspace', workspace)
         .order('created_at', { ascending: false })
         .range(from, to),
@@ -146,7 +149,7 @@ export async function registerJobRoutes(app: FastifyInstance) {
     const live = liveJobs ?? [];
     const liveIds = new Set(live.map((j) => j.id));
     const pageRows = (data ?? []).filter((j) => !liveIds.has(j.id));
-    const items = filterOutPipelineShells([...live, ...pageRows]);
+    const items = attachPostingAccountLabels(filterOutPipelineShells([...live, ...pageRows]));
     const shellTotal = await countContentFullPipelineShells(workspace);
 
     const stats = await fetchQueueStats(workspace);

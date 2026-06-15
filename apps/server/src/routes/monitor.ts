@@ -6,6 +6,7 @@ import {
   monitorSessionAccountLabel,
   monitorSessionPlatformLabel,
 } from '../lib/monitor-account-label.js';
+import { resolvePostingAccountLabelForMonitor } from '../lib/posting-accounts.js';
 
 function contentFullPhase(job: {
   title?: string | null;
@@ -71,14 +72,14 @@ export async function registerMonitorRoutes(app: FastifyInstance) {
     ] = await Promise.all([
       supabase
         .from('huma_jobs')
-        .select('id, title, job_type, workspace, platform, status, content, started_at, account_id, platform_schedule, huma_accounts(name, wpm)')
+        .select('id, title, job_type, workspace, platform, status, content, started_at, account_id, platform_schedule, huma_accounts(name, slot_label, wpm)')
         .in('workspace', workspaces)
         .in('status', ['running', 'awaiting_captcha'])
         .order('started_at', { ascending: false })
         .limit(6),
       supabase
         .from('huma_jobs')
-        .select('id, title, job_type, workspace, platform, scheduled_at, account_id, huma_accounts(name)')
+        .select('id, title, job_type, workspace, platform, scheduled_at, account_id, huma_accounts(name, slot_label)')
         .in('workspace', workspaces)
         .eq('status', 'scheduled')
         .not('scheduled_at', 'is', null)
@@ -104,15 +105,16 @@ export async function registerMonitorRoutes(app: FastifyInstance) {
 
     const live = await Promise.all(
       (activeJobs ?? []).map(async (job) => {
-        const acct = job.huma_accounts as { name?: string; wpm?: number } | null;
+        const acct = job.huma_accounts as { name?: string; slot_label?: string; wpm?: number } | null;
+        const accountLabel = job.account_id
+          ? monitorSessionAccountLabel({
+              accountName: acct?.name,
+              slotLabel: acct?.slot_label,
+            })
+          : await resolvePostingAccountLabelForMonitor(job.workspace, null);
         const base = {
           jobId: job.id,
-          account: monitorSessionAccountLabel({
-            workspace: job.workspace,
-            accountName: acct?.name,
-            jobType: job.job_type,
-            hasAccountId: Boolean(job.account_id),
-          }),
+          account: accountLabel,
           platform: monitorSessionPlatformLabel({
             workspace: job.workspace,
             platform: job.platform,
@@ -174,12 +176,12 @@ export async function registerMonitorRoutes(app: FastifyInstance) {
     const idle = nextScheduled
       ? {
           jobId: nextScheduled.id,
-          account: monitorSessionAccountLabel({
-            workspace: nextScheduled.workspace,
-            accountName: (nextScheduled.huma_accounts as { name?: string } | null)?.name,
-            jobType: nextScheduled.job_type,
-            hasAccountId: Boolean(nextScheduled.account_id),
-          }),
+          account: nextScheduled.account_id
+            ? monitorSessionAccountLabel({
+                accountName: (nextScheduled.huma_accounts as { name?: string } | null)?.name,
+                slotLabel: (nextScheduled.huma_accounts as { slot_label?: string } | null)?.slot_label,
+              })
+            : await resolvePostingAccountLabelForMonitor(nextScheduled.workspace, null),
           schedule: formatKstHm(nextScheduled.scheduled_at) ?? '—',
           title: nextScheduled.title ?? nextScheduled.job_type,
           workspace: nextScheduled.workspace,

@@ -606,20 +606,34 @@ async function isLocatorBodySection(page: Page, loc: Locator): Promise<boolean> 
 
 /** 글감 검색 팝업 — 본문 포커스 전 닫기 */
 export async function dismissSeOneMaterialPopup(page: Page): Promise<void> {
-  const popup = page
-    .locator('[class*="se-popup"], [class*="popup"]')
-    .filter({ hasText: /검색 결과가 없습니다|글감/ })
-    .first();
-  if (await popup.isVisible({ timeout: 250 }).catch(() => false)) {
-    const closeBtn = popup
-      .locator('button[aria-label*="닫"], .btn_close, button:has-text("닫기")')
+  for (let round = 0; round < 3; round += 1) {
+    let dismissed = false;
+
+    const popup = page
+      .locator('[class*="se-popup"], [class*="popup"], [class*="material"]')
+      .filter({ hasText: /검색 결과가 없습니다|글감/ })
       .first();
-    if (await closeBtn.isVisible({ timeout: 200 }).catch(() => false)) {
-      await closeBtn.click({ timeout: 3000 }).catch(() => {});
-    } else {
-      await page.keyboard.press('Escape').catch(() => {});
+    if (await popup.isVisible({ timeout: 250 }).catch(() => false)) {
+      const closeBtn = popup
+        .locator('button[aria-label*="닫"], .btn_close, button[class*="close"], button:has-text("닫기")')
+        .first();
+      if (await closeBtn.isVisible({ timeout: 200 }).catch(() => false)) {
+        await closeBtn.click({ timeout: 3000 }).catch(() => {});
+      } else {
+        await page.keyboard.press('Escape').catch(() => {});
+      }
+      dismissed = true;
+      await sleep(200);
     }
-    await sleep(200);
+
+    const materialInput = page.locator('input[placeholder*="글감"], input[placeholder*="검색"]').first();
+    if (await materialInput.isVisible({ timeout: 200 }).catch(() => false)) {
+      await page.keyboard.press('Escape').catch(() => {});
+      dismissed = true;
+      await sleep(200);
+    }
+
+    if (!dismissed) break;
   }
 }
 
@@ -904,10 +918,12 @@ export async function isBlogTitleFilledEnough(
   titleLoc: Locator,
   expected: string,
 ): Promise<boolean> {
-  if (await verifyBlogTitleField(page, titleLoc, expected)) return true;
-
   const editable = await resolveTitleEditableLocator(page, titleLoc);
   const written = await readBlogTitleTextAll(page, titleLoc, editable);
+  if (written && isDuplicatedBlogTitle(written, expected)) return true;
+
+  if (await verifyBlogTitleField(page, titleLoc, expected)) return true;
+
   if (written && titleContainsExpected(written, expected)) return true;
 
   const probe = Math.min(10, expected.replace(/\s+/g, '').length);
@@ -928,6 +944,26 @@ export async function isBlogTitleFilledEnough(
     }
   }
   return false;
+}
+
+/** 본문 입력은 끝났는데 검증만 실패한 재시도 — 제목칸에 글자만 있으면 재타이핑 금지 */
+export async function shouldSkipTitleRetypeOnBodyResume(
+  page: Page,
+  titleLoc: Locator,
+  expected: string,
+): Promise<boolean> {
+  if (await isBlogTitleFilledEnough(page, titleLoc, expected)) return true;
+  const editable = await resolveTitleEditableLocator(page, titleLoc);
+  const written = await readBlogTitleTextAll(page, titleLoc, editable);
+  if (!written || isTitlePlaceholderText(written) || isTitleEditorChromeText(written)) return false;
+  if (isDuplicatedBlogTitle(written, expected)) return true;
+  if (titleContainsExpected(written, expected)) return true;
+  const compact = written.replace(/\s+/g, '');
+  const exp = expected.replace(/\s+/g, '');
+  if (compact.length >= 6 && exp.length >= 4 && compact.includes(exp.slice(0, Math.min(8, exp.length)))) {
+    return true;
+  }
+  return compact.length >= 8 && /[가-힣]{4,}/.test(written);
 }
 
 /** 링크·이미지 삽입 직전 — 제목 blur 후 본문 끝 캐럿 */
@@ -1002,6 +1038,10 @@ export async function ensureBlogTitleWritten(
   }
 
   if (titleContainsExpected(domWritten, text) && !isDuplicatedBlogTitle(domWritten, text)) {
+    await blurBlogTitleField(page);
+    return;
+  }
+  if (domWritten && isDuplicatedBlogTitle(domWritten, text)) {
     await blurBlogTitleField(page);
     return;
   }
@@ -1433,7 +1473,15 @@ export function isBlogBodySubstantiallyWritten(bodyText: string, expectedContent
   const minLen = Math.min(60, Math.max(20, Math.floor(e.length * 0.45)));
   if (b.length < minLen) return false;
   const probe = Math.min(48, e.length);
-  return b.includes(e.slice(0, probe)) || e.includes(b.slice(0, Math.min(probe, b.length)));
+  if (b.includes(e.slice(0, probe)) || e.includes(b.slice(0, Math.min(probe, b.length)))) {
+    return true;
+  }
+  const bCompact = b.replace(/\s+/g, '');
+  const eCompact = e.replace(/\s+/g, '');
+  const shortProbe = Math.min(24, eCompact.length);
+  if (shortProbe >= 10 && bCompact.includes(eCompact.slice(0, shortProbe))) return true;
+  if (e.length >= 200 && b.length >= Math.floor(e.length * 0.38)) return true;
+  return false;
 }
 
 export async function verifyBlogBodyField(
@@ -1655,6 +1703,12 @@ export async function typeBlogTitleField(
   }
   const dup = isDuplicatedBlogTitle(current, titleText);
   await logTitleDebug(`진입 현재값="${current}" 중복=${dup}`);
+
+  if (dup) {
+    await blurBlogTitleField(page);
+    await logTitleDebug('제목 중복 — 재입력 생략');
+    return;
+  }
 
   if (titleContainsExpected(current, titleText)) {
     await blurBlogTitleField(page);
@@ -1895,6 +1949,14 @@ export async function typeBlogBodyContent(
 
   const verifyMs = Math.min(30_000, Math.max(8000, content.length * 40));
   if (!(await waitForBlogBodyWritten(page, bodyLoc, content, verifyMs))) {
+    const sectionText = await readBlogBodySectionText(page);
+    if (isBlogBodySubstantiallyWritten(sectionText, content)) {
+      await logOperation({
+        level: 'info',
+        message: `[post_blog][body] 검증 완화 통과 (${sectionText.length}자) — 링크·이미지 단계로 진행`,
+      }).catch(() => {});
+      return;
+    }
     throw new Error('BLOG_BODY_WRITE_FAILED');
   }
 }

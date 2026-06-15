@@ -1,13 +1,7 @@
-/** 발행 모니터 카드 — 계정·플랫폼 표시 (sessions API 폴백 job 카드) */
+/** 발행 모니터 폴백 job 카드 — sessions API에 없을 때 (계정명은 서버 sessions API 사용) */
 export function monitorJobAccountLabel(job: {
   workspace?: string | null;
-  job_type?: string | null;
-  account_id?: string | null;
-  platform?: string | null;
 }): string {
-  if (job.workspace === 'yeonun' && (job.job_type === 'content_full' || !job.account_id)) {
-    return '연운계정1-3';
-  }
   return job.workspace ?? '계정';
 }
 

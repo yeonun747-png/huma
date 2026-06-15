@@ -1,18 +1,18 @@
-/** 발행 모니터 카드 — 계정·플랫폼 표시 */
+import { formatPostingAccountLabel } from './posting-accounts.js';
+
+/** 발행 모니터 카드 — huma_accounts 조인 결과 → 표시명 (연운1~3 slot_label 우선) */
 export function monitorSessionAccountLabel(input: {
-  workspace?: string | null;
   accountName?: string | null;
-  jobType?: string | null;
-  hasAccountId?: boolean;
+  slotLabel?: string | null;
+  resolvedLabel?: string | null;
 }): string {
-  const name = input.accountName?.trim();
-  if (name) return name;
-
-  if (input.workspace === 'yeonun' && (input.jobType === 'content_full' || !input.hasAccountId)) {
-    return '연운계정1-3';
-  }
-
-  return '계정';
+  if (input.resolvedLabel?.trim()) return input.resolvedLabel.trim();
+  return (
+    formatPostingAccountLabel({
+      name: input.accountName,
+      slot_label: input.slotLabel,
+    }) ?? '계정'
+  );
 }
 
 export function monitorSessionPlatformLabel(input: {

@@ -1,6 +1,6 @@
 import { enqueueHumaJob, getScheduleDelay, type JobRecord } from '../../../lib/job-scheduler.js';
 import { normalizeBlogLinkUrl } from '../../../lib/blog-link.js';
-import { pickPostingAccount, type PostingAccountPick } from '../../../lib/posting-accounts.js';
+import { type PostingAccountPick, resolvePostingAccountForOrchestrator } from '../../../lib/posting-accounts.js';
 import { supabase } from '../../../middleware/auth.js';
 import { enqueueJob } from '../producer.js';
 import { generateAllContent, type ContentGenerationOutput } from '../../claude/content-generator.js';
@@ -398,7 +398,7 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
       ? resolveNaverBlogScheduledAt(schedule.naver_blog, input.scheduled_at)
       : input.scheduled_at;
 
-  const postingAccount = await pickPostingAccount(input.workspace);
+  const postingAccount = await resolvePostingAccountForOrchestrator(input.workspace, input.parentJobId);
   const blogWritingPersona = resolveBlogWritingPersona(
     input.workspace,
     postingAccount?.persona ?? null,

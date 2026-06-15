@@ -18,12 +18,16 @@ import {
   typeBlogBodyContent,
   ensureBlogTitleWritten,
   blurBlogTitleField,
+  dismissSeOneHelpPanel,
+  dismissSeOneMaterialPopup,
   isBlogTitleFilledEnough,
   focusBlogBodyAtEnd,
   readBlogBodySectionText,
   isBlogLinkUrlInBodyText,
   isBlogImageInBodySection,
   isFocusInTitleArea,
+  isBlogBodySubstantiallyWritten,
+  shouldSkipTitleRetypeOnBodyResume,
   verifyBlogBodyField,
   waitForBlogTitleInputReady,
   isDraftResumePopupVisible,
@@ -60,6 +64,16 @@ async function typeSeOneBlogBody(
   await typeBlogBodyContent(page, bodyLoc, content, humanConfig, { afterPlaceholderClick: true });
 }
 
+async function isBlogBodyReadyForMediaAppend(
+  page: Page,
+  editor: Locator,
+  content: string,
+): Promise<boolean> {
+  if (await verifyBlogBodyField(page, editor, content)) return true;
+  const sectionText = await readBlogBodySectionText(page);
+  return isBlogBodySubstantiallyWritten(sectionText, content);
+}
+
 /** 본문 insertText 직후 — Enter×2 → 링크 → Enter×1 → 이미지 (포커스·마우스 이동 없음) */
 async function appendLinkAndImageAtBodyEnd(params: {
   page: Page;
@@ -74,10 +88,13 @@ async function appendLinkAndImageAtBodyEnd(params: {
   const { page, scale, humanConfig, accountId } = params;
   const workspace = params.workspace ?? 'yeonun';
 
+  await dismissSeOneHelpPanel(page);
+  await dismissSeOneMaterialPopup(page);
   await blurBlogTitleField(page);
   if (await isFocusInTitleArea(page)) {
     throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
   }
+  await focusBlogBodyAtEnd(page, params.editor);
 
   await logOperation({
     level: 'info',
@@ -188,8 +205,24 @@ export async function postNaverBlog(params: {
   resetDraftDismissGuard(page);
 
   let titleBox = await findBlogTitleLocator(page);
-  const titleAlreadyOk =
+  const editor = blogBodySectionLocator(page);
+  const bodyResumeReady = await isBlogBodyReadyForMediaAppend(page, editor, params.content);
+
+  let titleAlreadyOk =
     titleBox != null && (await isBlogTitleFilledEnough(page, titleBox, params.title));
+
+  if (!titleAlreadyOk && bodyResumeReady && titleBox) {
+    if (await shouldSkipTitleRetypeOnBodyResume(page, titleBox, params.title)) {
+      titleAlreadyOk = true;
+      await blurBlogTitleField(page);
+      await logOperation({
+        level: 'info',
+        message:
+          '[post_blog] 본문 이미 입력됨 — 제목 재타이핑 생략(검증 실패 재시도·링크·이미지 단계로 진행)',
+        account_id: params.accountId,
+      }).catch(() => {});
+    }
+  }
 
   let titleOkThisRun = titleAlreadyOk;
 
@@ -228,10 +261,9 @@ export async function postNaverBlog(params: {
     account_id: params.accountId,
   });
 
-  const editor = blogBodySectionLocator(page);
-  const bodyAlreadyOk = await verifyBlogBodyField(page, editor, params.content);
+  let bodyReady = bodyResumeReady || (await isBlogBodyReadyForMediaAppend(page, editor, params.content));
 
-  if (!bodyAlreadyOk) {
+  if (!bodyReady) {
     await clickBlogBodyPlaceholder(page);
     const pastePct = Math.round(resolvePasteRatio(config) * 100);
     await logOperation({
@@ -243,20 +275,30 @@ export async function postNaverBlog(params: {
     try {
       await typeSeOneBlogBody(page, editor, params.content, config);
     } catch (bodyErr) {
-      await logOperation({
-        level: 'warn',
-        message: `[post_blog][body] 입력 실패 — ${(bodyErr as Error).message}`,
-        account_id: params.accountId,
-      }).catch(() => {});
-      throw bodyErr;
+      bodyReady = await isBlogBodyReadyForMediaAppend(page, editor, params.content);
+      if (bodyReady) {
+        await logOperation({
+          level: 'warn',
+          message: `[post_blog][body] 입력 오류 후 본문 충분 — 링크·이미지 단계로 진행: ${(bodyErr as Error).message}`,
+          account_id: params.accountId,
+        }).catch(() => {});
+      } else {
+        await logOperation({
+          level: 'warn',
+          message: `[post_blog][body] 입력 실패 — ${(bodyErr as Error).message}`,
+          account_id: params.accountId,
+        }).catch(() => {});
+        throw bodyErr;
+      }
     }
+    bodyReady = bodyReady || (await isBlogBodyReadyForMediaAppend(page, editor, params.content));
   }
 
   if (!titleBox) {
     throw new Error('BLOG_TITLE_NOT_FOUND');
   }
 
-  if (!(await verifyBlogBodyField(page, editor, params.content))) {
+  if (!bodyReady) {
     await logOperation({
       level: 'warn',
       message: '[post_blog][body] 입력 후 검증 실패 — BLOG_BODY_WRITE_FAILED',

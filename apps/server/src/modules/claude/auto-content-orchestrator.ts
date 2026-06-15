@@ -1,6 +1,7 @@
 import { enqueueHumaJob, type JobRecord } from '../../lib/job-scheduler.js';
 import { supabase } from '../../middleware/auth.js';
 import { getPostingEnabled } from '../../lib/activity-control.js';
+import { pickPostingAccount } from '../../lib/posting-accounts.js';
 import { toTodayDatetime } from './auto-decide.js';
 import {
   runContentOrchestrator,
@@ -52,10 +53,13 @@ export async function registerAutoContentJobs(body: AutoContentRequest): Promise
 
   const status = new Date(scheduledAt).getTime() > Date.now() ? 'scheduled' : 'pending';
 
+  const postingAccount = await pickPostingAccount(body.workspace);
+
   const { data: parentJob, error } = await supabase
     .from('huma_jobs')
     .insert({
       workspace: body.workspace,
+      account_id: postingAccount?.id ?? null,
       job_type: 'content_full',
       content_type: body.content_type ?? 'A',
       content_type_auto: contentTypeAuto,

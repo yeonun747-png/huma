@@ -4,7 +4,11 @@ import { postingSlotByWorkspace } from './dongle-slots.js';
 import { YEONUN_POSTING_PORTS } from './posting-proxy.js';
 import { redisConnection } from '../modules/queue/producer.js';
 
-export type PostingAccountPick = { id: string; persona?: Record<string, unknown> };
+export type PostingAccountPick = {
+  id: string;
+  persona?: Record<string, unknown>;
+  label?: string;
+};
 
 function postingRoundRobinKey(workspace: string): string {
   return `posting_account_rr:${workspace}`;
@@ -19,6 +23,97 @@ function roundRobinIndex(workspace: string, seq: number, advance: boolean, poolS
   return (base + offset) % poolSize;
 }
 
+export function formatPostingAccountLabel(
+  account: { name?: string | null; slot_label?: string | null } | null | undefined,
+): string | null {
+  const slot = account?.slot_label?.trim();
+  if (slot) return slot;
+  const name = account?.name?.trim();
+  return name || null;
+}
+
+/** 발행 모니터 — 배정된 계정 또는 순환 대기(미배정) 계정 표시명 */
+export async function resolvePostingAccountLabelForMonitor(
+  workspace: string,
+  accountId?: string | null,
+): Promise<string> {
+  if (accountId) {
+    const { data } = await supabase
+      .from('huma_accounts')
+      .select('name, slot_label')
+      .eq('id', accountId)
+      .maybeSingle();
+    return formatPostingAccountLabel(data) ?? '계정';
+  }
+
+  const picked = await pickPostingAccount(workspace, { advance: false });
+  return picked?.label ?? '계정';
+}
+
+export function postingAccountLabelFromJob(job: {
+  workspace?: string | null;
+  job_type?: string | null;
+  huma_accounts?: { name?: string | null; slot_label?: string | null } | null;
+}): string | null {
+  if (job.workspace !== 'yeonun') return null;
+  if (job.job_type !== 'content_full' && job.job_type !== 'post_blog') return null;
+  return formatPostingAccountLabel(job.huma_accounts);
+}
+
+export function attachPostingAccountLabels<T extends Record<string, unknown>>(
+  jobs: T[],
+): Array<T & { posting_account_label?: string }> {
+  return jobs.map((job) => {
+    const label = postingAccountLabelFromJob(
+      job as {
+        workspace?: string | null;
+        job_type?: string | null;
+        huma_accounts?: { name?: string | null; slot_label?: string | null } | null;
+      },
+    );
+    return label ? { ...job, posting_account_label: label } : job;
+  });
+}
+
+export async function loadPostingAccountById(accountId: string): Promise<PostingAccountPick | null> {
+  const { data } = await supabase
+    .from('huma_accounts')
+    .select('id, persona, name, slot_label')
+    .eq('id', accountId)
+    .eq('account_type', 'posting')
+    .maybeSingle();
+  if (!data?.id) return null;
+  return {
+    id: data.id as string,
+    persona: data.persona as Record<string, unknown> | undefined,
+    label: formatPostingAccountLabel(data) ?? undefined,
+  };
+}
+
+/** content_full 부모 job에 이미 account_id가 있으면 재사용 — 순환 이중 소비 방지 */
+export async function resolvePostingAccountForOrchestrator(
+  workspace: string,
+  parentJobId?: string,
+): Promise<PostingAccountPick | null> {
+  if (parentJobId) {
+    const { data: parent } = await supabase
+      .from('huma_jobs')
+      .select('account_id')
+      .eq('id', parentJobId)
+      .maybeSingle();
+    if (parent?.account_id) {
+      const loaded = await loadPostingAccountById(parent.account_id as string);
+      if (loaded) return loaded;
+    }
+  }
+
+  const picked = await pickPostingAccount(workspace);
+  if (parentJobId && picked?.id) {
+    await supabase.from('huma_jobs').update({ account_id: picked.id }).eq('id', parentJobId);
+  }
+  return picked;
+}
+
 /** 작업 배정용 — 연운1~3 등 동일 workspace 복수 포스팅 계정을 proxy_port 순으로 순환 */
 export async function pickPostingAccount(
   workspace: string,
@@ -28,7 +123,7 @@ export async function pickPostingAccount(
 
   let query = supabase
     .from('huma_accounts')
-    .select('id, persona, proxy_port, layer4_rest_until')
+    .select('id, persona, proxy_port, layer4_rest_until, name, slot_label')
     .eq('workspace', workspace)
     .eq('account_type', 'posting')
     .eq('is_active', true)
@@ -47,6 +142,7 @@ export async function pickPostingAccount(
     return {
       id: account.id as string,
       persona: account.persona as Record<string, unknown> | undefined,
+      label: formatPostingAccountLabel(account) ?? undefined,
     };
   }
 
@@ -58,5 +154,6 @@ export async function pickPostingAccount(
   return {
     id: picked.id as string,
     persona: picked.persona as Record<string, unknown> | undefined,
+    label: formatPostingAccountLabel(picked) ?? undefined,
   };
 }

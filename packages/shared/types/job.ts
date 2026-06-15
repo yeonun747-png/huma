@@ -54,6 +54,9 @@ export interface HumaJob {
   started_at?: string;
   completed_at?: string;
   created_at: string;
+  /** API enrich — 연운 content_full·post_blog 배정 계정 (연운1~3) */
+  posting_account_label?: string;
+  huma_accounts?: { name?: string; slot_label?: string } | null;
 }
 
 export function isCaptchaDrillJob(job: {

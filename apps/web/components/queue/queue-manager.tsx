@@ -90,6 +90,11 @@ function queueTagSlot(job: HumaJob): ReactNode {
   return <MTag tone="idle">{job.status}</MTag>;
 }
 
+function queueScopeLabel(job: HumaJob): string {
+  if (job.posting_account_label) return job.posting_account_label;
+  return WS_LABEL[job.workspace ?? ''] ?? job.workspace ?? '전체';
+}
+
 function jobSub(job: HumaJob): string {
   const parts: string[] = [];
 
@@ -118,7 +123,7 @@ function jobSub(job: HumaJob): string {
   } else if (job.content_type) parts.push(`타입 ${job.content_type}`);
   else if (job.link_url) parts.push('AI 생성');
 
-  parts.push(WS_LABEL[job.workspace ?? ''] ?? job.workspace ?? '전체');
+  parts.push(queueScopeLabel(job));
 
   if (job.scheduled_at) {
     const scheduleHint =
