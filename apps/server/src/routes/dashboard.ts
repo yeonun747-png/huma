@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { authMiddleware, getWorkspaceFilter, supabase } from '../middleware/auth.js';
 import { getSetting } from '../lib/settings.js';
+import { isContentFullPipelineShell } from '@huma/shared';
+import { countContentFullPipelineShells } from '../lib/job-pipeline-shell.js';
 import {
   buildChartBuckets,
   formatKstHm,
@@ -72,7 +74,7 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
         .maybeSingle(),
       supabase
         .from('huma_jobs')
-        .select('completed_at')
+        .select('completed_at, job_type, result_url, platform_schedule')
         .in('workspace', workspaces)
         .eq('status', 'completed')
         .gte('completed_at', range.start)
@@ -96,33 +98,77 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
       supabase.from('huma_platform_accounts').select('workspace, platform, username, is_active, post_count_today').in('workspace', workspaces),
     ]);
 
-    const serviceStats = await Promise.all(
+    const serviceStatsRaw = await Promise.all(
       workspaces.map(async (ws) => {
-        const [{ count: jobs }, { count: pending }, { count: errCount }, { count: running }] = await Promise.all([
-          supabase
-            .from('huma_jobs')
-            .select('*', { count: 'exact', head: true })
-            .eq('workspace', ws)
-            .eq('status', 'completed')
-            .gte('completed_at', todayStart.toISOString()),
-          supabase.from('huma_jobs').select('*', { count: 'exact', head: true }).eq('workspace', ws).in('status', ['pending', 'scheduled']),
-          supabase
-            .from('huma_logs')
-            .select('*', { count: 'exact', head: true })
-            .eq('workspace', ws)
-            .eq('level', 'ERROR')
-            .gte('created_at', todayStart.toISOString()),
-          supabase.from('huma_jobs').select('*', { count: 'exact', head: true }).eq('workspace', ws).eq('status', 'running'),
-        ]);
-        return { workspace: ws, todayJobs: jobs ?? 0, pending: pending ?? 0, errors: errCount ?? 0, running: running ?? 0 };
+        const [{ count: jobs }, { count: pending }, { count: errCount }, { count: running }] =
+          await Promise.all([
+            supabase
+              .from('huma_jobs')
+              .select('*', { count: 'exact', head: true })
+              .eq('workspace', ws)
+              .eq('status', 'completed')
+              .gte('completed_at', todayStart.toISOString()),
+            supabase
+              .from('huma_jobs')
+              .select('*', { count: 'exact', head: true })
+              .eq('workspace', ws)
+              .in('status', ['pending', 'scheduled']),
+            supabase
+              .from('huma_logs')
+              .select('*', { count: 'exact', head: true })
+              .eq('workspace', ws)
+              .eq('level', 'ERROR')
+              .gte('created_at', todayStart.toISOString()),
+            supabase
+              .from('huma_jobs')
+              .select('*', { count: 'exact', head: true })
+              .eq('workspace', ws)
+              .eq('status', 'running'),
+          ]);
+        return {
+          workspace: ws,
+          todayJobs: jobs ?? 0,
+          pending: pending ?? 0,
+          errors: errCount ?? 0,
+          running: running ?? 0,
+        };
       }),
     );
+
+    const [shellsPeriod, shellsPrev, ...shellTodayByWs] = await Promise.all([
+      countContentFullPipelineShells(workspaces, {
+        completedSince: range.start,
+        completedUntil: range.end,
+      }),
+      countContentFullPipelineShells(workspaces, {
+        completedSince: range.prevStart,
+        completedUntil: range.prevEnd,
+      }),
+      ...workspaces.map((ws) =>
+        countContentFullPipelineShells(ws, { completedSince: todayStart.toISOString() }),
+      ),
+    ]);
+
+    const serviceStats = workspaces.map((ws, i) => {
+      const shellToday = shellTodayByWs[i] ?? 0;
+      const pending = serviceStatsRaw.find((s) => s.workspace === ws);
+      return {
+        workspace: ws,
+        todayJobs: Math.max(0, (pending?.todayJobs ?? 0) - shellToday),
+        pending: pending?.pending ?? 0,
+        errors: pending?.errors ?? 0,
+        running: pending?.running ?? 0,
+      };
+    });
+
+    const adjustedPeriodCompleted = Math.max(0, (periodCompleted ?? 0) - shellsPeriod);
+    const adjustedPrevCompleted = Math.max(0, (prevCompleted ?? 0) - shellsPrev);
 
     const chartBuckets = buildChartBuckets(period);
     const chartMap: Record<string, number> = Object.fromEntries(chartBuckets.map((b) => [b.key, 0]));
 
     for (const j of periodJobs ?? []) {
-      if (!j.completed_at) continue;
+      if (!j.completed_at || isContentFullPipelineShell(j)) continue;
       if (period === 'month') {
         const key = j.completed_at.slice(0, 7);
         if (key in chartMap) chartMap[key]++;
@@ -168,7 +214,7 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
       .sort((a, b) => b.views - a.views)
       .slice(0, 5);
 
-    const publishDelta = (periodCompleted ?? 0) - (prevCompleted ?? 0);
+    const publishDelta = adjustedPeriodCompleted - adjustedPrevCompleted;
     const deltaPrefix = publishDelta >= 0 ? '▲' : '▼';
     const periodSub =
       period === 'today'
@@ -214,14 +260,14 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
       pendingJobs: (pendingJobs ?? 0) + (scheduledJobs ?? 0),
       activeAccounts: activeAccounts ?? 0,
       errors: periodErrors ?? 0,
-      todayCompleted: periodCompleted ?? 0,
+      todayCompleted: adjustedPeriodCompleted,
       serviceStats,
       chart: chartBuckets
         .filter((b) => b.key !== 'forecast')
         .map((b) => ({ day: b.label, value: chartMap[b.key] ?? 0 })),
       period,
       integrated: {
-        todayPublish: periodCompleted ?? 0,
+        todayPublish: adjustedPeriodCompleted,
         todayPublishSub: periodSub,
         queuePending: (pendingJobs ?? 0) + (scheduledJobs ?? 0),
         queueSub: formatKstYmdHm(nextScheduled?.scheduled_at)

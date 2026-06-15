@@ -30,6 +30,10 @@ import {
   getCaptchaHoldPublicInfo,
 } from '../modules/watcher/captcha-hold.js';
 import { resolveVncUrl, buildJobWebUrl } from '../modules/watcher/telegram.js';
+import {
+  countContentFullPipelineShells,
+  filterOutPipelineShells,
+} from '../lib/job-pipeline-shell.js';
 
 async function assertJobWorkspaceAccess(
   jobId: string,
@@ -61,18 +65,21 @@ function kstTodayStartIso(): string {
 async function fetchQueueStats(workspace: string) {
   const todayStart = kstTodayStartIso();
   const base = () => supabase.from('huma_jobs').select('*', { count: 'exact', head: true }).eq('workspace', workspace);
-  const [pendingRes, runningRes, captchaRes, doneTodayRes, doneAllRes] = await Promise.all([
-    base().in('status', ['pending', 'scheduled']),
-    base().eq('status', 'running'),
-    base().eq('status', 'awaiting_captcha'),
-    base().eq('status', 'completed').gte('completed_at', todayStart),
-    base().eq('status', 'completed'),
-  ]);
+  const [pendingRes, runningRes, captchaRes, doneTodayRes, doneAllRes, shellsToday, shellsAll] =
+    await Promise.all([
+      base().in('status', ['pending', 'scheduled']),
+      base().eq('status', 'running'),
+      base().eq('status', 'awaiting_captcha'),
+      base().eq('status', 'completed').gte('completed_at', todayStart),
+      base().eq('status', 'completed'),
+      countContentFullPipelineShells(workspace, { completedSince: todayStart }),
+      countContentFullPipelineShells(workspace),
+    ]);
   return {
     pending: pendingRes.count ?? 0,
     running: (runningRes.count ?? 0) + (captchaRes.count ?? 0),
-    doneToday: doneTodayRes.count ?? 0,
-    doneAll: doneAllRes.count ?? 0,
+    doneToday: Math.max(0, (doneTodayRes.count ?? 0) - shellsToday),
+    doneAll: Math.max(0, (doneAllRes.count ?? 0) - shellsAll),
   };
 }
 
@@ -142,12 +149,13 @@ export async function registerJobRoutes(app: FastifyInstance) {
     const live = liveJobs ?? [];
     const liveIds = new Set(live.map((j) => j.id));
     const pageRows = (data ?? []).filter((j) => !liveIds.has(j.id));
-    const items = [...live, ...pageRows];
+    const items = filterOutPipelineShells([...live, ...pageRows]);
+    const shellTotal = await countContentFullPipelineShells(workspace);
 
     const stats = await fetchQueueStats(workspace);
     return {
       items,
-      total: count ?? 0,
+      total: Math.max(0, (count ?? 0) - shellTotal),
       stats,
     };
   });
@@ -616,7 +624,7 @@ export async function registerJobRoutes(app: FastifyInstance) {
     }
 
     const { data } = await query;
-    return data ?? [];
+    return filterOutPipelineShells(data ?? []);
   });
 
   app.get('/api/jobs/:id/captcha-hold', { preHandler: authMiddleware }, async (request, reply) => {

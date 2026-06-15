@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { HumaJob, Workspace } from '@huma/shared';
-import { isCaptchaDrillJob } from '@huma/shared';
+import { isCaptchaDrillJob, isContentFullPipelineShell } from '@huma/shared';
 import { api } from '@/lib/api';
 import { WS_LABEL } from '@/lib/constants';
 import { useWorkspace } from '@/components/dashboard/workspace-context';
@@ -34,12 +34,6 @@ function readPageSize(): PageSize {
   const v = localStorage.getItem(QUEUE_PAGE_SIZE_KEY);
   if (v === '50' || v === '100') return Number(v) as PageSize;
   return 20;
-}
-
-function isHiddenPipelineParent(job: HumaJob, allJobs: HumaJob[]): boolean {
-  if (job.job_type !== 'content_full') return false;
-  if (job.status !== 'completed' || !job.result_url) return false;
-  return allJobs.some((child) => child.id === job.result_url);
 }
 
 function jobIcon(type: string) {
@@ -289,7 +283,7 @@ export function QueueManager() {
   const deletableJobs = useMemo(() => jobs.filter(isDeletableQueueJob), [jobs]);
   const staleFailedJobs = useMemo(() => jobs.filter(isStaleOrFailedQueueJob), [jobs]);
   const visibleJobs = useMemo(
-    () => jobs.filter((job) => !isHiddenPipelineParent(job, jobs)),
+    () => jobs.filter((job) => !isContentFullPipelineShell(job)),
     [jobs],
   );
   const selectedCount = selectedIds.size;
