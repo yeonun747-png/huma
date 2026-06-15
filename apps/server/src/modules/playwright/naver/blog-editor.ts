@@ -18,12 +18,13 @@ import {
   typeBlogBodyContent,
   ensureBlogTitleWritten,
   blurBlogTitleField,
+  isBlogTitleFilledEnough,
+  focusBlogBodyAtEnd,
   readBlogBodySectionText,
   isBlogLinkUrlInBodyText,
   isBlogImageInBodySection,
   isFocusInTitleArea,
   verifyBlogBodyField,
-  verifyBlogTitleField,
   waitForBlogTitleInputReady,
   isDraftResumePopupVisible,
 } from './naver-editor-locators.js';
@@ -69,7 +70,6 @@ async function appendLinkAndImageAtBodyEnd(params: {
   scale: number;
   humanConfig: HumanEngineConfig;
   accountId?: string;
-  allowSkipIfPresent: boolean;
 }): Promise<void> {
   const { page, scale, humanConfig, accountId } = params;
   const workspace = params.workspace ?? 'yeonun';
@@ -95,8 +95,7 @@ async function appendLinkAndImageAtBodyEnd(params: {
     : '';
 
   if (resolvedLink) {
-    const linkPresent =
-      params.allowSkipIfPresent && isBlogLinkUrlInBodyText(bodyText, resolvedLink);
+    const linkPresent = isBlogLinkUrlInBodyText(bodyText, resolvedLink);
     if (linkPresent) {
       await logOperation({
         level: 'info',
@@ -127,7 +126,8 @@ async function appendLinkAndImageAtBodyEnd(params: {
   await sleep(200);
 
   if (params.imagePath) {
-    const imagePresent = params.allowSkipIfPresent && (await isBlogImageInBodySection(page));
+    await focusBlogBodyAtEnd(page, params.editor);
+    const imagePresent = await isBlogImageInBodySection(page);
     if (imagePresent) {
       await logOperation({
         level: 'info',
@@ -189,7 +189,7 @@ export async function postNaverBlog(params: {
 
   let titleBox = await findBlogTitleLocator(page);
   const titleAlreadyOk =
-    titleBox != null && (await verifyBlogTitleField(page, titleBox, params.title));
+    titleBox != null && (await isBlogTitleFilledEnough(page, titleBox, params.title));
 
   let titleOkThisRun = titleAlreadyOk;
 
@@ -279,7 +279,6 @@ export async function postNaverBlog(params: {
     scale,
     humanConfig: config,
     accountId: params.accountId,
-    allowSkipIfPresent: bodyAlreadyOk,
   });
 
   if (params.videoPath?.trim()) {

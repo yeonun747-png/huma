@@ -764,6 +764,46 @@ export async function verifyBlogTitleField(
   return verifyBlogTitleInput(written, expected);
 }
 
+/** 재시도·CAPTCHA 재개 — 제목 DOM 읽기 실패해도 placeholder 소실·부분 일치면 재입력 금지 */
+export async function isBlogTitleFilledEnough(
+  page: Page,
+  titleLoc: Locator,
+  expected: string,
+): Promise<boolean> {
+  if (await verifyBlogTitleField(page, titleLoc, expected)) return true;
+
+  const editable = await resolveTitleEditableLocator(page, titleLoc);
+  const written = await readBlogTitleTextAll(page, titleLoc, editable);
+  if (written && titleContainsExpected(written, expected)) return true;
+
+  const probe = Math.min(10, expected.replace(/\s+/g, '').length);
+  if (written && probe >= 4) {
+    const compact = written.replace(/\s+/g, '');
+    const exp = expected.replace(/\s+/g, '');
+    if (compact.includes(exp.slice(0, probe))) return true;
+  }
+
+  if (await isBlogTitlePlaceholderGone(page)) {
+    const dom = await readTitleFromEditorDom(page);
+    if (dom && /[가-힣]{4,}/.test(dom)) {
+      const probeDom = Math.min(8, expected.replace(/\s+/g, '').length);
+      if (probeDom >= 4 && dom.replace(/\s+/g, '').includes(expected.replace(/\s+/g, '').slice(0, probeDom))) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** 링크·이미지 삽입 직전 — 제목 blur 후 본문 끝 캐럿 */
+export async function focusBlogBodyAtEnd(page: Page, bodyLoc: Locator): Promise<void> {
+  await blurBlogTitleField(page);
+  const editable = await resolveBodyEditableLocatorRelaxed(bodyLoc);
+  await focusBodyEditableNode(editable);
+  await page.keyboard.press('Control+End');
+  await sleep(150);
+}
+
 /** 링크·이미지 삽입 후 — locator stale·OG DOM 갱신으로 verifyBlogTitleField 오탐 방지 */
 export async function ensureBlogTitleBeforeReview(
   page: Page,
@@ -817,6 +857,11 @@ export async function ensureBlogTitleWritten(
 ): Promise<void> {
   const editable = await resolveTitleEditableLocator(page, titleLoc);
   const domWritten = await readBlogTitleTextAll(page, titleLoc, editable);
+
+  if (await isBlogTitleFilledEnough(page, titleLoc, text)) {
+    await blurBlogTitleField(page);
+    return;
+  }
 
   if (titleContainsExpected(domWritten, text) && !isDuplicatedBlogTitle(domWritten, text)) {
     await blurBlogTitleField(page);
@@ -1074,10 +1119,25 @@ export function isBlogLinkUrlInBodyText(bodyText: string, linkUrl: string): bool
   return /yeonun\.(com|ai)/i.test(normalized);
 }
 
-/** 본문 섹션 안에만 이미지 모듈 존재 여부 (툴바 se-image 오탐 제외) */
+/** 본문 섹션 안에만 이미지 모듈 존재 여부 (툴바 se-image·깨진 placeholder 제외) */
 export async function isBlogImageInBodySection(page: Page): Promise<boolean> {
-  const scoped = `${BLOG_BODY_SECTION_LOCATOR} .se-module-image, ${BLOG_BODY_SECTION_LOCATOR} .se-component-image, ${BLOG_BODY_SECTION_LOCATOR} [data-module="image"]`;
-  return (await page.locator(scoped).count()) > 0;
+  return page
+    .evaluate((bodySel) => {
+      const section = document.querySelector(bodySel);
+      if (!section) return false;
+      const imgs = section.querySelectorAll(
+        '.se-module-image img, .se-component-image img, [data-module="image"] img, .se-image img',
+      );
+      for (const img of imgs) {
+        const el = img as HTMLImageElement;
+        if (el.naturalWidth >= 32 && el.naturalHeight >= 32) return true;
+        const w = el.offsetWidth || el.clientWidth;
+        const h = el.offsetHeight || el.clientHeight;
+        if (w >= 48 && h >= 48 && el.src && !/^data:$/i.test(el.src)) return true;
+      }
+      return false;
+    }, BLOG_BODY_SECTION_LOCATOR)
+    .catch(() => false);
 }
 
 /** placeholder 클릭 직후 — 빈 paragraph는 isVisible false일 수 있어 attached만 확인 */
@@ -1440,15 +1500,23 @@ export async function typeBlogTitleField(
   }
 
   const titleText = truncateBlogTitle(text);
+  if (await isBlogTitleFilledEnough(page, titleLoc, titleText)) {
+    await blurBlogTitleField(page);
+    return;
+  }
+
   const editable = await resolveTitleEditableLocator(page, titleLoc);
   await editable.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
 
   let current = await readBlogTitleTextAll(page, titleLoc, editable);
   if (isLikelyDubeolsikGarbage(current, titleText)) current = '';
+  if (!current.trim() && (await isBlogTitlePlaceholderGone(page))) {
+    current = (await readTitleFromEditorDom(page)).trim();
+  }
   const dup = isDuplicatedBlogTitle(current, titleText);
   await logTitleDebug(`진입 현재값="${current}" 중복=${dup}`);
 
-  if (titleContainsExpected(current, titleText) && !dup) {
+  if (titleContainsExpected(current, titleText)) {
     await blurBlogTitleField(page);
     return;
   }

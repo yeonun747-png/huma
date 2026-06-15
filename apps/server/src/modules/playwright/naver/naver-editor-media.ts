@@ -1,29 +1,79 @@
 import { readFileSync } from 'fs';
 import { extname } from 'path';
-import type { Page } from 'playwright';
+import type { FileChooser, Page } from 'playwright';
 
 import { humanSleep } from '../../human-engine/typing.js';
+import { humanClickLocator } from '../../human-engine/mouse.js';
+import { sleep } from '../../../lib/utils.js';
 import {
   clickEditorToolbar,
   findVisibleLocator,
   isBlogImageInBodySection,
 } from './naver-editor-locators.js';
 
+async function waitForBlogImageLoaded(page: Page, timeoutMs = 18_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await isBlogImageInBodySection(page)) return true;
+    await sleep(400);
+  }
+  return false;
+}
+
+async function openPhotoFileChooser(page: Page): Promise<FileChooser | null> {
+  const scopedSelectors = [
+    '.se-toolbar button[data-name="image"]',
+    '.se-toolbar-item-image button',
+    '.se-toolbar-item-image',
+    '[class*="se-toolbar"] button[data-name="image"]',
+    'button.se-toolbar-button-image',
+  ];
+
+  for (const sel of scopedSelectors) {
+    const loc = await findVisibleLocator(page, [sel]);
+    if (!loc) continue;
+
+    const chooserPromise = page.waitForEvent('filechooser', { timeout: 12_000 }).catch(() => null);
+    try {
+      await humanClickLocator(page, loc);
+    } catch {
+      await loc.click({ timeout: 5000 }).catch(() => {});
+    }
+    const chooser = await chooserPromise;
+    if (chooser) return chooser;
+    await sleep(300);
+  }
+
+  const chooserPromise = page.waitForEvent('filechooser', { timeout: 12_000 }).catch(() => null);
+  const clicked = await clickEditorToolbar(page, {
+    dataNames: ['image', 'photo'],
+    buttonTexts: ['사진'],
+    classHints: ['image-toolbar', 'photo'],
+  });
+  if (!clicked) return null;
+  return chooserPromise;
+}
+
 async function insertFileViaToolbar(
   page: Page,
   localPath: string,
   toolbar: { dataNames: string[]; buttonTexts: string[]; classHints: string[] },
 ): Promise<boolean> {
-  const chooserPromise = page.waitForEvent('filechooser', { timeout: 12_000 }).catch(() => null);
-  const clicked = await clickEditorToolbar(page, toolbar);
-  if (!clicked) return false;
-
-  const chooser = await chooserPromise;
-  if (!chooser) return false;
+  const chooser = await openPhotoFileChooser(page);
+  if (!chooser) {
+    const chooserPromise = page.waitForEvent('filechooser', { timeout: 12_000 }).catch(() => null);
+    const clicked = await clickEditorToolbar(page, toolbar);
+    if (!clicked) return false;
+    const fallbackChooser = await chooserPromise;
+    if (!fallbackChooser) return false;
+    await fallbackChooser.setFiles(localPath);
+    await humanSleep(2000, 4500);
+    return waitForBlogImageLoaded(page);
+  }
 
   await chooser.setFiles(localPath);
   await humanSleep(2000, 4500);
-  return true;
+  return waitForBlogImageLoaded(page);
 }
 
 function mimeForImagePath(localPath: string): string {
@@ -34,8 +84,11 @@ function mimeForImagePath(localPath: string): string {
   return 'image/jpeg';
 }
 
-/** 캐럿 위치에 클립보드 붙여넣기 — 실패 시 툴바 filechooser */
+/** 본문 캐럿 — 툴바 filechooser 우선, 실패 시 클립보드 붙여넣기 */
 export async function pasteBlogImageAtCaret(page: Page, localPath: string): Promise<boolean> {
+  const viaToolbar = await insertImageViaToolbar(page, localPath);
+  if (viaToolbar) return true;
+
   const mime = mimeForImagePath(localPath);
   const bytes = readFileSync(localPath);
 
@@ -54,13 +107,11 @@ export async function pasteBlogImageAtCaret(page: Page, localPath: string): Prom
     )
     .catch(() => false);
 
-  if (clipboardReady) {
-    await page.keyboard.press('Control+v');
-    await humanSleep(2500, 4500);
-    if (await isBlogImageInBodySection(page)) return true;
-  }
+  if (!clipboardReady) return false;
 
-  return insertImageViaToolbar(page, localPath);
+  await page.keyboard.press('Control+v');
+  await humanSleep(2500, 4500);
+  return waitForBlogImageLoaded(page);
 }
 
 /** @deprecated 툴바 se-image 오탐 — isBlogImageInBodySection 사용 */
@@ -85,14 +136,14 @@ export async function insertImageViaToolbar(page: Page, localPath: string): Prom
   if (fileInput) {
     await fileInput.setInputFiles(localPath);
     await humanSleep(2000, 4000);
-    return true;
+    return waitForBlogImageLoaded(page);
   }
 
   const fallback = page.locator('input[type="file"]').first();
   if ((await fallback.count()) > 0) {
     await fallback.setInputFiles(localPath);
     await humanSleep(2000, 4000);
-    return true;
+    return waitForBlogImageLoaded(page);
   }
 
   return false;
@@ -100,9 +151,18 @@ export async function insertImageViaToolbar(page: Page, localPath: string): Prom
 
 /** 툴바 「동영상」 — video_path 있을 때만 호출 */
 export async function insertVideoViaToolbar(page: Page, localPath: string): Promise<boolean> {
-  return insertFileViaToolbar(page, localPath, {
+  const chooserPromise = page.waitForEvent('filechooser', { timeout: 12_000 }).catch(() => null);
+  const clicked = await clickEditorToolbar(page, {
     dataNames: ['video', 'movie'],
     buttonTexts: ['동영상', '영상'],
     classHints: ['video-toolbar', 'movie'],
   });
+  if (!clicked) return false;
+
+  const chooser = await chooserPromise;
+  if (!chooser) return false;
+
+  await chooser.setFiles(localPath);
+  await humanSleep(2000, 4500);
+  return true;
 }
