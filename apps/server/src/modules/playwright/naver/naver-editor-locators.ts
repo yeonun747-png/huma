@@ -666,7 +666,7 @@ async function readBlogTitleTextAll(
   return sanitizeTitleRead(fromWrap);
 }
 
-/** SE ONE 본문·제목 공통 — humanPressSequentially(유니코드·글자별 WPM) */
+/** SE ONE 본문·제목 공통 — humanPressSequentially(유니코드·글자별 WPM·오타) */
 async function typeSeOneUnicodeText(
   page: Page,
   editable: Locator,
@@ -677,7 +677,7 @@ async function typeSeOneUnicodeText(
   if (await isFocusInTitleArea(page)) {
     throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
   }
-  await humanPressSequentially(page, editable, text, humanConfig);
+  await humanPressSequentially(page, editable, text, humanConfig, { typos: true });
 }
 
 async function titleSectionMatchesExpected(page: Page, expected: string): Promise<boolean> {
@@ -1530,7 +1530,7 @@ export async function typeBlogTitleField(
   await focusTitleEditableNode(editable);
 
   await logTitleDebug(`pressSequentially 시작 (${titleText.length}자·wpm≈${humanConfig.wpm_mean})`);
-  await humanPressSequentially(page, editable, titleText, humanConfig);
+  await humanPressSequentially(page, editable, titleText, humanConfig, { typos: true });
   await sleep(humanBriefPauseMs(humanConfig, 0.12, 0.28));
 
   await waitForBlogTitleWritten(page, titleLoc, titleText, Math.min(8_000, titleVerifyTimeoutMs(titleText)));

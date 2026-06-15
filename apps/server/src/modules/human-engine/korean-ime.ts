@@ -259,14 +259,29 @@ export async function humanPressSequentially(
   locator: Locator,
   text: string,
   config: HumanEngineConfig,
+  options?: { typos?: boolean },
 ): Promise<void> {
   if (!text) return;
+  const typos = options?.typos === true && config.typo_rate > 0;
+
   for (const char of text) {
     if (char === '\n') {
       await page.keyboard.press('Enter');
       await sleep(humanBriefPauseMs(config, 0.1, 0.22));
       continue;
     }
+
+    if (typos && Math.random() < config.typo_rate) {
+      const wrong = getAdjacentKey(char);
+      if (wrong !== char) {
+        await locator.pressSequentially(wrong, { delay: 0 });
+        await sleep(randomBetween(80, 180));
+        await sleep(randomBetween(...config.backspace_delay_ms));
+        await page.keyboard.press('Backspace');
+        await sleep(randomBetween(120, 280));
+      }
+    }
+
     await locator.pressSequentially(char, { delay: 0 });
     await sleep(humanCharDelayMs(config));
   }

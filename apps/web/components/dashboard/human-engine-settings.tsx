@@ -329,7 +329,8 @@ export function HumanEngineSettings() {
             }}
           />
           <HeStaticRow label="본문 타이핑 비율" value={`${typePct}% (자동)`} />
-          <HeStaticRow label="제목 · 해시태그" value="항상 IME 타이핑" />
+          <HeStaticRow label="제목 · 본문 타이핑" value="IME + 오타·백스페이스 (위 발생률)" />
+          <HeStaticRow label="해시태그" value="항상 IME 타이핑 (오타 없음)" />
           <HeStaticRow label="백스페이스 딜레이" value="200~800ms" />
           <HeStaticRow label="문단 간 사고 정지" value="2~8초" />
           <HeStaticRow label="발행 전 검토" value={REVIEW_DURATION_SUMMARY} />

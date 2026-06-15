@@ -47,7 +47,7 @@ function mergePersonaConfig(base: HumanEngineConfig, persona: AccountPersona): H
   return {
     ...base,
     wpm_mean: persona.wpm,
-    typo_rate: persona.typoRate,
+    // typo_rate·backspace_delay_ms — 대시보드 human_engine 설정 우선 (페르소나 typoRate 미적용)
   };
 }
 
