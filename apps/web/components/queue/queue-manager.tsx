@@ -12,7 +12,7 @@ import { PostViewerModal } from '@/components/viewer/post-viewer-modal';
 import { CrankJobDetailModal } from './crank-job-detail-modal';
 import { parseSocialCrankJobContent } from '@/lib/crank-job-payload';
 import { parseQueueKstParts, isSchedulePast, isSameKstDay, weekdayColorClass } from '@/lib/format-kst';
-import { QueueAutoContentModal, type AutoContentFormValues } from './queue-auto-content-modal';
+import { QueueAutoContentModal, type AutoContentFormValues, type AutoContentSubmitContext } from './queue-auto-content-modal';
 import { resolveQueueUploadedImages } from '@/lib/resolve-queue-uploaded-images';
 import { buildScheduledAt } from '@/lib/queue-repeat';
 import { formatJobErrorLabel } from '@/lib/job-error-label';
@@ -406,8 +406,12 @@ export function QueueManager() {
     }
   };
 
-  const handlePreviewSubmit = async (values: AutoContentFormValues) => {
-    const uploaded_images = await resolveQueueUploadedImages(workspace, values.uploaded_images);
+  const handlePreviewSubmit = async (values: AutoContentFormValues, ctx?: AutoContentSubmitContext) => {
+    const uploaded_images = await resolveQueueUploadedImages(
+      workspace,
+      values.uploaded_images,
+      ctx?.onUploadProgress,
+    );
     const job = await api.createAutoContentJob({
       workspace,
       title: values.title.trim(),
@@ -432,7 +436,7 @@ export function QueueManager() {
     load();
   };
 
-  const handleAutoContentSubmit = async (values: AutoContentFormValues) => {
+  const handleAutoContentSubmit = async (values: AutoContentFormValues, ctx?: AutoContentSubmitContext) => {
     if (editingJob) {
       const scheduledAt = values.auto_schedule
         ? new Date().toISOString()
@@ -446,7 +450,11 @@ export function QueueManager() {
         auto_scheduled: values.auto_schedule,
         scheduled_at: scheduledAt,
       };
-      const uploaded = await resolveQueueUploadedImages(workspace, values.uploaded_images);
+      const uploaded = await resolveQueueUploadedImages(
+        workspace,
+        values.uploaded_images,
+        ctx?.onUploadProgress,
+      );
       if (uploaded) {
         const prev = (editingJob.image_urls ?? []).join('|');
         const next = uploaded.join('|');
@@ -456,7 +464,11 @@ export function QueueManager() {
       }
       await api.updateJob(editingJob.id, patch);
     } else {
-      const uploaded_images = await resolveQueueUploadedImages(workspace, values.uploaded_images);
+      const uploaded_images = await resolveQueueUploadedImages(
+        workspace,
+        values.uploaded_images,
+        ctx?.onUploadProgress,
+      );
       await api.createAutoContentJob({
         workspace,
         title: values.title.trim(),

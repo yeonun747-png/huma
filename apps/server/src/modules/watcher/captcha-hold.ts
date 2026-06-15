@@ -152,7 +152,10 @@ export async function syncCaptchaHoldState(
   const isSecondRound = entry.captchaClearedOnce && !entry.captchaCurrentlyVisible;
   entry.captchaCurrentlyVisible = true;
 
-  const shouldRefill = isSecondRound;
+  const shouldRefill =
+    isSecondRound ||
+    options?.treatAsSecondRound === true ||
+    options?.refillPassword === true;
   if (shouldRefill && shotPage.url().includes('nidlogin')) {
     await ensureNaverLoginCredentialsForCaptcha(shotPage, entry.accountId, { fast: true }).catch(
       () => {},

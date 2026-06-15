@@ -153,6 +153,22 @@
     @apply rounded-md border border-huma-bdr bg-transparent px-3 py-1 text-[12.5px] text-huma-t2 transition hover:border-huma-acc hover:text-huma-acc;
   }
 
+  .btn-upload-progress {
+    position: relative;
+    overflow: hidden;
+  }
+  .btn-upload-progress-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    background: color-mix(in srgb, var(--acc) 32%, transparent);
+    transition: width 0.25s ease;
+    pointer-events: none;
+  }
+  .btn-upload-progress-label {
+    position: relative;
+    z-index: 1;
+  }
+
   .btn-sm {
     @apply px-2 py-0.5 text-[11.5px];
   }
@@ -522,15 +538,17 @@
     right: 0;
     border-top: 1px dashed var(--t4);
     pointer-events: none;
-    z-index: 1;
+    z-index: 3;
   }
   .m-bar-chart-avg-label {
     position: absolute;
-    right: 0;
+    left: 50%;
     top: -14px;
+    transform: translateX(-50%);
     font-size: 9px;
-    color: var(--t3);
+    color: #ffffff;
     font-family: var(--font-ui);
+    white-space: nowrap;
   }
   .m-bar-col {
     display: flex;

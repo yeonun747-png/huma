@@ -9,13 +9,19 @@ function isHttpUrl(raw: string): boolean {
 export async function resolveQueueUploadedImages(
   workspace: string,
   slots: UploadedImageSlot[],
+  onProgress?: (done: number, total: number) => void,
 ): Promise<string[] | undefined> {
+  const pending = slots
+    .map((raw, i) => ({ raw: raw?.trim(), i }))
+    .filter((s): s is { raw: string; i: number } => Boolean(s.raw));
+
+  const uploadTotal = pending.filter((s) => s.raw.startsWith('data:')).length;
+  let uploaded = 0;
+  if (uploadTotal > 0) onProgress?.(0, uploadTotal);
+
   const out: string[] = [];
 
-  for (let i = 0; i < slots.length; i += 1) {
-    const raw = slots[i]?.trim();
-    if (!raw) continue;
-
+  for (const { raw, i } of pending) {
     if (isHttpUrl(raw)) {
       out.push(raw);
       continue;
@@ -28,6 +34,8 @@ export async function resolveQueueUploadedImages(
         image_data: raw,
       });
       out.push(url);
+      uploaded += 1;
+      onProgress?.(uploaded, uploadTotal);
     }
   }
 

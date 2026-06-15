@@ -687,7 +687,14 @@ export async function applyManualCaptchaAnswer(
   let pending_login: boolean;
 
   if (page.url().includes('nidlogin')) {
-    // ② nidlogin — 정답 입력 후 로그인 버튼 마우스 이동·클릭으로 제출 (Enter·코드 제출 금지)
+    if (ctx.accountId) {
+      const pwVal = await page.locator('#pw').inputValue().catch(() => '');
+      if (!pwVal.trim()) {
+        await ensureNaverLoginCredentialsForCaptcha(page, ctx.accountId, { fast: true });
+        await humanSleep(150, 350);
+      }
+    }
+    // nidlogin — 정답 입력 후 로그인 버튼 마우스 이동·클릭으로 제출 (Enter·코드 제출 금지)
     const loggedIn = await submitNaverLoginAfterCaptcha(page, ctx.accountId ?? '');
     await humanSleep(500, 1200);
     cleared = loggedIn || !(await isNaverCaptchaVisible(page));

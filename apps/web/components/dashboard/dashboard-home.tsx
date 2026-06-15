@@ -282,7 +282,7 @@ export function DashboardHome() {
             <div className="m-bar-chart">
               {chartAverage > 0 && maxChart > 0 ? (
                 <div className="m-bar-chart-avg" style={{ bottom: `${Math.max(8, avgLinePct * 0.88 + 8)}%` }}>
-                  <span className="m-bar-chart-avg-label">평균 {chartAverage}</span>
+                  <span className="m-bar-chart-avg-label">평균 {chartAverage} 발행</span>
                 </div>
               ) : null}
               {chartValues.map((value, i) => {
@@ -354,7 +354,7 @@ export function DashboardHome() {
       {workspace === 'yeonun' && (
         <>
           <MPanel title="오늘 발행 현황">
-            <PostsTable rows={yeonunPosts} metaHead="캐릭터" />
+            <PostsTable rows={yeonunPosts} metaHead="계정명" />
           </MPanel>
           <MPanel title="Bot Social Activity · 연운">
             {yeonunSocial.length === 0 ? (

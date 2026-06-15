@@ -23,13 +23,17 @@ export interface AutoContentFormValues {
   schedule_time: string;
 }
 
+export type AutoContentSubmitContext = {
+  onUploadProgress?: (done: number, total: number) => void;
+};
+
 interface QueueAutoContentModalProps {
   open: boolean;
   editJob?: HumaJob | null;
   prefill?: QueuePrefill | null;
   onClose: () => void;
-  onSubmit: (values: AutoContentFormValues) => Promise<void>;
-  onPreview?: (values: AutoContentFormValues) => Promise<void>;
+  onSubmit: (values: AutoContentFormValues, ctx?: AutoContentSubmitContext) => Promise<void>;
+  onPreview?: (values: AutoContentFormValues, ctx?: AutoContentSubmitContext) => Promise<void>;
 }
 
 const EMPTY_SLOTS: UploadedImageSlot[] = Array.from({ length: IMAGE_SLOT_COUNT });
@@ -85,8 +89,13 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
   const [slotNames, setSlotNames] = useState<string[]>(Array(IMAGE_SLOT_COUNT).fill(''));
   const [previewSlot, setPreviewSlot] = useState<number | null>(null);
   const [dragOverSlot, setDragOverSlot] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loadingAction, setLoadingAction] = useState<'preview' | 'publish' | null>(null);
+  const [uploadProgress, setUploadProgress] = useState({ done: 0, total: 0 });
   const [error, setError] = useState('');
+
+  const loading = loadingAction !== null;
+  const uploadPct =
+    uploadProgress.total > 0 ? Math.round((uploadProgress.done / uploadProgress.total) * 100) : 0;
 
   useEffect(() => {
     if (!open) return;
@@ -109,6 +118,8 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
     setPreviewSlot(null);
     setDragOverSlot(null);
     setError('');
+    setLoadingAction(null);
+    setUploadProgress({ done: 0, total: 0 });
   }, [open, editJob, prefill]);
 
   useEffect(() => {
@@ -168,6 +179,10 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
     if (input) input.value = '';
   };
 
+  const reportUploadProgress = (done: number, total: number) => {
+    setUploadProgress({ done, total });
+  };
+
   const handlePreview = async () => {
     if (!form.title.trim() || !form.source_url.trim()) {
       setError('① 제목과 ② URL은 필수 입력 항목입니다.');
@@ -175,9 +190,10 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
     }
     if (!onPreview || isEdit) return;
     setError('');
-    setLoading(true);
+    setLoadingAction('preview');
+    setUploadProgress({ done: 0, total: 0 });
     try {
-      await onPreview(form);
+      await onPreview(form, { onUploadProgress: reportUploadProgress });
       setForm(EMPTY_FORM);
       setSlotNames(Array(IMAGE_SLOT_COUNT).fill(''));
       setPreviewSlot(null);
@@ -185,7 +201,8 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
     } catch (e) {
       setError(e instanceof Error ? e.message : '검증 등록 실패');
     } finally {
-      setLoading(false);
+      setLoadingAction(null);
+      setUploadProgress({ done: 0, total: 0 });
     }
   };
 
@@ -195,9 +212,10 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
       return;
     }
     setError('');
-    setLoading(true);
+    setLoadingAction('publish');
+    setUploadProgress({ done: 0, total: 0 });
     try {
-      await onSubmit(form);
+      await onSubmit(form, { onUploadProgress: reportUploadProgress });
       if (!isEdit) {
         setForm(EMPTY_FORM);
         setSlotNames(Array(IMAGE_SLOT_COUNT).fill(''));
@@ -207,7 +225,8 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
     } catch (e) {
       setError(e instanceof Error ? e.message : isEdit ? '저장 실패' : '등록 실패');
     } finally {
-      setLoading(false);
+      setLoadingAction(null);
+      setUploadProgress({ done: 0, total: 0 });
     }
   };
 
@@ -509,22 +528,40 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
               onClick={handlePreview}
               disabled={loading || !editable}
             >
-              {loading ? '등록 중…' : '🔍 검증 미리보기'}
+              {loadingAction === 'preview' ? '등록 중…' : '🔍 검증 미리보기'}
             </button>
           ) : (
             <button type="button" className="btn-primary flex-[2] py-2" onClick={handleSubmit} disabled={loading || !editable}>
-              {loading ? (isEdit ? '저장 중…' : 'AI 생성 중…') : isEdit ? '저장' : '🚀 AI 생성 + 발행 큐 등록'}
+              {loadingAction === 'publish'
+                ? uploadPct > 0 && uploadPct < 100
+                  ? `등록 중… ${uploadPct}%`
+                  : '등록 중…'
+                : isEdit
+                  ? '저장'
+                  : '🚀 AI 생성 + 발행 큐 등록'}
             </button>
           )}
           {!isEdit && onPreview ? (
             <button
               type="button"
-              className="btn-ghost min-w-0 py-2 text-[11px] leading-tight text-huma-warn sm:text-xs"
+              className="btn-ghost btn-upload-progress min-w-0 py-2 text-[11px] leading-tight text-huma-warn sm:text-xs"
               onClick={handleSubmit}
               disabled={loading || !editable}
               title="Claude·Imagen 새로 생성 후 네이버 발행"
+              data-progress={loadingAction === 'publish' ? uploadPct : 0}
             >
-              발행 큐
+              <span
+                className="btn-upload-progress-fill"
+                style={{ width: loadingAction === 'publish' ? `${Math.max(uploadPct, 8)}%` : '0%' }}
+                aria-hidden
+              />
+              <span className="btn-upload-progress-label">
+                {loadingAction === 'publish'
+                  ? uploadPct > 0 && uploadPct < 100
+                    ? `등록 중… ${uploadPct}%`
+                    : '등록 중…'
+                  : '발행 큐'}
+              </span>
             </button>
           ) : null}
         </div>
