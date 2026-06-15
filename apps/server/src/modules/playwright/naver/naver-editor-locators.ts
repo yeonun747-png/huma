@@ -2,7 +2,7 @@ import type { FrameLocator, Locator, Page } from 'playwright';
 import { planParagraphPaste } from '@huma/shared';
 
 import { humanClickLocator, humanMouseMove } from '../../human-engine/mouse.js';
-import { humanTypeIntoElement, humanTypeTitleIntoElement } from '../../human-engine/korean-ime.js';
+import { humanTypeIntoElement } from '../../human-engine/korean-ime.js';
 import { humanSleep } from '../../human-engine/typing.js';
 import type { HumanEngineConfig } from '../../../lib/settings.js';
 import { resolvePasteRatio } from '../../../lib/settings.js';
@@ -71,6 +71,7 @@ export function blogBodySectionLocator(page: Page): Locator {
 }
 
 const TITLE_PLACEHOLDER_RE = /^(제목|title)$/i;
+const BLOG_TITLE_MAX_LEN = 100;
 
 /** SE ONE 툴바·컨텍스트 UI가 제목 paragraph innerText에 섞일 때 */
 const TITLE_CHROME_NOISE_RE =
@@ -83,10 +84,25 @@ export function isTitleEditorChromeText(text: string): boolean {
   return /위치.*제목.*배경|배경.*사진.*삭제/.test(t);
 }
 
+function truncateBlogTitle(text: string): string {
+  const t = text.replace(/\u00a0/g, ' ').trim();
+  if (t.length <= BLOG_TITLE_MAX_LEN) return t;
+  return t.slice(0, BLOG_TITLE_MAX_LEN);
+}
+
 function sanitizeTitleRead(text: string): string {
   const t = text.replace(/\u00a0/g, ' ').trim();
   if (!t || isTitlePlaceholderText(t) || isTitleEditorChromeText(t)) return '';
   return t;
+}
+
+/** OS IME(CDP 두벌식) 실패 시 raw 알파벳만 쌓인 제목 — dusdns dlekf … */
+function isLikelyDubeolsikGarbage(text: string, expected: string): boolean {
+  const w = text.replace(/\u00a0/g, ' ').trim();
+  if (!w || !/[가-힣]/.test(expected)) return false;
+  const hangulCount = (w.match(/[가-힣]/g) ?? []).length;
+  const latinCount = (w.match(/[a-z]/gi) ?? []).length;
+  return latinCount >= 4 && hangulCount < Math.min(4, expected.length * 0.2);
 }
 
 /** 임시저장 이어쓰기 팝업 — 취소/확인 버튼이 실제로 보일 때만 true (닫힌 뒤 DOM 잔여 오탐 방지) */
@@ -1365,7 +1381,8 @@ function titleVerifyTimeoutMs(text: string): number {
 }
 
 /**
- * SE ONE 제목 — fcitx OS IME 타이핑 (합성 composition은 에디터 미반영).
+ * SE ONE 제목 — pressSequentially(유니코드) · 검색창과 동일 InputEvent 경로.
+ * CDP 두벌식(OS IME)은 fcitx 미경유 → 영문 raw 입력. 합성 composition은 에디터 미반영.
  */
 export async function typeBlogTitleField(
   page: Page,
@@ -1377,14 +1394,16 @@ export async function typeBlogTitleField(
     throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
   }
 
+  const titleText = truncateBlogTitle(text);
   const editable = await resolveTitleEditableLocator(page, titleLoc);
   await editable.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
 
-  const current = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
-  const dup = isDuplicatedBlogTitle(current, text);
+  let current = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
+  if (isLikelyDubeolsikGarbage(current, titleText)) current = '';
+  const dup = isDuplicatedBlogTitle(current, titleText);
   await logTitleDebug(`진입 현재값="${current}" 중복=${dup}`);
 
-  if (titleContainsExpected(current, text) && !dup) {
+  if (titleContainsExpected(current, titleText) && !dup) {
     await blurBlogTitleField(page);
     return;
   }
@@ -1393,29 +1412,32 @@ export async function typeBlogTitleField(
   await sleep(150);
 
   if (current) {
-    await clearTitleFieldViaKeyboard(page, editable);
+    await clearTitleFieldThoroughly(page, editable);
   }
   await focusTitleEditableNode(editable);
-  await logTitleDebug('OS IME 타이핑 시작');
-  await humanTypeTitleIntoElement(page, editable, text, humanConfig, { skipFocus: true });
-  await waitForBlogTitleWritten(page, titleLoc, text, titleVerifyTimeoutMs(text));
+
+  const delay = randomBetween(45, 95);
+  await logTitleDebug(`pressSequentially 시작 (${titleText.length}자·${delay}ms)`);
+  await editable.pressSequentially(titleText, { delay });
+  await waitForBlogTitleWritten(page, titleLoc, titleText, titleVerifyTimeoutMs(titleText));
 
   let after = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
+  if (isLikelyDubeolsikGarbage(after, titleText)) after = '';
   await logTitleDebug(`타이핑 후="${after}"`);
 
-  if (isDuplicatedBlogTitle(after, text) || !titleContainsExpected(after, text)) {
-    await logTitleDebug('OS IME 미반영 — insertText 폴백');
-    await clearTitleFieldViaKeyboard(page, editable);
+  if (isDuplicatedBlogTitle(after, titleText) || !titleContainsExpected(after, titleText)) {
+    await logTitleDebug('pressSequentially 미반영 — insertText 폴백');
+    await clearTitleFieldThoroughly(page, editable);
     await focusTitleEditableNode(editable);
-    await page.keyboard.insertText(text);
-    await waitForBlogTitleWritten(page, titleLoc, text, titleVerifyTimeoutMs(text));
+    await page.keyboard.insertText(titleText);
+    await waitForBlogTitleWritten(page, titleLoc, titleText, titleVerifyTimeoutMs(titleText));
     after = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
     await logTitleDebug(`insertText 후="${after}"`);
   }
 
   await blurBlogTitleField(page);
 
-  if (titleContainsExpected(after, text) && !isDuplicatedBlogTitle(after, text)) {
+  if (titleContainsExpected(after, titleText) && !isDuplicatedBlogTitle(after, titleText)) {
     return;
   }
   throw new Error('BLOG_TITLE_WRITE_FAILED');
@@ -1701,6 +1723,22 @@ export async function resolveTitleEditableLocator(page: Page, titleLoc: Locator)
   }
 
   return titleLoc;
+}
+
+/**
+ * 제목 editable 비움 — Ctrl+A·Backspace 후 잔여는 키 삭제.
+ */
+async function clearTitleFieldThoroughly(page: Page, editable: Locator): Promise<boolean> {
+  await focusTitleEditableNode(editable);
+  await page.keyboard.press('Control+a');
+  await sleep(60);
+  await page.keyboard.press('Backspace');
+  await sleep(100);
+
+  let remaining = await readEditableTitleText(editable);
+  if (!remaining || isTitlePlaceholderText(remaining)) return true;
+
+  return clearTitleFieldViaKeyboard(page, editable);
 }
 
 /**

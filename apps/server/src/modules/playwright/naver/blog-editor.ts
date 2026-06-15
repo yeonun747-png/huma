@@ -203,7 +203,7 @@ export async function postNaverBlog(params: {
     }
     await logOperation({
       level: 'info',
-      message: '[post_blog] 제목칸 준비 — OS IME 타이핑 시작',
+      message: '[post_blog] 제목칸 준비 — pressSequentially 타이핑 시작',
       account_id: params.accountId,
     });
 
