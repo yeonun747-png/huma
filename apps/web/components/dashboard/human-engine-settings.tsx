@@ -335,7 +335,7 @@ export function HumanEngineSettings() {
             value={
               typoPct <= 0
                 ? 'pressSequentially 유니코드 (오타 없음)'
-                : `IME + 오타·백스페이스 (${typoPct}%)`
+                : `pressSequentially + 인접음절 오타·Space·Backspace×2 (${typoPct}%)`
             }
           />
           <HeStaticRow label="해시태그" value="항상 IME 타이핑 (오타 없음)" />

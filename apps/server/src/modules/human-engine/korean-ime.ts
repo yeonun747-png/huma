@@ -5,7 +5,7 @@ import type { HumanEngineConfig } from '../../lib/settings.js';
 import { hangulToJamoSequence, isHangul, recomposeHangul } from './hangul.js';
 import { getAdjacentKey } from './typing-adjacent.js';
 import { humanClickLocator } from './mouse.js';
-import { ensureOsHangulMode, resolveUseOsIme, typeHangulViaOsIme, typeHangulViaOsImeWithJamoTypos } from './os-ime.js';
+import { ensureOsHangulMode, resolveUseOsIme, typeHangulViaOsIme } from './os-ime.js';
 
 const IME_PROCESS_VK = 229;
 
@@ -254,6 +254,19 @@ export function humanBriefPauseMs(
 }
 
 /** SE ONE·발행 태그 — 유니코드 pressSequentially + 글자별 WPM (합성 IME·OS IME 미사용) */
+/** 한글 오타 — Space 후 Backspace×2 (두벌식: 공백 뒤에서는 음절 단위 삭제) */
+async function pressTypoBackspaceHangul(page: Page, locator: Locator, config: HumanEngineConfig): Promise<void> {
+  await locator.focus().catch(() => {});
+  await sleep(randomBetween(80, 180));
+  await sleep(randomBetween(...config.backspace_delay_ms));
+  await page.keyboard.press(' ');
+  await sleep(randomBetween(100, 220));
+  await page.keyboard.press('Backspace');
+  await sleep(randomBetween(80, 180));
+  await page.keyboard.press('Backspace');
+  await sleep(randomBetween(120, 280));
+}
+
 async function pressTypoBackspace(page: Page, locator: Locator, config: HumanEngineConfig): Promise<void> {
   await locator.focus().catch(() => {});
   await sleep(randomBetween(80, 180));
@@ -279,16 +292,15 @@ export async function humanPressSequentially(
       continue;
     }
 
-    if (typos && isHangul(char)) {
-      await typeHangulViaOsImeWithJamoTypos(page, locator, char, config);
-      continue;
-    }
-
     if (typos && Math.random() < config.typo_rate) {
       const wrong = getAdjacentKey(char);
       if (wrong !== char) {
         await locator.pressSequentially(wrong, { delay: 0 });
-        await pressTypoBackspace(page, locator, config);
+        if (isHangul(char)) {
+          await pressTypoBackspaceHangul(page, locator, config);
+        } else {
+          await pressTypoBackspace(page, locator, config);
+        }
       }
     }
 
