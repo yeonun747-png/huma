@@ -43,8 +43,7 @@ import {
   insertVideoViaToolbar,
   pasteBlogImageAtCaret,
 } from './naver-editor-media.js';
-import { completeNaverPublishDialog } from './naver-publish-dialog.js';
-import { performPostMediaBodyReview } from './blog-editor-review.js';
+import { completeNaverPublishDialog, moveMouseToTopPublishButton } from './naver-publish-dialog.js';
 import { logOperation } from '../../../lib/log-emitter.js';
 import { sleep } from '../../../lib/utils.js';
 
@@ -194,7 +193,7 @@ async function appendLinkAndImageAtBodyEnd(params: {
       if (!ok) {
         await logOperation({
           level: 'warn',
-          message: '[post_blog][image] 삽입 미확인 — 본문 검토·발행 계속',
+          message: '[post_blog][image] 삽입 미확인 — 발행 계속',
           account_id: accountId,
         }).catch(() => {});
       } else {
@@ -211,10 +210,10 @@ async function appendLinkAndImageAtBodyEnd(params: {
   await dismissSeOneMaterialPopup(page);
   await logOperation({
     level: 'info',
-    message: '[post_blog] 본문 중앙 검토 스크롤 — 발행 준비',
+    message: '[post_blog] 미디어 완료 — 발행 버튼으로 포인터 이동',
     account_id: accountId,
   }).catch(() => {});
-  await performPostMediaBodyReview(page, scale);
+  await moveMouseToTopPublishButton(page);
 }
 
 export async function postNaverBlog(params: {
@@ -292,8 +291,8 @@ export async function postNaverBlog(params: {
     await logOperation({
       level: 'info',
       message: publishResumeReady
-        ? '[post_blog] 본문·링크 완료 — 제목 재입력 생략, 검토 스크롤 후 발행'
-        : '[post_blog] 본문·링크·이미지 완료 — 제목 재입력 생략, 본문 검토 후 발행',
+        ? '[post_blog] 본문·링크 완료 — 제목 재입력 생략, 발행으로 진행'
+        : '[post_blog] 본문·링크·이미지 완료 — 제목 재입력 생략, 발행으로 진행',
       account_id: params.accountId,
     }).catch(() => {});
   } else {

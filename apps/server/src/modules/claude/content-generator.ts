@@ -32,8 +32,8 @@ export interface ContentGenerationInput {
 
 export interface ContentGenerationOutput {
   blog_post: string;
-  /** 네이버 검색 최적화 제목 (≤32자, 핵심 키워드 앞배치). 없으면 운영자 제목 사용 */
-  seo_title?: string;
+  /** 네이버 검색 최적화 제목 (≤32자, 핵심 키워드 앞배치). 항상 SEO 변환됨 */
+  seo_title: string;
   tiktok_caption: string;
   instagram_caption: string;
   threads_text: string;
@@ -72,6 +72,146 @@ function sanitizeBlogLinksInPost(text: string): string {
   return text
     .replace(/https?:\/\/(www\.)?yeonun\.com[^\s\n]*/gi, 'yeonun.com')
     .replace(/www\.yeonun\.com/gi, 'yeonun.com');
+}
+
+const SEO_TITLE_MAX = 32;
+
+function normalizeTitleCompare(s: string): string {
+  return s.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function truncateSeoTitle(s: string): string {
+  const t = s.trim().replace(/\s+/g, ' ');
+  if (t.length <= SEO_TITLE_MAX) return t;
+  const cut = t.slice(0, SEO_TITLE_MAX);
+  const lastSpace = cut.lastIndexOf(' ');
+  if (lastSpace > SEO_TITLE_MAX * 0.6) return cut.slice(0, lastSpace);
+  return cut;
+}
+
+function isAcceptableSeoTitle(seo: string | undefined, operatorTitle: string): boolean {
+  const t = seo?.trim();
+  if (!t) return false;
+  if (t.length > SEO_TITLE_MAX) return false;
+  if (normalizeTitleCompare(t) === normalizeTitleCompare(operatorTitle)) return false;
+  return true;
+}
+
+function heuristicSeoTitle(operatorTitle: string, synopsis?: string, blogExcerpt?: string): string {
+  const synopsisTrim = synopsis?.trim();
+  const keywords = operatorTitle
+    .trim()
+    .split(/[\s·—\-,]+/)
+    .filter((w) => w.length >= 2);
+  const prefix = keywords.slice(0, 2).join(' ');
+
+  if (synopsisTrim) {
+    const body = synopsisTrim.replace(/\s+/g, ' ');
+    if (prefix && !body.includes(prefix.slice(0, Math.min(4, prefix.length)))) {
+      return truncateSeoTitle(`${prefix} ${body}`.trim());
+    }
+    return truncateSeoTitle(body);
+  }
+
+  const excerpt = blogExcerpt?.trim().replace(/\s+/g, ' ');
+  if (excerpt) {
+    const lead = excerpt.split(/[.!?]\s/)[0]?.trim() ?? excerpt;
+    if (prefix && !lead.includes(prefix.slice(0, Math.min(4, prefix.length)))) {
+      return truncateSeoTitle(`${prefix} ${lead}`.trim());
+    }
+    return truncateSeoTitle(lead);
+  }
+
+  if (prefix) return truncateSeoTitle(`${prefix} 총정리`);
+  return truncateSeoTitle(operatorTitle.trim());
+}
+
+function forceDistinctSeoTitle(operatorTitle: string, synopsis?: string, blogExcerpt?: string): string {
+  const base = heuristicSeoTitle(operatorTitle, synopsis, blogExcerpt);
+  if (normalizeTitleCompare(base) !== normalizeTitleCompare(operatorTitle)) return base;
+
+  const variants = [
+    `${operatorTitle.slice(0, 20)} 총정리`,
+    `${operatorTitle.slice(0, 18)} 후기`,
+    `${operatorTitle.slice(0, 16)} 추천`,
+  ];
+  for (const v of variants) {
+    const t = truncateSeoTitle(v);
+    if (normalizeTitleCompare(t) !== normalizeTitleCompare(operatorTitle)) return t;
+  }
+  return truncateSeoTitle(`${operatorTitle.slice(0, 28)}·정리`);
+}
+
+async function generateSeoTitleOnly(params: {
+  operatorTitle: string;
+  synopsis?: string;
+  urlSummary: string;
+  blogExcerpt?: string;
+}): Promise<string | undefined> {
+  const synopsisBlock = params.synopsis?.trim()
+    ? `[운영자 시놉시스 — 반드시 반영]\n${params.synopsis.trim()}`
+    : '[시놉시스 없음]';
+
+  const raw = await askClaudeWithModel({
+    model: (await getSubClaudeModel()) || HAIKU_MODEL_FALLBACK,
+    max_tokens: 120,
+    prompt: `네이버 블로그 검색 노출용 SEO 제목만 생성 (JSON만).
+
+운영자 입력 제목(참고용·그대로 쓰지 말 것): ${params.operatorTitle}
+${synopsisBlock}
+[URL·주제 요약]
+${params.urlSummary.slice(0, 400)}
+${params.blogExcerpt ? `[생성된 본문 앞부분]\n${params.blogExcerpt.slice(0, 300)}` : ''}
+
+규칙:
+- 32자 이내 (공백 포함, 초과 금지)
+- 핵심 검색 키워드를 앞쪽 배치
+- 운영자 제목과 동일·거의 동일하게 쓰지 말 것
+- 과장·특수문자 남발 금지
+- 클릭 유도 자연스러운 한국어
+
+{"seo_title":"..."}`,
+  });
+
+  if (!raw) return undefined;
+  try {
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    const parsed = JSON.parse(jsonMatch?.[0] ?? raw) as { seo_title?: string };
+    return parsed.seo_title?.trim();
+  } catch {
+    return undefined;
+  }
+}
+
+/** SEO 제목 강제 — 운영자 제목 그대로 사용 금지 */
+export async function ensureSeoTitle(params: {
+  operatorTitle: string;
+  synopsis?: string;
+  urlSummary: string;
+  blogExcerpt?: string;
+  candidate?: string;
+}): Promise<string> {
+  const operatorTitle = params.operatorTitle.trim();
+  if (isAcceptableSeoTitle(params.candidate, operatorTitle)) {
+    return truncateSeoTitle(params.candidate!.trim());
+  }
+
+  if (process.env.ANTHROPIC_API_KEY) {
+    try {
+      const generated = await generateSeoTitleOnly(params);
+      if (isAcceptableSeoTitle(generated, operatorTitle)) {
+        return truncateSeoTitle(generated!.trim());
+      }
+    } catch (err) {
+      console.warn('[content-generator] seo_title 전용 생성 실패:', (err as Error).message);
+    }
+  }
+
+  return forceDistinctSeoTitle(operatorTitle, params.synopsis, params.blogExcerpt);
+}
+
+export function resolvePostingTitle(generated: Pick<ContentGenerationOutput, 'seo_title'>): string {
+  return generated.seo_title.trim();
 }
 
 async function fetchUrlText(url: string): Promise<string> {
@@ -139,6 +279,7 @@ function fallbackContent(
   const wsTag = input.workspace === 'quizoasis' ? '#심리테스트' : input.workspace === 'panana' ? '#AI캐릭터' : '#사주';
   return {
     blog_post: body,
+    seo_title: forceDistinctSeoTitle(input.title, input.synopsis, body),
     blog_post_target_chars: lengthRange.tier,
     blog_post_target_min_chars: lengthRange.min,
     blog_post_target_max_chars: lengthRange.max,
@@ -337,6 +478,20 @@ export async function generateAllContent(input: ContentGenerationInput): Promise
   const urlSummary = await resolveSourceContext(input);
   const lengthRange = pickBlogPostLengthRange();
 
+  const finalize = async (
+    partial: Omit<ContentGenerationOutput, 'hashtags' | 'seo_title'> & { seo_title?: string },
+    hashtags: string[],
+  ): Promise<ContentGenerationOutput> => {
+    const seo_title = await ensureSeoTitle({
+      operatorTitle: input.title,
+      synopsis: input.synopsis,
+      urlSummary,
+      blogExcerpt: partial.blog_post,
+      candidate: partial.seo_title,
+    });
+    return { ...partial, seo_title, hashtags };
+  };
+
   try {
     const mainContent = await generateMainContent(input, urlSummary, lengthRange);
     const subContent = await generateSubContent({
@@ -346,7 +501,7 @@ export async function generateAllContent(input: ContentGenerationInput): Promise
       workspace: input.workspace,
       urlSummary,
     });
-    return { ...mainContent, ...subContent };
+    return finalize(mainContent, subContent.hashtags);
   } catch (mainErr) {
     if (!process.env.ANTHROPIC_API_KEY) {
       return fallbackContent(input, urlSummary, lengthRange);
@@ -357,7 +512,13 @@ export async function generateAllContent(input: ContentGenerationInput): Promise
         max_tokens: 2000,
         system: withHumanWritingSystem(SYSTEM_PROMPTS[input.workspace] ?? SYSTEM_PROMPTS.yeonun),
         prompt: withLongformWritingMandate(
-          `제목: ${input.title}\nURL 요약: ${urlSummary.slice(0, 500)}\n${blogPostLengthPromptGuide(lengthRange)}\n\n네이버 블로그용 ${lengthRange.min}~${lengthRange.max}자 완결 본문과 TikTok/Instagram/Threads/X용 짧은 캡션을 JSON으로 (tts_script 생략, Kling 내장 오디오):\n{"blog_post":"...","tiktok_caption":"...","instagram_caption":"...","threads_text":"...","x_text":"...","image_prompt":"...","video_prompt":"..."}`,
+          `제목: ${input.title}
+${input.synopsis?.trim() ? `[운영자 시놉시스 - 반드시 참고]\n"${input.synopsis.trim()}"` : '[시놉시스 없음 — URL 요약 반영]'}
+URL 요약: ${urlSummary.slice(0, 500)}
+${blogPostLengthPromptGuide(lengthRange)}
+
+네이버 블로그용 ${lengthRange.min}~${lengthRange.max}자 완결 본문과 SEO 제목·SNS 캡션을 JSON으로 (tts_script 생략, Kling 내장 오디오):
+{"seo_title":"네이버 검색 최적화 제목 32자 이내. 핵심 키워드 앞배치, 운영자 제목과 다르게","blog_post":"...","tiktok_caption":"...","instagram_caption":"...","threads_text":"...","x_text":"...","image_prompt":"...","video_prompt":"..."}`,
         ),
       });
       const jsonMatch = retryRaw?.match(/\{[\s\S]*\}/);
@@ -375,7 +536,7 @@ export async function generateAllContent(input: ContentGenerationInput): Promise
           parsed.blog_post_target_chars = lengthRange.tier;
           parsed.blog_post_target_min_chars = lengthRange.min;
           parsed.blog_post_target_max_chars = lengthRange.max;
-          return { ...parsed, ...sub };
+          return finalize(parsed, sub.hashtags);
         }
       }
     } catch {

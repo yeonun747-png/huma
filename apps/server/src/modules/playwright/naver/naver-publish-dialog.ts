@@ -3,7 +3,7 @@ import type { Page } from 'playwright';
 import { sleep } from '../../../lib/utils.js';
 import type { HumanEngineConfig } from '../../../lib/settings.js';
 import { normalizeHashtagTag } from '../../../lib/hashtag-sanitize.js';
-import { humanClickLocator } from '../../human-engine/mouse.js';
+import { humanClickLocator, humanMouseMove } from '../../human-engine/mouse.js';
 import { humanBriefPauseMs, humanPressSequentially } from '../../human-engine/korean-ime.js';
 import { humanSleep } from '../../human-engine/typing.js';
 import { scaledHumanSleep } from '../../human-engine/timing.js';
@@ -65,6 +65,16 @@ const DEFAULT_CATEGORY_BY_WORKSPACE: Record<string, string> = {
   quizoasis: '포스팅',
   panana: '포스팅',
 };
+
+export async function moveMouseToTopPublishButton(page: Page): Promise<boolean> {
+  const btn = await findVisibleLocator(page, PUBLISH_BTN_SELECTORS, { inFrame: false });
+  if (!btn) return false;
+  const box = await btn.boundingBox().catch(() => null);
+  if (!box || box.width < 8 || box.height < 8) return false;
+  await humanMouseMove(page, box.x + box.width / 2, box.y + box.height / 2);
+  await sleep(150);
+  return true;
+}
 
 export async function clickTopPublishButton(page: Page): Promise<void> {
   const btn = await findVisibleLocator(page, PUBLISH_BTN_SELECTORS, { inFrame: false });

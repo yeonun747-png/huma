@@ -13,27 +13,19 @@ import {
   isBlogImagePresentInBody,
   isBlogImageInBodySection,
 } from './naver-editor-locators.js';
-import {
-  moveMouseToBodyCenterForReview,
-  performPostMediaBodyReview,
-} from './blog-editor-review.js';
+import { moveMouseToTopPublishButton } from './naver-publish-dialog.js';
 import { logOperation } from '../../../lib/log-emitter.js';
 
-async function refocusBodyAfterPhotoToolbar(page: Page): Promise<void> {
+async function preparePointerForPublishAfterImage(page: Page): Promise<void> {
   await blurBlogTitleField(page);
   await dismissSeOneMaterialPopup(page);
-  await moveMouseToBodyCenterForReview(page);
+  await moveMouseToTopPublishButton(page);
 }
 
 async function waitForBlogImageLoaded(page: Page, timeoutMs = 12_000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
-  let scrollRound = 0;
   while (Date.now() < deadline) {
     if (await isBlogImagePresentInBody(page)) return true;
-    if (scrollRound % 3 === 0) {
-      await moveMouseToBodyCenterForReview(page).catch(() => {});
-    }
-    scrollRound += 1;
     await sleep(400);
   }
   return isBlogImagePresentInBody(page);
@@ -86,27 +78,27 @@ async function insertFileViaToolbar(
     const fallbackChooser = await chooserPromise;
     if (!fallbackChooser) return false;
     await fallbackChooser.setFiles(localPath);
-    await refocusBodyAfterPhotoToolbar(page);
+    await preparePointerForPublishAfterImage(page);
     await humanSleep(800, 1600);
     const loaded = await waitForBlogImageLoaded(page);
     if (loaded) return true;
     if (await isBlogImagePresentInBody(page)) return true;
     await logOperation({
       level: 'warn',
-      message: '[post_blog][image] 업로드 대기 초과 — 본문 검토·발행 단계로 진행',
+      message: '[post_blog][image] 업로드 대기 초과 — 발행 단계로 진행',
     }).catch(() => {});
     return true;
   }
 
   await chooser.setFiles(localPath);
-  await refocusBodyAfterPhotoToolbar(page);
+  await preparePointerForPublishAfterImage(page);
   await humanSleep(800, 1600);
   const loaded = await waitForBlogImageLoaded(page);
   if (loaded) return true;
   if (await isBlogImagePresentInBody(page)) return true;
   await logOperation({
     level: 'warn',
-    message: '[post_blog][image] 업로드 대기 초과 — 본문 검토·발행 단계로 진행',
+    message: '[post_blog][image] 업로드 대기 초과 — 발행 단계로 진행',
   }).catch(() => {});
   return true;
 }
@@ -126,13 +118,7 @@ export async function pasteBlogImageAtCaret(
   options?: { skipPostReview?: boolean },
 ): Promise<boolean> {
   const viaToolbar = await insertImageViaToolbar(page, localPath);
-  if (viaToolbar) {
-    if (!options?.skipPostReview) {
-      await refocusBodyAfterPhotoToolbar(page);
-      await performPostMediaBodyReview(page);
-    }
-    return true;
-  }
+  if (viaToolbar) return true;
 
   const mime = mimeForImagePath(localPath);
   const bytes = readFileSync(localPath);
@@ -155,13 +141,9 @@ export async function pasteBlogImageAtCaret(
   if (!clipboardReady) return false;
 
   await page.keyboard.press('Control+v');
-  await refocusBodyAfterPhotoToolbar(page);
+  await preparePointerForPublishAfterImage(page);
   await humanSleep(2000, 3500);
-  const ok = await waitForBlogImageLoaded(page);
-  if (ok && !options?.skipPostReview) {
-    await performPostMediaBodyReview(page);
-  }
-  return ok;
+  return waitForBlogImageLoaded(page);
 }
 
 /** @deprecated 툴바 se-image 오탐 — isBlogImageInBodySection 사용 */
@@ -185,7 +167,7 @@ export async function insertImageViaToolbar(page: Page, localPath: string): Prom
   );
   if (fileInput) {
     await fileInput.setInputFiles(localPath);
-    await refocusBodyAfterPhotoToolbar(page);
+    await preparePointerForPublishAfterImage(page);
     await humanSleep(800, 1600);
     if (await waitForBlogImageLoaded(page)) return true;
     if (await isBlogImagePresentInBody(page)) return true;
@@ -195,7 +177,7 @@ export async function insertImageViaToolbar(page: Page, localPath: string): Prom
   const fallback = page.locator('input[type="file"]').first();
   if ((await fallback.count()) > 0) {
     await fallback.setInputFiles(localPath);
-    await refocusBodyAfterPhotoToolbar(page);
+    await preparePointerForPublishAfterImage(page);
     await humanSleep(800, 1600);
     if (await waitForBlogImageLoaded(page)) return true;
     if (await isBlogImagePresentInBody(page)) return true;

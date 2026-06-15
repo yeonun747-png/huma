@@ -3,7 +3,7 @@ import { normalizeBlogLinkUrl } from '../../../lib/blog-link.js';
 import { type PostingAccountPick, resolvePostingAccountForOrchestrator } from '../../../lib/posting-accounts.js';
 import { supabase } from '../../../middleware/auth.js';
 import { enqueueJob } from '../producer.js';
-import { generateAllContent, type ContentGenerationOutput } from '../../claude/content-generator.js';
+import { generateAllContent, ensureSeoTitle, resolvePostingTitle, type ContentGenerationOutput } from '../../claude/content-generator.js';
 import { fetchAndSummarizeUrl } from '../../claude/content-generator.js';
 import {
   autoDecideWithCredits,
@@ -175,8 +175,8 @@ async function runTypeA(
     workspace,
     account_id: accountId,
     job_type: 'post_blog',
-    // 네이버 검색 노출용 SEO 제목 우선, 없으면 운영자 제목
-    title: generated.seo_title?.trim() || title,
+    // 네이버 검색 노출용 SEO 제목 (운영자 입력 제목 사용 금지)
+    title: resolvePostingTitle(generated),
     content: generated.blog_post,
     // 발행 직전 post-blog에서 1회 uniquify (로컬 tmp는 휘발 → 내구성 있는 https URL 저장)
     image_urls: [imageUrl],
@@ -246,8 +246,8 @@ async function runTypeB(
     workspace,
     account_id: accountId,
     job_type: 'post_blog',
-    // 네이버 검색 노출용 SEO 제목 우선, 없으면 운영자 제목
-    title: generated.seo_title?.trim() || title,
+    // 네이버 검색 노출용 SEO 제목 (운영자 입력 제목 사용 금지)
+    title: resolvePostingTitle(generated),
     content: generated.blog_post,
     // 발행 직전 post-blog에서 1회 uniquify (내구성 있는 https URL 저장)
     image_urls: [imageUrl],
@@ -428,7 +428,7 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
     ...previewSteps[0]!,
     status: 'ok',
     ms: Date.now() - claudeStart,
-    detail: `${generated.blog_post.length}자`,
+    detail: `${generated.blog_post.length}자 · SEO제목 ${generated.seo_title}`,
   };
   previewSteps[1] = { ...previewSteps[1]!, status: 'running' };
   if (input.parentJobId) {
@@ -493,8 +493,11 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
             image_model: imageModel,
             image_prompt: generated.image_prompt,
             image_url: imageUrl,
+            operator_title: input.title.trim(),
+            operator_synopsis: input.synopsis?.trim() || undefined,
             generated: {
               blog_post: generated.blog_post,
+              seo_title: generated.seo_title,
               tiktok_caption: generated.tiktok_caption,
               instagram_caption: generated.instagram_caption,
               threads_text: generated.threads_text,
@@ -533,6 +536,7 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
 type PreviewGeneratedSnapshot = Pick<
   ContentGenerationOutput,
   | 'blog_post'
+  | 'seo_title'
   | 'tiktok_caption'
   | 'instagram_caption'
   | 'threads_text'
@@ -561,6 +565,7 @@ function resolvePreviewGenerated(
   const title = String(job.title ?? '');
   return {
     blog_post: String(job.content ?? ''),
+    seo_title: title,
     hashtags: (job.hashtags as string[]) ?? [],
     tiktok_caption: title.slice(0, 150),
     instagram_caption: title.slice(0, 300),
@@ -591,6 +596,17 @@ export async function promoteDryRunToPublish(parentJobId: string) {
   }
 
   const generated = resolvePreviewGenerated(job, preview);
+  const postingAccount = await resolvePostingAccountForOrchestrator(job.workspace, parentJobId);
+  const urlSummary = job.link_url ? await fetchAndSummarizeUrl(String(job.link_url)) : '';
+  const operatorSynopsis = (preview?.operator_synopsis as string | undefined)?.trim();
+  const seo_title = await ensureSeoTitle({
+    operatorTitle: String(job.title ?? ''),
+    synopsis: operatorSynopsis || undefined,
+    urlSummary,
+    blogExcerpt: generated.blog_post,
+    candidate: generated.seo_title,
+  });
+  const generatedWithSeo = { ...generated, seo_title };
   const schedule = extractPlatformSchedule(ps);
   const contentType = (job.content_type ?? 'A') as ContentType;
   const autoScheduled = job.auto_scheduled !== false;
@@ -617,15 +633,17 @@ export async function promoteDryRunToPublish(parentJobId: string) {
     contentType === 'B'
       ? await runTypeB(
           runInput,
-          generated as Awaited<ReturnType<typeof generateAllContent>>,
+          generatedWithSeo as Awaited<ReturnType<typeof generateAllContent>>,
           imageUrl,
           job.video_model ?? 'kling-3.0',
+          postingAccount,
           schedule,
         )
       : await runTypeA(
           runInput,
-          generated as Awaited<ReturnType<typeof generateAllContent>>,
+          generatedWithSeo as Awaited<ReturnType<typeof generateAllContent>>,
           imageUrl,
+          postingAccount,
           schedule,
         );
 
