@@ -8,7 +8,9 @@ import { getCaptchaHold, listCaptchaHoldJobIds } from './captcha-hold.js';
 import {
   formatTelegramAxiosError,
   isAllowedTelegramChatId,
+  normalizeTelegramChatId,
   parseCaptchaAnswerFromTelegram,
+  registerTelegramChatIdMigration,
   resolveWorkspaceFromTelegramChatId,
   sendTelegramHtml,
   TELEGRAM_AXIOS_OPTS,
@@ -16,9 +18,11 @@ import {
 
 type TelegramMessage = {
   message_id: number;
-  chat: { id: number };
+  chat: { id: number; type?: string };
   text?: string;
   reply_to_message?: { message_id: number };
+  migrate_to_chat_id?: number;
+  migrate_from_chat_id?: number;
 };
 
 type TelegramUpdate = {
@@ -34,9 +38,7 @@ let polling = false;
 let stopped = false;
 
 function lookupJobByReply(chatId: string | number, replyMessageId: number): string | null {
-  const jobId = lookupCaptchaJobByTelegramReply(chatId, replyMessageId);
-  if (!jobId || !getCaptchaHold(jobId)) return null;
-  return jobId;
+  return lookupCaptchaJobByTelegramReply(chatId, replyMessageId);
 }
 
 function listActiveHoldsForChat(chatId: string | number): string[] {
@@ -70,10 +72,24 @@ async function replyTelegram(chatId: number, html: string): Promise<void> {
 
 async function handleTelegramCaptchaAnswer(message: TelegramMessage): Promise<void> {
   const chatId = message.chat.id;
-  if (!isAllowedTelegramChatId(chatId)) return;
+  if (!isAllowedTelegramChatId(chatId)) {
+    console.warn(
+      `[telegram-inbound] ignored chat ${normalizeTelegramChatId(chatId)} (env yeonun=${process.env.TELEGRAM_CHAT_ID_YEONUN ?? '?'})`,
+    );
+    return;
+  }
 
   const answer = parseCaptchaAnswerFromTelegram(message.text ?? '');
-  if (!answer) return;
+  if (!answer) {
+    const active = listActiveHoldsForChat(chatId);
+    if (message.reply_to_message && active.length > 0) {
+      await replyTelegram(
+        chatId,
+        '⚠️ 정답을 인식하지 못했습니다.\nCAPTCHA 알림에 <b>답장</b>으로 한글·숫자만 입력하거나 <code>정답: xxx</code> 형식으로 보내 주세요.',
+      );
+    }
+    return;
+  }
 
   const jobId = resolveJobForInboundMessage(message);
   if (!jobId) {
@@ -83,9 +99,18 @@ async function handleTelegramCaptchaAnswer(message: TelegramMessage): Promise<vo
         chatId,
         '⚠️ CAPTCHA 대기 작업이 여러 개입니다.\n캡cha 알림 메시지(사진)에 <b>답장</b>으로 정답을 보내 주세요.',
       );
+      return;
     }
+    await replyTelegram(
+      chatId,
+      '⚠️ 연결된 CAPTCHA job이 없습니다.\n· CAPTCHA <b>사진·알림에 답장</b>으로 정답을 보내 주세요\n· 그룹에서는 <b>답장</b>이 아니면 봇이 메시지를 받지 못할 수 있습니다 (BotFather → Group Privacy Off 권장)',
+    );
     return;
   }
+
+  console.info(
+    `[telegram-inbound] CAPTCHA answer chat=${normalizeTelegramChatId(chatId)} job=${jobId} reply=${message.reply_to_message?.message_id ?? 'none'}`,
+  );
 
   if (processingJobs.has(jobId)) return;
   processingJobs.add(jobId);
@@ -126,7 +151,16 @@ async function handleTelegramCaptchaAnswer(message: TelegramMessage): Promise<vo
 
 async function handleTelegramUpdate(update: TelegramUpdate): Promise<void> {
   const message = update.message;
-  if (!message?.text) return;
+  if (!message) return;
+
+  if (message.migrate_to_chat_id) {
+    registerTelegramChatIdMigration(message.chat.id, message.migrate_to_chat_id);
+  }
+  if (message.migrate_from_chat_id) {
+    registerTelegramChatIdMigration(message.migrate_from_chat_id, message.chat.id);
+  }
+
+  if (!message.text) return;
   await handleTelegramCaptchaAnswer(message);
 }
 

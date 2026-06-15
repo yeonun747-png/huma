@@ -1,7 +1,9 @@
+import { normalizeTelegramChatId } from '../modules/watcher/telegram.js';
+
 const messageToJob = new Map<string, string>();
 
 function messageKey(chatId: string | number, messageId: number): string {
-  return `${chatId}:${messageId}`;
+  return `${normalizeTelegramChatId(chatId)}:${messageId}`;
 }
 
 /** CAPTCHA 알림 발송 시 message_id → job_id 매핑 (텔레그램 답장 매칭) */

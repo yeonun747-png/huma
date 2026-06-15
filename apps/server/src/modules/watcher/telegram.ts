@@ -40,26 +40,72 @@ export { formatTelegramAxiosError };
 
 const QUIZ_PANANA_WORKSPACES: Workspace[] = ['panana', 'quizoasis'];
 
+/** 슈퍼그룹 전환 등 — from → to (메모리, 재시작 시 재학습) */
+const migratedTelegramChatIds = new Map<string, string>();
+
+export function normalizeTelegramChatId(chatId: string | number | null | undefined): string {
+  if (chatId == null) return '';
+  return String(chatId)
+    .trim()
+    .replace(/^["']|["']$/g, '');
+}
+
+export function parseConfiguredTelegramChatIds(raw: string | null | undefined): string[] {
+  const value = raw?.trim();
+  if (!value) return [];
+  return value
+    .split(/[,;\s]+/)
+    .map((part) => normalizeTelegramChatId(part))
+    .filter(Boolean);
+}
+
+export function registerTelegramChatIdMigration(
+  fromChatId: string | number,
+  toChatId: string | number,
+): void {
+  const from = normalizeTelegramChatId(fromChatId);
+  const to = normalizeTelegramChatId(toChatId);
+  if (!from || !to || from === to) return;
+  migratedTelegramChatIds.set(from, to);
+  console.info(`[telegram] chat_id migrated ${from} → ${to}`);
+}
+
+function matchesConfiguredTelegramChatId(
+  incoming: string | number,
+  configuredRaw: string | null | undefined,
+): boolean {
+  const id = normalizeTelegramChatId(incoming);
+  if (!id) return false;
+
+  for (const cfg of parseConfiguredTelegramChatIds(configuredRaw)) {
+    if (id === cfg) return true;
+    if (migratedTelegramChatIds.get(cfg) === id) return true;
+    if (migratedTelegramChatIds.get(id) === cfg) return true;
+  }
+  return false;
+}
+
 export function resolveTelegramChatId(workspace?: string | null): string | null {
   if (workspace === 'yeonun') {
-    return process.env.TELEGRAM_CHAT_ID_YEONUN?.trim() || null;
+    return parseConfiguredTelegramChatIds(process.env.TELEGRAM_CHAT_ID_YEONUN)[0] ?? null;
   }
   if (workspace && QUIZ_PANANA_WORKSPACES.includes(workspace as Workspace)) {
-    return process.env.TELEGRAM_CHAT_ID_QUIZ_PANANA?.trim() || null;
+    return parseConfiguredTelegramChatIds(process.env.TELEGRAM_CHAT_ID_QUIZ_PANANA)[0] ?? null;
   }
   return (
-    process.env.TELEGRAM_CHAT_ID_YEONUN?.trim() ||
-    process.env.TELEGRAM_CHAT_ID_QUIZ_PANANA?.trim() ||
+    parseConfiguredTelegramChatIds(process.env.TELEGRAM_CHAT_ID_YEONUN)[0] ??
+    parseConfiguredTelegramChatIds(process.env.TELEGRAM_CHAT_ID_QUIZ_PANANA)[0] ??
     null
   );
 }
 
 export function resolveWorkspaceFromTelegramChatId(chatId: string | number): string | null {
-  const id = String(chatId).trim();
-  const yeonun = process.env.TELEGRAM_CHAT_ID_YEONUN?.trim();
-  const quizPanana = process.env.TELEGRAM_CHAT_ID_QUIZ_PANANA?.trim();
-  if (yeonun && id === yeonun) return 'yeonun';
-  if (quizPanana && id === quizPanana) return 'panana';
+  if (matchesConfiguredTelegramChatId(chatId, process.env.TELEGRAM_CHAT_ID_YEONUN)) {
+    return 'yeonun';
+  }
+  if (matchesConfiguredTelegramChatId(chatId, process.env.TELEGRAM_CHAT_ID_QUIZ_PANANA)) {
+    return 'panana';
+  }
   return null;
 }
 
@@ -69,8 +115,9 @@ export function isAllowedTelegramChatId(chatId: string | number): boolean {
 
 /** 텔레그램 메시지에서 CAPTCHA 정답 추출 */
 export function parseCaptchaAnswerFromTelegram(text: string): string | null {
-  const raw = text.trim();
+  let raw = text.trim();
   if (!raw || raw.startsWith('/')) return null;
+  raw = raw.replace(/^@\w+\s+/, '').trim();
   const answer = raw.replace(/^(정답|답|answer)\s*[:：]?\s*/i, '').trim();
   return answer || null;
 }
@@ -334,7 +381,8 @@ export async function notifyCaptchaTelegram(
         '1) VNC 접속 → CAPTCHA 풀기(또는 huma 정답 원격 입력) → 로그인',
         '2) huma 큐 → 발행 재개',
         '※ CAPTCHA 이미지는 텔레그램·huma 팝업에 캡처로 함께 표시됩니다.',
-        '💬 이 메시지에 <b>답장</b>으로 정답을 내면 huma가 VNC에 자동 입력합니다.',
+        '💬 CAPTCHA <b>사진·알림에 답장</b>으로 정답을 보내면 huma가 VNC에 자동 입력합니다.',
+        '📌 그룹: 일반 채팅(답장 아님)은 Bot Privacy로 수신되지 않을 수 있습니다.',
       );
     }
   }
