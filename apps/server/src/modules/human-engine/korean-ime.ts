@@ -5,7 +5,7 @@ import type { HumanEngineConfig } from '../../lib/settings.js';
 import { hangulToJamoSequence, isHangul, recomposeHangul } from './hangul.js';
 import { getAdjacentKey } from './typing-adjacent.js';
 import { humanClickLocator } from './mouse.js';
-import { resolveUseOsIme, typeHangulViaOsIme } from './os-ime.js';
+import { ensureOsHangulMode, resolveUseOsIme, typeHangulViaOsIme } from './os-ime.js';
 
 const IME_PROCESS_VK = 229;
 
