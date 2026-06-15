@@ -2,7 +2,6 @@ import type { Locator, Page } from 'playwright';
 
 import { humanSleep } from '../../human-engine/typing.js';
 import { scaledHumanSleep } from '../../human-engine/timing.js';
-import { calcReviewDurationMs } from '../../../lib/review-duration.js';
 import type { HumanEngineConfig } from '../../../lib/settings.js';
 import { parsePersona, type AccountPersona } from '../persona.js';
 import {
@@ -38,7 +37,6 @@ import {
   insertVideoViaToolbar,
   pasteBlogImageAtCaret,
 } from './naver-editor-media.js';
-import { performBlogReview } from './blog-editor-review.js';
 import { completeNaverPublishDialog } from './naver-publish-dialog.js';
 import { logOperation } from '../../../lib/log-emitter.js';
 import { sleep } from '../../../lib/utils.js';
@@ -142,7 +140,7 @@ async function appendLinkAndImageAtBodyEnd(params: {
       }).catch(() => {});
       const ok = await pasteBlogImageAtCaret(page, params.imagePath);
       if (!ok) throw new Error('BLOG_IMAGE_INSERT_FAILED');
-      await scaledHumanSleep(800, 2000, scale);
+      await sleep(300);
       await logOperation({
         level: 'info',
         message: '[post_blog] 이미지 삽입 완료',
@@ -291,31 +289,16 @@ export async function postNaverBlog(params: {
   if (!titleOkThisRun) {
     await logOperation({
       level: 'warn',
-      message: '[post_blog] 제목 미확정 — 검토·발행 계속 (재검증 생략)',
+      message: '[post_blog] 제목 미확정 — 발행 계속 (재검증·검토 생략)',
       account_id: params.accountId,
     }).catch(() => {});
   } else {
     await logOperation({
       level: 'info',
-      message: '[post_blog] 제목·본문·미디어 완료 — 검토·발행으로 진행',
+      message: '[post_blog] 제목·본문·미디어 완료 — 검토 생략, 발행으로 진행',
       account_id: params.accountId,
     }).catch(() => {});
   }
-
-  await prepareSeOneEditorSurface(page, 8_000, { destructiveDraftDismiss: false });
-
-  const reviewMs = calcReviewDurationMs(
-    params.title.length + params.content.length + (params.linkUrl?.length ?? 0),
-    config.review_duration_ms,
-  );
-  await logOperation({
-    level: 'info',
-    message: `[post_blog] 검토 시작 (${Math.round(reviewMs / 1000)}초 — 스크롤·읽기)`,
-    account_id: params.accountId,
-  }).catch(() => {});
-  await performBlogReview(page, reviewMs, scale);
-
-  await prepareSeOneEditorSurface(page, 8_000, { destructiveDraftDismiss: false });
 
   if (!isPostBlogPublishedUrl(page.url())) {
     await logOperation({
