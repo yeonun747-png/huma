@@ -406,7 +406,18 @@ export const api = {
           url?: string;
         }>
       >;
-      roasItems: Array<{ title: string; platform: string; views: number }>;
+      roasItems: Array<{
+        title: string;
+        blogUrl: string;
+        landingUrl: string;
+        clicks: number;
+        impressions: number;
+      }>;
+      roasMeta: {
+        configured: boolean;
+        periodDays: number;
+        missingEnv?: string[];
+      };
       yeonunSocial: Array<{ label: string; current: number; max: number | null }>;
       pananaStats: { todayPosts: number; activePlatforms: number; errorAccounts: number };
     }>(`/api/dashboard/stats${qs({ period: params?.period })}`),

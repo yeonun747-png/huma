@@ -15,6 +15,30 @@ import type { Workspace } from '@huma/shared';
 
 type DashboardApi = Awaited<ReturnType<typeof api.dashboardStats>>;
 
+type RoasRow = {
+  title: string;
+  blogUrl: string;
+  clicks: number;
+};
+
+function normalizeRoasItems(
+  items: DashboardApi['roasItems'] | undefined,
+): RoasRow[] {
+  return (items ?? []).map((item) => {
+    const legacy = item as {
+      views?: number;
+      platform?: string;
+      blogUrl?: string;
+      clicks?: number;
+    };
+    return {
+      title: item.title?.trim() || '제목 없음',
+      blogUrl: legacy.blogUrl?.trim() ?? '',
+      clicks: Number.isFinite(legacy.clicks) ? legacy.clicks! : Number(legacy.views) || 0,
+    };
+  });
+}
+
 function tagTone(status: PostRow['status']) {
   if (status === 'done') return 'ok' as const;
   if (status === 'error') return 'err' as const;
@@ -124,16 +148,29 @@ export function DashboardHome() {
   const maxChart = Math.max(...chartValues, 1);
   const maxValue = Math.max(...chartValues, 0);
   const avgLinePct = maxChart > 0 ? (chartAverage / maxChart) * 100 : 0;
-  const roasSource = stats?.roasItems ?? [];
-  const maxRoas = roasSource[0]?.views ?? 1;
+  const roasSource = useMemo(() => normalizeRoasItems(stats?.roasItems), [stats?.roasItems]);
+  const roasMeta = stats?.roasMeta;
+  const maxRoas = Math.max(...roasSource.map((item) => item.clicks), 1);
 
   const roasRows = useMemo(
     () =>
       roasSource.map((item) => [
-        item.title,
-        item.platform,
-        <span key="v" className="font-mono">{item.views.toLocaleString()}</span>,
-        <span key="b" className="m-roas-bar" style={{ width: `${roasBarWidth(item.views, maxRoas)}px` }} />,
+        <span key="t" className="block max-w-[148px] truncate" title={item.title}>
+          {item.title}
+        </span>,
+        item.blogUrl ? (
+          <MUrlLink key="b" href={item.blogUrl}>
+            {item.blogUrl.replace(/^https?:\/\//, '').slice(0, 28)} ↗
+          </MUrlLink>
+        ) : (
+          <span key="b" className="font-mono text-[11px] text-huma-t4">
+            —
+          </span>
+        ),
+        <span key="c" className="font-mono">
+          {(item.clicks ?? 0).toLocaleString()}
+        </span>,
+        <span key="bar" className="m-roas-bar" style={{ width: `${roasBarWidth(item.clicks ?? 0, maxRoas)}px` }} />,
       ]),
     [roasSource, maxRoas],
   );
@@ -287,11 +324,29 @@ export function DashboardHome() {
           </div>
         </MPanel>
 
-        <MPanel className="m-panel-fill" title="콘텐츠 효율 (ROAS) · 상위 5">
-          {roasRows.length === 0 ? (
-            <p className="py-4 text-center text-[12px] text-huma-t3">완료된 발행이 없습니다.</p>
+        <MPanel
+          className="m-panel-fill"
+          title={
+            <>
+              <span>발행 콘텐츠 성과 · 상위 5</span>
+              <span className="ml-auto text-[10.5px] font-normal normal-case tracking-normal text-huma-t3">
+                GSC · 최근 28일
+              </span>
+            </>
+          }
+        >
+          {roasMeta && !roasMeta.configured ? (
+            <p className="py-4 text-center text-[12px] text-huma-t3">
+              Search Console 미설정 ·{' '}
+              <Link href="/seo-keywords" className="text-huma-accent hover:underline">
+                SEO 키워드
+              </Link>
+              에서 연동
+            </p>
+          ) : roasRows.length === 0 ? (
+            <p className="py-4 text-center text-[12px] text-huma-t3">최근 28일 발행 기록이 없습니다.</p>
           ) : (
-            <MTable head={['콘텐츠 유형', '플랫폼', '조회', '효율']} rows={roasRows} />
+            <MTable head={['제목', '블로그', '유입', '효율']} rows={roasRows} />
           )}
         </MPanel>
       </MGrid>

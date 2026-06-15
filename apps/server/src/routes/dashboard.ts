@@ -12,6 +12,12 @@ import {
   kstTodayStartIso,
   parseDashboardPeriod,
 } from '../lib/dashboard-period.js';
+import { buildContentPerformanceItems } from '../lib/content-performance.js';
+import {
+  fetchSearchConsoleTopPages,
+  getMissingSearchConsoleEnvKeys,
+  isSearchConsoleConfigured,
+} from '../modules/seo/search-console.js';
 import type { Workspace } from '@huma/shared';
 
 const WS_META: Record<Workspace, { icon: string; name: string }> = {
@@ -40,6 +46,7 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
     const range = getPeriodRange(period);
     const todayStart = kstTodayStartIso();
     const chartRangeStart = kstDayStartIso(6);
+    const performanceRangeStart = new Date(Date.now() - 28 * 86400000).toISOString();
 
     const publishJobSelect =
       'completed_at, job_type, status, result_url, platform_schedule, link_url, content_type, title, workspace';
@@ -54,7 +61,7 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
       { data: periodJobs },
       { data: prevPeriodJobs },
       { data: chartJobs },
-      { data: recentCompleted },
+      { data: performanceJobs },
       { data: workspaceJobRows },
       { data: crankAccounts },
       { data: postingAccounts },
@@ -97,12 +104,10 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
         .gte('completed_at', chartRangeStart),
       supabase
         .from('huma_jobs')
-        .select('title, platform, content, completed_at, workspace')
+        .select(publishJobSelect)
         .in('workspace', workspaces)
         .eq('status', 'completed')
-        .gte('completed_at', range.start)
-        .order('completed_at', { ascending: false })
-        .limit(20),
+        .gte('completed_at', performanceRangeStart),
       supabase
         .from('huma_jobs')
         .select(
@@ -210,14 +215,32 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
         });
     }
 
-    const roasItems = (recentCompleted ?? [])
-      .map((j) => ({
-        title: j.title ?? '콘텐츠',
-        platform: j.platform ?? j.workspace ?? 'naver',
-        views: Math.max(100, (j.content ?? '').length * 3),
-      }))
-      .sort((a, b) => b.views - a.views)
-      .slice(0, 5);
+    const gscConfigured = workspaces.some((ws) => isSearchConsoleConfigured(ws));
+    const roasMissingEnv = gscConfigured
+      ? undefined
+      : [...new Set(workspaces.flatMap((ws) => getMissingSearchConsoleEnvKeys(ws)))];
+
+    let roasItems: ReturnType<typeof buildContentPerformanceItems> = [];
+    if (gscConfigured) {
+      const gscPagesByWorkspace = new Map<string, Awaited<ReturnType<typeof fetchSearchConsoleTopPages>>>();
+      await Promise.all(
+        workspaces.map(async (ws) => {
+          if (!isSearchConsoleConfigured(ws)) return;
+          try {
+            gscPagesByWorkspace.set(ws, await fetchSearchConsoleTopPages(ws, 500));
+          } catch {
+            gscPagesByWorkspace.set(ws, []);
+          }
+        }),
+      );
+      roasItems = buildContentPerformanceItems(performanceJobs ?? [], gscPagesByWorkspace);
+    }
+
+    const roasMeta = {
+      configured: gscConfigured,
+      periodDays: 28,
+      missingEnv: roasMissingEnv,
+    };
 
     const publishDelta = adjustedPeriodCompleted - adjustedPrevCompleted;
     const deltaPrefix = publishDelta >= 0 ? '▲' : '▼';
@@ -298,6 +321,7 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
       serviceStatus,
       workspacePosts,
       roasItems,
+      roasMeta,
       yeonunSocial: [
         { label: '🤝 오늘 타 블로그 방문', current: visitCurrent, max: visitMax },
         { label: '❤ 공감 클릭', current: Math.round(visitCurrent * 0.62), max: likeMax },

@@ -9,6 +9,14 @@ export type GscQueryRow = {
   position: number;
 };
 
+export type GscPageRow = {
+  page: string;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+};
+
 export function isSearchConsoleConfigured(workspace: string): boolean {
   return Boolean(getGoogleOAuth2(workspace) && gscSiteUrl(workspace));
 }
@@ -48,6 +56,39 @@ export async function fetchSearchConsoleTopQueries(
 
   return (res.data.rows ?? []).map((row) => ({
     word: String(row.keys?.[0] ?? ''),
+    clicks: row.clicks ?? 0,
+    impressions: row.impressions ?? 0,
+    ctr: row.ctr ?? 0,
+    position: row.position ?? 0,
+  }));
+}
+
+export async function fetchSearchConsoleTopPages(
+  workspace: string,
+  rowLimit = 500,
+): Promise<GscPageRow[]> {
+  const auth = getGoogleOAuth2(workspace);
+  const siteUrl = gscSiteUrl(workspace);
+  if (!auth || !siteUrl) return [];
+
+  const sc = google.searchconsole({ version: 'v1', auth });
+  const end = new Date();
+  const start = new Date(end.getTime() - 28 * 86400000);
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+
+  const res = await sc.searchanalytics.query({
+    siteUrl,
+    requestBody: {
+      startDate: fmt(start),
+      endDate: fmt(end),
+      dimensions: ['page'],
+      rowLimit,
+      dataState: 'final',
+    },
+  });
+
+  return (res.data.rows ?? []).map((row) => ({
+    page: String(row.keys?.[0] ?? ''),
     clicks: row.clicks ?? 0,
     impressions: row.impressions ?? 0,
     ctr: row.ctr ?? 0,
