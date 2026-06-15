@@ -42,6 +42,27 @@ async function scrollEditorCanvas(page: Page, durationMs: number): Promise<void>
   }
 }
 
+/** 이미지·링크 삽입 직후 — 툴바에서 본문으로 포인터 이동 후 읽듯 스크롤 */
+export async function performPostMediaBodyReview(page: Page, scale = 1): Promise<void> {
+  await moveMouseToEditorCanvas(page);
+  const rounds = randomBetween(3, 5);
+  for (let i = 0; i < rounds; i += 1) {
+    const reverse = i > 0 && Math.random() < 0.45;
+    const delta = reverse ? -randomBetween(120, 280) : randomBetween(140, 320);
+    await page.mouse.wheel(0, delta);
+    await page
+      .evaluate((dy) => {
+        const el = document.querySelector('.se-main-container, .se-container, .se-wrap') as
+          | HTMLElement
+          | null;
+        if (el) el.scrollTop = Math.max(0, Math.min(el.scrollHeight, el.scrollTop + dy));
+      }, delta)
+      .catch(() => {});
+    await scaledHumanSleep(700, 1800, scale);
+  }
+  await scaledHumanSleep(400, 900, scale);
+}
+
 /** 발행 전 검토 — 본문으로 마우스 이동 후 스크롤 */
 export async function performBlogReview(page: Page, durationMs: number, scale = 1): Promise<void> {
   await moveMouseToEditorCanvas(page);

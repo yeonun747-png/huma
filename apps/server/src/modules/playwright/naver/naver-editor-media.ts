@@ -6,18 +6,29 @@ import { humanSleep } from '../../human-engine/typing.js';
 import { humanClickLocator } from '../../human-engine/mouse.js';
 import { sleep } from '../../../lib/utils.js';
 import {
+  blogBodySectionLocator,
+  blurBlogTitleField,
   clickEditorToolbar,
   findVisibleLocator,
+  focusBlogBodyAtEnd,
   isBlogImageInBodySection,
+  isBlogImagePresentInBody,
 } from './naver-editor-locators.js';
+import { performPostMediaBodyReview } from './blog-editor-review.js';
 
-async function waitForBlogImageLoaded(page: Page, timeoutMs = 18_000): Promise<boolean> {
+async function refocusBodyAfterPhotoToolbar(page: Page): Promise<void> {
+  await blurBlogTitleField(page);
+  const bodyLoc = blogBodySectionLocator(page);
+  await focusBlogBodyAtEnd(page, bodyLoc);
+}
+
+async function waitForBlogImageLoaded(page: Page, timeoutMs = 30_000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (await isBlogImageInBodySection(page)) return true;
-    await sleep(400);
+    if (await isBlogImagePresentInBody(page)) return true;
+    await sleep(450);
   }
-  return false;
+  return isBlogImagePresentInBody(page);
 }
 
 async function openPhotoFileChooser(page: Page): Promise<FileChooser | null> {
@@ -67,12 +78,14 @@ async function insertFileViaToolbar(
     const fallbackChooser = await chooserPromise;
     if (!fallbackChooser) return false;
     await fallbackChooser.setFiles(localPath);
-    await humanSleep(2000, 4500);
+    await refocusBodyAfterPhotoToolbar(page);
+    await humanSleep(1500, 3000);
     return waitForBlogImageLoaded(page);
   }
 
   await chooser.setFiles(localPath);
-  await humanSleep(2000, 4500);
+  await refocusBodyAfterPhotoToolbar(page);
+  await humanSleep(1500, 3000);
   return waitForBlogImageLoaded(page);
 }
 
@@ -85,9 +98,19 @@ function mimeForImagePath(localPath: string): string {
 }
 
 /** 본문 캐럿 — 툴바 filechooser 우선, 실패 시 클립보드 붙여넣기 */
-export async function pasteBlogImageAtCaret(page: Page, localPath: string): Promise<boolean> {
+export async function pasteBlogImageAtCaret(
+  page: Page,
+  localPath: string,
+  options?: { skipPostReview?: boolean },
+): Promise<boolean> {
   const viaToolbar = await insertImageViaToolbar(page, localPath);
-  if (viaToolbar) return true;
+  if (viaToolbar) {
+    if (!options?.skipPostReview) {
+      await refocusBodyAfterPhotoToolbar(page);
+      await performPostMediaBodyReview(page);
+    }
+    return true;
+  }
 
   const mime = mimeForImagePath(localPath);
   const bytes = readFileSync(localPath);
@@ -110,8 +133,13 @@ export async function pasteBlogImageAtCaret(page: Page, localPath: string): Prom
   if (!clipboardReady) return false;
 
   await page.keyboard.press('Control+v');
-  await humanSleep(2500, 4500);
-  return waitForBlogImageLoaded(page);
+  await refocusBodyAfterPhotoToolbar(page);
+  await humanSleep(2000, 3500);
+  const ok = await waitForBlogImageLoaded(page);
+  if (ok && !options?.skipPostReview) {
+    await performPostMediaBodyReview(page);
+  }
+  return ok;
 }
 
 /** @deprecated 툴바 se-image 오탐 — isBlogImageInBodySection 사용 */
@@ -135,14 +163,16 @@ export async function insertImageViaToolbar(page: Page, localPath: string): Prom
   );
   if (fileInput) {
     await fileInput.setInputFiles(localPath);
-    await humanSleep(2000, 4000);
+    await refocusBodyAfterPhotoToolbar(page);
+    await humanSleep(1500, 3000);
     return waitForBlogImageLoaded(page);
   }
 
   const fallback = page.locator('input[type="file"]').first();
   if ((await fallback.count()) > 0) {
     await fallback.setInputFiles(localPath);
-    await humanSleep(2000, 4000);
+    await refocusBodyAfterPhotoToolbar(page);
+    await humanSleep(1500, 3000);
     return waitForBlogImageLoaded(page);
   }
 

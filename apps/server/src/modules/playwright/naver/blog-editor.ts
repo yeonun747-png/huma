@@ -10,6 +10,7 @@ import {
   prepareSeOneEditorSurface,
   waitAndDismissDraftResumePopup,
   resetDraftDismissGuard,
+  dismissDraftResumePopupNonDestructive,
 } from './enter-blog-editor.js';
 import {
   findBlogTitleLocator,
@@ -24,7 +25,7 @@ import {
   focusBlogBodyAtEnd,
   readBlogBodySectionText,
   isBlogLinkUrlInBodyText,
-  isBlogImageInBodySection,
+  isBlogImagePresentInBody,
   isFocusInTitleArea,
   isBlogBodySubstantiallyWritten,
   shouldSkipTitleRetypeOnBodyResume,
@@ -44,6 +45,7 @@ import {
   pasteBlogImageAtCaret,
 } from './naver-editor-media.js';
 import { completeNaverPublishDialog } from './naver-publish-dialog.js';
+import { performPostMediaBodyReview } from './blog-editor-review.js';
 import { logOperation } from '../../../lib/log-emitter.js';
 import { sleep } from '../../../lib/utils.js';
 
@@ -72,6 +74,27 @@ async function isBlogBodyReadyForMediaAppend(
   if (await verifyBlogBodyField(page, editor, content)) return true;
   const sectionText = await readBlogBodySectionText(page);
   return isBlogBodySubstantiallyWritten(sectionText, content);
+}
+
+async function isPostBlogMediaStageComplete(params: {
+  page: Page;
+  editor: Locator;
+  content: string;
+  linkUrl?: string;
+  imagePath?: string;
+  workspace?: string;
+}): Promise<boolean> {
+  if (!(await isBlogBodyReadyForMediaAppend(params.page, params.editor, params.content))) {
+    return false;
+  }
+  const workspace = params.workspace ?? 'yeonun';
+  const bodyText = await readBlogBodySectionText(params.page);
+  const resolvedLink = params.linkUrl?.trim()
+    ? resolveBlogLinkUrl(workspace, params.linkUrl.trim(), params.linkUrl.trim())
+    : '';
+  if (resolvedLink && !isBlogLinkUrlInBodyText(bodyText, resolvedLink)) return false;
+  if (params.imagePath && !(await isBlogImagePresentInBody(params.page))) return false;
+  return true;
 }
 
 /** 본문 insertText 직후 — Enter×2 → 링크 → Enter×1 → 이미지 (포커스·마우스 이동 없음) */
@@ -144,7 +167,7 @@ async function appendLinkAndImageAtBodyEnd(params: {
 
   if (params.imagePath) {
     await focusBlogBodyAtEnd(page, params.editor);
-    const imagePresent = await isBlogImageInBodySection(page);
+    const imagePresent = await isBlogImagePresentInBody(page);
     if (imagePresent) {
       await logOperation({
         level: 'info',
@@ -157,9 +180,10 @@ async function appendLinkAndImageAtBodyEnd(params: {
         message: '[post_blog] 이미지 삽입 시작 (붙여넣기·툴바 폴백)',
         account_id: accountId,
       }).catch(() => {});
-      const ok = await pasteBlogImageAtCaret(page, params.imagePath);
-      if (!ok) throw new Error('BLOG_IMAGE_INSERT_FAILED');
-      await sleep(300);
+      const ok = await pasteBlogImageAtCaret(page, params.imagePath, { skipPostReview: true });
+      if (!ok && !(await isBlogImagePresentInBody(page))) {
+        throw new Error('BLOG_IMAGE_INSERT_FAILED');
+      }
       await logOperation({
         level: 'info',
         message: '[post_blog] 이미지 삽입 완료',
@@ -167,6 +191,16 @@ async function appendLinkAndImageAtBodyEnd(params: {
       }).catch(() => {});
     }
   }
+
+  await blurBlogTitleField(page);
+  await dismissSeOneMaterialPopup(page);
+  await focusBlogBodyAtEnd(page, params.editor);
+  await logOperation({
+    level: 'info',
+    message: '[post_blog] 본문 검토 스크롤 — 발행 준비',
+    account_id: accountId,
+  }).catch(() => {});
+  await performPostMediaBodyReview(page, scale);
 }
 
 export async function postNaverBlog(params: {
@@ -188,7 +222,10 @@ export async function postNaverBlog(params: {
   const config = mergePersonaConfig(params.humanEngine, persona);
   const scale = params.rttScale ?? 1;
 
-  const page = await enterBlogEditor(params.page, config, { accountId: params.accountId });
+  const page = await enterBlogEditor(params.page, config, {
+    accountId: params.accountId,
+    preserveDraft: /postwrite|PostWriteForm|GoBlogWrite/i.test(params.page.url()),
+  });
 
   const publishedEarly = extractPublishedPostUrl(page.url());
   if (publishedEarly) {
@@ -201,116 +238,137 @@ export async function postNaverBlog(params: {
     account_id: params.accountId,
   });
 
-  await waitAndDismissDraftResumePopup(page, 3_000).catch(() => {});
-  resetDraftDismissGuard(page);
-
-  let titleBox = await findBlogTitleLocator(page);
   const editor = blogBodySectionLocator(page);
   const bodyResumeReady = await isBlogBodyReadyForMediaAppend(page, editor, params.content);
+  const mediaStageComplete = await isPostBlogMediaStageComplete({
+    page,
+    editor,
+    content: params.content,
+    linkUrl: params.linkUrl,
+    imagePath: params.imageUrls?.[0],
+    workspace: params.workspace,
+  });
 
-  let titleAlreadyOk =
-    titleBox != null && (await isBlogTitleFilledEnough(page, titleBox, params.title));
-
-  if (!titleAlreadyOk && bodyResumeReady && titleBox) {
-    if (await shouldSkipTitleRetypeOnBodyResume(page, titleBox, params.title)) {
-      titleAlreadyOk = true;
-      await blurBlogTitleField(page);
-      await logOperation({
-        level: 'info',
-        message:
-          '[post_blog] 본문 이미 입력됨 — 제목 재타이핑 생략(검증 실패 재시도·링크·이미지 단계로 진행)',
-        account_id: params.accountId,
-      }).catch(() => {});
-    }
-  }
-
-  let titleOkThisRun = titleAlreadyOk;
-
-  if (!titleAlreadyOk) {
-    titleBox = await waitForBlogTitleInputReady(page, 45_000, async () => {
-      await waitAndDismissDraftResumePopup(page, 8_000).catch(() => {});
-      resetDraftDismissGuard(page);
-    });
-    if (!titleBox) {
-      throw new Error('BLOG_TITLE_NOT_FOUND');
-    }
-    await logOperation({
-      level: 'info',
-      message: '[post_blog] 제목칸 준비 — pressSequentially 타이핑 시작',
-      account_id: params.accountId,
-    });
-
-    if (await isDraftResumePopupVisible(page)) {
-      await prepareSeOneEditorSurface(page, 6_000);
-    }
-
-    await ensureBlogTitleWritten(page, titleBox, params.title, config);
-    titleOkThisRun = true;
+  if (bodyResumeReady || mediaStageComplete) {
+    await dismissDraftResumePopupNonDestructive(page);
   } else {
+    await waitAndDismissDraftResumePopup(page, 3_000).catch(() => {});
+  }
+  resetDraftDismissGuard(page);
+
+  let titleOkThisRun = true;
+
+  if (mediaStageComplete) {
     await blurBlogTitleField(page);
     await logOperation({
       level: 'info',
-      message: '[post_blog] 제목 이미 입력됨 — 본문 입력으로 진행(재시도 시 제목 마우스 이동 없음)',
+      message: '[post_blog] 본문·링크·이미지 완료 — 제목 재입력 생략, 본문 검토 후 발행',
+      account_id: params.accountId,
+    }).catch(() => {});
+  } else {
+    let titleBox = await findBlogTitleLocator(page);
+
+    let titleAlreadyOk =
+      titleBox != null && (await isBlogTitleFilledEnough(page, titleBox, params.title));
+
+    if (!titleAlreadyOk && bodyResumeReady && titleBox) {
+      if (await shouldSkipTitleRetypeOnBodyResume(page, titleBox, params.title)) {
+        titleAlreadyOk = true;
+        await blurBlogTitleField(page);
+        await logOperation({
+          level: 'info',
+          message:
+            '[post_blog] 본문 이미 입력됨 — 제목 재타이핑 생략(검증 실패 재시도·링크·이미지 단계로 진행)',
+          account_id: params.accountId,
+        }).catch(() => {});
+      }
+    }
+
+    titleOkThisRun = titleAlreadyOk;
+
+    if (!titleAlreadyOk) {
+      titleBox = await waitForBlogTitleInputReady(page, 45_000, async () => {
+        await dismissDraftResumePopupNonDestructive(page);
+        resetDraftDismissGuard(page);
+      });
+      if (!titleBox) {
+        throw new Error('BLOG_TITLE_NOT_FOUND');
+      }
+      await logOperation({
+        level: 'info',
+        message: '[post_blog] 제목칸 준비 — pressSequentially 타이핑 시작',
+        account_id: params.accountId,
+      });
+
+      if (await isDraftResumePopupVisible(page)) {
+        await prepareSeOneEditorSurface(page, 6_000, { destructiveDraftDismiss: false });
+      }
+
+      await ensureBlogTitleWritten(page, titleBox, params.title, config);
+      titleOkThisRun = true;
+    } else {
+      await blurBlogTitleField(page);
+      await logOperation({
+        level: 'info',
+        message: '[post_blog] 제목 이미 입력됨 — 본문 입력으로 진행(재시도 시 제목 마우스 이동 없음)',
+        account_id: params.accountId,
+      });
+    }
+
+    await logOperation({
+      level: 'info',
+      message: '[post_blog] 제목 입력 완료 — 본문 placeholder 클릭·입력 시작',
+      account_id: params.accountId,
+    });
+
+    let bodyReady =
+      bodyResumeReady || (await isBlogBodyReadyForMediaAppend(page, editor, params.content));
+
+    if (!bodyReady) {
+      await clickBlogBodyPlaceholder(page);
+      const pastePct = Math.round(resolvePasteRatio(config) * 100);
+      await logOperation({
+        level: 'info',
+        message: `[post_blog] 본문 입력 시작 (복붙${pastePct}%·타이핑${100 - pastePct}%)`,
+        account_id: params.accountId,
+      }).catch(() => {});
+
+      try {
+        await typeSeOneBlogBody(page, editor, params.content, config);
+      } catch (bodyErr) {
+        bodyReady = await isBlogBodyReadyForMediaAppend(page, editor, params.content);
+        if (bodyReady) {
+          await logOperation({
+            level: 'warn',
+            message: `[post_blog][body] 입력 오류 후 본문 충분 — 링크·이미지 단계로 진행: ${(bodyErr as Error).message}`,
+            account_id: params.accountId,
+          }).catch(() => {});
+        } else {
+          await logOperation({
+            level: 'warn',
+            message: `[post_blog][body] 입력 실패 — ${(bodyErr as Error).message}`,
+            account_id: params.accountId,
+          }).catch(() => {});
+          throw bodyErr;
+        }
+      }
+      bodyReady = bodyReady || (await isBlogBodyReadyForMediaAppend(page, editor, params.content));
+    }
+
+    if (!bodyReady) {
+      await logOperation({
+        level: 'warn',
+        message: '[post_blog][body] 입력 후 검증 실패 — BLOG_BODY_WRITE_FAILED',
+        account_id: params.accountId,
+      }).catch(() => {});
+      throw new Error('BLOG_BODY_WRITE_FAILED');
+    }
+    await logOperation({
+      level: 'info',
+      message: '[post_blog] 본문 입력 완료',
       account_id: params.accountId,
     });
   }
-
-  await logOperation({
-    level: 'info',
-    message: '[post_blog] 제목 입력 완료 — 본문 placeholder 클릭·입력 시작',
-    account_id: params.accountId,
-  });
-
-  let bodyReady = bodyResumeReady || (await isBlogBodyReadyForMediaAppend(page, editor, params.content));
-
-  if (!bodyReady) {
-    await clickBlogBodyPlaceholder(page);
-    const pastePct = Math.round(resolvePasteRatio(config) * 100);
-    await logOperation({
-      level: 'info',
-      message: `[post_blog] 본문 입력 시작 (복붙${pastePct}%·타이핑${100 - pastePct}%)`,
-      account_id: params.accountId,
-    }).catch(() => {});
-
-    try {
-      await typeSeOneBlogBody(page, editor, params.content, config);
-    } catch (bodyErr) {
-      bodyReady = await isBlogBodyReadyForMediaAppend(page, editor, params.content);
-      if (bodyReady) {
-        await logOperation({
-          level: 'warn',
-          message: `[post_blog][body] 입력 오류 후 본문 충분 — 링크·이미지 단계로 진행: ${(bodyErr as Error).message}`,
-          account_id: params.accountId,
-        }).catch(() => {});
-      } else {
-        await logOperation({
-          level: 'warn',
-          message: `[post_blog][body] 입력 실패 — ${(bodyErr as Error).message}`,
-          account_id: params.accountId,
-        }).catch(() => {});
-        throw bodyErr;
-      }
-    }
-    bodyReady = bodyReady || (await isBlogBodyReadyForMediaAppend(page, editor, params.content));
-  }
-
-  if (!titleBox) {
-    throw new Error('BLOG_TITLE_NOT_FOUND');
-  }
-
-  if (!bodyReady) {
-    await logOperation({
-      level: 'warn',
-      message: '[post_blog][body] 입력 후 검증 실패 — BLOG_BODY_WRITE_FAILED',
-      account_id: params.accountId,
-    }).catch(() => {});
-    throw new Error('BLOG_BODY_WRITE_FAILED');
-  }
-  await logOperation({
-    level: 'info',
-    message: '[post_blog] 본문 입력 완료',
-    account_id: params.accountId,
-  });
 
   await appendLinkAndImageAtBodyEnd({
     page,
@@ -345,6 +403,7 @@ export async function postNaverBlog(params: {
   }
 
   if (!isPostBlogPublishedUrl(page.url())) {
+    await prepareSeOneEditorSurface(page, 4_000, { destructiveDraftDismiss: false });
     await logOperation({
       level: 'info',
       message: '[post_blog] 발행 버튼 클릭·카테고리·해시태그·최종 발행',

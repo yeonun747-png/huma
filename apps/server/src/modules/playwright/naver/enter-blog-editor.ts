@@ -20,6 +20,7 @@ import {
   findBlogTitleLocator,
   findVisibleLocator,
   editorLocatorScopes,
+  hasExistingBlogEditorContent,
   isDraftResumePopupVisible,
   isNaverBlogEditorInteractable,
   isSeOneEditorShellReady,
@@ -117,7 +118,10 @@ export function resetDraftDismissGuard(editorPage: Page): void {
 }
 
 /** 「작성 중인 글이 있습니다」 — 확인(이어쓰기) 금지, 취소만 마우스로 클릭해 새 글 작성 */
-async function dismissDraftResumePopup(editorPage: Page): Promise<boolean> {
+async function dismissDraftResumePopup(
+  editorPage: Page,
+  options?: { moveMouseToTitle?: boolean },
+): Promise<boolean> {
   if (!(await isDraftResumePopupVisible(editorPage))) return false;
 
   const guard = draftDismissGuardByPage.get(editorPage);
@@ -164,7 +168,9 @@ async function dismissDraftResumePopup(editorPage: Page): Promise<boolean> {
           message: '[post_blog] 작성중 글 팝업 취소 완료',
         }).catch(() => {});
         // 팝업이 사라지면 포인터를 즉시 제목칸으로 이동(취소 버튼 위치 정체 방지)
-        await moveMouseToTitleIfReady(editorPage);
+        if (options?.moveMouseToTitle !== false) {
+          await moveMouseToTitleIfReady(editorPage);
+        }
         resetDraftDismissGuard(editorPage);
         draftDismissGuardByPage.set(editorPage, {
           inFlight: false,
@@ -213,12 +219,14 @@ export async function dismissDraftResumePopupNonDestructive(editorPage: Page): P
 /** 도움말·dim 등 — 에디터 입력을 가리는 오버레이 제거 (발행 전에도 재호출) */
 export async function dismissNaverBlogEditorOverlays(
   editorPage: Page,
-  options?: { includeDraftPopup?: boolean },
+  options?: { includeDraftPopup?: boolean; preserveDraft?: boolean },
 ): Promise<void> {
   await dismissSeOneHelpPanel(editorPage);
 
-  if (options?.includeDraftPopup !== false) {
-    await dismissDraftResumePopup(editorPage);
+  if (options?.includeDraftPopup !== false && !options?.preserveDraft) {
+    await dismissDraftResumePopup(editorPage, { moveMouseToTitle: true });
+  } else if (options?.preserveDraft) {
+    await dismissDraftResumePopupNonDestructive(editorPage);
   }
 
   const scopes = await editorLocatorScopes(editorPage);
@@ -276,12 +284,18 @@ async function isSmartEditorInteractable(editorPage: Page): Promise<boolean> {
   return isNaverBlogEditorInteractable(editorPage);
 }
 
-async function waitForSmartEditor(editorPage: Page, timeoutMs = SMART_EDITOR_WAIT_MS): Promise<boolean> {
+async function waitForSmartEditor(
+  editorPage: Page,
+  timeoutMs = SMART_EDITOR_WAIT_MS,
+  options?: { preserveDraft?: boolean },
+): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
-    // 임시저장 팝업·도움말 — draft 팝업은 여기서 1회만 처리(중복 취소 클릭 방지)
-    await dismissNaverBlogEditorOverlays(editorPage, { includeDraftPopup: true });
+    await dismissNaverBlogEditorOverlays(editorPage, {
+      includeDraftPopup: !options?.preserveDraft,
+      preserveDraft: options?.preserveDraft,
+    });
     if (!(await isDraftResumePopupVisible(editorPage))) {
       if (await isSeOneEditorShellReady(editorPage)) return true;
       if (await isSmartEditorInteractable(editorPage)) return true;
@@ -295,7 +309,11 @@ async function waitForSmartEditor(editorPage: Page, timeoutMs = SMART_EDITOR_WAI
   return false;
 }
 
-async function tryEditorOnPage(page: Page, waitBudgetMs = SMART_EDITOR_WAIT_MS): Promise<Page | null> {
+async function tryEditorOnPage(
+  page: Page,
+  waitBudgetMs = SMART_EDITOR_WAIT_MS,
+  options?: { preserveDraft?: boolean },
+): Promise<Page | null> {
   await page.bringToFront().catch(() => {});
   await page.waitForLoadState('domcontentloaded').catch(() => {});
 
@@ -304,11 +322,18 @@ async function tryEditorOnPage(page: Page, waitBudgetMs = SMART_EDITOR_WAIT_MS):
     (await page.locator('#mainFrame').count().catch(() => 0)) > 0 ||
     (await isSeOneEditorShellReady(page))
   ) {
-    if (await waitForSmartEditor(page, waitBudgetMs)) {
+    if (await waitForSmartEditor(page, waitBudgetMs, options)) {
       await dismissSeOneHelpPanel(page);
-      await dismissNaverBlogEditorOverlays(page, { includeDraftPopup: false });
+      await dismissNaverBlogEditorOverlays(page, {
+        includeDraftPopup: false,
+        preserveDraft: options?.preserveDraft,
+      });
       if (await isDraftResumePopupVisible(page)) {
-        await prepareSeOneEditorSurface(page, 20_000);
+        if (options?.preserveDraft) {
+          await dismissDraftResumePopupNonDestructive(page);
+        } else {
+          await prepareSeOneEditorSurface(page, 20_000);
+        }
       } else {
         await dismissSeOneMaterialPopup(page);
       }
@@ -326,19 +351,26 @@ async function tryEditorOnPage(page: Page, waitBudgetMs = SMART_EDITOR_WAIT_MS):
 export async function enterBlogEditor(
   page: Page,
   _humanEngine: HumanEngineConfig,
-  options?: { accountId?: string },
+  options?: { accountId?: string; preserveDraft?: boolean },
 ): Promise<Page> {
   const context = page.context();
+  const preserveDraft =
+    options?.preserveDraft ??
+    (POSTWRITE_URL_RE.test(page.url()) ? await hasExistingBlogEditorContent(page) : false);
 
   // ① 이미 postwrite 로딩 중인 탭 — goto 없이 대기만
   const existingPostwrite = findNaverPostwritePage(context);
   if (existingPostwrite) {
-    const ready = await tryEditorOnPage(existingPostwrite);
+    const preserve =
+      preserveDraft || (await hasExistingBlogEditorContent(existingPostwrite));
+    const ready = await tryEditorOnPage(existingPostwrite, SMART_EDITOR_WAIT_MS, {
+      preserveDraft: preserve,
+    });
     if (ready) return ready;
   }
 
   if (POSTWRITE_URL_RE.test(page.url())) {
-    const ready = await tryEditorOnPage(page);
+    const ready = await tryEditorOnPage(page, SMART_EDITOR_WAIT_MS, { preserveDraft });
     if (ready) return ready;
   }
 

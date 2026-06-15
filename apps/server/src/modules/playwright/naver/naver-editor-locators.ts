@@ -1297,6 +1297,25 @@ export function isBlogLinkUrlInBodyText(bodyText: string, linkUrl: string): bool
   return /yeonun\.(com|ai)/i.test(normalized);
 }
 
+/** 본문 섹션 — 업로드 중·placeholder 이미지 모듈 (naturalWidth 미확정) */
+export async function isBlogImageModuleInBodySection(page: Page): Promise<boolean> {
+  return page
+    .evaluate((bodySel) => {
+      const section = document.querySelector(bodySel);
+      if (!section) return false;
+      const modules = section.querySelectorAll(
+        '.se-module-image, .se-component-image, [data-module="image"], .se-image-resource',
+      );
+      for (const mod of modules) {
+        const el = mod as HTMLElement;
+        if (el.offsetWidth >= 40 && el.offsetHeight >= 40) return true;
+        if (el.querySelector('img, .se-image, [class*="image"]')) return true;
+      }
+      return false;
+    }, BLOG_BODY_SECTION_LOCATOR)
+    .catch(() => false);
+}
+
 /** 본문 섹션 안에만 이미지 모듈 존재 여부 (툴바 se-image·깨진 placeholder 제외) */
 export async function isBlogImageInBodySection(page: Page): Promise<boolean> {
   return page
@@ -1316,6 +1335,29 @@ export async function isBlogImageInBodySection(page: Page): Promise<boolean> {
       return false;
     }, BLOG_BODY_SECTION_LOCATOR)
     .catch(() => false);
+}
+
+export async function isBlogImagePresentInBody(page: Page): Promise<boolean> {
+  if (await isBlogImageInBodySection(page)) return true;
+  return isBlogImageModuleInBodySection(page);
+}
+
+/** postwrite 탭에 제목·본문이 이미 채워졌는지 — 재진입 시 임시저장 취소·제목 재입력 방지 */
+export async function hasExistingBlogEditorContent(page: Page): Promise<boolean> {
+  const bodyText = await readBlogBodySectionText(page);
+  if (bodyText.replace(/\s+/g, '').length >= 40) return true;
+  if (await isBlogImagePresentInBody(page)) return true;
+
+  const titleLoc = await findBlogTitleLocator(page);
+  if (!titleLoc) return false;
+  const editable = await resolveTitleEditableLocator(page, titleLoc);
+  const written = await readBlogTitleTextAll(page, titleLoc, editable);
+  return Boolean(
+    written &&
+      written.replace(/\s+/g, '').length >= 4 &&
+      !isTitlePlaceholderText(written) &&
+      !isTitleEditorChromeText(written),
+  );
 }
 
 /** placeholder 클릭 직후 — 빈 paragraph는 isVisible false일 수 있어 attached만 확인 */
