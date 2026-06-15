@@ -33,7 +33,11 @@ export const DEFAULT_POSTING_WARMUP: PostingWarmupSettings = {
 
 export interface WatcherSettings {
   slack_webhook?: string;
+  /** Layer4 CAPTCHA·429 감지 시 Slack 알림 ON/OFF */
+  captcha_slack?: boolean;
   cooldown_429_min?: number;
+  /** 429 감지 후 자동 쿨다운 대기 ON/OFF */
+  cooldown_auto?: boolean;
   recovery_steps_min?: number[];
   auto_pause?: boolean;
   gradual_recovery?: boolean;
@@ -92,6 +96,8 @@ export async function getPostingWarmupSettings(): Promise<PostingWarmupSettings>
 }
 
 const DEFAULT_WATCHER: WatcherSettings = {
+  captcha_slack: true,
+  cooldown_auto: true,
   cooldown_429_min: 15,
   recovery_steps_min: [12, 30, 120],
   auto_pause: true,
@@ -240,14 +246,8 @@ export async function getCrankScheduleWindow(): Promise<{ start: number; end: nu
   return { start: 8, end: 22 };
 }
 
-export function resolve429CooldownMs(
-  watcher: WatcherSettings,
-  human: HumanEngineScheduleConfig,
-): number {
-  const fpHours = human.fingerprint?.cooldown_429_hours;
-  if (typeof fpHours === 'number' && fpHours > 0) {
-    return fpHours * 3600_000;
-  }
+export function resolve429CooldownMs(watcher: WatcherSettings): number {
+  if (watcher.cooldown_auto === false) return 0;
   return (watcher.cooldown_429_min ?? 15) * 60_000;
 }
 
@@ -255,15 +255,14 @@ export function resolveRecoveryDelayMs(
   tier: number,
   is429: boolean,
   watcher: WatcherSettings,
-  human: HumanEngineScheduleConfig,
 ): number {
   if (watcher.gradual_recovery === false) {
-    return resolve429CooldownMs(watcher, human);
+    return resolve429CooldownMs(watcher);
   }
 
   const steps = watcher.recovery_steps_min ?? [12, 30, 120];
   if (tier >= 3) return (steps[2] ?? 120) * 60_000;
-  if (is429 || tier >= 2) return resolve429CooldownMs(watcher, human);
+  if (is429 || tier >= 2) return resolve429CooldownMs(watcher);
   return (steps[0] ?? 12) * 60_000;
 }
 
@@ -271,8 +270,8 @@ export async function shouldNotifySlack(): Promise<boolean> {
   const app = await getAppSettings();
   if (app.slack_webhook === false) return false;
 
-  const human = await getHumanEngineScheduleConfig();
-  if (human.fingerprint?.captcha_slack === false) return false;
+  const watcher = await getWatcherSettings();
+  if (watcher.captcha_slack === false) return false;
 
   return Boolean(process.env.SLACK_WEBHOOK_URL?.trim());
 }

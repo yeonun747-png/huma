@@ -2,7 +2,6 @@ import axios from 'axios';
 import { supabase } from '../../middleware/auth.js';
 import { logOperation } from '../../lib/log-emitter.js';
 import {
-  getHumanEngineScheduleConfig,
   getWatcherSettings,
   resolveRecoveryDelayMs,
   shouldNotifySlack,
@@ -177,7 +176,6 @@ export async function handleLayer4Detection(
   },
 ) {
   const watcher = await getWatcherSettings();
-  const human = await getHumanEngineScheduleConfig();
   const { countToday, tier } = await bumpDetectionState(accountId);
 
   if (options?.skipAccountPause) {
@@ -189,8 +187,7 @@ export async function handleLayer4Detection(
     return;
   }
 
-  const autoPause =
-    watcher.auto_pause !== false && human.fingerprint?.auto_pause_on_detect !== false;
+  const autoPause = watcher.auto_pause !== false;
   if (autoPause) {
     await pauseAccount(accountId);
   }
@@ -215,7 +212,7 @@ export async function handleLayer4Detection(
 
   const captcha = isCaptchaError(err);
   const is429 = is429Error(err);
-  const delayMs = resolveRecoveryDelayMs(tier, is429, watcher, human);
+  const delayMs = resolveRecoveryDelayMs(tier, is429, watcher);
   const restLabel = (ms: number) =>
     `${Math.round(ms / 60000)}분 휴식 (계정 관리에서 is_active 수동 후 재투입)`;
 

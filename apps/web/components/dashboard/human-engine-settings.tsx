@@ -28,11 +28,8 @@ interface HumanEngineConfig {
     audio_noise: boolean;
     mouse_bezier: boolean;
     click_jitter_px: number;
-    auto_pause_on_detect: boolean;
-    captcha_slack: boolean;
     captcha_telegram: boolean;
     captcha_vision_auto: boolean;
-    cooldown_429_hours: number;
   };
 }
 
@@ -76,11 +73,8 @@ const DEFAULT_HUMAN: HumanEngineConfig = {
     audio_noise: true,
     mouse_bezier: true,
     click_jitter_px: 3,
-    auto_pause_on_detect: true,
-    captcha_slack: true,
     captcha_telegram: true,
     captcha_vision_auto: false,
-    cooldown_429_hours: 2,
   },
 };
 
@@ -146,6 +140,7 @@ function HeSliderRow({
   max,
   step = 1,
   suffix = '',
+  hint,
   onChange,
 }: {
   label: string;
@@ -154,31 +149,38 @@ function HeSliderRow({
   max: number;
   step?: number;
   suffix?: string;
+  hint?: string;
   onChange: (v: number) => void;
 }) {
   const display = step < 1 ? `${value.toFixed(1)}${suffix}` : `${value}${suffix}`;
   return (
-    <div className="he-slider-row">
-      <span className="he-slider-label">{label}</span>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(snapStep(parseFloat(e.target.value), step))}
-        className="he-range"
-      />
-      <span className="he-slider-val">{display}</span>
+    <div className="he-field">
+      <div className="he-slider-row">
+        <span className="he-slider-label">{label}</span>
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(e) => onChange(snapStep(parseFloat(e.target.value), step))}
+          className="he-range"
+        />
+        <span className="he-slider-val">{display}</span>
+      </div>
+      {hint ? <p className="he-field-hint">{hint}</p> : null}
     </div>
   );
 }
 
-function HeStaticRow({ label, value }: { label: string; value: string }) {
+function HeStaticRow({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div className="he-slider-row">
-      <span className="he-slider-label">{label}</span>
-      <span className="he-slider-static">{value}</span>
+    <div className="he-field">
+      <div className="he-slider-row">
+        <span className="he-slider-label">{label}</span>
+        <span className="he-slider-static">{value}</span>
+      </div>
+      {hint ? <p className="he-field-hint">{hint}</p> : null}
     </div>
   );
 }
@@ -186,24 +188,29 @@ function HeStaticRow({ label, value }: { label: string; value: string }) {
 function HeToggle({
   label,
   value,
+  hint,
   onChange,
 }: {
   label: string;
   value: boolean;
+  hint?: string;
   onChange: (v: boolean) => void;
 }) {
   return (
-    <div className="he-tw">
-      <span className="he-tw-label">{label}</span>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={value}
-        onClick={() => onChange(!value)}
-        className={cn('he-tgl', value && 'he-tgl-on')}
-      >
-        <span className="he-tgl-knob" />
-      </button>
+    <div className="he-field">
+      <div className="he-tw">
+        <span className="he-tw-label">{label}</span>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={value}
+          onClick={() => onChange(!value)}
+          className={cn('he-tgl', value && 'he-tgl-on')}
+        >
+          <span className="he-tgl-knob" />
+        </button>
+      </div>
+      {hint ? <p className="he-field-hint">{hint}</p> : null}
     </div>
   );
 }
@@ -227,12 +234,8 @@ export function HumanEngineSettings() {
       api.getSetting('human_engine').catch(() => ({})),
       api.getSetting('image_engine').catch(() => ({})),
       api.getSetting('higgsfield').catch(() => ({})),
-      api.getSetting('watcher').catch(() => ({})),
-    ]).then(([h, img, higgs, watcher]) => {
+    ]).then(([h, img, higgs]) => {
       const merged = mergeHuman(h as Record<string, unknown>);
-      const w = watcher as Record<string, unknown>;
-      if (w.auto_pause !== undefined) merged.fingerprint.auto_pause_on_detect = Boolean(w.auto_pause);
-      if (w.cooldown_429_min !== undefined) merged.fingerprint.cooldown_429_hours = Number(w.cooldown_429_min) / 60;
       setHuman(merged);
       humanRef.current = merged;
       const mergedImage = {
@@ -270,12 +273,6 @@ export function HumanEngineSettings() {
           default_video_resolution: FIXED_VIDEO_RESOLUTION,
           video_duration_sec: 15,
           whisper_subtitle_sync: med.whisper_subtitle_sync,
-        }),
-        api.updateSetting('watcher', {
-          auto_pause: h.fingerprint.auto_pause_on_detect,
-          cooldown_429_min: h.fingerprint.cooldown_429_hours * 60,
-          captcha_slack: h.fingerprint.captcha_slack,
-          captcha_telegram: h.fingerprint.captcha_telegram ?? true,
         }),
       ]);
     },
@@ -387,38 +384,40 @@ export function HumanEngineSettings() {
       <div className="he-g2">
         <div className="panel he-panel">
           <div className="he-panel-t">○ 감지 방어 · 핑거프린트</div>
-          <HeToggle label="Canvas 해시 스푸핑" value={human.fingerprint.canvas_spoof} onChange={(v) => { setHuman((h) => { const next = { ...h, fingerprint: { ...h.fingerprint, canvas_spoof: v } }; humanRef.current = next; saveNow(next, imageRef.current, mediaRef.current); return next; }); }} />
-          <HeToggle label="WebGL 렌더러 변조" value={human.fingerprint.webgl_spoof} onChange={(v) => { setHuman((h) => { const next = { ...h, fingerprint: { ...h.fingerprint, webgl_spoof: v } }; humanRef.current = next; saveNow(next, imageRef.current, mediaRef.current); return next; }); }} />
-          <HeToggle label="AudioContext 노이즈" value={human.fingerprint.audio_noise} onChange={(v) => { setHuman((h) => { const next = { ...h, fingerprint: { ...h.fingerprint, audio_noise: v } }; humanRef.current = next; saveNow(next, imageRef.current, mediaRef.current); return next; }); }} />
-          <HeToggle label="마우스 베지어 이동" value={human.fingerprint.mouse_bezier} onChange={(v) => { setHuman((h) => { const next = { ...h, fingerprint: { ...h.fingerprint, mouse_bezier: v } }; humanRef.current = next; saveNow(next, imageRef.current, mediaRef.current); return next; }); }} />
-          <div className="he-tw">
-            <span className="he-tw-label">클릭 좌표 오차</span>
-            <div className="flex items-center gap-2">
-              <input
-                type="range"
-                min={0}
-                max={10}
-                step={1}
-                value={human.fingerprint.click_jitter_px}
-                onChange={(e) => {
-                  const v = Math.round(parseFloat(e.target.value));
-                  setHuman((h) => {
-                    const next = { ...h, fingerprint: { ...h.fingerprint, click_jitter_px: v } };
-                    humanRef.current = next;
-                    return next;
-                  });
-                  scheduleSave();
-                }}
-                className="he-range-sm"
-              />
-              <span className="he-jitter-val">±{human.fingerprint.click_jitter_px}px</span>
+          <HeToggle label="Canvas 해시 스푸핑" hint="브라우저 Canvas 지문을 세션마다 살짝 바꿔 자동화 탐지를 줄입니다." value={human.fingerprint.canvas_spoof} onChange={(v) => { setHuman((h) => { const next = { ...h, fingerprint: { ...h.fingerprint, canvas_spoof: v } }; humanRef.current = next; saveNow(next, imageRef.current, mediaRef.current); return next; }); }} />
+          <HeToggle label="WebGL 렌더러 변조" hint="GPU·렌더러 정보를 변조해 같은 PC 패턴이 반복 노출되지 않게 합니다." value={human.fingerprint.webgl_spoof} onChange={(v) => { setHuman((h) => { const next = { ...h, fingerprint: { ...h.fingerprint, webgl_spoof: v } }; humanRef.current = next; saveNow(next, imageRef.current, mediaRef.current); return next; }); }} />
+          <HeToggle label="AudioContext 노이즈" hint="오디오 핑거프린트에 미세 노이즈를 넣어 기기 식별을 어렵게 합니다." value={human.fingerprint.audio_noise} onChange={(v) => { setHuman((h) => { const next = { ...h, fingerprint: { ...h.fingerprint, audio_noise: v } }; humanRef.current = next; saveNow(next, imageRef.current, mediaRef.current); return next; }); }} />
+          <HeToggle label="마우스 베지어 이동" hint="직선이 아닌 곡선 경로로 마우스를 움직여 사람처럼 보이게 합니다." value={human.fingerprint.mouse_bezier} onChange={(v) => { setHuman((h) => { const next = { ...h, fingerprint: { ...h.fingerprint, mouse_bezier: v } }; humanRef.current = next; saveNow(next, imageRef.current, mediaRef.current); return next; }); }} />
+          <div className="he-field">
+            <div className="he-tw">
+              <span className="he-tw-label">클릭 좌표 오차</span>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min={0}
+                  max={10}
+                  step={1}
+                  value={human.fingerprint.click_jitter_px}
+                  onChange={(e) => {
+                    const v = Math.round(parseFloat(e.target.value));
+                    setHuman((h) => {
+                      const next = { ...h, fingerprint: { ...h.fingerprint, click_jitter_px: v } };
+                      humanRef.current = next;
+                      return next;
+                    });
+                    scheduleSave();
+                  }}
+                  className="he-range-sm"
+                />
+                <span className="he-jitter-val">±{human.fingerprint.click_jitter_px}px</span>
+              </div>
             </div>
+            <p className="he-field-hint">버튼 정중앙이 아닌 ±Npx 범위에서 클릭합니다.</p>
           </div>
-          <HeToggle label="탐지 시 자동 일시정지" value={human.fingerprint.auto_pause_on_detect} onChange={(v) => { setHuman((h) => { const next = { ...h, fingerprint: { ...h.fingerprint, auto_pause_on_detect: v } }; humanRef.current = next; saveNow(next, imageRef.current, mediaRef.current); return next; }); }} />
-          <HeToggle label="캡차 감지 → Slack 알림" value={human.fingerprint.captcha_slack} onChange={(v) => { setHuman((h) => { const next = { ...h, fingerprint: { ...h.fingerprint, captcha_slack: v } }; humanRef.current = next; saveNow(next, imageRef.current, mediaRef.current); return next; }); }} />
-          <HeToggle label="캡cha 감지 → Telegram 알림" value={human.fingerprint.captcha_telegram ?? true} onChange={(v) => { setHuman((h) => { const next = { ...h, fingerprint: { ...h.fingerprint, captcha_telegram: v } }; humanRef.current = next; saveNow(next, imageRef.current, mediaRef.current); return next; }); }} />
+          <HeToggle label="캡cha 감지 → Telegram 알림" hint="CAPTCHA가 뜨면 Telegram으로 운영자에게 알립니다." value={human.fingerprint.captcha_telegram ?? true} onChange={(v) => { setHuman((h) => { const next = { ...h, fingerprint: { ...h.fingerprint, captcha_telegram: v } }; humanRef.current = next; saveNow(next, imageRef.current, mediaRef.current); return next; }); }} />
           <HeToggle
             label="CAPTCHA Vision 자동 해결 (Sonnet)"
+            hint="AI로 CAPTCHA를 자동 시도합니다. 3회 실패 시 Telegram 알림 후 VNC 수동 처리로 넘깁니다."
             value={human.fingerprint.captcha_vision_auto ?? false}
             onChange={(v) => {
               setHuman((h) => {
@@ -429,19 +428,14 @@ export function HumanEngineSettings() {
               });
             }}
           />
-          <div className="he-tw-sub -mt-2 mb-2 text-[11px] text-huma-t3">
-            영수증·숫자 입력 · 이미지 그리드 클릭 · 슬라이드 퍼즐 (베지어 마우스) — 3회 실패 시 Telegram → VNC
-          </div>
-          <div className="he-tw">
-            <span className="he-tw-label">429 이후 쿨다운</span>
-            <span className="he-meta-val">{human.fingerprint.cooldown_429_hours}시간</span>
-          </div>
+
         </div>
 
         <div className="panel he-panel">
           <div className="he-panel-t">■ 이미지 고유화</div>
           <HeSliderRow
             label="픽셀 노이즈 강도"
+            hint="업로드 이미지에 눈에 띄지 않는 노이즈를 추가해 동일 파일 재사용 흔적을 줄입니다."
             value={image.noise_pct}
             min={0}
             max={5}
@@ -449,16 +443,17 @@ export function HumanEngineSettings() {
             suffix="%"
             onChange={(v) => { setImage((img) => { const next = { ...img, noise_pct: v }; imageRef.current = next; return next; }); scheduleSave(); }}
           />
-          <HeStaticRow label="노이즈 방식" value="가우시안 · 슬라이더 % = 실제 강도" />
-          <HeToggle label="EXIF 기기 정보 랜덤화" value={image.exif_randomize} onChange={(v) => { setImage((img) => { const next = { ...img, exif_randomize: v }; imageRef.current = next; saveNow(humanRef.current, next, mediaRef.current); return next; }); }} />
-          <HeToggle label="EXIF GPS 랜덤 주입" value={image.gps_randomize} onChange={(v) => { setImage((img) => { const next = { ...img, gps_randomize: v }; imageRef.current = next; saveNow(humanRef.current, next, mediaRef.current); return next; }); }} />
-          <HeStaticRow label="JPEG 품질 범위" value="90~96%" />
-          <HeToggle label="중복 이미지 차단" value={image.block_duplicate} onChange={(v) => { setImage((img) => { const next = { ...img, block_duplicate: v }; imageRef.current = next; saveNow(humanRef.current, next, mediaRef.current); return next; }); }} />
-          <HeStaticRow label="기본 이미지 모델" value={HUMAN_ENGINE_IMAGE_LABEL} />
+          <HeStaticRow label="노이즈 방식" value="가우시안 · 슬라이더 % = 실제 강도" hint="위 강도 값이 실제 픽셀 변형 비율과 1:1로 적용됩니다." />
+          <HeToggle label="EXIF 기기 정보 랜덤화" hint="카메라·기기 EXIF를 매번 다르게 넣어 같은 기기로 찍은 것처럼 보이지 않게 합니다." value={image.exif_randomize} onChange={(v) => { setImage((img) => { const next = { ...img, exif_randomize: v }; imageRef.current = next; saveNow(humanRef.current, next, mediaRef.current); return next; }); }} />
+          <HeToggle label="EXIF GPS 랜덤 주입" hint="GPS 좌표를 무작위로 넣어 항상 같은 위치에서 촬영한 패턴을 방지합니다." value={image.gps_randomize} onChange={(v) => { setImage((img) => { const next = { ...img, gps_randomize: v }; imageRef.current = next; saveNow(humanRef.current, next, mediaRef.current); return next; }); }} />
+          <HeStaticRow label="JPEG 품질 범위" value="90~96%" hint="매 업로드마다 90~96% 사이에서 품질을 랜덤 선택합니다." />
+          <HeToggle label="중복 이미지 차단" hint="이미 사용한 이미지 해시는 다시 업로드하지 않습니다." value={image.block_duplicate} onChange={(v) => { setImage((img) => { const next = { ...img, block_duplicate: v }; imageRef.current = next; saveNow(humanRef.current, next, mediaRef.current); return next; }); }} />
+          <HeStaticRow label="기본 이미지 모델" value={HUMAN_ENGINE_IMAGE_LABEL} hint="블로그·영상 파이프라인에서 기본으로 쓰는 Imagen 모델입니다." />
           <div className="he-chart-caption">v3.26 · Imagen 4 + Kling 3.0 내장 오디오 (TTS 기본 미사용)</div>
-          <HeStaticRow label="영상 해상도" value={`${FIXED_VIDEO_DIMENSIONS} · ${FIXED_VIDEO_RESOLUTION} 고정`} />
+          <HeStaticRow label="영상 해상도" value={`${FIXED_VIDEO_DIMENSIONS} · ${FIXED_VIDEO_RESOLUTION} 고정`} hint="Shorts·릴스 업로드용 9:16 세로 해상도입니다." />
           <HeToggle
             label="자막 자동 싱크 (Whisper)"
+            hint="영상 생성 후 Whisper로 음성·자막 타이밍을 맞춥니다."
             value={media.whisper_subtitle_sync}
             onChange={(v) => { setMedia((m) => { const next = { ...m, whisper_subtitle_sync: v }; mediaRef.current = next; saveNow(humanRef.current, imageRef.current, next); return next; }); }}
           />

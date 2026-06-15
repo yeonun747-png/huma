@@ -292,6 +292,26 @@
     border-bottom: 1px solid var(--bdr2);
   }
 
+  .he-field {
+    border-bottom: 1px solid var(--bdr2);
+  }
+
+  .he-field:last-child {
+    border-bottom: none;
+  }
+
+  .he-field .he-tw {
+    border-bottom: none;
+  }
+
+  .he-field-hint {
+    margin: -2px 0 10px;
+    padding-bottom: 2px;
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--t3);
+  }
+
   .he-tw:last-child {
     border-bottom: none;
   }

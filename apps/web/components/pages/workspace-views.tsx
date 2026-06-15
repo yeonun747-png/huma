@@ -114,6 +114,11 @@ export function SeoKeywordsView() {
       </MGrid>
 
       <MPanel title="콘텐츠 ↔ 키워드 연결 맵">
+        <p className="mb-3 text-[11.5px] leading-relaxed text-huma-t3">
+          <strong className="text-huma-t2">상태</strong>는 주력 키워드별 누적 발행수 기준입니다 —{' '}
+          <MTag tone="ok">최상</MTag> 10건 이상 · <MTag tone="ok">양호</MTag> 5~9건 ·{' '}
+          <MTag tone="warn">보강필요</MTag> 2~4건 · <MTag tone="err">부족</MTag> 0~1건
+        </p>
         {d.table.length === 0 ? (
           <EmptyPanel message="발행 콘텐츠 없음" />
         ) : (

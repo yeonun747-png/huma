@@ -6,14 +6,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { useWorkspace } from '@/components/dashboard/workspace-context';
 
-import { JobScheduleForm, type JobScheduleFormValues } from '@/components/queue/job-schedule-form';
 import {
   formatScheduledAt,
   formatKstHm,
-  kstDatetimeLocalToIso,
   kstDayOfWeek,
   kstDaysInMonth,
-  kstToUtcMs,
   kstYearMonthDay,
   parseLogTimestamp,
   weekdayColorClass,
@@ -65,8 +62,6 @@ export function CalendarView() {
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
 
   const [drawerOpen, setDrawerOpen] = useState(false);
-
-  const [showForm, setShowForm] = useState(false);
 
   const [viewer, setViewer] = useState<{
     title: string;
@@ -135,50 +130,9 @@ export function CalendarView() {
 
 
   const openDay = (d: number) => {
-
     setSelectedDay(d);
-
     setDrawerOpen(true);
-
-    setShowForm(false);
-
   };
-
-
-
-  const defaultScheduleDate = selectedDay
-
-    ? new Date(kstToUtcMs(year, month + 1, selectedDay, 10, 0)).toISOString()
-
-    : undefined;
-
-
-
-  const handleSchedule = async (values: JobScheduleFormValues) => {
-
-    await api.createJob({
-
-      workspace,
-
-      job_type: values.job_type,
-
-      title: values.title,
-
-      content: values.content || '',
-
-      scheduled_at: kstDatetimeLocalToIso(values.scheduled_at),
-
-      status: 'scheduled',
-
-    });
-
-    setShowForm(false);
-
-    load();
-
-  };
-
-
 
   const cells: (number | null)[] = [];
 
@@ -383,7 +337,7 @@ export function CalendarView() {
 
               <div>
 
-                <div className="font-sans text-[16px] font-bold tracking-wide text-huma-acc">발행 예약 조감</div>
+                <div className="font-sans text-[16px] font-bold tracking-wide text-huma-acc">발행 리스트</div>
 
                 <div className="font-mono text-[11px] text-huma-t3">
 
@@ -402,16 +356,6 @@ export function CalendarView() {
             </div>
 
             <div className="cal-drawer-body">
-
-              <div className="mb-3 flex gap-2">
-
-                <button type="button" className="btn-primary btn-sm" onClick={() => setShowForm(true)}>
-
-                  + 이 날짜에 예약
-
-                </button>
-
-              </div>
 
               {selectedJobs.length === 0 ? (
 
@@ -451,26 +395,6 @@ export function CalendarView() {
                   ))}
 
                 </ul>
-
-              )}
-
-              {showForm && (
-
-                <div className="mt-4 border-t border-huma-bdr pt-4">
-
-                  <JobScheduleForm
-
-                    workspace={workspace}
-
-                    defaultDate={defaultScheduleDate}
-
-                    onSubmit={handleSchedule}
-
-                    onCancel={() => setShowForm(false)}
-
-                  />
-
-                </div>
 
               )}
 

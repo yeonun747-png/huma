@@ -2,9 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
-import { WORKSPACES } from '@/lib/constants';
 import { formatLogKst, kstDateKey, logKstDateKey } from '@/lib/format-kst';
-import { MGrid, MPanel, MStat, MTable, MTag, MUrlLink } from '@/components/mockup/primitives';
+import { MGrid, MPanel, MStat, MTable, MTag } from '@/components/mockup/primitives';
 import { useRegisterPageAction } from '@/components/dashboard/page-action-context';
 
 type LogRow = Record<string, unknown>;
@@ -26,15 +25,6 @@ function accountLabel(row: LogRow): string {
   const id = row.account_id;
   if (typeof id === 'string' && id.length > 8) return `${id.slice(0, 8)}…`;
   return String(id ?? '—');
-}
-
-function logUrl(row: LogRow): string | null {
-  const direct = row.result_url;
-  if (typeof direct === 'string' && direct.trim()) return direct;
-  const meta = row.metadata as Record<string, unknown> | null;
-  const fromMeta = meta?.sub;
-  if (typeof fromMeta === 'string' && fromMeta.includes('.')) return fromMeta.startsWith('http') ? fromMeta : `https://${fromMeta}`;
-  return null;
 }
 
 export function OplogView() {
@@ -74,31 +64,15 @@ export function OplogView() {
   }, [logs]);
 
   const rows = logs.map((l) => {
-    const ws = WORKSPACES.find((w) => w.id === l.workspace)?.short ?? String(l.workspace ?? '—');
     const time = formatLogKst(String(l.created_at ?? ''));
-    const url = logUrl(l);
-    const meta = l.metadata as Record<string, unknown> | null;
-    const detail =
-      typeof meta?.sub === 'string' && meta.sub
-        ? meta.sub
-        : typeof l.detail === 'string'
-          ? l.detail
-          : '—';
 
     return [
       <span key="t" className="whitespace-nowrap font-mono text-[10.5px]">
         {time}
       </span>,
-      ws,
       accountLabel(l),
-      String(l.message ?? '—').slice(0, 56),
-      String(l.platform ?? '—'),
+      String(l.message ?? '—').slice(0, 80),
       levelTag(String(l.level ?? 'INFO')),
-      url ? (
-        <MUrlLink href={url}>{String(url).replace(/^https?:\/\//, '').slice(0, 36)} ↗</MUrlLink>
-      ) : (
-        <span className="font-mono text-[10px] text-huma-t3">{detail}</span>
-      ),
     ];
   });
 
@@ -113,7 +87,7 @@ export function OplogView() {
         {rows.length === 0 ? (
           <div className="py-8 text-center text-sm text-huma-t3">로그가 없습니다</div>
         ) : (
-          <MTable head={['시각 (KST)', '서비스', '계정', '콘텐츠', '플랫폼', '결과', 'URL / 비고']} rows={rows} />
+          <MTable head={['시각 (KST)', '계정', '콘텐츠', '결과']} rows={rows} />
         )}
       </MPanel>
     </div>

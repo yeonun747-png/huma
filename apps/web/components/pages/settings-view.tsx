@@ -202,8 +202,6 @@ export function SettingsView() {
 
   const [app, setApp] = useState<Record<string, unknown>>({});
 
-  const [watcher, setWatcher] = useState<Record<string, unknown>>({});
-
   const [activity, setActivity] = useState<{ crank_enabled: boolean; posting_enabled: boolean }>({
     crank_enabled: true,
     posting_enabled: true,
@@ -215,14 +213,9 @@ export function SettingsView() {
   const load = useCallback(() => {
 
     Promise.all([
-
       api.getSetting('app_settings').catch(() => ({})),
-
-      api.getSetting('watcher').catch(() => ({})),
-
       api.getSetting('activity_control').catch(() => ({ crank_enabled: true, posting_enabled: true })),
-
-    ]).then(([a, w, act]) => {
+    ]).then(([a, act]) => {
 
       const appSettings = a as Record<string, unknown>;
 
@@ -244,8 +237,6 @@ export function SettingsView() {
 
       setApp(appSettings);
       setPostingWarmup(normalizePostingWarmup(appSettings.posting_warmup));
-
-      setWatcher(w as Record<string, unknown>);
 
       const actRow = act as { crank_enabled?: boolean; posting_enabled?: boolean };
       setActivity({
@@ -278,16 +269,6 @@ export function SettingsView() {
   };
 
 
-
-  const patchWatcher = async (key: string, val: boolean) => {
-
-    const next = { ...watcher, [key]: val };
-
-    setWatcher(next);
-
-    await api.updateSetting('watcher', next);
-
-  };
 
   const patchActivity = async (key: 'crank_enabled' | 'posting_enabled', val: boolean) => {
     const next = { ...activity, [key]: val };
@@ -452,26 +433,6 @@ export function SettingsView() {
 
           />
 
-          <SettingsToggle
-
-            label="Layer4 자동 일시정지"
-
-            value={Boolean(watcher.auto_pause ?? true)}
-
-            onChange={(v) => patchWatcher('auto_pause', v)}
-
-          />
-
-          <SettingsToggle
-
-            label="점진적 복구 스케줄"
-
-            value={Boolean(watcher.gradual_recovery ?? true)}
-
-            onChange={(v) => patchWatcher('gradual_recovery', v)}
-
-          />
-
         </MPanel>
 
       </MGrid>
@@ -489,17 +450,6 @@ export function WatcherView() {
   const [watcher, setWatcher] = useState<Record<string, unknown>>({});
 
   const [logs, setLogs] = useState<WatcherLogRow[]>([]);
-  const [drillJobId, setDrillJobId] = useState<string | null>(null);
-  const [drillLoading, setDrillLoading] = useState(false);
-  const [telegramTestLoading, setTelegramTestLoading] = useState(false);
-  const [vncCheckLoading, setVncCheckLoading] = useState(false);
-
-  const loadDrill = useCallback(() => {
-    api
-      .getCaptchaDrillStatus()
-      .then((s) => setDrillJobId(s.activeJobId))
-      .catch(() => setDrillJobId(null));
-  }, []);
 
   const load = useCallback(() => {
 
@@ -516,9 +466,7 @@ export function WatcherView() {
 
       .catch(() => {});
 
-    loadDrill();
-
-  }, [loadDrill]);
+  }, []);
 
 
 
@@ -541,66 +489,6 @@ export function WatcherView() {
     await api.updateSetting('watcher', next);
 
   };
-
-  const startDrill = async (workspace: 'yeonun' | 'panana' | 'quizoasis') => {
-    if (!window.confirm(`${workspace} CAPTCHA 연습을 시작할까요?\nTelegram · VNC · 큐 발행완료 UI (5분, 실발행 아님)`)) {
-      return;
-    }
-    setDrillLoading(true);
-    try {
-      const r = await api.startCaptchaDrill(workspace);
-      setDrillJobId(r.jobId);
-      const tg = r.telegram;
-      const tgLine = tg.ok
-        ? 'Telegram: 발송 OK'
-        : `Telegram: 실패 — ${tg.error ?? tg.skipped ?? 'unknown'} (token=${tg.env.hasToken ? 'Y' : 'N'}, chat=${tg.env.chatId ? 'Y' : 'N'})`;
-      const vncLine = `VNC: ${r.browser.mode} · DISPLAY ${r.browser.display} — 밝은 흰/빨간 DRILL 화면이 보여야 함`;
-      alert(`연습 job 생성됨\n\n${tgLine}\n${vncLine}\n\n큐에서 발행 완료까지 테스트하세요.`);
-      window.open(`/queue?job=${encodeURIComponent(r.jobId)}`, '_blank', 'noopener,noreferrer');
-    } catch (e) {
-      alert((e as Error).message);
-    } finally {
-      setDrillLoading(false);
-    }
-  };
-
-  const checkVnc = async () => {
-    setVncCheckLoading(true);
-    try {
-      const s = await api.getVncStatus();
-      alert(
-        [
-          `VNC ${s.listening && s.x11vnc ? 'OK' : '문제'}`,
-          `port ${s.port} · DISPLAY ${s.display}`,
-          `Xvfb: ${s.xvfb ? 'Y' : 'N'} · x11vnc: ${s.x11vnc ? 'Y' : 'N'} · DRILL: ${s.drillActive ? '진행 중' : '없음'}`,
-          s.hint,
-          s.vncUrlYeonun ? `\nenv: ${s.vncUrlYeonun}` : '',
-        ].join('\n'),
-      );
-    } catch (e) {
-      alert((e as Error).message);
-    } finally {
-      setVncCheckLoading(false);
-    }
-  };
-
-  const testTelegram = async (workspace: 'yeonun' | 'panana' | 'quizoasis') => {
-    setTelegramTestLoading(true);
-    try {
-      const r = await api.testTelegram(workspace);
-      alert(
-        r.ok
-          ? `${workspace} Telegram OK (@${r.botUsername ?? 'bot'}) — Telegram 앱에서 메시지 확인`
-          : `Telegram 실패:\n${r.error ?? 'unknown'}\ntoken=${r.env.hasToken ? 'Y' : 'N'} chat=${r.env.chatId ? 'Y' : 'N'}`,
-      );
-    } catch (e) {
-      alert((e as Error).message);
-    } finally {
-      setTelegramTestLoading(false);
-    }
-  };
-
-
 
   const layer4Logs = logs.filter(isLayer4FailSafeLog);
   const otherErrors = logs.length - layer4Logs.length;
@@ -715,66 +603,6 @@ export function WatcherView() {
 
       </MPanel>
 
-      <MPanel title="CAPTCHA 연습 (DRILL)">
-        <p className="mb-3 text-[12px] leading-relaxed text-huma-t2">
-          Telegram 알림 · VNC 화면 · 큐 「발행 완료」 UI를 한 번에 테스트합니다. 실제 네이버 발행·Layer4 처리는 하지
-          않습니다. i7에서 x11vnc가 떠 있어야 VNC에 DRILL 화면이 보입니다.
-        </p>
-        {drillJobId ? (
-          <p className="mb-3 font-mono text-[11px] text-huma-warn">
-            진행 중 job: {drillJobId}{' '}
-            <a className="text-huma-accent underline" href={`/queue?job=${drillJobId}`}>
-              큐 열기
-            </a>
-          </p>
-        ) : null}
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            className="btn-primary btn-sm"
-            disabled={drillLoading || Boolean(drillJobId)}
-            onClick={() => void startDrill('yeonun')}
-          >
-            연운 DRILL
-          </button>
-          <button
-            type="button"
-            className="btn-primary btn-sm"
-            disabled={drillLoading || Boolean(drillJobId)}
-            onClick={() => void startDrill('panana')}
-          >
-            파나나 DRILL
-          </button>
-          <button
-            type="button"
-            className="btn-primary btn-sm"
-            disabled={drillLoading || Boolean(drillJobId)}
-            onClick={() => void startDrill('quizoasis')}
-          >
-            퀴즈 DRILL
-          </button>
-          <button type="button" className="btn-ghost btn-sm" disabled={drillLoading} onClick={() => loadDrill()}>
-            상태 새로고침
-          </button>
-          <button
-            type="button"
-            className="btn-ghost btn-sm"
-            disabled={telegramTestLoading}
-            onClick={() => void testTelegram('yeonun')}
-          >
-            Telegram 테스트 (연운)
-          </button>
-          <button
-            type="button"
-            className="btn-ghost btn-sm"
-            disabled={vncCheckLoading}
-            onClick={() => void checkVnc()}
-          >
-            VNC 상태 (i7)
-          </button>
-        </div>
-      </MPanel>
-
       <MGrid cols={2}>
 
         <MPanel title="Fail-Safe 설정">
@@ -783,7 +611,7 @@ export function WatcherView() {
 
             label="캡차 감지 즉시 중지"
 
-            sub="탐지 시 해당 계정 즉시 일시정지"
+            sub="CAPTCHA가 뜨면 해당 계정의 발행·소통 job을 바로 멈춥니다."
 
             value={Boolean(watcher.auto_pause ?? true)}
 
@@ -795,7 +623,7 @@ export function WatcherView() {
 
             label="Slack Webhook 알림"
 
-            sub="#huma-alerts · 실시간"
+            sub="Layer4(CAPTCHA·429 등) 감지 시 Slack #huma-alerts로 즉시 알립니다."
 
             value={Boolean(watcher.captcha_slack ?? true)}
 
@@ -807,7 +635,7 @@ export function WatcherView() {
 
             label="429 쿨다운 자동 대기"
 
-            sub="감지 후 15분 대기 후 재시도"
+            sub="네이버 429(과다 요청) 후 15분간 재시도하지 않고 자동으로 쉽니다."
 
             value={Boolean(watcher.cooldown_auto ?? true)}
 
@@ -819,7 +647,7 @@ export function WatcherView() {
 
             label="점진적 복구 스케줄"
 
-            sub="12분 → 30분 → 2시간 단계 복구"
+            sub="중지 후 12분 → 30분 → 2시간 간격으로 활동을 조금씩 다시 켭니다."
 
             value={Boolean(watcher.gradual_recovery ?? true)}
 

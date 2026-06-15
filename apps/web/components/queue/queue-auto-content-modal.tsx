@@ -371,15 +371,6 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
           </div>
         )}
 
-        {!isEdit && (
-          <div className="m-modal-cost">
-            <div className="text-[11.5px] font-mono text-huma-t3">예상 AI 비용 (건당)</div>
-            <div className="text-[13.5px] font-semibold text-huma-t">
-              약 104원 <span className="text-[10.5px] font-normal text-huma-t3">(Sonnet $0.069 + Haiku $0.0025)</span>
-            </div>
-          </div>
-        )}
-
         {error && <p className="mb-2 text-xs text-huma-err">{error}</p>}
 
         <div className={`m-modal-foot ${!isEdit && onPreview ? 'grid grid-cols-2 gap-2' : ''}`}>
