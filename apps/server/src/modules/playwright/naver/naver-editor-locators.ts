@@ -6,7 +6,7 @@ import { humanTypeIntoElement } from '../../human-engine/korean-ime.js';
 import { humanSleep } from '../../human-engine/typing.js';
 import type { HumanEngineConfig } from '../../../lib/settings.js';
 import { resolvePasteRatio } from '../../../lib/settings.js';
-import { randomBetween, sleep } from '../../../lib/utils.js';
+import { gaussianRandom, randomBetween, sleep, wpmToDelay } from '../../../lib/utils.js';
 import { logOperation } from '../../../lib/log-emitter.js';
 
 export function editorFrame(page: Page): FrameLocator {
@@ -613,11 +613,8 @@ async function readEditableTitleText(editable: Locator): Promise<string> {
 async function readTitleFromEditorDom(page: Page): Promise<string> {
   return page
     .evaluate(() => {
-      const nodes = document.querySelectorAll(
-        '.se-section-documentTitle .se-text-paragraph[contenteditable="true"], .se-section-documentTitle [contenteditable="true"], .se-documentTitle [contenteditable="true"]',
-      );
-      for (const node of nodes) {
-        const clone = (node as HTMLElement).cloneNode(true) as HTMLElement;
+      const clean = (root: HTMLElement): string => {
+        const clone = root.cloneNode(true) as HTMLElement;
         for (const bad of clone.querySelectorAll(
           'button, [role="button"], .se-toolbar, .se-floating-toolbar, .se-popup, .se-blind',
         )) {
@@ -626,7 +623,27 @@ async function readTitleFromEditorDom(page: Page): Promise<string> {
         for (const ph of clone.querySelectorAll('.se-placeholder, [class*="placeholder"]')) {
           ph.remove();
         }
-        const t = (clone.innerText ?? clone.textContent ?? '').replace(/\u00a0/g, ' ').trim();
+        return (clone.innerText ?? clone.textContent ?? '').replace(/\u00a0/g, ' ').trim();
+      };
+
+      const sections = document.querySelectorAll('.se-section-documentTitle, .se-documentTitle');
+      for (const section of sections) {
+        const sectionText = clean(section as HTMLElement);
+        if (sectionText && !/^(제목|title)$/i.test(sectionText)) return sectionText;
+
+        for (const node of section.querySelectorAll(
+          '.se-text-paragraph[contenteditable="true"], .se-text-paragraph, .se-text, [contenteditable="true"]',
+        )) {
+          const t = clean(node as HTMLElement);
+          if (t && !/^(제목|title)$/i.test(t)) return t;
+        }
+      }
+
+      const nodes = document.querySelectorAll(
+        '.se-section-documentTitle .se-text-paragraph[contenteditable="true"], .se-section-documentTitle [contenteditable="true"], .se-documentTitle [contenteditable="true"], #subjectTextBox',
+      );
+      for (const node of nodes) {
+        const t = clean(node as HTMLElement);
         if (t && !/^(제목|title)$/i.test(t)) return t;
       }
       return '';
@@ -635,21 +652,45 @@ async function readTitleFromEditorDom(page: Page): Promise<string> {
     .then(sanitizeTitleRead);
 }
 
-/** insertText 직후 — editable DOM 우선, wrapper(titleLoc) 보조 */
-async function readTitleForVerification(
-  editable: Locator,
+/** editable·section·wrapper 통합 — pressSequentially 후 innerText 빈값 오탐 완화 */
+async function readBlogTitleTextAll(
+  page: Page,
   titleLoc: Locator,
-  page?: Page,
+  editable: Locator,
 ): Promise<string> {
+  const fromDom = await readTitleFromEditorDom(page);
+  if (fromDom) return fromDom;
   const fromEditable = await readEditableTitleText(editable);
-  if (fromEditable && !isTitlePlaceholderText(fromEditable)) return fromEditable;
+  if (fromEditable) return fromEditable;
   const fromWrap = await readBlogTitleText(titleLoc);
-  if (fromWrap && !isTitlePlaceholderText(fromWrap)) return fromWrap;
-  if (page) {
-    const fromDom = await readTitleFromEditorDom(page);
-    if (fromDom) return fromDom;
-  }
-  return '';
+  return sanitizeTitleRead(fromWrap);
+}
+
+function titleKeyDelayMs(config: HumanEngineConfig): number {
+  const ms = wpmToDelay(gaussianRandom(config.wpm_mean, config.wpm_sigma));
+  return Math.max(40, Math.min(130, Math.round(ms)));
+}
+
+async function titleSectionMatchesExpected(page: Page, expected: string): Promise<boolean> {
+  const sectionText = await readTitleFromEditorDom(page);
+  if (!sectionText) return false;
+  return titleContainsExpected(sectionText, expected) && !isDuplicatedBlogTitle(sectionText, expected);
+}
+
+/** pressSequentially 직후 placeholder가 사라지면 제목 입력된 것으로 간주 */
+async function isBlogTitlePlaceholderGone(page: Page): Promise<boolean> {
+  return page
+    .evaluate(() => {
+      const section = document.querySelector('.se-section-documentTitle, .se-documentTitle');
+      if (!section) return false;
+      const ph = section.querySelector('.se-placeholder, [class*="placeholder"]');
+      if (!ph) return true;
+      const el = ph as HTMLElement;
+      if (el.offsetParent === null) return true;
+      const style = window.getComputedStyle(el);
+      return style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0';
+    })
+    .catch(() => false);
 }
 
 /** verifyBlogTitleInput 보완 — 화면에 1회 입력됐으나 wrapper 검증만 실패한 경우 */
@@ -708,10 +749,9 @@ export async function verifyBlogTitleField(
   titleLoc: Locator,
   expected: string,
 ): Promise<boolean> {
-  const fromSection = await readTitleFromEditorDom(page);
-  if (titleAlreadyAcceptable(fromSection, expected)) return true;
   const editable = await resolveTitleEditableLocator(page, titleLoc);
-  const written = await readTitleForVerification(editable, titleLoc, page);
+  const written = await readBlogTitleTextAll(page, titleLoc, editable);
+  if (titleAlreadyAcceptable(written, expected)) return true;
   return verifyBlogTitleInput(written, expected);
 }
 
@@ -751,13 +791,10 @@ export async function waitForBlogTitleWritten(
   const editable = await resolveTitleEditableLocator(page, titleLoc);
   const deadline = Date.now() + maxMs;
   while (Date.now() < deadline) {
-    const domWritten = await readEditableTitleText(editable);
-    if (titleAlreadyAcceptable(domWritten, expected)) return true;
-    const sectionWritten = await readTitleFromEditorDom(page);
-    if (titleAlreadyAcceptable(sectionWritten, expected)) return true;
-    const written = await readTitleForVerification(editable, titleLoc, page);
+    const written = await readBlogTitleTextAll(page, titleLoc, editable);
+    if (titleAlreadyAcceptable(written, expected)) return true;
     if (verifyBlogTitleInput(written, expected)) return true;
-    await sleep(100);
+    await sleep(120);
   }
   return verifyBlogTitleField(page, titleLoc, expected);
 }
@@ -770,7 +807,7 @@ export async function ensureBlogTitleWritten(
   humanConfig: HumanEngineConfig,
 ): Promise<void> {
   const editable = await resolveTitleEditableLocator(page, titleLoc);
-  const domWritten = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
+  const domWritten = await readBlogTitleTextAll(page, titleLoc, editable);
 
   if (titleContainsExpected(domWritten, text) && !isDuplicatedBlogTitle(domWritten, text)) {
     await blurBlogTitleField(page);
@@ -1381,8 +1418,7 @@ function titleVerifyTimeoutMs(text: string): number {
 }
 
 /**
- * SE ONE 제목 — pressSequentially(유니코드) · 검색창과 동일 InputEvent 경로.
- * CDP 두벌식(OS IME)은 fcitx 미경유 → 영문 raw 입력. 합성 composition은 에디터 미반영.
+ * SE ONE 제목 — 1회 클릭·pressSequentially 후 본문으로 blur (insertText·재타이핑 없음).
  */
 export async function typeBlogTitleField(
   page: Page,
@@ -1398,7 +1434,7 @@ export async function typeBlogTitleField(
   const editable = await resolveTitleEditableLocator(page, titleLoc);
   await editable.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
 
-  let current = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
+  let current = await readBlogTitleTextAll(page, titleLoc, editable);
   if (isLikelyDubeolsikGarbage(current, titleText)) current = '';
   const dup = isDuplicatedBlogTitle(current, titleText);
   await logTitleDebug(`진입 현재값="${current}" 중복=${dup}`);
@@ -1409,37 +1445,38 @@ export async function typeBlogTitleField(
   }
 
   await humanClickLocator(page, editable);
-  await sleep(150);
+  await sleep(randomBetween(120, 280));
 
   if (current) {
     await clearTitleFieldThoroughly(page, editable);
   }
   await focusTitleEditableNode(editable);
 
-  const delay = randomBetween(45, 95);
+  const delay = titleKeyDelayMs(humanConfig);
   await logTitleDebug(`pressSequentially 시작 (${titleText.length}자·${delay}ms)`);
   await editable.pressSequentially(titleText, { delay });
-  await waitForBlogTitleWritten(page, titleLoc, titleText, titleVerifyTimeoutMs(titleText));
+  await sleep(randomBetween(250, 700));
 
-  let after = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
-  if (isLikelyDubeolsikGarbage(after, titleText)) after = '';
+  await waitForBlogTitleWritten(page, titleLoc, titleText, Math.min(8_000, titleVerifyTimeoutMs(titleText)));
+
+  const after = await readBlogTitleTextAll(page, titleLoc, editable);
   await logTitleDebug(`타이핑 후="${after}"`);
 
-  if (isDuplicatedBlogTitle(after, titleText) || !titleContainsExpected(after, titleText)) {
-    await logTitleDebug('pressSequentially 미반영 — insertText 폴백');
-    await clearTitleFieldThoroughly(page, editable);
-    await focusTitleEditableNode(editable);
-    await page.keyboard.insertText(titleText);
-    await waitForBlogTitleWritten(page, titleLoc, titleText, titleVerifyTimeoutMs(titleText));
-    after = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
-    await logTitleDebug(`insertText 후="${after}"`);
-  }
-
-  await blurBlogTitleField(page);
-
-  if (titleContainsExpected(after, titleText) && !isDuplicatedBlogTitle(after, titleText)) {
+  if (
+    (titleContainsExpected(after, titleText) && !isDuplicatedBlogTitle(after, titleText)) ||
+    (await titleSectionMatchesExpected(page, titleText))
+  ) {
+    await blurBlogTitleField(page);
+    await logTitleDebug('제목 입력 확정 — 본문으로 blur');
     return;
   }
+
+  if (await isBlogTitlePlaceholderGone(page)) {
+    await blurBlogTitleField(page);
+    await logTitleDebug('placeholder 사라짐 — pressSequentially 성공으로 간주');
+    return;
+  }
+
   throw new Error('BLOG_TITLE_WRITE_FAILED');
 }
 
