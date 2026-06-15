@@ -192,6 +192,26 @@ export function QueueManager() {
 
   const load = useCallback(async () => {
     const offset = (page - 1) * pageSize;
+
+    const applyCompletedStats = async (base: {
+      pending: number;
+      running: number;
+      doneToday: number;
+      doneAll: number;
+    }) => {
+      try {
+        const completed = await api.jobs({ workspace, status: 'completed', limit: '500' });
+        const visible = completed.filter((j) => !isContentFullPipelineShell(j));
+        return {
+          ...base,
+          doneToday: visible.filter((j) => isSameKstDay(j.completed_at)).length,
+          doneAll: visible.length,
+        };
+      } catch {
+        return base;
+      }
+    };
+
     try {
       const result = await api.jobsPage({
         workspace,
@@ -200,10 +220,11 @@ export function QueueManager() {
       });
       setJobs(result.items);
       setTotal(result.total);
-      setStats(result.stats);
+      const stats = await applyCompletedStats(result.stats);
+      setStats(stats);
       setLoadError(null);
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('huma:queue-updated', { detail: result.stats }));
+        window.dispatchEvent(new CustomEvent('huma:queue-updated', { detail: stats }));
       }
       return;
     } catch {

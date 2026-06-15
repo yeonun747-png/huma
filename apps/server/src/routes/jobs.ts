@@ -31,6 +31,7 @@ import {
 } from '../modules/watcher/captcha-hold.js';
 import { resolveVncUrl, buildJobWebUrl } from '../modules/watcher/telegram.js';
 import {
+  computeVisibleQueueStats,
   countContentFullPipelineShells,
   filterOutPipelineShells,
 } from '../lib/job-pipeline-shell.js';
@@ -65,21 +66,17 @@ function kstTodayStartIso(): string {
 async function fetchQueueStats(workspace: string) {
   const todayStart = kstTodayStartIso();
   const base = () => supabase.from('huma_jobs').select('*', { count: 'exact', head: true }).eq('workspace', workspace);
-  const [pendingRes, runningRes, captchaRes, doneTodayRes, doneAllRes, shellsToday, shellsAll] =
-    await Promise.all([
-      base().in('status', ['pending', 'scheduled']),
-      base().eq('status', 'running'),
-      base().eq('status', 'awaiting_captcha'),
-      base().eq('status', 'completed').gte('completed_at', todayStart),
-      base().eq('status', 'completed'),
-      countContentFullPipelineShells(workspace, { completedSince: todayStart }),
-      countContentFullPipelineShells(workspace),
-    ]);
+  const [pendingRes, runningRes, captchaRes, visibleCompleted] = await Promise.all([
+    base().in('status', ['pending', 'scheduled']),
+    base().eq('status', 'running'),
+    base().eq('status', 'awaiting_captcha'),
+    computeVisibleQueueStats(workspace, todayStart),
+  ]);
   return {
     pending: pendingRes.count ?? 0,
     running: (runningRes.count ?? 0) + (captchaRes.count ?? 0),
-    doneToday: Math.max(0, (doneTodayRes.count ?? 0) - shellsToday),
-    doneAll: Math.max(0, (doneAllRes.count ?? 0) - shellsAll),
+    doneToday: visibleCompleted.doneToday,
+    doneAll: visibleCompleted.doneAll,
   };
 }
 
