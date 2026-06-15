@@ -1941,7 +1941,11 @@ export async function typeBlogBodyContent(
   bodyLoc: Locator,
   content: string,
   humanConfig: HumanEngineConfig,
-  options?: { skipClick?: boolean; afterPlaceholderClick?: boolean },
+  options?: {
+    skipClick?: boolean;
+    afterPlaceholderClick?: boolean;
+    onAfterParagraph?: (paragraphIndex: number) => Promise<void>;
+  },
 ): Promise<void> {
   if (await isDraftResumePopupVisible(page)) {
     throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
@@ -2028,6 +2032,10 @@ export async function typeBlogBodyContent(
       await page.keyboard.press('Enter');
       await page.keyboard.press('Enter');
       await humanSleep(humanConfig.paragraph_pause_ms[0], humanConfig.paragraph_pause_ms[1]);
+    }
+
+    if (options?.onAfterParagraph) {
+      await options.onAfterParagraph(i);
     }
   }
 

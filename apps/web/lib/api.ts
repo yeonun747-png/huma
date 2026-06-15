@@ -149,6 +149,7 @@ export const api = {
     title: string;
     source_url: string;
     synopsis?: string;
+    uploaded_images?: string[];
     screenshot_base64?: string;
     content_type?: 'A' | 'B';
     content_type_auto?: boolean;
@@ -158,6 +159,12 @@ export const api = {
     dry_run?: boolean;
   }) =>
     request<HumaJob>('/api/jobs/auto-content', { method: 'POST', body: JSON.stringify(body) }),
+  uploadJobSlotImage: (body: { workspace: string; slot_index: number; image_data: string }) =>
+    request<{ url: string }>('/api/jobs/upload-image', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      timeoutMs: 120_000,
+    }),
   getJob: (id: string) => request<HumaJob>(`/api/jobs/${id}`),
   getCaptchaHold: (id: string) =>
     request<{
@@ -223,6 +230,7 @@ export const api = {
     title: string;
     source_url: string;
     synopsis?: string;
+    uploaded_images?: string[];
     screenshot_base64?: string;
     content_type?: 'A' | 'B';
     account_id?: string;

@@ -13,6 +13,7 @@ import { CrankJobDetailModal } from './crank-job-detail-modal';
 import { parseSocialCrankJobContent } from '@/lib/crank-job-payload';
 import { parseQueueKstParts, isSchedulePast, isSameKstDay, weekdayColorClass } from '@/lib/format-kst';
 import { QueueAutoContentModal, type AutoContentFormValues } from './queue-auto-content-modal';
+import { resolveQueueUploadedImages } from '@/lib/resolve-queue-uploaded-images';
 import { buildScheduledAt } from '@/lib/queue-repeat';
 import { formatJobErrorLabel } from '@/lib/job-error-label';
 import {
@@ -406,6 +407,7 @@ export function QueueManager() {
   };
 
   const handlePreviewSubmit = async (values: AutoContentFormValues) => {
+    const uploaded_images = await resolveQueueUploadedImages(workspace, values.uploaded_images);
     const job = await api.createAutoContentJob({
       workspace,
       title: values.title.trim(),
@@ -415,7 +417,7 @@ export function QueueManager() {
       content_type_auto: values.content_type === 'auto',
       auto_schedule: values.auto_schedule,
       schedule_time: values.schedule_time,
-      screenshot_base64: values.screenshot_base64,
+      uploaded_images,
       dry_run: true,
     });
     const w = Math.min(1440, window.screen.availWidth - 24);
@@ -444,11 +446,17 @@ export function QueueManager() {
         auto_scheduled: values.auto_schedule,
         scheduled_at: scheduledAt,
       };
-      if (values.screenshot_base64 && values.screenshot_base64 !== editingJob.image_urls?.[0]) {
-        patch.image_urls = [values.screenshot_base64];
+      const uploaded = await resolveQueueUploadedImages(workspace, values.uploaded_images);
+      if (uploaded) {
+        const prev = (editingJob.image_urls ?? []).join('|');
+        const next = uploaded.join('|');
+        if (next !== prev) patch.image_urls = uploaded;
+      } else if (editingJob.image_urls?.length) {
+        patch.image_urls = [];
       }
       await api.updateJob(editingJob.id, patch);
     } else {
+      const uploaded_images = await resolveQueueUploadedImages(workspace, values.uploaded_images);
       await api.createAutoContentJob({
         workspace,
         title: values.title.trim(),
@@ -458,7 +466,7 @@ export function QueueManager() {
         content_type_auto: values.content_type === 'auto',
         auto_schedule: values.auto_schedule,
         schedule_time: values.schedule_time,
-        screenshot_base64: values.screenshot_base64,
+        uploaded_images,
       });
     }
     setPrefill(null);

@@ -20,7 +20,7 @@ export interface ContentPreviewInput {
   title: string;
   source_url: string;
   synopsis?: string;
-  screenshot_base64?: string;
+  uploaded_images?: string[];
   content_type?: 'A' | 'B';
   account_id?: string;
 }
@@ -73,11 +73,13 @@ export async function runContentPreview(input: ContentPreviewInput): Promise<Con
     title: input.title.trim(),
     sourceUrl: input.source_url.trim(),
     synopsis: input.synopsis?.trim(),
-    screenshotBase64: input.screenshot_base64,
     workspace: input.workspace,
     content_type: input.content_type ?? 'A',
     blogWritingPersona,
   };
+
+  const uploaded = (input.uploaded_images ?? []).filter((u) => Boolean(u?.trim()));
+  const hasUploaded = uploaded.length > 0;
 
   let generated: Awaited<ReturnType<typeof generateAllContent>> | undefined;
   const claudeStart = Date.now();
@@ -98,6 +100,22 @@ export async function runContentPreview(input: ContentPreviewInput): Promise<Con
       detail: (err as Error).message,
     };
     return { steps, dry_run: true, total_ms: Date.now() - started };
+  }
+
+  if (hasUploaded) {
+    steps[1] = {
+      ...steps[1]!,
+      status: 'ok',
+      ms: 0,
+      detail: `등록 이미지 ${uploaded.length}장 (Imagen 생략)`,
+    };
+    return {
+      steps,
+      generated,
+      image_url: uploaded[0],
+      dry_run: true,
+      total_ms: Date.now() - started,
+    };
   }
 
   const imagenStart = Date.now();

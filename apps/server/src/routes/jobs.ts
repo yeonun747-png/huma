@@ -22,6 +22,7 @@ import { deleteJobById, deleteJobsByIds } from '../lib/delete-job.js';
 import { abortHumaJobById } from '../lib/abort-job.js';
 import { downloadHumaMedia, parseHumaMediaStoragePath } from '../lib/huma-media-storage.js';
 import { resolveJobPreviewImageUrl } from '../lib/resolve-job-preview-image.js';
+import { normalizeUploadedImagesInput, persistSingleJobImageDataUrl } from '../lib/upload-job-images.js';
 import { readCaptchaHoldScreenshot } from '../lib/captcha-hold-screenshot.js';
 import { submitCaptchaAnswerForJob } from '../lib/captcha-answer-submit.js';
 import {
@@ -217,7 +218,11 @@ export async function registerJobRoutes(app: FastifyInstance) {
           title: String(body.title).trim(),
           source_url: sourceUrl.trim(),
           synopsis: (body.synopsis as string | undefined)?.trim(),
-          screenshot_base64: (body.screenshotBase64 ?? body.screenshot_base64) as string | undefined,
+          uploaded_images:
+            normalizeUploadedImagesInput(body.uploaded_images ?? body.uploadedImages) ??
+            ((body.screenshotBase64 ?? body.screenshot_base64) as string | undefined)?.trim()
+              ? [String(body.screenshotBase64 ?? body.screenshot_base64).trim()]
+              : undefined,
           content_type: contentType,
           content_type_auto: contentTypeAuto,
           auto_schedule: autoScheduled,
@@ -263,12 +268,44 @@ export async function registerJobRoutes(app: FastifyInstance) {
     return data;
   });
 
+  app.post(
+    '/api/jobs/upload-image',
+    { preHandler: authMiddleware, bodyLimit: 12 * 1024 * 1024 },
+    async (request, reply) => {
+      const body = request.body as {
+        workspace?: string;
+        slot_index?: number;
+        image_data?: string;
+      };
+      const allowedWorkspaces = getWorkspaceFilter(request);
+
+      if (!body.workspace || !allowedWorkspaces.includes(body.workspace)) {
+        return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
+      }
+      const slotIndex = Number(body.slot_index);
+      if (!Number.isInteger(slotIndex) || slotIndex < 1 || slotIndex > 5) {
+        return reply.code(400).send({ error: 'slot_index는 1~5 정수여야 합니다' });
+      }
+      if (!body.image_data?.trim() || !body.image_data.trim().startsWith('data:')) {
+        return reply.code(400).send({ error: 'image_data(data URL)가 필요합니다' });
+      }
+
+      try {
+        const url = await persistSingleJobImageDataUrl(body.image_data.trim(), slotIndex);
+        return { url };
+      } catch (err) {
+        return reply.code(400).send({ error: (err as Error).message ?? '이미지 업로드 실패' });
+      }
+    },
+  );
+
   app.post('/api/jobs/content-preview', { preHandler: authMiddleware }, async (request, reply) => {
     const body = request.body as {
       workspace?: string;
       title?: string;
       source_url?: string;
       synopsis?: string;
+      uploaded_images?: string[];
       screenshot_base64?: string;
       content_type?: 'A' | 'B';
       account_id?: string;
@@ -288,7 +325,9 @@ export async function registerJobRoutes(app: FastifyInstance) {
         title: body.title.trim(),
         source_url: body.source_url.trim(),
         synopsis: body.synopsis?.trim(),
-        screenshot_base64: body.screenshot_base64,
+        uploaded_images:
+          normalizeUploadedImagesInput(body.uploaded_images) ??
+          (body.screenshot_base64?.trim() ? [body.screenshot_base64.trim()] : undefined),
         content_type: body.content_type ?? 'A',
         account_id: body.account_id,
       });
@@ -306,6 +345,7 @@ export async function registerJobRoutes(app: FastifyInstance) {
       title?: string;
       source_url?: string;
       synopsis?: string;
+      uploaded_images?: string[];
       screenshot_base64?: string;
       content_type?: 'A' | 'B';
       content_type_auto?: boolean;
@@ -331,7 +371,9 @@ export async function registerJobRoutes(app: FastifyInstance) {
         title: body.title.trim(),
         source_url: body.source_url.trim(),
         synopsis: body.synopsis?.trim(),
-        screenshot_base64: body.screenshot_base64,
+        uploaded_images:
+          normalizeUploadedImagesInput(body.uploaded_images) ??
+          (body.screenshot_base64?.trim() ? [body.screenshot_base64.trim()] : undefined),
         content_type: body.content_type,
         content_type_auto: body.content_type_auto ?? body.content_type == null,
         auto_schedule: autoScheduled,

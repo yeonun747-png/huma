@@ -23,7 +23,6 @@ export interface ContentGenerationInput {
   title: string;
   sourceUrl: string;
   synopsis?: string;
-  screenshotBase64?: string;
   workspace: string;
   content_type?: 'A' | 'B';
   /** 계정별 블로그 문체 지침 (연운 ~요체 등) */
@@ -247,18 +246,6 @@ export async function fetchAndSummarizeUrl(url: string): Promise<string> {
   return summary ?? rawText.slice(0, 500);
 }
 
-function parseScreenshotBase64(raw: string): { mediaType: 'image/jpeg' | 'image/png'; data: string } {
-  const match = raw.match(/^data:(image\/(?:jpeg|png));base64,(.+)$/i);
-  if (match) {
-    return {
-      mediaType: match[1].toLowerCase() === 'image/jpeg' ? 'image/jpeg' : 'image/png',
-      data: match[2],
-    };
-  }
-  const data = raw.replace(/^data:image\/\w+;base64,/, '');
-  return { mediaType: data.startsWith('/9j/') ? 'image/jpeg' : 'image/png', data };
-}
-
 function fallbackContent(
   input: ContentGenerationInput,
   urlSummary: string,
@@ -345,15 +332,6 @@ ${lengthGuide}
 }`),
     },
   ];
-
-  if (input.screenshotBase64) {
-    const { mediaType, data } = parseScreenshotBase64(input.screenshotBase64);
-    userParts.unshift({ type: 'text', text: '서비스 화면 캡처 (UI·특징 반영):' });
-    userParts.unshift({
-      type: 'image',
-      source: { type: 'base64', media_type: mediaType, data },
-    });
-  }
 
   const model = (await getMainClaudeModel()) || SONNET_MODEL_FALLBACK;
   const system = withHumanWritingSystem(SYSTEM_PROMPTS[input.workspace] ?? SYSTEM_PROMPTS.yeonun);

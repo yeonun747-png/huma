@@ -21,6 +21,7 @@ import {
   type PreviewStep,
 } from '../../claude/content-preview.js';
 import { isNaverBlogOnlyMode } from '../../../lib/activity-control.js';
+import { resolveFeaturedBlogImageUrl } from '../../../lib/blog-image-placement.js';
 
 export type ContentType = 'A' | 'B';
 
@@ -34,7 +35,7 @@ export interface ContentOrchestratorInput {
   title: string;
   sourceUrl: string;
   synopsis?: string;
-  screenshotBase64?: string;
+  uploadedImageUrls?: string[];
   content_type?: ContentType;
   content_type_auto?: boolean;
   auto_scheduled?: boolean;
@@ -161,13 +162,14 @@ async function enqueueVideoPipeline(
 async function runTypeA(
   params: ContentOrchestratorInput,
   generated: Awaited<ReturnType<typeof generateAllContent>>,
-  imageUrl: string,
+  imageUrls: string[],
   postingAccount: PostingAccountPick | null,
   schedule?: PlatformSchedule,
 ) {
   const { workspace, title, sourceUrl, scheduled_at, repeat_rule, auto_scheduled = true } = params;
   const accountId = postingAccount?.id ?? null;
   let jobsCreated = 0;
+  const featuredImage = resolveFeaturedBlogImageUrl(imageUrls);
 
   const blogLink = normalizeBlogLinkUrl(workspace, sourceUrl);
   const blogAt = platformTime(auto_scheduled, schedule, 'naver_blog', scheduled_at);
@@ -179,7 +181,7 @@ async function runTypeA(
     title: resolvePostingTitle(generated),
     content: generated.blog_post,
     // 발행 직전 post-blog에서 1회 uniquify (로컬 tmp는 휘발 → 내구성 있는 https URL 저장)
-    image_urls: [imageUrl],
+    image_urls: imageUrls,
     link_url: blogLink,
     hashtags: generated.hashtags,
     platform: 'naver',
@@ -194,9 +196,9 @@ async function runTypeA(
 
   if (!isNaverBlogOnlyMode()) {
     const socialJobs: Array<{ type: string; platform: string; content: string; imageUrl?: string; scheduleKey: keyof PlatformSchedule }> = [
-      { type: 'instagram_post', platform: 'instagram', content: generated.instagram_caption, imageUrl, scheduleKey: 'instagram' },
-      { type: 'threads_post', platform: 'threads', content: generated.threads_text, imageUrl, scheduleKey: 'threads' },
-      { type: 'twitter_post', platform: 'twitter', content: generated.x_text, imageUrl, scheduleKey: 'x' },
+      { type: 'instagram_post', platform: 'instagram', content: generated.instagram_caption, imageUrl: featuredImage, scheduleKey: 'instagram' },
+      { type: 'threads_post', platform: 'threads', content: generated.threads_text, imageUrl: featuredImage, scheduleKey: 'threads' },
+      { type: 'twitter_post', platform: 'twitter', content: generated.x_text, imageUrl: featuredImage, scheduleKey: 'x' },
     ];
 
     for (const social of socialJobs) {
@@ -228,13 +230,14 @@ async function runTypeA(
 async function runTypeB(
   params: ContentOrchestratorInput,
   generated: Awaited<ReturnType<typeof generateAllContent>>,
-  imageUrl: string,
+  imageUrls: string[],
   videoModel: string,
   postingAccount: PostingAccountPick | null,
   schedule?: PlatformSchedule,
 ) {
   const { workspace, title, sourceUrl, scheduled_at, repeat_rule, auto_scheduled = true } = params;
   const accountId = postingAccount?.id ?? null;
+  const featuredImage = resolveFeaturedBlogImageUrl(imageUrls);
 
   const blogLink = normalizeBlogLinkUrl(workspace, sourceUrl);
   const blogAt = platformTime(auto_scheduled, schedule, 'naver_blog', scheduled_at);
@@ -250,7 +253,7 @@ async function runTypeB(
     title: resolvePostingTitle(generated),
     content: generated.blog_post,
     // 발행 직전 post-blog에서 1회 uniquify (내구성 있는 https URL 저장)
-    image_urls: [imageUrl],
+    image_urls: imageUrls,
     link_url: blogLink,
     hashtags: generated.hashtags,
     platform: 'naver',
@@ -290,7 +293,7 @@ async function runTypeB(
     job_type: 'twitter_post',
     title: `[twitter] ${title}`,
     content: generated.x_text,
-    image_urls: [imageUrl],
+    image_urls: featuredImage ? [featuredImage] : undefined,
     hashtags: generated.hashtags,
     platform: 'twitter',
     content_type: 'B',
@@ -310,7 +313,7 @@ async function runTypeB(
       blog_job_id: blogJob.id,
       threads_job_id: threadsJob.id,
       twitter_job_id: twitterJob.id,
-      generated_image_url: imageUrl,
+      generated_image_url: featuredImage,
       image_prompt: generated.image_prompt,
       video_prompt: generated.video_prompt,
       ...(pipelineModels.imageModel ? { image_model: pipelineModels.imageModel } : {}),
@@ -413,12 +416,14 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
     await patch(input.parentJobId, previewSteps);
   }
 
+  const uploadedImages = (input.uploadedImageUrls ?? []).filter((u) => Boolean(u?.trim()));
+  const hasUploadedImages = uploadedImages.length > 0;
+
   const claudeStart = Date.now();
   const generated = await generateAllContent({
     title: input.title.trim(),
     sourceUrl: input.sourceUrl.trim(),
     synopsis: input.synopsis?.trim(),
-    screenshotBase64: input.screenshotBase64,
     workspace: input.workspace,
     content_type: resolvedType,
     blogWritingPersona,
@@ -448,32 +453,58 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
       .eq('id', input.parentJobId);
   }
 
-  const imagenStart = Date.now();
-  const imageModel = selectImageModel(input.workspace);
-  const imageUrl = await generateImage({
-    prompt: generated.image_prompt,
-    model: imageModel as ImageModel,
-  });
+  let blogImageUrls: string[];
+  let imageModel: string | undefined;
+  let imagenUrl: string | undefined;
 
-  previewSteps[1] = {
-    ...previewSteps[1]!,
-    status: 'ok',
-    ms: Date.now() - imagenStart,
-    detail: imageUrl,
-  };
-
-  if (input.parentJobId && !dryRun) {
-    await patchJobGenerationProgress(input.parentJobId, previewSteps, {
-      image_model: imageModel,
-      image_url: imageUrl,
+  if (hasUploadedImages) {
+    blogImageUrls = uploadedImages;
+    previewSteps[1] = {
+      ...previewSteps[1]!,
+      status: 'ok',
+      ms: 0,
+      detail: `등록 이미지 ${uploadedImages.length}장`,
+    };
+    if (input.parentJobId && !dryRun) {
+      await patchJobGenerationProgress(input.parentJobId, previewSteps, {
+        uploaded_image_count: uploadedImages.length,
+      });
+    }
+  } else {
+    const imagenStart = Date.now();
+    imageModel = selectImageModel(input.workspace);
+    imagenUrl = await generateImage({
+      prompt: generated.image_prompt,
+      model: imageModel as ImageModel,
     });
+    blogImageUrls = [imagenUrl];
+
+    previewSteps[1] = {
+      ...previewSteps[1]!,
+      status: 'ok',
+      ms: Date.now() - imagenStart,
+      detail: imagenUrl,
+    };
+
+    if (input.parentJobId && !dryRun) {
+      await patchJobGenerationProgress(input.parentJobId, previewSteps, {
+        image_model: imageModel,
+        image_url: imagenUrl,
+      });
+    }
   }
 
   if (dryRun && input.parentJobId) {
-    await patchJobPreviewProgress(input.parentJobId, previewSteps, {
-      image_model: imageModel,
-      image_url: imageUrl,
-    });
+    if (hasUploadedImages) {
+      await patchJobPreviewProgress(input.parentJobId, previewSteps, {
+        uploaded_image_count: uploadedImages.length,
+      });
+    } else {
+      await patchJobPreviewProgress(input.parentJobId, previewSteps, {
+        image_model: imageModel,
+        image_url: imagenUrl,
+      });
+    }
     const { data: currentJob } = await supabase
       .from('huma_jobs')
       .select('platform_schedule')
@@ -483,7 +514,7 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
     await supabase
       .from('huma_jobs')
       .update({
-        image_urls: [imageUrl],
+        image_urls: blogImageUrls,
         platform_schedule: {
           ...prevPs,
           ...(schedule ?? {}),
@@ -492,7 +523,7 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
             steps: previewSteps,
             image_model: imageModel,
             image_prompt: generated.image_prompt,
-            image_url: imageUrl,
+            image_url: imagenUrl ?? uploadedImages[0],
             operator_title: input.title.trim(),
             operator_synopsis: input.synopsis?.trim() || undefined,
             generated: {
@@ -521,16 +552,16 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
       video_queue_id: undefined as string | undefined,
       dry_run: true as const,
       generated,
-      image_url: imageUrl,
+      image_url: imagenUrl ?? uploadedImages[0],
     };
   }
 
   const runInput = { ...input, scheduled_at: baseScheduledAt, auto_scheduled: autoScheduled };
 
   if (resolvedType === 'A') {
-    return runTypeA(runInput, generated, imageUrl, postingAccount, schedule);
+    return runTypeA(runInput, generated, blogImageUrls, postingAccount, schedule);
   }
-  return runTypeB(runInput, generated, imageUrl, videoModel, postingAccount, schedule);
+  return runTypeB(runInput, generated, blogImageUrls, videoModel, postingAccount, schedule);
 }
 
 type PreviewGeneratedSnapshot = Pick<
@@ -590,9 +621,13 @@ export async function promoteDryRunToPublish(parentJobId: string) {
     throw new Error('이미 발행 큐에 등록된 검증 작업입니다');
   }
 
-  const imageUrl = (preview?.image_url as string | undefined) ?? job.image_urls?.[0];
-  if (!job.content || !imageUrl) {
-    throw new Error('본문 또는 Imagen 이미지가 없습니다');
+  const uploaded = Array.isArray(job.image_urls)
+    ? job.image_urls.filter((u): u is string => typeof u === 'string' && Boolean(u.trim()))
+    : [];
+  const previewUrl = preview?.image_url as string | undefined;
+  const blogImageUrls = uploaded.length ? uploaded : previewUrl ? [previewUrl] : [];
+  if (!job.content || blogImageUrls.length === 0) {
+    throw new Error('본문 또는 이미지가 없습니다');
   }
 
   const generated = resolvePreviewGenerated(job, preview);
@@ -634,7 +669,7 @@ export async function promoteDryRunToPublish(parentJobId: string) {
       ? await runTypeB(
           runInput,
           generatedWithSeo as Awaited<ReturnType<typeof generateAllContent>>,
-          imageUrl,
+          blogImageUrls,
           job.video_model ?? 'kling-3.0',
           postingAccount,
           schedule,
@@ -642,7 +677,7 @@ export async function promoteDryRunToPublish(parentJobId: string) {
       : await runTypeA(
           runInput,
           generatedWithSeo as Awaited<ReturnType<typeof generateAllContent>>,
-          imageUrl,
+          blogImageUrls,
           postingAccount,
           schedule,
         );

@@ -69,6 +69,7 @@ async function insertFileViaToolbar(
   page: Page,
   localPath: string,
   toolbar: { dataNames: string[]; buttonTexts: string[]; classHints: string[] },
+  options?: { keepCaret?: boolean },
 ): Promise<boolean> {
   const chooser = await openPhotoFileChooser(page);
   if (!chooser) {
@@ -78,7 +79,11 @@ async function insertFileViaToolbar(
     const fallbackChooser = await chooserPromise;
     if (!fallbackChooser) return false;
     await fallbackChooser.setFiles(localPath);
-    await preparePointerForPublishAfterImage(page);
+    if (!options?.keepCaret) {
+      await preparePointerForPublishAfterImage(page);
+    } else {
+      await dismissSeOneMaterialPopup(page);
+    }
     await humanSleep(800, 1600);
     const loaded = await waitForBlogImageLoaded(page);
     if (loaded) return true;
@@ -91,7 +96,11 @@ async function insertFileViaToolbar(
   }
 
   await chooser.setFiles(localPath);
-  await preparePointerForPublishAfterImage(page);
+  if (!options?.keepCaret) {
+    await preparePointerForPublishAfterImage(page);
+  } else {
+    await dismissSeOneMaterialPopup(page);
+  }
   await humanSleep(800, 1600);
   const loaded = await waitForBlogImageLoaded(page);
   if (loaded) return true;
@@ -115,9 +124,9 @@ function mimeForImagePath(localPath: string): string {
 export async function pasteBlogImageAtCaret(
   page: Page,
   localPath: string,
-  options?: { skipPostReview?: boolean },
+  options?: { skipPostReview?: boolean; keepCaret?: boolean },
 ): Promise<boolean> {
-  const viaToolbar = await insertImageViaToolbar(page, localPath);
+  const viaToolbar = await insertImageViaToolbar(page, localPath, options);
   if (viaToolbar) return true;
 
   const mime = mimeForImagePath(localPath);
@@ -141,7 +150,11 @@ export async function pasteBlogImageAtCaret(
   if (!clipboardReady) return false;
 
   await page.keyboard.press('Control+v');
-  await preparePointerForPublishAfterImage(page);
+  if (!options?.keepCaret) {
+    await preparePointerForPublishAfterImage(page);
+  } else {
+    await dismissSeOneMaterialPopup(page);
+  }
   await humanSleep(2000, 3500);
   return waitForBlogImageLoaded(page);
 }
@@ -152,12 +165,21 @@ export async function isBlogImageInEditor(page: Page): Promise<boolean> {
 }
 
 /** 툴바 「사진」 → filechooser. 실패 시 hidden input 폴백 */
-export async function insertImageViaToolbar(page: Page, localPath: string): Promise<boolean> {
-  const viaToolbar = await insertFileViaToolbar(page, localPath, {
-    dataNames: ['image', 'photo'],
-    buttonTexts: ['사진'],
-    classHints: ['image-toolbar', 'photo'],
-  });
+export async function insertImageViaToolbar(
+  page: Page,
+  localPath: string,
+  options?: { keepCaret?: boolean },
+): Promise<boolean> {
+  const viaToolbar = await insertFileViaToolbar(
+    page,
+    localPath,
+    {
+      dataNames: ['image', 'photo'],
+      buttonTexts: ['사진'],
+      classHints: ['image-toolbar', 'photo'],
+    },
+    options,
+  );
   if (viaToolbar) return true;
 
   const fileInput = await findVisibleLocator(
@@ -167,7 +189,11 @@ export async function insertImageViaToolbar(page: Page, localPath: string): Prom
   );
   if (fileInput) {
     await fileInput.setInputFiles(localPath);
-    await preparePointerForPublishAfterImage(page);
+    if (!options?.keepCaret) {
+      await preparePointerForPublishAfterImage(page);
+    } else {
+      await dismissSeOneMaterialPopup(page);
+    }
     await humanSleep(800, 1600);
     if (await waitForBlogImageLoaded(page)) return true;
     if (await isBlogImagePresentInBody(page)) return true;
@@ -177,7 +203,11 @@ export async function insertImageViaToolbar(page: Page, localPath: string): Prom
   const fallback = page.locator('input[type="file"]').first();
   if ((await fallback.count()) > 0) {
     await fallback.setInputFiles(localPath);
-    await preparePointerForPublishAfterImage(page);
+    if (!options?.keepCaret) {
+      await preparePointerForPublishAfterImage(page);
+    } else {
+      await dismissSeOneMaterialPopup(page);
+    }
     await humanSleep(800, 1600);
     if (await waitForBlogImageLoaded(page)) return true;
     if (await isBlogImagePresentInBody(page)) return true;

@@ -90,7 +90,11 @@ async function main() {
 
   assertSecretsConfigured();
 
-  const app = Fastify({ logger: true });
+  const app = Fastify({
+    logger: true,
+    /** JSON 본문 기본 한도 — 이미지는 /api/jobs/upload-image 로 분리 업로드 */
+    bodyLimit: 2 * 1024 * 1024,
+  });
 
 
 

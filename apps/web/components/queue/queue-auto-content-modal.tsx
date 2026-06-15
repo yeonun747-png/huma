@@ -8,13 +8,18 @@ import type { QueuePrefill } from '@/lib/queue-prefill';
 import { extractKstScheduleTime } from '@/lib/format-kst';
 import { formatScheduleLabel } from './job-schedule-form';
 
+const IMAGE_SLOT_COUNT = 5;
+const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+
+export type UploadedImageSlot = string | undefined;
+
 export interface AutoContentFormValues {
   title: string;
   source_url: string;
   synopsis: string;
   content_type: 'A' | 'B' | 'auto';
   auto_schedule: boolean;
-  screenshot_base64?: string;
+  uploaded_images: UploadedImageSlot[];
   schedule_time: string;
 }
 
@@ -27,15 +32,25 @@ interface QueueAutoContentModalProps {
   onPreview?: (values: AutoContentFormValues) => Promise<void>;
 }
 
+const EMPTY_SLOTS: UploadedImageSlot[] = Array.from({ length: IMAGE_SLOT_COUNT });
+
 const EMPTY_FORM: AutoContentFormValues = {
   title: '',
   source_url: '',
   synopsis: '',
   content_type: 'A',
   auto_schedule: true,
+  uploaded_images: [...EMPTY_SLOTS],
   schedule_time: '10:00',
 };
 
+function slotsFromJob(job: HumaJob): UploadedImageSlot[] {
+  const slots: UploadedImageSlot[] = [...EMPTY_SLOTS];
+  (job.image_urls ?? []).slice(0, IMAGE_SLOT_COUNT).forEach((url, i) => {
+    slots[i] = url;
+  });
+  return slots;
+}
 
 function jobToForm(job: HumaJob): AutoContentFormValues {
   const contentType: AutoContentFormValues['content_type'] = job.content_type_auto
@@ -50,19 +65,26 @@ function jobToForm(job: HumaJob): AutoContentFormValues {
     synopsis: job.content ?? '',
     content_type: contentType,
     auto_schedule: job.auto_scheduled ?? true,
-    screenshot_base64: job.image_urls?.[0],
+    uploaded_images: slotsFromJob(job),
     schedule_time: extractKstScheduleTime(job.scheduled_at),
   };
 }
 
+function countFilledSlots(slots: UploadedImageSlot[]): number {
+  return slots.filter(Boolean).length;
+}
+
+import { compressImageFileForUpload } from '@/lib/compress-image-for-upload';
+
 export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmit, onPreview }: QueueAutoContentModalProps) {
-  const fileRef = useRef<HTMLInputElement>(null);
+  const fileRefs = useRef<Array<HTMLInputElement | null>>([]);
   const isEdit = Boolean(editJob);
   const editable = !editJob || ['pending', 'scheduled', 'paused'].includes(editJob.status);
 
   const [form, setForm] = useState<AutoContentFormValues>(EMPTY_FORM);
-  const [screenshotName, setScreenshotName] = useState('');
-  const [previewOpen, setPreviewOpen] = useState(false);
+  const [slotNames, setSlotNames] = useState<string[]>(Array(IMAGE_SLOT_COUNT).fill(''));
+  const [previewSlot, setPreviewSlot] = useState<number | null>(null);
+  const [dragOverSlot, setDragOverSlot] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -70,42 +92,80 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
     if (!open) return;
     if (editJob) {
       setForm(jobToForm(editJob));
-      setScreenshotName(editJob.image_urls?.[0] ? '기존 캡처' : '');
+      setSlotNames(
+        slotsFromJob(editJob).map((url, i) => (url ? `슬롯 ${i + 1}` : '')),
+      );
     } else if (prefill) {
       setForm({
         ...EMPTY_FORM,
         title: prefill.title,
         source_url: prefill.source_url,
       });
-      setScreenshotName('');
+      setSlotNames(Array(IMAGE_SLOT_COUNT).fill(''));
     } else {
       setForm(EMPTY_FORM);
-      setScreenshotName('');
+      setSlotNames(Array(IMAGE_SLOT_COUNT).fill(''));
     }
-    setPreviewOpen(false);
+    setPreviewSlot(null);
+    setDragOverSlot(null);
     setError('');
   }, [open, editJob, prefill]);
 
   useEffect(() => {
-    if (!previewOpen) return;
+    if (previewSlot == null) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setPreviewOpen(false);
+      if (e.key === 'Escape') setPreviewSlot(null);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [previewOpen]);
+  }, [previewSlot]);
+
+  useEffect(() => {
+    const clearDrag = () => setDragOverSlot(null);
+    window.addEventListener('dragend', clearDrag);
+    window.addEventListener('drop', clearDrag);
+    return () => {
+      window.removeEventListener('dragend', clearDrag);
+      window.removeEventListener('drop', clearDrag);
+    };
+  }, []);
 
   if (!open) return null;
 
-  const handleFile = (file?: File | null) => {
+  const filledCount = countFilledSlots(form.uploaded_images);
+
+  const setSlotImage = (index: number, data: string | undefined, name = '') => {
+    setForm((f) => {
+      const uploaded_images = [...f.uploaded_images];
+      uploaded_images[index] = data;
+      return { ...f, uploaded_images };
+    });
+    setSlotNames((names) => {
+      const next = [...names];
+      next[index] = name;
+      return next;
+    });
+  };
+
+  const handleFile = async (index: number, file?: File | null) => {
     if (!file || !editable) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const data = String(reader.result ?? '');
-      setForm((f) => ({ ...f, screenshot_base64: data }));
-      setScreenshotName(file.name);
-    };
-    reader.readAsDataURL(file);
+    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
+      setError('PNG · JPG · WEBP 이미지만 등록할 수 있습니다.');
+      return;
+    }
+    setError('');
+    try {
+      const data = await compressImageFileForUpload(file);
+      setSlotImage(index, data, file.name);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '이미지 등록 실패');
+    }
+  };
+
+  const clearSlot = (index: number) => {
+    setSlotImage(index, undefined, '');
+    const input = fileRefs.current[index];
+    if (input) input.value = '';
   };
 
   const handlePreview = async () => {
@@ -119,8 +179,8 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
     try {
       await onPreview(form);
       setForm(EMPTY_FORM);
-      setScreenshotName('');
-      setPreviewOpen(false);
+      setSlotNames(Array(IMAGE_SLOT_COUNT).fill(''));
+      setPreviewSlot(null);
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : '검증 등록 실패');
@@ -140,8 +200,8 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
       await onSubmit(form);
       if (!isEdit) {
         setForm(EMPTY_FORM);
-        setScreenshotName('');
-        setPreviewOpen(false);
+        setSlotNames(Array(IMAGE_SLOT_COUNT).fill(''));
+        setPreviewSlot(null);
       }
       onClose();
     } catch (e) {
@@ -256,55 +316,123 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
         </div>
 
         <div className="m-modal-field">
-          <div className="m-modal-label">③ 서비스 화면 캡처 <span className="text-huma-t3">선택 — Claude 비전으로 분석</span></div>
-          <button
-            type="button"
-            className="m-modal-drop m-modal-drop-screenshot"
-            disabled={!editable}
-            onClick={() => fileRef.current?.click()}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              handleFile(e.dataTransfer.files[0]);
+          <div className="m-modal-label">
+            ③ 포스팅 이미지 <span className="text-huma-t3">선택 · 0장이면 Imagen 4 생성</span>
+          </div>
+          <p className="mb-2 font-mono text-[10.5px] text-huma-t3">
+            PNG · WEBP · JPG · 최대 5장 · 등록 {filledCount}장
+            {filledCount > 0 ? ' — Imagen 생략' : ''}
+          </p>
+          <div
+            className="m-image-slots-grid"
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                setDragOverSlot(null);
+              }
             }}
           >
-            {form.screenshot_base64 ? (
-              <>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={form.screenshot_base64}
-                  alt={screenshotName || '서비스 화면 캡처'}
-                  className="m-modal-drop-screenshot-img"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setPreviewOpen(true);
+            {form.uploaded_images.map((src, index) => (
+              <div
+                key={index}
+                className={`m-image-slot-wrap${dragOverSlot === index ? ' is-drag-over' : ''}`}
+                onDragEnter={(e) => {
+                  if (!editable) return;
+                  e.preventDefault();
+                  setDragOverSlot(index);
+                }}
+                onDragOver={(e) => {
+                  if (!editable) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'copy';
+                  setDragOverSlot(index);
+                }}
+                onDragLeave={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                    setDragOverSlot((prev) => (prev === index ? null : prev));
+                  }
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragOverSlot(null);
+                  void handleFile(index, e.dataTransfer.files[0]);
+                }}
+              >
+                {index === 0 ? (
+                  <span className="m-image-slot-badge">대표이미지</span>
+                ) : null}
+                <button
+                  type="button"
+                  className="m-modal-drop m-modal-drop-screenshot m-image-slot"
+                  disabled={!editable}
+                  onClick={() => fileRefs.current[index]?.click()}
+                >
+                  {src ? (
+                    <>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={src}
+                        alt={slotNames[index] || `이미지 슬롯 ${index + 1}`}
+                        className="m-modal-drop-screenshot-img"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPreviewSlot(index);
+                        }}
+                      />
+                      <span className="m-modal-drop-screenshot-hint">클릭 확대 · 드래그 교체</span>
+                      {editable ? (
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          className="m-image-slot-clear"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            clearSlot(index);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.stopPropagation();
+                              clearSlot(index);
+                            }
+                          }}
+                        >
+                          ✕
+                        </span>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-sm font-mono text-huma-t3">{index + 1}</div>
+                      <div className="text-[10px] text-huma-t3">드래그 또는 클릭</div>
+                    </>
+                  )}
+                </button>
+                <input
+                  ref={(el) => {
+                    fileRefs.current[index] = el;
                   }}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={(e) => void handleFile(index, e.target.files?.[0])}
                 />
-                <span className="m-modal-drop-screenshot-hint">클릭하여 크게 보기 · 드래그로 교체</span>
-              </>
-            ) : (
-              <>
-                <div className="text-lg">📸</div>
-                <div className="text-xs text-huma-t3">PNG·JPG 드래그 또는 클릭</div>
-              </>
-            )}
-          </button>
-          <input ref={fileRef} type="file" accept="image/png,image/jpeg" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
+              </div>
+            ))}
+          </div>
         </div>
 
-        {previewOpen && form.screenshot_base64 && (
+        {previewSlot != null && form.uploaded_images[previewSlot] && (
           <div
             className="m-screenshot-lightbox"
             role="dialog"
             aria-modal="true"
-            aria-label="캡처 이미지 크게 보기"
-            onClick={() => setPreviewOpen(false)}
+            aria-label="등록 이미지 크게 보기"
+            onClick={() => setPreviewSlot(null)}
           >
             <span className="m-screenshot-lightbox-close">ESC 또는 바깥 클릭으로 닫기</span>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={form.screenshot_base64}
-              alt={screenshotName || '서비스 화면 캡처'}
+              src={form.uploaded_images[previewSlot]!}
+              alt={slotNames[previewSlot] || `이미지 슬롯 ${previewSlot + 1}`}
               onClick={(e) => e.stopPropagation()}
             />
           </div>
@@ -411,3 +539,10 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
     </div>
   );
 }
+
+function compactUploadedImages(slots: UploadedImageSlot[]): string[] | undefined {
+  const out = slots.filter((s): s is string => Boolean(s?.trim()));
+  return out.length ? out : undefined;
+}
+
+export { compactUploadedImages };

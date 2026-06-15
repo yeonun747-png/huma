@@ -40,9 +40,19 @@ import {
 import { pasteBlogLinkWithOgPreview } from './paste-blog-link.js';
 import { resolveBlogLinkUrl } from '../../../lib/blog-link.js';
 import {
+  buildInBodyImageMap,
+  resolveFeaturedBlogImageUrl,
+  resolveTrailingBlogImageUrl,
+} from '../../../lib/blog-image-placement.js';
+import {
   insertVideoViaToolbar,
   pasteBlogImageAtCaret,
 } from './naver-editor-media.js';
+import {
+  countBodyImageModules,
+  setBlogRepresentativeAfterImageInsert,
+  setBlogRepresentativeImage,
+} from './naver-representative-image.js';
 import { completeNaverPublishDialog, moveMouseToTopPublishButton } from './naver-publish-dialog.js';
 import { logOperation } from '../../../lib/log-emitter.js';
 import { sleep } from '../../../lib/utils.js';
@@ -60,8 +70,47 @@ async function typeSeOneBlogBody(
   bodyLoc: Locator,
   content: string,
   humanConfig: HumanEngineConfig,
+  imageUrls?: string[],
+  accountId?: string,
 ): Promise<void> {
-  await typeBlogBodyContent(page, bodyLoc, content, humanConfig, { afterPlaceholderClick: true });
+  const featuredPath = resolveFeaturedBlogImageUrl(imageUrls ?? []);
+  const inBodyImages =
+    imageUrls && imageUrls.length > 1 ? buildInBodyImageMap(content, imageUrls) : new Map<number, string>();
+
+  await typeBlogBodyContent(page, bodyLoc, content, humanConfig, {
+    afterPlaceholderClick: true,
+    onAfterParagraph:
+      inBodyImages.size > 0
+        ? async (paragraphIndex) => {
+            const imagePath = inBodyImages.get(paragraphIndex);
+            if (!imagePath) return;
+            const moduleIndexBeforeInsert = await countBodyImageModules(page);
+            await focusBlogBodyAtEnd(page, bodyLoc);
+            const ok = await pasteBlogImageAtCaret(page, imagePath, {
+              skipPostReview: true,
+              keepCaret: true,
+            });
+            if (!ok) {
+              await logOperation({
+                level: 'warn',
+                message: `[post_blog][image] 본문 중간 삽입 미확인 (단락 ${paragraphIndex + 1})`,
+                account_id: accountId,
+              }).catch(() => {});
+            } else {
+              await setBlogRepresentativeAfterImageInsert(
+                page,
+                imagePath,
+                featuredPath,
+                moduleIndexBeforeInsert,
+                accountId,
+              );
+            }
+            await page.keyboard.press('Enter');
+            await page.keyboard.press('Enter');
+            await sleep(200);
+          }
+        : undefined,
+  });
 }
 
 async function isBlogBodyReadyForMediaAppend(
@@ -112,6 +161,8 @@ async function appendLinkAndImageAtBodyEnd(params: {
   editor: Locator;
   linkUrl?: string;
   imagePath?: string;
+  featuredImagePath?: string;
+  allowMultipleImages?: boolean;
   workspace?: string;
   scale: number;
   humanConfig: HumanEngineConfig;
@@ -177,13 +228,20 @@ async function appendLinkAndImageAtBodyEnd(params: {
   if (params.imagePath) {
     await focusBlogBodyAtEnd(page, params.editor);
     const imagePresent = await isBlogImagePresentInBody(page);
-    if (imagePresent) {
+    if (imagePresent && !params.allowMultipleImages) {
       await logOperation({
         level: 'info',
         message: '[post_blog] 본문에 이미지 있음 — 이미지 삽입 건너뜀',
         account_id: accountId,
       }).catch(() => {});
+      if (
+        params.featuredImagePath &&
+        params.imagePath === params.featuredImagePath
+      ) {
+        await setBlogRepresentativeImage(page, 0, accountId);
+      }
     } else {
+      const moduleIndexBeforeInsert = await countBodyImageModules(page);
       await logOperation({
         level: 'info',
         message: '[post_blog] 이미지 삽입 시작 (붙여넣기·툴바 폴백)',
@@ -202,6 +260,13 @@ async function appendLinkAndImageAtBodyEnd(params: {
           message: '[post_blog] 이미지 삽입 완료',
           account_id: accountId,
         }).catch(() => {});
+        await setBlogRepresentativeAfterImageInsert(
+          page,
+          params.imagePath,
+          params.featuredImagePath,
+          moduleIndexBeforeInsert,
+          accountId,
+        );
       }
     }
   }
@@ -371,7 +436,7 @@ export async function postNaverBlog(params: {
       }).catch(() => {});
 
       try {
-        await typeSeOneBlogBody(page, editor, params.content, config);
+        await typeSeOneBlogBody(page, editor, params.content, config, params.imageUrls, params.accountId);
       } catch (bodyErr) {
         bodyReady = await isBlogBodyReadyForMediaAppend(page, editor, params.content);
         if (bodyReady) {
@@ -407,16 +472,25 @@ export async function postNaverBlog(params: {
     });
   }
 
+  const trailingImage = resolveTrailingBlogImageUrl(params.imageUrls ?? []);
+  const featuredImagePath = resolveFeaturedBlogImageUrl(params.imageUrls ?? []);
+
   await appendLinkAndImageAtBodyEnd({
     page,
     editor,
     linkUrl: params.linkUrl,
-    imagePath: params.imageUrls?.[0],
+    imagePath: trailingImage,
+    featuredImagePath,
+    allowMultipleImages: (params.imageUrls?.length ?? 0) > 1,
     workspace: params.workspace,
     scale,
     humanConfig: config,
     accountId: params.accountId,
   });
+
+  if (featuredImagePath && (params.imageUrls?.length ?? 0) > 0) {
+    await setBlogRepresentativeImage(page, 0, params.accountId);
+  }
 
   if (params.videoPath?.trim()) {
     await prepareSeOneEditorSurface(page, 4_000, { destructiveDraftDismiss: false });

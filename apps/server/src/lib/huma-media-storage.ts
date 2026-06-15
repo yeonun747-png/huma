@@ -27,14 +27,15 @@ export async function downloadHumaMedia(storagePath: string): Promise<Buffer> {
   return Buffer.from(await data.arrayBuffer());
 }
 
-export async function uploadHumaMediaJpeg(
+export async function uploadHumaMediaBuffer(
   storagePath: string,
   buf: Buffer,
+  contentType: string,
   opts?: { signedUrlExpiresSec?: number },
 ): Promise<string> {
   const supa = supabaseAdmin();
   const { error: uploadError } = await supa.storage.from(BUCKET).upload(storagePath, buf, {
-    contentType: 'image/jpeg',
+    contentType,
     upsert: true,
   });
   if (uploadError) throw new Error(`Storage upload 실패: ${uploadError.message}`);
@@ -47,4 +48,12 @@ export async function uploadHumaMediaJpeg(
 
   const { data } = supa.storage.from(BUCKET).getPublicUrl(storagePath);
   return data.publicUrl;
+}
+
+export async function uploadHumaMediaJpeg(
+  storagePath: string,
+  buf: Buffer,
+  opts?: { signedUrlExpiresSec?: number },
+): Promise<string> {
+  return uploadHumaMediaBuffer(storagePath, buf, 'image/jpeg', opts);
 }

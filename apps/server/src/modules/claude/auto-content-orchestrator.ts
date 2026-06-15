@@ -2,6 +2,7 @@ import { enqueueHumaJob, type JobRecord } from '../../lib/job-scheduler.js';
 import { supabase } from '../../middleware/auth.js';
 import { getPostingEnabled } from '../../lib/activity-control.js';
 import { pickPostingAccount } from '../../lib/posting-accounts.js';
+import { persistUploadedJobImages, normalizeUploadedImagesInput } from '../../lib/upload-job-images.js';
 import { toTodayDatetime } from './auto-decide.js';
 import {
   runContentOrchestrator,
@@ -13,7 +14,9 @@ export interface AutoContentRequest {
   title: string;
   source_url: string;
   synopsis?: string;
+  /** @deprecated uploaded_images 사용 */
   screenshot_base64?: string;
+  uploaded_images?: string[];
   content_type?: ContentType;
   content_type_auto?: boolean;
   auto_schedule?: boolean;
@@ -67,7 +70,7 @@ export async function registerAutoContentJobs(body: AutoContentRequest): Promise
       title: body.title.trim(),
       content: body.synopsis?.trim() || null,
       link_url: body.source_url.trim(),
-      image_urls: body.screenshot_base64 ? [body.screenshot_base64] : null,
+      image_urls: null,
       scheduled_at: scheduledAt,
       repeat_rule: body.repeat_rule || null,
       platform_schedule: body.dry_run ? { _dry_run: true } : null,
@@ -78,6 +81,17 @@ export async function registerAutoContentJobs(body: AutoContentRequest): Promise
     .single();
 
   if (error || !parentJob) throw new Error(error?.message ?? '작업 등록 실패');
+
+  const rawImages =
+    normalizeUploadedImagesInput(body.uploaded_images) ??
+    (body.screenshot_base64?.trim() ? [body.screenshot_base64.trim()] : undefined);
+  if (rawImages?.length) {
+    const stored = await persistUploadedJobImages(rawImages, parentJob.id);
+    if (stored?.length) {
+      await supabase.from('huma_jobs').update({ image_urls: stored }).eq('id', parentJob.id);
+      (parentJob as Record<string, unknown>).image_urls = stored;
+    }
+  }
 
   await enqueueHumaJob(parentJob as JobRecord);
 
@@ -92,12 +106,16 @@ export async function executeContentFull(humaJobId: string) {
   const { data: job, error } = await supabase.from('huma_jobs').select('*').eq('id', humaJobId).single();
   if (error || !job) throw new Error('content_full 작업 없음');
 
+  const uploadedImageUrls = Array.isArray(job.image_urls)
+    ? job.image_urls.filter((u): u is string => typeof u === 'string' && Boolean(u.trim()))
+    : [];
+
   const result = await runContentOrchestrator({
     workspace: job.workspace,
     title: job.title ?? '',
     sourceUrl: job.link_url ?? '',
     synopsis: job.content ?? undefined,
-    screenshotBase64: job.image_urls?.[0]?.startsWith('data:') ? job.image_urls[0] : undefined,
+    uploadedImageUrls,
     content_type: job.content_type_auto ? undefined : (job.content_type as ContentType | undefined),
     content_type_auto: job.content_type_auto ?? true,
     auto_scheduled: job.auto_scheduled ?? true,
