@@ -874,41 +874,48 @@ async function resolveBodyEditableLocatorLast(page: Page, bodyLoc: Locator): Pro
   return resolveBodyEditableLocatorRelaxed(bodyLoc);
 }
 
-/** 본문 맨 끝으로 캐럿 이동 — 마지막 paragraph (다중 section 대응) */
+/** 본문 맨 끝으로 캐럿 이동 — 마우스는 마지막 줄 우측만 (중앙 클릭 금지) */
 export async function focusBlogBodyEnd(page: Page, bodyLoc: Locator): Promise<void> {
   await blurBlogTitleField(page);
 
   if (await isFocusInBodyArea(page)) {
     await page.keyboard.press('End');
-    await sleep(80);
+    await sleep(60);
+    await page.keyboard.press('End');
+    await sleep(60);
     await page.keyboard.press('Control+End');
-    await sleep(80);
+    await sleep(60);
     if (!(await isFocusInTitleArea(page))) return;
   }
 
   if (await focusLastBodyParagraphViaDom(page)) {
+    await sleep(100);
+    await page.keyboard.press('End');
+    await sleep(60);
+    if (!(await isFocusInTitleArea(page))) return;
+  }
+
+  const lastPara = page
+    .locator('.se-components-wrap .se-text-paragraph[contenteditable="true"]')
+    .last();
+  const paraBox = await lastPara.boundingBox().catch(() => null);
+  if (paraBox && paraBox.width > 12) {
+    const x = paraBox.x + paraBox.width - 4;
+    const y = paraBox.y + paraBox.height / 2;
+    await humanMouseMove(page, x, y);
+    await sleep(80);
+    await page.mouse.click(x, y);
     await sleep(120);
     await page.keyboard.press('End');
-    await sleep(80);
+    await sleep(60);
     if (!(await isFocusInTitleArea(page))) return;
   }
 
   const lastEditable = await resolveBodyEditableLocatorLast(page, bodyLoc);
   if (await focusCaretAtLocatorEnd(lastEditable)) {
-    await sleep(120);
+    await sleep(100);
     await page.keyboard.press('End');
-    await sleep(80);
-    if (!(await isFocusInTitleArea(page))) return;
-  }
-
-  const box = await bodyLoc.boundingBox().catch(() => null);
-  if (box && box.height > 16) {
-    await humanMouseMove(page, box.x + box.width / 2, box.y + box.height - 8);
-    await sleep(80);
-    await page.mouse.click(box.x + box.width / 2, box.y + box.height - 8);
-    await sleep(150);
-    await page.keyboard.press('Control+End');
-    await sleep(80);
+    await sleep(60);
     if (!(await isFocusInTitleArea(page))) return;
   }
 
@@ -920,6 +927,18 @@ export async function focusBlogBodyEnd(page: Page, bodyLoc: Locator): Promise<vo
   if (await isFocusInBodyArea(page)) return;
 
   throw new Error('BLOG_BODY_END_FOCUS_FAILED');
+}
+
+/** 본문 insertText 직후 — 클릭 없이 키보드만으로 줄 끝 */
+export async function moveCaretToBodyTailAfterPaste(page: Page): Promise<void> {
+  await blurBlogTitleField(page);
+  if (await isFocusInBodyArea(page)) {
+    await page.keyboard.press('End');
+    await sleep(60);
+    await page.keyboard.press('End');
+    await sleep(60);
+    return;
+  }
 }
 
 /** 본문 섹션 전체 텍스트 (링크 URL 검증용) */

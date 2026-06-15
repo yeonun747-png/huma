@@ -19,9 +19,11 @@ import {
   ensureBlogTitleWritten,
   blurBlogTitleField,
   focusBlogBodyEnd,
+  moveCaretToBodyTailAfterPaste,
   readBlogBodySectionText,
   isBlogLinkUrlInBodyText,
   isBlogImageInBodySection,
+  isFocusInBodyArea,
   verifyBlogBodyField,
   verifyBlogTitleField,
   waitForBlogTitleInputReady,
@@ -74,7 +76,10 @@ async function appendLinkAndImageAtBodyEnd(params: {
   const { page, editor, scale, humanConfig, accountId } = params;
   const workspace = params.workspace ?? 'yeonun';
 
-  await focusBlogBodyEnd(page, editor);
+  await moveCaretToBodyTailAfterPaste(page);
+  if (!(await isFocusInBodyArea(page))) {
+    await focusBlogBodyEnd(page, editor);
+  }
   await page.keyboard.press('Enter');
   await page.keyboard.press('Enter');
   await sleep(250);
@@ -125,7 +130,6 @@ async function appendLinkAndImageAtBodyEnd(params: {
         account_id: accountId,
       }).catch(() => {});
     } else {
-      await focusBlogBodyEnd(page, editor);
       await logOperation({
         level: 'info',
         message: '[post_blog] 이미지 삽입 시작 (붙여넣기·툴바 폴백)',

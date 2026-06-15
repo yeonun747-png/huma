@@ -6,10 +6,7 @@ import { normalizeHashtagTag } from '../../../lib/hashtag-sanitize.js';
 import { humanClickLocator } from '../../human-engine/mouse.js';
 import { humanSleep } from '../../human-engine/typing.js';
 import { scaledHumanSleep } from '../../human-engine/timing.js';
-import {
-  dismissNaverBlogEditorOverlays,
-  prepareSeOneEditorSurface,
-} from './enter-blog-editor.js';
+import { prepareSeOneEditorSurface } from './enter-blog-editor.js';
 import {
   findVisibleLocator,
   clickVisibleLocator,
@@ -45,12 +42,14 @@ const TAG_INPUT_SELECTORS = [
   '#tagText',
   '.tag_input input',
   '[class*="tag"] input[type="text"]',
+  '.se-popup-publish input[type="text"]',
 ];
 
 const CONFIRM_PUBLISH_SELECTORS = [
   '.se-popup-publish .btn_publish',
   '.se-popup-publish button[class*="publish"]',
   '.se-popup-publish .confirm_btn',
+  '.se-popup-publish button.se-popup-button-confirm',
   '[class*="publish_layer"] .btn_publish',
   '[class*="publish_layer"] button[class*="confirm"]',
   '[class*="publish_layer"] .confirm_btn',
@@ -88,6 +87,16 @@ async function waitForPublishLayer(page: Page, timeoutMs = 15_000): Promise<bool
   return false;
 }
 
+async function isPublishLayerVisible(page: Page): Promise<boolean> {
+  for (const sel of PUBLISH_LAYER_SELECTORS) {
+    const loc = page.locator(sel).first();
+    if ((await loc.count()) > 0 && (await loc.isVisible().catch(() => false))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export async function selectPublishCategory(
   page: Page,
   categoryName: string,
@@ -108,7 +117,7 @@ export async function selectPublishCategory(
 
   const option = await findVisibleLocator(page, optionSelectors, { inFrame: false });
   if (!option) {
-    await page.keyboard.press('Escape').catch(() => {});
+    await clickVisibleLocator(page, trigger).catch(() => {});
     return false;
   }
 
@@ -130,27 +139,44 @@ export async function typePublishTags(
   if (!input) return false;
 
   await humanClickLocator(page, input);
+  await scaledHumanSleep(300, 600, scale);
 
   for (let i = 0; i < tags.length; i += 1) {
-    const tag = tags[i]!;
-    await humanClickLocator(page, input);
-    await page.keyboard.insertText(tag);
-    await scaledHumanSleep(200, 550, scale);
-    await page.keyboard.press(i < tags.length - 1 || Math.random() < 0.75 ? 'Space' : 'Enter');
-    await scaledHumanSleep(400, 900, scale);
+    await page.keyboard.insertText(tags[i]!);
+    await scaledHumanSleep(180, 450, scale);
+    await page.keyboard.press('Enter');
+    await scaledHumanSleep(350, 750, scale);
   }
 
-  await scaledHumanSleep(500, 1200, scale);
+  await scaledHumanSleep(400, 900, scale);
   return true;
 }
 
 export async function clickConfirmPublish(page: Page): Promise<void> {
+  if (!(await isPublishLayerVisible(page))) {
+    throw new Error('NAVER_PUBLISH_LAYER_CLOSED');
+  }
+
   const layer = await findVisibleLocator(page, PUBLISH_LAYER_SELECTORS, { inFrame: false });
+
   if (layer) {
+    for (const sel of [
+      '.btn_publish',
+      '.confirm_btn',
+      'button[class*="confirm"]',
+      'button.se-popup-button-confirm',
+    ]) {
+      const btn = layer.locator(sel).first();
+      if ((await btn.count()) > 0 && (await btn.isVisible().catch(() => false))) {
+        await clickVisibleLocator(page, btn);
+        return;
+      }
+    }
+
     const footerPublish = layer.locator('button').filter({ hasText: /^발행$/ }).last();
     if (
       (await footerPublish.count()) > 0 &&
-      (await footerPublish.isVisible({ timeout: 2000 }).catch(() => false))
+      (await footerPublish.isVisible({ timeout: 3000 }).catch(() => false))
     ) {
       await clickVisibleLocator(page, footerPublish);
       return;
@@ -158,17 +184,12 @@ export async function clickConfirmPublish(page: Page): Promise<void> {
   }
 
   const confirm = await findVisibleLocator(page, CONFIRM_PUBLISH_SELECTORS, { inFrame: false });
-  if (!confirm) {
-    if (layer) {
-      const fallback = layer.locator('button:has-text("발행")').last();
-      if ((await fallback.count()) > 0) {
-        await clickVisibleLocator(page, fallback);
-        return;
-      }
-    }
-    throw new Error('NAVER_CONFIRM_PUBLISH_NOT_FOUND');
+  if (confirm) {
+    await clickVisibleLocator(page, confirm);
+    return;
   }
-  await clickVisibleLocator(page, confirm);
+
+  throw new Error('NAVER_CONFIRM_PUBLISH_NOT_FOUND');
 }
 
 export async function completeNaverPublishDialog(params: {
@@ -180,16 +201,15 @@ export async function completeNaverPublishDialog(params: {
   scale?: number;
 }): Promise<string> {
   const scale = params.scale ?? 1;
+  const page = params.page;
 
-  await prepareSeOneEditorSurface(params.page, 12_000, { destructiveDraftDismiss: false });
-  await dismissNaverBlogEditorOverlays(params.page, { includeDraftPopup: false });
+  await prepareSeOneEditorSurface(page, 6_000, { destructiveDraftDismiss: false });
 
-  await clickTopPublishButton(params.page);
-  await scaledHumanSleep(800, 1800, scale);
+  await clickTopPublishButton(page);
+  await scaledHumanSleep(600, 1200, scale);
 
-  const layerVisible = await waitForPublishLayer(params.page);
-  if (!layerVisible) {
-    await humanSleep(1000, 2000);
+  if (!(await waitForPublishLayer(page))) {
+    throw new Error('NAVER_PUBLISH_LAYER_NOT_FOUND');
   }
 
   const category =
@@ -197,16 +217,21 @@ export async function completeNaverPublishDialog(params: {
     DEFAULT_CATEGORY_BY_WORKSPACE[params.workspace ?? 'yeonun'] ||
     '포스팅';
 
-  await selectPublishCategory(params.page, category, scale).catch(() => false);
+  await selectPublishCategory(page, category, scale).catch(() => false);
 
   if (params.hashtags?.length) {
-    await typePublishTags(params.page, params.hashtags, params.humanConfig, scale).catch(() => false);
+    await typePublishTags(page, params.hashtags, params.humanConfig, scale);
   }
 
-  await scaledHumanSleep(600, 1400, scale);
-  await dismissNaverBlogEditorOverlays(params.page);
-  await clickConfirmPublish(params.page);
-  await params.page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => {});
+  await scaledHumanSleep(400, 900, scale);
 
-  return waitForNaverPublishSuccess(params.page);
+  if (!(await isPublishLayerVisible(page))) {
+    await clickTopPublishButton(page);
+    await waitForPublishLayer(page);
+  }
+
+  await clickConfirmPublish(page);
+  await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => {});
+
+  return waitForNaverPublishSuccess(page);
 }
