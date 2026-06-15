@@ -83,7 +83,7 @@ export async function pasteBlogLinkWithOgPreview(
     }
   }
 
-  const deadline = Date.now() + 20_000;
+  const deadline = Date.now() + 12_000;
   let ogPreview = false;
   while (Date.now() < deadline) {
     if (await isOgLinkInBodySection(page)) {
@@ -93,7 +93,7 @@ export async function pasteBlogLinkWithOgPreview(
     await sleep(400);
   }
 
-  await scaledHumanSleep(1500, 3500, scale);
+  await scaledHumanSleep(800, 1800, scale);
   return { ogPreview };
 }
 

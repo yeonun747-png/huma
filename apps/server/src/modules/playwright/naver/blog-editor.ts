@@ -18,12 +18,10 @@ import {
   pasteBlogBodyContent,
   ensureBlogTitleWritten,
   blurBlogTitleField,
-  focusBlogBodyEnd,
-  moveCaretToBodyTailAfterPaste,
   readBlogBodySectionText,
   isBlogLinkUrlInBodyText,
   isBlogImageInBodySection,
-  isFocusInBodyArea,
+  isFocusInTitleArea,
   verifyBlogBodyField,
   verifyBlogTitleField,
   waitForBlogTitleInputReady,
@@ -61,7 +59,7 @@ async function typeSeOneBlogBody(
   await pasteBlogBodyContent(page, bodyLoc, content, { afterPlaceholderClick: true });
 }
 
-/** 본문 끝 Enter×2 → 링크 insertText → Enter×1 → 이미지 붙여넣기 */
+/** 본문 insertText 직후 — Enter×2 → 링크 → Enter×1 → 이미지 (포커스·마우스 이동 없음) */
 async function appendLinkAndImageAtBodyEnd(params: {
   page: Page;
   editor: Locator;
@@ -73,16 +71,23 @@ async function appendLinkAndImageAtBodyEnd(params: {
   accountId?: string;
   allowSkipIfPresent: boolean;
 }): Promise<void> {
-  const { page, editor, scale, humanConfig, accountId } = params;
+  const { page, scale, humanConfig, accountId } = params;
   const workspace = params.workspace ?? 'yeonun';
 
-  await moveCaretToBodyTailAfterPaste(page);
-  if (!(await isFocusInBodyArea(page))) {
-    await focusBlogBodyEnd(page, editor);
+  await blurBlogTitleField(page);
+  if (await isFocusInTitleArea(page)) {
+    throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
   }
+
+  await logOperation({
+    level: 'info',
+    message: '[post_blog] 본문 끝 Enter×2 → 링크 (insertText 직후 캐럿, 클릭 없음)',
+    account_id: accountId,
+  }).catch(() => {});
+
   await page.keyboard.press('Enter');
   await page.keyboard.press('Enter');
-  await sleep(250);
+  await sleep(200);
 
   const bodyText = await readBlogBodySectionText(page);
   const resolvedLink = params.linkUrl?.trim()
@@ -101,10 +106,10 @@ async function appendLinkAndImageAtBodyEnd(params: {
     } else {
       await logOperation({
         level: 'info',
-        message: '[post_blog] 링크 삽입 시작 (본문 끝 insertText)',
+        message: '[post_blog] 링크 insertText 시작',
         account_id: accountId,
       }).catch(() => {});
-      const { ogPreview } = await pasteBlogLinkWithOgPreview(page, editor, resolvedLink, {
+      const { ogPreview } = await pasteBlogLinkWithOgPreview(page, params.editor, resolvedLink, {
         workspace,
         scale,
         humanConfig,
@@ -119,7 +124,7 @@ async function appendLinkAndImageAtBodyEnd(params: {
   }
 
   await page.keyboard.press('Enter');
-  await sleep(250);
+  await sleep(200);
 
   if (params.imagePath) {
     const imagePresent = params.allowSkipIfPresent && (await isBlogImageInBodySection(page));
@@ -137,7 +142,7 @@ async function appendLinkAndImageAtBodyEnd(params: {
       }).catch(() => {});
       const ok = await pasteBlogImageAtCaret(page, params.imagePath);
       if (!ok) throw new Error('BLOG_IMAGE_INSERT_FAILED');
-      await scaledHumanSleep(1000, 3000, scale);
+      await scaledHumanSleep(800, 2000, scale);
       await logOperation({
         level: 'info',
         message: '[post_blog] 이미지 삽입 완료',
