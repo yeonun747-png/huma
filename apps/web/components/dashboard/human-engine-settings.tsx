@@ -85,7 +85,7 @@ const DEFAULT_HUMAN: HumanEngineConfig = {
 };
 
 const DEFAULT_IMAGE: ImageEngineConfig = {
-  noise_pct: 0.8,
+  noise_pct: 0.3,
   jpeg_quality_range: [90, 96],
   exif_randomize: true,
   gps_randomize: true,
@@ -437,6 +437,7 @@ export function HumanEngineSettings() {
             suffix="%"
             onChange={(v) => { setImage((img) => { const next = { ...img, noise_pct: v }; imageRef.current = next; return next; }); scheduleSave(); }}
           />
+          <HeStaticRow label="노이즈 방식" value="가우시안 · 슬라이더 % = 실제 강도" />
           <HeToggle label="EXIF 기기 정보 랜덤화" value={image.exif_randomize} onChange={(v) => { setImage((img) => { const next = { ...img, exif_randomize: v }; imageRef.current = next; saveNow(humanRef.current, next, mediaRef.current); return next; }); }} />
           <HeToggle label="EXIF GPS 랜덤 주입" value={image.gps_randomize} onChange={(v) => { setImage((img) => { const next = { ...img, gps_randomize: v }; imageRef.current = next; saveNow(humanRef.current, next, mediaRef.current); return next; }); }} />
           <HeStaticRow label="JPEG 품질 범위" value="90~96%" />

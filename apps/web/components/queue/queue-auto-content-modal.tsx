@@ -31,7 +31,7 @@ const EMPTY_FORM: AutoContentFormValues = {
   title: '',
   source_url: '',
   synopsis: '',
-  content_type: 'auto',
+  content_type: 'A',
   auto_schedule: true,
   schedule_time: '10:00',
 };

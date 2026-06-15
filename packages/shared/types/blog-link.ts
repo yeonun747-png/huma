@@ -1,4 +1,8 @@
-const YEONUN_HOST = /yeonun\.(com|ai)/i;
+const WORKSPACE_BLOG_HOME: Record<string, string> = {
+  yeonun: 'https://yeonun.com',
+  quizoasis: 'https://myquizoasis.com',
+  panana: 'https://panana.com',
+};
 
 export function ensureHttpsUrl(url: string): string {
   const t = url.trim();
@@ -7,37 +11,58 @@ export function ensureHttpsUrl(url: string): string {
   return `https://${t.replace(/^\/\//, '')}`;
 }
 
-/** post_blog DB·큐 — OG 붙여넣기용 전체 URL */
-export function normalizeBlogLinkUrl(workspace: string, sourceUrl: string): string {
-  if (workspace === 'yeonun') {
-    const u = sourceUrl.trim();
-    if (u && YEONUN_HOST.test(u)) return ensureHttpsUrl(u);
-    return 'https://yeonun.com';
-  }
-  return ensureHttpsUrl(sourceUrl);
+/** 워크스페이스별 블로그 OG 링크 — 홈페이지만 (관련 URL 아님) */
+export function workspaceBlogHomeUrl(workspace: string): string {
+  return WORKSPACE_BLOG_HOME[workspace] ?? WORKSPACE_BLOG_HOME.yeonun!;
 }
 
-/** post_blog·Playwright — 본문 붙여넣기용 전체 URL (연운 포함 OG 카드) */
+/** post_blog DB·큐 — OG 붙여넣기용 홈 URL */
+export function normalizeBlogLinkUrl(workspace: string, _sourceUrl?: string): string {
+  return workspaceBlogHomeUrl(workspace);
+}
+
+/** post_blog·Playwright — 본문 붙여넣기용 홈 URL */
 export function resolveBlogLinkUrl(
   workspace: string,
-  linkUrl?: string | null,
-  sourceUrl?: string | null,
+  _linkUrl?: string | null,
+  _sourceUrl?: string | null,
 ): string {
-  const fromLink = linkUrl?.trim() ?? '';
-  const fromSource = sourceUrl?.trim() ?? '';
-  const raw = fromLink || fromSource;
-  if (workspace === 'yeonun') return normalizeBlogLinkUrl(workspace, raw);
-  return ensureHttpsUrl(raw);
+  return workspaceBlogHomeUrl(workspace);
+}
+
+/** 본문 sanitize 시 제거할 URL·호스트 변형 */
+export function blogLinkStripVariants(workspace: string, linkUrl?: string | null): string[] {
+  const variants = new Set<string>();
+  if (linkUrl?.trim()) {
+    variants.add(linkUrl.trim());
+    try {
+      const u = new URL(linkUrl.startsWith('http') ? linkUrl : `https://${linkUrl}`);
+      variants.add(u.hostname.replace(/^www\./, ''));
+      variants.add(`${u.hostname}${u.pathname}`);
+    } catch {
+      /* ignore */
+    }
+  }
+  const home = workspaceBlogHomeUrl(workspace);
+  let host = 'yeonun.com';
+  try {
+    host = new URL(home).hostname.replace(/^www\./, '');
+  } catch {
+    /* ignore */
+  }
+  variants.add(host);
+  variants.add(`www.${host}`);
+  variants.add(home);
+  variants.add(home.replace(/^https:/, 'http:'));
+  return [...variants];
 }
 
 /** UI 짧은 표시 */
-export function formatBlogLinkLabel(url: string, workspace?: string | null): string {
-  if (workspace === 'yeonun') return 'yeonun.com';
+export function formatBlogLinkLabel(_url: string, workspace?: string | null): string {
+  const ws = workspace ?? 'yeonun';
   try {
-    const u = new URL(ensureHttpsUrl(url));
-    if (YEONUN_HOST.test(u.hostname)) return 'yeonun.com';
-    return u.hostname.replace(/^www\./, '');
+    return new URL(workspaceBlogHomeUrl(ws)).hostname.replace(/^www\./, '');
   } catch {
-    return url.replace(/^https?:\/\//, '').split('\n')[0] ?? url;
+    return 'yeonun.com';
   }
 }

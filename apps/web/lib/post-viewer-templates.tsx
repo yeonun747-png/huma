@@ -1,6 +1,6 @@
 import type { ContentType, Workspace } from '@huma/shared';
 import { formatKstDateTime } from '@/lib/format-kst';
-import { formatBlogLinkLabel, normalizeBlogLink, sanitizeBlogPostForNaver } from '@/lib/naver-post-sanitize';
+import { formatBlogLinkLabel, normalizeBlogLink, resolveBlogLinkUrl, sanitizeBlogPostForNaver } from '@/lib/naver-post-sanitize';
 
 export type PostViewerTemplate = {
   accent: string;
@@ -83,8 +83,9 @@ export function mergePostViewerTemplate(overrides: PostViewerOverrides): PostVie
 }
 
 function PostViewerBlogLink({ label, workspace }: { label: string; workspace?: string | null }) {
-  const text = formatBlogLinkLabel(label, workspace);
-  const href = text === 'yeonun.com' ? 'https://yeonun.com' : label.startsWith('http') ? label : `https://${text}`;
+  const ws = workspace ?? 'yeonun';
+  const href = resolveBlogLinkUrl(ws, label, label);
+  const text = formatBlogLinkLabel(href, ws);
   return (
     <p className="mb-3 text-[13px] leading-relaxed">
       <a href={href} target="_blank" rel="noreferrer" className="text-[#5b7fff] underline">

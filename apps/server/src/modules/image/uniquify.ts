@@ -1,11 +1,18 @@
 import sharp from 'sharp';
 import axios from 'axios';
 import { getSetting } from '../../lib/settings.js';
-import { randomBetween } from '../../lib/utils.js';
+import { gaussianRandom, randomBetween } from '../../lib/utils.js';
 import { writeFile, readFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { pickExifDevice } from '../../lib/exif-device-pool.js';
+
+/** UI 슬라이더 noise_pct(0~5) = 실제 강도 % */
+export function resolveNoiseSigma(noisePct: number): number {
+  const pct = Math.min(5, Math.max(0, Number(noisePct) || 0));
+  if (pct <= 0) return 0;
+  return (pct / 100) * 255 * 0.35;
+}
 
 /** http(s) URL이면 다운로드, 로컬 파일 경로면 그대로 읽는다 */
 async function loadImageBytes(src: string): Promise<Buffer> {
@@ -16,10 +23,28 @@ async function loadImageBytes(src: string): Promise<Buffer> {
   return readFile(src);
 }
 
+async function applySubtleGaussianNoise(img: sharp.Sharp, noisePct: number): Promise<sharp.Sharp> {
+  const sigma = resolveNoiseSigma(noisePct);
+  if (sigma <= 0) return img;
+
+  const { data, info } = await img.raw().toBuffer({ resolveWithObject: true });
+  const out = Buffer.from(data);
+
+  for (let i = 0; i < out.length; i += 1) {
+    if (info.channels === 4 && i % 4 === 3) continue;
+    const next = out[i]! + gaussianRandom(0, sigma);
+    out[i] = Math.max(0, Math.min(255, Math.round(next)));
+  }
+
+  return sharp(out, {
+    raw: { width: info.width, height: info.height, channels: info.channels },
+  });
+}
+
 export async function uniquifyImageFromUrl(url: string): Promise<string> {
   const data = await loadImageBytes(url);
   const config = await getSetting('image_engine', {
-    noise_pct: 0.8,
+    noise_pct: 0.3,
     jpeg_quality_range: [90, 96],
     exif_randomize: true,
     gps_randomize: true,
@@ -27,21 +52,7 @@ export async function uniquifyImageFromUrl(url: string): Promise<string> {
 
   const quality = randomBetween(config.jpeg_quality_range[0], config.jpeg_quality_range[1]);
   let img = sharp(data);
-
-  if (config.noise_pct > 0) {
-    const meta = await img.metadata();
-    const w = meta.width ?? 800;
-    const h = meta.height ?? 600;
-    const noise = Buffer.alloc(w * h * 3);
-    for (let i = 0; i < noise.length; i++) {
-      noise[i] = Math.floor(Math.random() * 256);
-    }
-    const noiseImg = await sharp(noise, { raw: { width: w, height: h, channels: 3 } })
-      .resize(w, h)
-      .png()
-      .toBuffer();
-    img = sharp(await img.toBuffer()).composite([{ input: noiseImg, blend: 'overlay' }]);
-  }
+  img = await applySubtleGaussianNoise(img, config.noise_pct);
 
   const outPath = join(tmpdir(), `img_${Date.now()}_${randomBetween(1000, 9999)}.jpg`);
   await img.jpeg({ quality, mozjpeg: true }).toFile(outPath);
@@ -89,4 +100,3 @@ async function injectRandomExif(filePath: string) {
     // EXIF 실패 시 원본 유지
   }
 }
-
