@@ -18,4 +18,8 @@ export async function humanType(
   await humanTypeIntoElement(page, element, text, config);
 }
 
-export { humanTypeIntoElement, humanPasteIntoElement } from './korean-ime.js';
+export {
+  humanTypeIntoElement,
+  humanTypeTitleIntoElement,
+  humanPasteIntoElement,
+} from './korean-ime.js';

@@ -2,7 +2,7 @@ import type { FrameLocator, Locator, Page } from 'playwright';
 import { planParagraphPaste } from '@huma/shared';
 
 import { humanClickLocator, humanMouseMove } from '../../human-engine/mouse.js';
-import { humanTypeIntoElement } from '../../human-engine/korean-ime.js';
+import { humanTypeIntoElement, humanTypeTitleIntoElement } from '../../human-engine/korean-ime.js';
 import { humanSleep } from '../../human-engine/typing.js';
 import type { HumanEngineConfig } from '../../../lib/settings.js';
 import { resolvePasteRatio } from '../../../lib/settings.js';
@@ -71,6 +71,23 @@ export function blogBodySectionLocator(page: Page): Locator {
 }
 
 const TITLE_PLACEHOLDER_RE = /^(제목|title)$/i;
+
+/** SE ONE 툴바·컨텍스트 UI가 제목 paragraph innerText에 섞일 때 */
+const TITLE_CHROME_NOISE_RE =
+  /위치\s*이동|제목\s*위치|제목위치|배경\s*사진|삭제\s*취소|삭제취소|취소\s*확인|삭제취소확인/i;
+
+export function isTitleEditorChromeText(text: string): boolean {
+  const t = text.replace(/\u00a0/g, ' ').trim();
+  if (!t) return false;
+  if (TITLE_CHROME_NOISE_RE.test(t)) return true;
+  return /위치.*제목.*배경|배경.*사진.*삭제/.test(t);
+}
+
+function sanitizeTitleRead(text: string): string {
+  const t = text.replace(/\u00a0/g, ' ').trim();
+  if (!t || isTitlePlaceholderText(t) || isTitleEditorChromeText(t)) return '';
+  return t;
+}
 
 /** 임시저장 이어쓰기 팝업 — 취소/확인 버튼이 실제로 보일 때만 true (닫힌 뒤 DOM 잔여 오탐 방지) */
 export async function isDraftResumePopupVisible(page: Page): Promise<boolean> {
@@ -562,12 +579,18 @@ async function readEditableTitleText(editable: Locator): Promise<string> {
     .evaluate((el) => {
       const node = el as HTMLElement;
       const clone = node.cloneNode(true) as HTMLElement;
+      for (const bad of clone.querySelectorAll(
+        'button, [role="button"], .se-toolbar, .se-floating-toolbar, .se-popup, .se-blind',
+      )) {
+        bad.remove();
+      }
       for (const ph of clone.querySelectorAll('.se-placeholder, [class*="placeholder"]')) {
         ph.remove();
       }
       return (clone.innerText ?? clone.textContent ?? '').replace(/\u00a0/g, ' ').trim();
     })
-    .catch(() => '');
+    .catch(() => '')
+    .then(sanitizeTitleRead);
 }
 
 /** SE ONE 제목 paragraph — locator 오판 시 page DOM 직접 읽기 */
@@ -579,6 +602,11 @@ async function readTitleFromEditorDom(page: Page): Promise<string> {
       );
       for (const node of nodes) {
         const clone = (node as HTMLElement).cloneNode(true) as HTMLElement;
+        for (const bad of clone.querySelectorAll(
+          'button, [role="button"], .se-toolbar, .se-floating-toolbar, .se-popup, .se-blind',
+        )) {
+          bad.remove();
+        }
         for (const ph of clone.querySelectorAll('.se-placeholder, [class*="placeholder"]')) {
           ph.remove();
         }
@@ -587,7 +615,8 @@ async function readTitleFromEditorDom(page: Page): Promise<string> {
       }
       return '';
     })
-    .catch(() => '');
+    .catch(() => '')
+    .then(sanitizeTitleRead);
 }
 
 /** insertText 직후 — editable DOM 우선, wrapper(titleLoc) 보조 */
@@ -634,7 +663,7 @@ function isDuplicatedBlogTitle(written: string, expected: string): boolean {
 function titleContainsExpected(written: string, expected: string): boolean {
   const w = written.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
   const e = expected.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
-  if (!w || !e || isTitlePlaceholderText(w)) return false;
+  if (!w || !e || isTitlePlaceholderText(w) || isTitleEditorChromeText(w)) return false;
   if (/이어서\s*작성|작성\s*중인\s*글/.test(w)) return false;
   if (w.includes(e)) return true;
   const probe = Math.min(Math.max(8, Math.floor(e.length * 0.6)), e.length);
@@ -1336,7 +1365,7 @@ function titleVerifyTimeoutMs(text: string): number {
 }
 
 /**
- * SE ONE 제목 — IME 타이핑 (복붙 없음).
+ * SE ONE 제목 — fcitx OS IME 타이핑 (합성 composition은 에디터 미반영).
  */
 export async function typeBlogTitleField(
   page: Page,
@@ -1363,23 +1392,25 @@ export async function typeBlogTitleField(
   await humanClickLocator(page, editable);
   await sleep(150);
 
-  if (current && !isTitlePlaceholderText(current)) {
+  if (current) {
     await clearTitleFieldViaKeyboard(page, editable);
   }
   await focusTitleEditableNode(editable);
-  await humanTypeIntoElement(page, editable, text, humanConfig, { skipFocus: true });
+  await logTitleDebug('OS IME 타이핑 시작');
+  await humanTypeTitleIntoElement(page, editable, text, humanConfig, { skipFocus: true });
   await waitForBlogTitleWritten(page, titleLoc, text, titleVerifyTimeoutMs(text));
 
   let after = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
   await logTitleDebug(`타이핑 후="${after}"`);
 
   if (isDuplicatedBlogTitle(after, text) || !titleContainsExpected(after, text)) {
+    await logTitleDebug('OS IME 미반영 — insertText 폴백');
     await clearTitleFieldViaKeyboard(page, editable);
     await focusTitleEditableNode(editable);
-    await humanTypeIntoElement(page, editable, text, humanConfig, { skipFocus: true });
+    await page.keyboard.insertText(text);
     await waitForBlogTitleWritten(page, titleLoc, text, titleVerifyTimeoutMs(text));
     after = (await readTitleFromEditorDom(page)) || (await readEditableTitleText(editable));
-    await logTitleDebug(`교정 타이핑 후="${after}"`);
+    await logTitleDebug(`insertText 후="${after}"`);
   }
 
   await blurBlogTitleField(page);

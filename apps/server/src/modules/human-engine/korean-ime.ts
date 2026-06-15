@@ -189,6 +189,39 @@ export async function humanTypeIntoElement(
   }
 }
 
+/**
+ * SE ONE 제목 — fcitx 두벌식 물리키.
+ * 합성 composition은 SmartEditor 상태에 반영되지 않아 글자가 보이지 않을 수 있음.
+ */
+export async function humanTypeTitleIntoElement(
+  page: Page,
+  element: Locator,
+  text: string,
+  config: HumanEngineConfig,
+  options?: { skipFocus?: boolean },
+): Promise<void> {
+  if (!options?.skipFocus) {
+    await humanClickLocator(page, element);
+    await sleep(randomBetween(80, 220));
+  }
+
+  await ensureOsHangulMode(page);
+
+  for (const char of text) {
+    if (char === '\n') {
+      await page.keyboard.press('Enter');
+      await sleep(randomBetween(120, 350));
+      continue;
+    }
+    if (isHangul(char)) {
+      await typeHangulViaOsIme(page, char, config);
+    } else {
+      await page.keyboard.type(char, { delay: randomBetween(35, 120) });
+      await sleep(wpmToDelay(gaussianRandom(config.wpm_mean, config.wpm_sigma)));
+    }
+  }
+}
+
 export async function humanPasteIntoElement(
   page: Page,
   element: Locator,
