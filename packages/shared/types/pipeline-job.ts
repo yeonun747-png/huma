@@ -1,5 +1,5 @@
 const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function isJobIdLike(value: string | null | undefined): boolean {
   const v = value?.trim();
@@ -11,9 +11,13 @@ function isDryRunPlatformSchedule(platformSchedule: unknown): boolean {
   return (platformSchedule as Record<string, unknown>)._dry_run === true;
 }
 
-/** Claude가 post_blog 등 자식 job을 만든 content_full — 큐·캘린더·집계에서 숨김 */
+/**
+ * 운영자가 등록한 content_full(Claude 생성 스케줄) — post_blog 생성 후 큐·캘린더·집계에서 숨김.
+ * dry_run(검증) job은 유지.
+ */
 export function isContentFullPipelineShell(job: {
   job_type?: string | null;
+  status?: string | null;
   result_url?: string | null;
   platform_schedule?: unknown;
 }): boolean {
@@ -21,8 +25,13 @@ export function isContentFullPipelineShell(job: {
   if (isDryRunPlatformSchedule(job.platform_schedule)) return false;
 
   const ps = job.platform_schedule as Record<string, unknown> | undefined;
-  const promoted = ps?._promoted as { blog_job_id?: string } | undefined;
-  if (promoted?.blog_job_id) return true;
+  if (ps?._promoted) return true;
 
-  return isJobIdLike(job.result_url);
+  const resultUrl = job.result_url?.trim();
+  if (!resultUrl) return false;
+
+  // 생성 완료 후 result_url = post_blog id 또는 발행 URL
+  if (job.status === 'completed') return true;
+
+  return isJobIdLike(resultUrl);
 }

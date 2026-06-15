@@ -23,6 +23,7 @@ import { MPanel } from '@/components/mockup/primitives';
 import { api } from '@/lib/api';
 
 import { cn, WS_LABEL } from '@/lib/constants';
+import { isContentFullPipelineShell } from '@huma/shared';
 
 import { PostViewerModal } from '@/components/viewer/post-viewer-modal';
 
@@ -45,6 +46,7 @@ type CalJob = {
   image_urls?: string[] | null;
   link_url?: string | null;
   platform?: string | null;
+  platform_schedule?: unknown;
 };
 
 
@@ -92,7 +94,10 @@ export function CalendarView() {
 
     const monthStr = `${year}-${String(month + 1).padStart(2, '0')}`;
 
-    api.calendarJobs({ month: monthStr, workspace }).then(setJobs).catch(() => setJobs([]));
+    api
+      .calendarJobs({ month: monthStr, workspace })
+      .then((rows) => setJobs(rows.filter((j) => !isContentFullPipelineShell(j))))
+      .catch(() => setJobs([]));
 
   }, [workspace, year, month]);
 

@@ -612,7 +612,9 @@ export async function registerJobRoutes(app: FastifyInstance) {
 
     let query = supabase
       .from('huma_jobs')
-      .select('id, title, job_type, status, scheduled_at, workspace, result_url, completed_at, content, image_urls, platform')
+      .select(
+        'id, title, job_type, status, scheduled_at, workspace, result_url, completed_at, content, image_urls, platform, platform_schedule',
+      )
       .in('workspace', allowedWorkspaces)
       .not('scheduled_at', 'is', null)
       .gte('scheduled_at', start)

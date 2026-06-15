@@ -215,16 +215,17 @@ export function QueueManager() {
       const sorted = [...all].sort((a, b) =>
         String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')),
       );
-      const completed = sorted.filter((j) => j.status === 'completed');
+      const visible = sorted.filter((j) => !isContentFullPipelineShell(j));
+      const completed = visible.filter((j) => j.status === 'completed');
       setStats({
-        pending: sorted.filter((j) => j.status === 'pending' || j.status === 'scheduled').length,
+        pending: visible.filter((j) => j.status === 'pending' || j.status === 'scheduled').length,
         running:
-          sorted.filter((j) => j.status === 'running' || j.status === 'awaiting_captcha').length,
+          visible.filter((j) => j.status === 'running' || j.status === 'awaiting_captcha').length,
         doneToday: completed.filter((j) => isSameKstDay(j.completed_at)).length,
         doneAll: completed.length,
       });
-      setTotal(sorted.length);
-      setJobs(sorted.slice(offset, offset + pageSize));
+      setTotal(visible.length);
+      setJobs(visible.slice(offset, offset + pageSize));
       setLoadError(null);
     } catch {
       setJobs([]);
@@ -280,11 +281,18 @@ export function QueueManager() {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
-  const deletableJobs = useMemo(() => jobs.filter(isDeletableQueueJob), [jobs]);
-  const staleFailedJobs = useMemo(() => jobs.filter(isStaleOrFailedQueueJob), [jobs]);
   const visibleJobs = useMemo(
     () => jobs.filter((job) => !isContentFullPipelineShell(job)),
     [jobs],
+  );
+  const visibleDeletableJobs = useMemo(
+    () => visibleJobs.filter(isDeletableQueueJob),
+    [visibleJobs],
+  );
+  const deletableJobs = useMemo(() => visibleDeletableJobs, [visibleDeletableJobs]);
+  const staleFailedJobs = useMemo(
+    () => visibleJobs.filter(isStaleOrFailedQueueJob),
+    [visibleJobs],
   );
   const selectedCount = selectedIds.size;
   const allDeletableSelected =
@@ -520,7 +528,7 @@ export function QueueManager() {
                     onChange={toggleSelectAll}
                   />
                   큐 전체
-                  {deletableJobs.length > 0 ? ` (${deletableJobs.length})` : ''}
+                  {visibleDeletableJobs.length > 0 ? ` (${visibleDeletableJobs.length})` : ''}
                 </label>
                 {staleFailedJobs.length > 0 ? (
                   <button type="button" className="btn-ghost btn-sm" onClick={selectStaleFailed}>
