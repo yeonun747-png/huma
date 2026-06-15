@@ -237,3 +237,38 @@ export async function humanPasteIntoElement(
   await page.keyboard.press('Control+V');
   await sleep(randomBetween(300, 800));
 }
+
+/** WPM 평균·편차 — 글자마다 gaussian delay (40~130ms) */
+export function humanCharDelayMs(config: HumanEngineConfig): number {
+  return Math.max(40, Math.min(130, Math.round(wpmToDelay(gaussianRandom(config.wpm_mean, config.wpm_sigma)))));
+}
+
+/** paragraph_pause_ms 비율 — 클릭·타이핑 직후 짧은 pause */
+export function humanBriefPauseMs(
+  config: HumanEngineConfig,
+  minRatio = 0.08,
+  maxRatio = 0.2,
+): number {
+  const [lo, hi] = config.paragraph_pause_ms;
+  return randomBetween(Math.max(100, Math.floor(lo * minRatio)), Math.min(800, Math.floor(hi * maxRatio)));
+}
+
+/** SE ONE·발행 태그 — 유니코드 pressSequentially + 글자별 WPM (합성 IME·OS IME 미사용) */
+export async function humanPressSequentially(
+  page: Page,
+  locator: Locator,
+  text: string,
+  config: HumanEngineConfig,
+): Promise<void> {
+  if (!text) return;
+  for (const char of text) {
+    if (char === '\n') {
+      await page.keyboard.press('Enter');
+      await sleep(humanBriefPauseMs(config, 0.1, 0.22));
+      continue;
+    }
+    await locator.pressSequentially(char, { delay: 0 });
+    await sleep(humanCharDelayMs(config));
+  }
+  await sleep(humanBriefPauseMs(config, 0.1, 0.25));
+}

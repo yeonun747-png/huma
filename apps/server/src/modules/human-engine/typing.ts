@@ -19,7 +19,10 @@ export async function humanType(
 }
 
 export {
+  humanBriefPauseMs,
+  humanCharDelayMs,
+  humanPasteIntoElement,
+  humanPressSequentially,
   humanTypeIntoElement,
   humanTypeTitleIntoElement,
-  humanPasteIntoElement,
 } from './korean-ime.js';

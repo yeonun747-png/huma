@@ -4,7 +4,7 @@ import { sleep } from '../../../lib/utils.js';
 import type { HumanEngineConfig } from '../../../lib/settings.js';
 import { normalizeHashtagTag } from '../../../lib/hashtag-sanitize.js';
 import { humanClickLocator } from '../../human-engine/mouse.js';
-import { humanTypeIntoElement } from '../../human-engine/korean-ime.js';
+import { humanBriefPauseMs, humanPressSequentially } from '../../human-engine/korean-ime.js';
 import { humanSleep } from '../../human-engine/typing.js';
 import { scaledHumanSleep } from '../../human-engine/timing.js';
 import { prepareSeOneEditorSurface } from './enter-blog-editor.js';
@@ -142,12 +142,22 @@ export async function typePublishTags(
   for (let i = 0; i < tags.length; i += 1) {
     if (i === 0) {
       await humanClickLocator(page, input);
-      await scaledHumanSleep(300, 600, scale);
+      await humanSleep(
+        Math.floor(humanBriefPauseMs(humanConfig, 0.1, 0.2) * scale),
+        Math.floor(humanBriefPauseMs(humanConfig, 0.15, 0.35) * scale),
+      );
     }
-    await humanTypeIntoElement(page, input, tags[i]!, humanConfig, { skipFocus: i > 0 });
-    await scaledHumanSleep(180, 450, scale);
+    await humanPressSequentially(page, input, tags[i]!, humanConfig);
+    const [pLo, pHi] = humanConfig.paragraph_pause_ms;
+    await humanSleep(
+      Math.floor(pLo * 0.06 * scale),
+      Math.floor(pHi * 0.14 * scale),
+    );
     await page.keyboard.press('Enter');
-    await scaledHumanSleep(350, 750, scale);
+    await humanSleep(
+      Math.floor(pLo * 0.08 * scale),
+      Math.floor(pHi * 0.18 * scale),
+    );
   }
 
   await scaledHumanSleep(400, 900, scale);

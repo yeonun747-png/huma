@@ -2,11 +2,11 @@ import type { FrameLocator, Locator, Page } from 'playwright';
 import { planParagraphPaste } from '@huma/shared';
 
 import { humanClickLocator, humanMouseMove } from '../../human-engine/mouse.js';
-import { humanTypeIntoElement } from '../../human-engine/korean-ime.js';
+import { humanBriefPauseMs, humanPressSequentially } from '../../human-engine/korean-ime.js';
 import { humanSleep } from '../../human-engine/typing.js';
 import type { HumanEngineConfig } from '../../../lib/settings.js';
 import { resolvePasteRatio } from '../../../lib/settings.js';
-import { gaussianRandom, randomBetween, sleep, wpmToDelay } from '../../../lib/utils.js';
+import { randomBetween, sleep } from '../../../lib/utils.js';
 import { logOperation } from '../../../lib/log-emitter.js';
 
 export function editorFrame(page: Page): FrameLocator {
@@ -666,9 +666,18 @@ async function readBlogTitleTextAll(
   return sanitizeTitleRead(fromWrap);
 }
 
-function titleKeyDelayMs(config: HumanEngineConfig): number {
-  const ms = wpmToDelay(gaussianRandom(config.wpm_mean, config.wpm_sigma));
-  return Math.max(40, Math.min(130, Math.round(ms)));
+/** SE ONE 본문·제목 공통 — humanPressSequentially(유니코드·글자별 WPM) */
+async function typeSeOneUnicodeText(
+  page: Page,
+  editable: Locator,
+  text: string,
+  humanConfig: HumanEngineConfig,
+): Promise<void> {
+  if (!text) return;
+  if (await isFocusInTitleArea(page)) {
+    throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
+  }
+  await humanPressSequentially(page, editable, text, humanConfig);
 }
 
 async function titleSectionMatchesExpected(page: Page, expected: string): Promise<boolean> {
@@ -1445,17 +1454,16 @@ export async function typeBlogTitleField(
   }
 
   await humanClickLocator(page, editable);
-  await sleep(randomBetween(120, 280));
+  await sleep(humanBriefPauseMs(humanConfig));
 
   if (current) {
     await clearTitleFieldThoroughly(page, editable);
   }
   await focusTitleEditableNode(editable);
 
-  const delay = titleKeyDelayMs(humanConfig);
-  await logTitleDebug(`pressSequentially 시작 (${titleText.length}자·${delay}ms)`);
-  await editable.pressSequentially(titleText, { delay });
-  await sleep(randomBetween(250, 700));
+  await logTitleDebug(`pressSequentially 시작 (${titleText.length}자·wpm≈${humanConfig.wpm_mean})`);
+  await humanPressSequentially(page, editable, titleText, humanConfig);
+  await sleep(humanBriefPauseMs(humanConfig, 0.12, 0.28));
 
   await waitForBlogTitleWritten(page, titleLoc, titleText, Math.min(8_000, titleVerifyTimeoutMs(titleText)));
 
@@ -1570,7 +1578,7 @@ export async function pasteBlogBodyContent(
 }
 
 /**
- * SE ONE 본문 — paste_ratio 단락 복붙 · 나머지 IME 타이핑.
+ * SE ONE 본문 — paste_ratio 단락 복붙 · 나머지 pressSequentially(유니코드).
  * afterPlaceholderClick: placeholder humanClick 직후 — 재탐색·재클릭 없이 캐럿 유지.
  */
 export async function typeBlogBodyContent(
@@ -1614,7 +1622,6 @@ export async function typeBlogBodyContent(
     throw new Error('BLOG_BODY_WRITE_FAILED');
   }
 
-  const editable = await resolveBodyEditableLocatorRelaxed(bodyLoc);
   const pasteRatio = resolvePasteRatio(humanConfig);
   const pasteCount = Math.floor(paragraphs.length * pasteRatio);
   const pasteIndices = new Set<number>();
@@ -1625,6 +1632,12 @@ export async function typeBlogBodyContent(
   let focused = Boolean(options?.afterPlaceholderClick);
 
   for (let i = 0; i < paragraphs.length; i += 1) {
+    const editable = await resolveBodyEditableLocatorRelaxed(bodyLoc);
+    if (!focused) {
+      await focusBodyEditableNode(editable);
+      focused = true;
+    }
+
     if (await isFocusInTitleArea(page)) {
       await blurBlogTitleField(page);
       if (!options?.afterPlaceholderClick) {
@@ -1647,12 +1660,12 @@ export async function typeBlogBodyContent(
           await pastePlainTextAtCaret(page, seg.text);
           focused = true;
         } else {
-          await humanTypeIntoElement(page, editable, seg.text, humanConfig, { skipFocus: focused });
+          await typeSeOneUnicodeText(page, editable, seg.text, humanConfig);
           focused = true;
         }
       }
     } else {
-      await humanTypeIntoElement(page, editable, para, humanConfig, { skipFocus: focused });
+      await typeSeOneUnicodeText(page, editable, para, humanConfig);
       focused = true;
     }
 
