@@ -3,6 +3,7 @@ import { generateImage } from '../higgsfield/image.js';
 import { selectImageModel } from '../claude/auto-decide.js';
 import { supabase } from '../../middleware/auth.js';
 import { resolveBlogWritingPersona } from '../../lib/blog-writing-persona.js';
+import { pickPostingAccount } from '../../lib/posting-accounts.js';
 
 export type PreviewStepStatus = 'pending' | 'running' | 'ok' | 'err';
 
@@ -34,22 +35,28 @@ export interface ContentPreviewResult {
 }
 
 async function loadAccountBlogPersona(workspace: string, accountId?: string) {
-  let query = supabase
-    .from('huma_accounts')
-    .select('id, persona')
-    .eq('workspace', workspace)
-    .eq('account_type', 'posting')
-    .eq('is_active', true);
+  if (accountId) {
+    const { data } = await supabase
+      .from('huma_accounts')
+      .select('id, persona')
+      .eq('id', accountId)
+      .eq('workspace', workspace)
+      .eq('account_type', 'posting')
+      .eq('is_active', true)
+      .maybeSingle();
+    return {
+      accountId: data?.id as string | undefined,
+      blogWritingPersona: resolveBlogWritingPersona(
+        workspace,
+        data?.persona as Record<string, unknown> | null,
+      ),
+    };
+  }
 
-  if (accountId) query = query.eq('id', accountId);
-
-  const { data } = await query.limit(1).maybeSingle();
+  const picked = await pickPostingAccount(workspace, { advance: false });
   return {
-    accountId: data?.id as string | undefined,
-    blogWritingPersona: resolveBlogWritingPersona(
-      workspace,
-      data?.persona as Record<string, unknown> | null,
-    ),
+    accountId: picked?.id,
+    blogWritingPersona: resolveBlogWritingPersona(workspace, picked?.persona ?? null),
   };
 }
 

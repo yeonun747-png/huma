@@ -1,6 +1,6 @@
 import { enqueueHumaJob, getScheduleDelay, type JobRecord } from '../../../lib/job-scheduler.js';
-import { layer4RestSupabaseOr } from '../../../lib/account-guards.js';
 import { normalizeBlogLinkUrl } from '../../../lib/blog-link.js';
+import { pickPostingAccount, type PostingAccountPick } from '../../../lib/posting-accounts.js';
 import { supabase } from '../../../middleware/auth.js';
 import { enqueueJob } from '../producer.js';
 import { generateAllContent, type ContentGenerationOutput } from '../../claude/content-generator.js';
@@ -43,19 +43,6 @@ export interface ContentOrchestratorInput {
   scheduled_at: string;
   repeat_rule?: string | null;
   parentJobId?: string;
-}
-
-async function pickPostingAccount(workspace: string): Promise<{ id: string; persona?: Record<string, unknown> } | null> {
-  const { data } = await supabase
-    .from('huma_accounts')
-    .select('id, persona')
-    .eq('workspace', workspace)
-    .eq('account_type', 'posting')
-    .eq('is_active', true)
-    .or(layer4RestSupabaseOr())
-    .limit(1)
-    .maybeSingle();
-  return data ? { id: data.id as string, persona: data.persona as Record<string, unknown> | undefined } : null;
 }
 
 async function pickPlatformAccount(workspace: string, platform: string): Promise<string | null> {
@@ -175,11 +162,11 @@ async function runTypeA(
   params: ContentOrchestratorInput,
   generated: Awaited<ReturnType<typeof generateAllContent>>,
   imageUrl: string,
+  postingAccount: PostingAccountPick | null,
   schedule?: PlatformSchedule,
 ) {
   const { workspace, title, sourceUrl, scheduled_at, repeat_rule, auto_scheduled = true } = params;
-  const account = await pickPostingAccount(workspace);
-  const accountId = account?.id ?? null;
+  const accountId = postingAccount?.id ?? null;
   let jobsCreated = 0;
 
   const blogLink = normalizeBlogLinkUrl(workspace, sourceUrl);
@@ -243,11 +230,11 @@ async function runTypeB(
   generated: Awaited<ReturnType<typeof generateAllContent>>,
   imageUrl: string,
   videoModel: string,
+  postingAccount: PostingAccountPick | null,
   schedule?: PlatformSchedule,
 ) {
   const { workspace, title, sourceUrl, scheduled_at, repeat_rule, auto_scheduled = true } = params;
-  const account = await pickPostingAccount(workspace);
-  const accountId = account?.id ?? null;
+  const accountId = postingAccount?.id ?? null;
 
   const blogLink = normalizeBlogLinkUrl(workspace, sourceUrl);
   const blogAt = platformTime(auto_scheduled, schedule, 'naver_blog', scheduled_at);
@@ -538,9 +525,9 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
   const runInput = { ...input, scheduled_at: baseScheduledAt, auto_scheduled: autoScheduled };
 
   if (resolvedType === 'A') {
-    return runTypeA(runInput, generated, imageUrl, schedule);
+    return runTypeA(runInput, generated, imageUrl, postingAccount, schedule);
   }
-  return runTypeB(runInput, generated, imageUrl, videoModel, schedule);
+  return runTypeB(runInput, generated, imageUrl, videoModel, postingAccount, schedule);
 }
 
 type PreviewGeneratedSnapshot = Pick<
