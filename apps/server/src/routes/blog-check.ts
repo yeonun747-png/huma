@@ -3,8 +3,8 @@ import { authMiddleware, getWorkspaceFilter, supabase } from '../middleware/auth
 import {
   buildBlogCheckAccountsResponse,
   buildBlogCheckPostsResponse,
-  enqueueBlogCheckScan,
   getBlogCheckScanState,
+  triggerBlogCheckScan,
 } from '../modules/blog-check/service.js';
 
 export async function registerBlogCheckRoutes(app: FastifyInstance) {
@@ -31,7 +31,7 @@ export async function registerBlogCheckRoutes(app: FastifyInstance) {
 
   app.post('/api/blog-check/scan', { preHandler: authMiddleware }, async (_request, reply) => {
     try {
-      return await enqueueBlogCheckScan();
+      return await triggerBlogCheckScan();
     } catch (err) {
       const message = (err as Error).message;
       if (message === 'SCAN_ALREADY_RUNNING') {
@@ -51,7 +51,7 @@ export async function registerBlogCheckRoutes(app: FastifyInstance) {
     }
 
     try {
-      return await enqueueBlogCheckScan(id);
+      return await triggerBlogCheckScan(id);
     } catch (err) {
       const message = (err as Error).message;
       if (message === 'SCAN_ALREADY_RUNNING') {

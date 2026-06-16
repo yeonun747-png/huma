@@ -114,11 +114,18 @@ export function BlogCheckView() {
     if (scanning) return;
     try {
       setScanning(true);
-      await api.blogCheckScan();
+      const result = await api.blogCheckScan();
       await loadAccounts();
+      if (curAcc) await loadPosts(curAcc);
+      if (result.scannedPosts === 0) {
+        setError('최근 30일 completed post_blog + result_url 발행 이력이 없습니다. Operation Log에서 [blog-check] 확인');
+      } else {
+        setError(null);
+      }
     } catch (e) {
-      setScanning(false);
       alert((e as Error).message);
+    } finally {
+      setScanning(false);
     }
   };
 

@@ -1,5 +1,5 @@
 const BLOG_ID_RE = /blog\.naver\.com\/([^/?#]+)/i;
-const POST_NO_RE = /(?:logNo=|\/)(\d{8,})(?:[/?#]|$)/;
+const POST_NO_RE = /(?:logNo=|\/)(\d{6,})(?:[/?#]|$)/;
 
 export function extractBlogIdFromUrl(blogUrl: string | null | undefined, naverId?: string | null): string | null {
   if (blogUrl) {
@@ -11,7 +11,13 @@ export function extractBlogIdFromUrl(blogUrl: string | null | undefined, naverId
 }
 
 export function extractPostNoFromUrl(postUrl: string): string | null {
-  const m = postUrl.match(POST_NO_RE);
+  const trimmed = postUrl.trim();
+  if (!trimmed) return null;
+  const logNo = trimmed.match(/[?&]logNo=(\d+)/i);
+  if (logNo?.[1]) return logNo[1];
+  const path = trimmed.match(/blog\.naver\.com\/[^/?#]+\/(\d+)/i);
+  if (path?.[1]) return path[1];
+  const m = trimmed.match(POST_NO_RE);
   return m?.[1] ?? null;
 }
 

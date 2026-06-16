@@ -721,8 +721,8 @@ export const api = {
       }>;
     }>(`/api/blog-check/posts/${accountId}`),
   blogCheckScan: (accountId?: string) =>
-    request<{ queued: true; accountId?: string }>(
+    request<{ ok: true; scannedAccounts: number; scannedPosts: number; accountId?: string }>(
       accountId ? `/api/blog-check/scan/${accountId}` : '/api/blog-check/scan',
-      { method: 'POST', timeoutMs: 30_000 },
+      { method: 'POST', timeoutMs: 300_000 },
     ),
 };
