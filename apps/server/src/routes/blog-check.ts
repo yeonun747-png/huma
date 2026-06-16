@@ -3,8 +3,9 @@ import { authMiddleware, getWorkspaceFilter, supabase } from '../middleware/auth
 import {
   buildBlogCheckAccountsResponse,
   buildBlogCheckPostsResponse,
+  clearPostExtLinkFlag,
   getBlogCheckScanState,
-  triggerBlogCheckScan,
+  requestBlogCheckScan,
 } from '../modules/blog-check/service.js';
 
 export async function registerBlogCheckRoutes(app: FastifyInstance) {
@@ -31,7 +32,7 @@ export async function registerBlogCheckRoutes(app: FastifyInstance) {
 
   app.post('/api/blog-check/scan', { preHandler: authMiddleware }, async (_request, reply) => {
     try {
-      return await triggerBlogCheckScan();
+      return await requestBlogCheckScan();
     } catch (err) {
       const message = (err as Error).message;
       if (message === 'SCAN_ALREADY_RUNNING') {
@@ -51,13 +52,35 @@ export async function registerBlogCheckRoutes(app: FastifyInstance) {
     }
 
     try {
-      return await triggerBlogCheckScan(id);
+      return await requestBlogCheckScan(id);
     } catch (err) {
       const message = (err as Error).message;
       if (message === 'SCAN_ALREADY_RUNNING') {
         return reply.code(409).send({ error: '스캔이 이미 실행 중입니다' });
       }
       return reply.code(500).send({ error: message });
+    }
+  });
+
+  app.post('/api/blog-check/posts/:id/clear-link', { preHandler: authMiddleware }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { post_url: postUrl } = request.body as { post_url?: string };
+    const allowed = getWorkspaceFilter(request);
+
+    if (!postUrl?.trim()) {
+      return reply.code(400).send({ error: 'post_url 필요' });
+    }
+
+    const { data: acc } = await supabase.from('huma_accounts').select('workspace').eq('id', id).maybeSingle();
+    if (!acc || !allowed.includes(acc.workspace as string)) {
+      return reply.code(403).send({ error: '계정 접근 권한 없음' });
+    }
+
+    try {
+      await clearPostExtLinkFlag(id, postUrl.trim());
+      return { ok: true };
+    } catch (err) {
+      return reply.code(500).send({ error: (err as Error).message });
     }
   });
 }

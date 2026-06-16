@@ -51,6 +51,7 @@ import { executeSocialCrank } from './jobs/social-crank.js';
 import { executeScheduledSocialCrank } from '../crank/scheduled-session.js';
 import { executeVideoPipeline } from './jobs/video-pipeline.js';
 import { executeContentFull } from '../claude/auto-content-orchestrator.js';
+import { recordPublishedPost } from '../blog-check/post-record.js';
 import { executeBlogCheckJob } from './jobs/blog-check.js';
 import { executeSocialPost } from './jobs/social-post.js';
 import { scheduleRepeatIfNeeded } from '../../lib/repeat-scheduler.js';
@@ -108,6 +109,19 @@ async function completeJob(jobId: string, resultUrl?: string) {
       ...(job?.job_type === 'post_blog' && published ? { image_urls: null } : {}),
     })
     .eq('id', jobId);
+
+  if (job?.job_type === 'post_blog' && published && resultUrl?.trim() && job.account_id) {
+    await recordPublishedPost({
+      accountId: job.account_id as string,
+      resultUrl,
+      title: job.title as string | null,
+      content: job.content as string | null,
+      linkUrl: job.link_url as string | null,
+      imageUrls: job.image_urls as string[] | null,
+      publishedAt: new Date().toISOString(),
+    });
+  }
+
   if (job) await scheduleRepeatIfNeeded(job as import('../../lib/job-scheduler.js').JobRecord);
 }
 

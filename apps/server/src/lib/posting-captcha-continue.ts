@@ -15,6 +15,7 @@ import { isPostBlogRetryableError, POST_BLOG_RETRY } from '../modules/playwright
 import { pickPostingWorkflowPage } from './posting-captcha-session.js';
 import { sleep } from './utils.js';
 import { shouldPreserveBrowserPageForVnc } from '../modules/watcher/captcha-hold.js';
+import { recordPublishedPost } from '../modules/blog-check/post-record.js';
 
 async function incrementPostCount(accountId: string): Promise<void> {
   const { data } = await supabase.from('huma_accounts').select('post_count_today').eq('id', accountId).single();
@@ -149,6 +150,18 @@ export async function continuePostBlogFromCaptchaHold(params: {
       .eq('id', jobId);
     if (job) await scheduleRepeatIfNeeded(job as JobRecord);
     await incrementPostCount(accountId);
+
+    if (resultUrl?.trim()) {
+      await recordPublishedPost({
+        accountId,
+        resultUrl,
+        title: job?.title as string | null,
+        content: job?.content as string | null,
+        linkUrl: job?.link_url as string | null,
+        imageUrls: job?.image_urls as string[] | null,
+        publishedAt: new Date().toISOString(),
+      });
+    }
 
     await logOperation({
       level: 'info',

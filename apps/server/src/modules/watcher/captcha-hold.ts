@@ -8,6 +8,7 @@ import { releaseModem } from '../proxy/manager.js';
 import { resumeSocialCrankAfterCaptcha } from '../../lib/crank-captcha-resume.js';
 import { resumePostingAfterCaptcha } from '../../lib/posting-captcha-resume.js';
 import { continuePostBlogFromCaptchaHold } from '../../lib/posting-captcha-continue.js';
+import { recordPublishedPost } from '../blog-check/post-record.js';
 import {
   buildPostBlogPayloadFromJob,
   ensurePostingSessionAfterCaptcha,
@@ -234,7 +235,7 @@ async function completeJobRecord(jobId: string, resultUrl?: string): Promise<voi
   const published = Boolean(resultUrl?.trim());
   const { data: job } = await supabase
     .from('huma_jobs')
-    .select('job_type, image_urls, account_id')
+    .select('job_type, image_urls, account_id, title, content, link_url')
     .eq('id', jobId)
     .maybeSingle();
 
@@ -255,6 +256,18 @@ async function completeJobRecord(jobId: string, resultUrl?: string): Promise<voi
       ...(job?.job_type === 'post_blog' && published ? { image_urls: null } : {}),
     })
     .eq('id', jobId);
+
+  if (job?.job_type === 'post_blog' && published && resultUrl?.trim() && job.account_id) {
+    await recordPublishedPost({
+      accountId: job.account_id as string,
+      resultUrl,
+      title: job.title as string | null,
+      content: job.content as string | null,
+      linkUrl: job.link_url as string | null,
+      imageUrls: job.image_urls as string[] | null,
+      publishedAt: new Date().toISOString(),
+    });
+  }
 }
 
 function scheduleReminders(entry: CaptchaHoldEntry): void {

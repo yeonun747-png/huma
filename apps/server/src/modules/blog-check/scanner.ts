@@ -5,6 +5,7 @@ import { extractBlogIdFromUrl, extractPostNoFromUrl } from './blog-url.js';
 
 const SEARCH_GAP_MS = 900;
 
+/** 비로그인 전용 Playwright 컨텍스트 (기존 로그인 세션과 분리) */
 export async function withBlogCheckBrowser<T>(
   run: (page: Page) => Promise<T>,
 ): Promise<T> {
@@ -18,7 +19,7 @@ export async function withBlogCheckBrowser<T>(
   }
 }
 
-/** site:blog.naver.com/계정ID/포스트번호 — 결과 1건 이상이면 수집됨 */
+/** site:blog.naver.com/계정ID/포스트번호 — 검색 결과에 URL 있으면 수집됨 */
 export async function checkPostIndexed(
   page: Page,
   blogId: string,
@@ -41,50 +42,11 @@ export async function checkPostIndexed(
     return true;
   }
 
-  const resultBlocks = await page.locator('.api_subject_bx, .total_wrap, #main_pack').count();
-  if (resultBlocks > 0 && /blog\.naver\.com/i.test(bodyText) && bodyText.includes(postNo)) {
+  if (/blog\.naver\.com/i.test(bodyText) && bodyText.includes(postNo)) {
     return true;
   }
 
   return false;
-}
-
-/** https://blog.naver.com/계정ID — 블로그 지수 숫자 파싱 */
-export async function scrapeBlogIndexScore(page: Page, blogId: string): Promise<number | null> {
-  const candidates = [
-    `https://blog.naver.com/${blogId}`,
-    `https://m.blog.naver.com/${blogId}`,
-  ];
-
-  for (const url of candidates) {
-    await page.goto(url, { waitUntil: 'domcontentloaded' });
-    await sleep(1500);
-
-    const html = await page.content().catch(() => '');
-    const text = await page.locator('body').innerText().catch(() => '');
-
-    const patterns = [
-      /블로그\s*지수[^\d]{0,20}([\d]+(?:\.[\d]+)?)/i,
-      /blogIndex["'\s:]*([\d]+(?:\.[\d]+)?)/i,
-      /"indexScore"\s*:\s*([\d]+(?:\.[\d]+)?)/i,
-      /지수\s*([\d]+(?:\.[\d]+)?)\s*\/\s*10/i,
-    ];
-
-    for (const re of patterns) {
-      const fromText = text.match(re);
-      if (fromText?.[1]) {
-        const n = Number(fromText[1]);
-        if (Number.isFinite(n) && n >= 0 && n <= 10) return Math.round(n * 10) / 10;
-      }
-      const fromHtml = html.match(re);
-      if (fromHtml?.[1]) {
-        const n = Number(fromHtml[1]);
-        if (Number.isFinite(n) && n >= 0 && n <= 10) return Math.round(n * 10) / 10;
-      }
-    }
-  }
-
-  return null;
 }
 
 export async function scanPostsIndexed(
@@ -94,21 +56,22 @@ export async function scanPostsIndexed(
   onProgress?: (done: number, total: number) => void,
 ): Promise<Map<string, boolean>> {
   const results = new Map<string, boolean>();
-  const total = posts.length;
   for (let i = 0; i < posts.length; i++) {
     const { postNo } = posts[i];
-    const ok = await checkPostIndexed(page, blogId, postNo);
-    results.set(postNo, ok);
-    onProgress?.(i + 1, total);
+    results.set(postNo, await checkPostIndexed(page, blogId, postNo));
+    onProgress?.(i + 1, posts.length);
     if (i < posts.length - 1) await sleep(SEARCH_GAP_MS);
   }
   return results;
 }
 
-export function resolvePostNo(postUrl: string, blogId: string): string | null {
-  return extractPostNoFromUrl(postUrl) ?? null;
+export function resolveBlogId(
+  blogUrl: string | null | undefined,
+  naverId: string | null | undefined,
+): string | null {
+  return extractBlogIdFromUrl(blogUrl, naverId);
 }
 
-export function resolveBlogId(blogUrl: string | null | undefined, naverId: string | null | undefined): string | null {
-  return extractBlogIdFromUrl(blogUrl, naverId);
+export function resolvePostNo(postUrl: string): string | null {
+  return extractPostNoFromUrl(postUrl);
 }

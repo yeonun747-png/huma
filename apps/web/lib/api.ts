@@ -690,39 +690,44 @@ export const api = {
   blogCheckAccounts: () =>
     request<{
       accounts: Array<{
-        id: string;
+        account_id: string;
         label: string;
         svc: string;
-        url: string;
-        idx: number;
-        posts: number;
-        ok: number;
-        miss: number;
-        ext: number;
-        pattern: '낮음' | '중간' | '높음';
-        session: '정상' | '오류';
+        blog_url: string;
+        idx_score: number | null;
+        total_posts: number;
+        ok_count: number;
+        miss_count: number;
+        miss_rate: number;
         trend: number[];
+        trend_direction: '안정' | '악화' | '개선';
+        session_status: '정상' | '오류';
       }>;
       lastScanAt: string | null;
       scanning: boolean;
-      scanProgress: { done: number; total: number };
     }>('/api/blog-check/accounts'),
   blogCheckPosts: (accountId: string) =>
     request<{
       posts: Array<{
-        date: string;
+        post_url: string;
         title: string;
+        published_at: string;
+        date: string;
         chars: number;
-        img: number;
-        ext: number;
-        status: 'ok' | 'miss';
-        missReason: string | null;
-        postUrl: string;
+        img_count: number;
+        ext_link_count: number;
+        status: 'ok' | 'miss' | null;
+        miss_reason: string;
       }>;
     }>(`/api/blog-check/posts/${accountId}`),
   blogCheckScan: (accountId?: string) =>
-    request<{ ok: true; scannedAccounts: number; scannedPosts: number; accountId?: string }>(
+    request<{ queued: true; accountId?: string }>(
       accountId ? `/api/blog-check/scan/${accountId}` : '/api/blog-check/scan',
-      { method: 'POST', timeoutMs: 300_000 },
+      { method: 'POST' },
     ),
+  blogCheckClearExtLink: (accountId: string, postUrl: string) =>
+    request<{ ok: true }>(`/api/blog-check/posts/${accountId}/clear-link`, {
+      method: 'POST',
+      body: JSON.stringify({ post_url: postUrl }),
+    }),
 };

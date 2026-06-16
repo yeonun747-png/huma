@@ -21,23 +21,26 @@ function formatLastScan(iso: string | null): string {
   const d = new Date(iso);
   const now = new Date();
   const diffMin = Math.round((now.getTime() - d.getTime()) / 60_000);
-  if (diffMin < 2) return '마지막 스캔: 방금';
   const hh = String(d.getHours()).padStart(2, '0');
   const mm = String(d.getMinutes()).padStart(2, '0');
+  if (diffMin < 2) return `마지막 스캔: 방금 ${hh}:${mm}`;
   return `마지막 스캔: ${d.toDateString() === now.toDateString() ? `오늘 ${hh}:${mm}` : `${hh}:${mm}`}`;
 }
 
-function missReasonUi(post: BcPost, acc?: BcAccount): { cls: string; text: string } {
+function missReasonUi(post: BcPost): { cls: string; text: string } {
   if (post.status === 'ok') return { cls: 'none', text: '—' };
-  if (post.missReason) {
-    if (post.missReason.includes('외부링크')) return { cls: 'ext', text: post.missReason };
-    if (post.missReason.includes('발행간격')) return { cls: 'ai', text: post.missReason };
-    return { cls: 'ai', text: post.missReason };
+  if (post.miss_reason && post.miss_reason !== '—') {
+    if (post.miss_reason.includes('외부링크')) return { cls: 'ext', text: post.miss_reason };
+    return { cls: 'ai', text: post.miss_reason };
   }
-  if (post.ext > 0) return { cls: 'ext', text: '외부링크 포함' };
-  if (acc?.pattern === '높음') return { cls: 'ai', text: 'AI패턴 감지' };
-  if (acc?.pattern === '중간') return { cls: 'ai', text: 'AI패턴 의심' };
+  if (post.ext_link_count > 0) return { cls: 'ext', text: '외부링크 포함' };
   return { cls: 'ai', text: 'AI패턴 의심' };
+}
+
+function trendLabel(dir: BcAccount['trend_direction']): { text: string; color: string } {
+  if (dir === '안정') return { text: '✓ 안정', color: 'var(--ok)' };
+  if (dir === '악화') return { text: '▲ 악화', color: 'var(--err)' };
+  return { text: '▼ 개선', color: 'var(--ok)' };
 }
 
 export function BlogCheckView() {
@@ -92,7 +95,10 @@ export function BlogCheckView() {
     }
     pollRef.current = setInterval(() => {
       void loadAccounts().then((data) => {
-        if (data && !data.scanning && curAcc) void loadPosts(curAcc);
+        if (data && !data.scanning) {
+          setScanning(false);
+          if (curAcc) void loadPosts(curAcc);
+        }
       });
     }, 2500);
     return () => {
@@ -100,7 +106,10 @@ export function BlogCheckView() {
     };
   }, [scanning, loadAccounts, curAcc, loadPosts]);
 
-  const selectedAcc = useMemo(() => accounts.find((a) => a.id === curAcc), [accounts, curAcc]);
+  const selectedAcc = useMemo(
+    () => accounts.find((a) => a.account_id === curAcc),
+    [accounts, curAcc],
+  );
 
   const filteredPosts = useMemo(() => {
     if (filter === 'miss') return posts.filter((p) => p.status === 'miss');
@@ -108,24 +117,26 @@ export function BlogCheckView() {
     return posts;
   }, [posts, filter]);
 
-  const totalMiss = useMemo(() => accounts.reduce((s, a) => s + a.miss, 0), [accounts]);
+  const totalMiss = useMemo(() => accounts.reduce((s, a) => s + a.miss_count, 0), [accounts]);
 
   const startScan = async () => {
     if (scanning) return;
     try {
       setScanning(true);
-      const result = await api.blogCheckScan();
+      await api.blogCheckScan();
       await loadAccounts();
-      if (curAcc) await loadPosts(curAcc);
-      if (result.scannedPosts === 0) {
-        setError('최근 30일 completed post_blog + result_url 발행 이력이 없습니다. Operation Log에서 [blog-check] 확인');
-      } else {
-        setError(null);
-      }
+    } catch (e) {
+      setScanning(false);
+      alert((e as Error).message);
+    }
+  };
+
+  const clearExtLink = async (accountId: string, postUrl: string) => {
+    try {
+      await api.blogCheckClearExtLink(accountId, postUrl);
+      await loadPosts(accountId);
     } catch (e) {
       alert((e as Error).message);
-    } finally {
-      setScanning(false);
     }
   };
 
@@ -161,42 +172,46 @@ export function BlogCheckView() {
 
       <div className="bci-grid">
         {accounts.map((a) => {
-          const rate = a.posts > 0 ? Math.round((a.miss / a.posts) * 100) : 0;
+          const rate = a.miss_rate;
           const rateColor = rate >= 20 ? 'var(--err)' : rate >= 10 ? 'var(--warn)' : 'var(--ok)';
-          const idxPct = Math.round((a.idx / 10) * 100);
-          const sessColor = a.session === '오류' ? 'var(--err)' : 'var(--ok)';
+          const idx = a.idx_score ?? 0;
+          const idxPct = Math.round((idx / 10) * 100);
+          const sessColor = a.session_status === '오류' ? 'var(--err)' : 'var(--ok)';
           const maxT = Math.max(...a.trend, 1);
+          const trendUi = trendLabel(a.trend_direction);
           const today = new Date();
-          const isFlat = a.trend.every((v) => v === 0);
-          const trendDir = a.trend[6] > a.trend[0] ? '▲ 악화' : '▼ 개선';
-          const trendColor = a.trend[6] > a.trend[0] ? 'var(--err)' : 'var(--ok)';
 
           return (
             <button
-              key={a.id}
+              key={a.account_id}
               type="button"
-              className={cn('bci-card', curAcc === a.id && 'selected')}
-              onClick={() => setCurAcc(a.id)}
+              className={cn('bci-card', curAcc === a.account_id && 'selected')}
+              onClick={() => setCurAcc(a.account_id)}
             >
               <div className="bci-svc" style={{ color: svcColor(a.svc) }}>
                 {a.svc}
               </div>
               <div className="bci-name">{a.label}</div>
-              <div className="bci-url">blog.naver.com/{a.url}</div>
+              <div className="bci-url">blog.naver.com/{a.blog_url}</div>
               <div className="mb-0.5 font-mono text-[10px] text-huma-t3">블로그 지수</div>
               <div className="bci-idx-row">
                 <div className="bci-idx-bar">
                   <div className="bci-idx-fill" style={{ width: `${idxPct}%` }} />
                 </div>
-                <span className="bci-idx-val">{a.idx.toFixed(1)}</span>
+                <span className="bci-idx-val">
+                  {a.idx_score != null ? a.idx_score.toFixed(1) : '—'}
+                </span>
               </div>
               <div className="my-1.5 h-px bg-[var(--bdr2)]" />
               <div className="bci-miss-row">
                 <div>
-                  <div className="bci-miss-num" style={{ color: a.miss > 0 ? 'var(--err)' : 'var(--ok)' }}>
-                    {a.miss}
+                  <div
+                    className="bci-miss-num"
+                    style={{ color: a.miss_count > 0 ? 'var(--err)' : 'var(--ok)' }}
+                  >
+                    {a.miss_count}
                   </div>
-                  <div className="bci-miss-l">누락 / {a.posts}건</div>
+                  <div className="bci-miss-l">누락 / {a.total_posts}건</div>
                 </div>
                 <div className="text-right">
                   <div className="bci-rate" style={{ color: rateColor }}>
@@ -208,9 +223,7 @@ export function BlogCheckView() {
               <div className="spark-wrap">
                 <div className="spark-label">
                   <span>7일 누락 추이</span>
-                  <span style={{ color: isFlat ? 'var(--ok)' : trendColor, fontWeight: 700 }}>
-                    {isFlat ? '✓ 안정' : trendDir}
-                  </span>
+                  <span style={{ color: trendUi.color, fontWeight: 700 }}>{trendUi.text}</span>
                 </div>
                 <div className="spark-bars">
                   {a.trend.map((v, i) => {
@@ -243,7 +256,7 @@ export function BlogCheckView() {
               <div className="mt-1.5 flex items-center gap-1">
                 <span className="bci-status-dot" style={{ background: sessColor }} />
                 <span className="font-mono text-[10.5px]" style={{ color: sessColor }}>
-                  세션 {a.session}
+                  세션 {a.session_status}
                 </span>
               </div>
             </button>
@@ -294,23 +307,25 @@ export function BlogCheckView() {
             ) : filteredPosts.length === 0 ? (
               <tr>
                 <td colSpan={8} className="py-6 text-center text-[12.5px] text-huma-t3">
-                  {posts.length === 0 ? '스캔 후 포스트 목록이 표시됩니다 — ⟳ 전체 스캔 실행' : '해당 조건의 포스트 없음'}
+                  {posts.length === 0
+                    ? '발행 이력 없음 — posts 테이블·v3_43 마이그레이션 확인 후 ⟳ 전체 스캔'
+                    : '해당 조건의 포스트 없음'}
                 </td>
               </tr>
             ) : (
               filteredPosts.map((p) => {
-                const reason = missReasonUi(p, selectedAcc);
+                const reason = missReasonUi(p);
                 return (
-                  <tr key={p.postUrl}>
+                  <tr key={p.post_url}>
                     <td className="whitespace-nowrap font-mono text-[11px] text-huma-t3">{p.date}</td>
                     <td className="max-w-[200px] overflow-hidden text-ellipsis whitespace-nowrap" title={p.title}>
                       {p.title}
                     </td>
                     <td className="text-center font-mono text-[12px]">{p.chars}</td>
-                    <td className="text-center font-mono text-[12px]">{p.img}</td>
+                    <td className="text-center font-mono text-[12px]">{p.img_count}</td>
                     <td className="text-center">
-                      {p.ext > 0 ? (
-                        <span className="font-mono text-[12px] font-bold text-huma-err">⚠ {p.ext}개</span>
+                      {p.ext_link_count > 0 ? (
+                        <span className="font-mono text-[12px] font-bold text-huma-err">⚠ {p.ext_link_count}개</span>
                       ) : (
                         <span className="font-mono text-huma-t4">—</span>
                       )}
@@ -318,21 +333,21 @@ export function BlogCheckView() {
                     <td>
                       {p.status === 'ok' ? (
                         <span className="bc-badge ok">✓ 수집됨</span>
-                      ) : (
+                      ) : p.status === 'miss' ? (
                         <span className="bc-badge miss">✕ 누락</span>
+                      ) : (
+                        <span className="font-mono text-[11px] text-huma-t4">미스캔</span>
                       )}
                     </td>
                     <td>
                       <span className={cn('bc-reason', reason.cls)}>{reason.text}</span>
                     </td>
                     <td>
-                      {p.status === 'miss' && p.ext > 0 ? (
+                      {p.status === 'miss' && p.ext_link_count > 0 && curAcc ? (
                         <button
                           type="button"
                           className="rounded border border-huma-err bg-[var(--err-bg)] px-2 py-0.5 text-[10.5px] text-huma-err"
-                          onClick={() =>
-                            alert(`[링크 제거 예약]\n포스트: ${p.title}\n\n향후 자동 처리 연동 예정`)
-                          }
+                          onClick={() => void clearExtLink(curAcc, p.post_url)}
                         >
                           링크 제거
                         </button>
