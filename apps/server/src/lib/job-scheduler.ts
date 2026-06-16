@@ -50,7 +50,7 @@ export function buildEnqueuePayload(job: JobRecord) {
   const crankExtras =
     job.job_type === 'social_crank' ? parseSocialCrankContent(job.content) : {};
 
-  const stripBodyLink = ['threads_post', 'twitter_post'].includes(job.job_type);
+  const stripBodyLink = ['threads_post', 'twitter_post', 'post_blog'].includes(job.job_type);
   const linkUrl = stripBodyLink
     ? undefined
     : resolveBlogLinkUrl(job.workspace ?? 'yeonun', job.link_url, job.link_url);

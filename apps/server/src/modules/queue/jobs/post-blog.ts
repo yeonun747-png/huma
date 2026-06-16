@@ -15,7 +15,7 @@ export async function executePostBlog(params: {
   accountId?: string;
 }) {
   const workspace = String(params.payload.workspace ?? 'yeonun');
-  const { content, linkUrl } = prepareBlogPostForPlaywright(
+  const { content } = prepareBlogPostForPlaywright(
     String(params.payload.content ?? ''),
     workspace,
     params.payload.linkUrl as string | undefined,
@@ -33,7 +33,6 @@ export async function executePostBlog(params: {
     title: params.payload.title as string,
     content,
     imageUrls: imgs,
-    linkUrl,
     hashtags: (params.payload.hashtags as string[]) ?? [],
     blogCategory,
     videoPath,

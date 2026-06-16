@@ -1,4 +1,5 @@
 import { normalizeTelegramChatId } from '../modules/watcher/telegram.js';
+import { telegramChatIdLookupVariants } from './telegram-chat-id-variants.js';
 
 const messageToJob = new Map<string, string>();
 
@@ -12,18 +13,33 @@ export function registerCaptchaTelegramOutboundMessage(
   messageId: number,
   jobId: string,
 ): void {
-  messageToJob.set(messageKey(chatId, messageId), jobId);
+  for (const variant of telegramChatIdLookupVariants(chatId)) {
+    messageToJob.set(messageKey(variant, messageId), jobId);
+  }
 }
 
 export function lookupCaptchaJobByTelegramReply(
   chatId: string | number,
   replyMessageId: number,
 ): string | null {
-  return messageToJob.get(messageKey(chatId, replyMessageId)) ?? null;
+  for (const variant of telegramChatIdLookupVariants(chatId)) {
+    const jobId = messageToJob.get(messageKey(variant, replyMessageId));
+    if (jobId) return jobId;
+  }
+  return null;
 }
 
 export function clearCaptchaTelegramMessagesForJob(jobId: string): void {
   for (const [key, id] of messageToJob) {
     if (id === jobId) messageToJob.delete(key);
+  }
+}
+
+/** pm2 재시작 후 hold에 저장된 telegram message_id 재등록 */
+export function rehydrateCaptchaTelegramRegistry(
+  rows: Array<{ chatId: string; messageId: number; jobId: string }>,
+): void {
+  for (const row of rows) {
+    registerCaptchaTelegramOutboundMessage(row.chatId, row.messageId, row.jobId);
   }
 }

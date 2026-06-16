@@ -67,8 +67,8 @@ function registerGracefulShutdown(
     shuttingDown = true;
     app.log.warn(`${signal} 수신 — graceful shutdown 시작`);
     try {
-      await worker.close();
       stopTelegramCaptchaInbound();
+      await worker.close();
       await shutdownCaptchaHolds();
       await reconcileStaleCrankModemLocks();
     } catch (err) {

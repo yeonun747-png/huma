@@ -57,7 +57,8 @@ export async function typeIntoNaverLoginField(
 }
 
 /**
- * CAPTCHA 화면 전환 시 네이버가 비밀번호만 비우는 경우가 많음 — ID는 유지, PW만 재입력.
+ * CAPTCHA 전환·오답 후 네이버가 로그인 폼을 비우는 경우 —
+ * ID만 비었으면 ID+PW, PW만 비었으면 PW만 재입력 (최초 로그인과 동일 순서).
  */
 export async function ensureNaverLoginCredentialsForCaptcha(
   page: Page,
@@ -70,26 +71,43 @@ export async function ensureNaverLoginCredentialsForCaptcha(
 
   const { data: account } = await supabase
     .from('huma_accounts')
-    .select('naver_pw_enc')
+    .select('naver_id, naver_pw_enc')
     .eq('id', accountId)
     .single();
   if (!account) return;
 
-  const password = decrypt(account.naver_pw_enc);
-  await typeIntoNaverLoginField(page, '#pw', password, { fast: options?.fast });
-  await humanSleep(options?.fast ? 120 : 400, options?.fast ? 280 : 900);
+  const idVal = await page.locator('#id').inputValue().catch(() => '');
+  const pwVal = await page.locator('#pw').inputValue().catch(() => '');
+  const needId = !idVal.trim();
+  const needPw = !pwVal.trim();
+
+  if (!needId && !needPw) return;
+
+  if (needId) {
+    await typeIntoNaverLoginField(page, '#id', account.naver_id, { fast: options?.fast });
+    await humanSleep(options?.fast ? 120 : 400, options?.fast ? 280 : 900);
+  }
+
+  if (needId || needPw) {
+    const password = decrypt(account.naver_pw_enc);
+    await typeIntoNaverLoginField(page, '#pw', password, { fast: options?.fast });
+    await humanSleep(options?.fast ? 120 : 400, options?.fast ? 280 : 900);
+  }
 }
 
 /**
- * CAPTCHA 통과 후 nidlogin — 로그인 버튼만 마우스 클릭 (비번은 hold 진입 시 1회만 입력).
+ * CAPTCHA 통과 후 nidlogin — 필요 시 ID·PW 재입력 후 로그인 버튼 클릭.
  */
 export async function submitNaverLoginAfterCaptcha(
   page: Page,
-  _accountId: string,
+  accountId: string,
 ): Promise<boolean> {
   if (!page.url().includes('nidlogin')) return false;
 
   await ensureNaverLoginIdPhoneTab(page);
+  if (accountId) {
+    await ensureNaverLoginCredentialsForCaptcha(page, accountId, { fast: true }).catch(() => {});
+  }
   await humanSleep(250, 500);
   await clickNaverLoginButton(page);
   await page

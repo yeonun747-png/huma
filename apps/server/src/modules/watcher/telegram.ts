@@ -3,6 +3,7 @@ import https from 'node:https';
 import { access, readFile } from 'node:fs/promises';
 
 import type { Workspace } from '@huma/shared';
+import { telegramChatIdLookupVariants } from '../../lib/telegram-chat-id-variants.js';
 import { registerCaptchaTelegramOutboundMessage } from '../../lib/captcha-telegram-registry.js';
 import { shouldNotifyTelegram } from '../../lib/human-engine-policy.js';
 
@@ -74,13 +75,18 @@ function matchesConfiguredTelegramChatId(
   incoming: string | number,
   configuredRaw: string | null | undefined,
 ): boolean {
-  const id = normalizeTelegramChatId(incoming);
-  if (!id) return false;
+  const incomingVariants = telegramChatIdLookupVariants(incoming);
+  if (incomingVariants.length === 0) return false;
 
   for (const cfg of parseConfiguredTelegramChatIds(configuredRaw)) {
-    if (id === cfg) return true;
-    if (migratedTelegramChatIds.get(cfg) === id) return true;
-    if (migratedTelegramChatIds.get(id) === cfg) return true;
+    for (const id of incomingVariants) {
+      if (id === cfg) return true;
+      if (migratedTelegramChatIds.get(cfg) === id) return true;
+      if (migratedTelegramChatIds.get(id) === cfg) return true;
+    }
+    for (const variant of telegramChatIdLookupVariants(cfg)) {
+      if (incomingVariants.includes(variant)) return true;
+    }
   }
   return false;
 }
@@ -149,10 +155,21 @@ function escapeHtml(text: string): string {
     .replace(/>/g, '&gt;');
 }
 
+function absorbTelegramDeliveryChat(requestedChatId: string, resultChatId?: number): string {
+  const requested = normalizeTelegramChatId(requestedChatId);
+  const delivered = normalizeTelegramChatId(resultChatId);
+  if (!delivered || delivered === requested) return requested;
+  registerTelegramChatIdMigration(requested, delivered);
+  console.info(
+    `[telegram] delivery chat_id ${delivered} (env ${requested}) — inbound 답장은 ${delivered}로 수신됩니다`,
+  );
+  return delivered;
+}
+
 export async function sendTelegramHtml(
   chatId: string,
   html: string,
-): Promise<{ ok: boolean; error?: string; messageId?: number }> {
+): Promise<{ ok: boolean; error?: string; messageId?: number; deliveryChatId?: string }> {
   const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
   if (!token) return { ok: false, error: 'TELEGRAM_BOT_TOKEN 없음' };
   if (!chatId) return { ok: false, error: 'chat_id 없음' };
@@ -161,7 +178,7 @@ export async function sendTelegramHtml(
     const { data } = await axios.post<{
       ok?: boolean;
       description?: string;
-      result?: { message_id?: number };
+      result?: { message_id?: number; chat?: { id?: number } };
     }>(
       `https://api.telegram.org/bot${token}/sendMessage`,
       {
@@ -177,7 +194,8 @@ export async function sendTelegramHtml(
       console.warn('[telegram] send failed:', detail);
       return { ok: false, error: detail };
     }
-    return { ok: true, messageId: data.result?.message_id };
+    const deliveryChatId = absorbTelegramDeliveryChat(chatId, data.result?.chat?.id);
+    return { ok: true, messageId: data.result?.message_id, deliveryChatId };
   } catch (err) {
     const detail = formatTelegramAxiosError(err, 'sendMessage failed');
     console.warn('[telegram] send failed:', detail, err);
@@ -202,7 +220,7 @@ export async function sendTelegramPhoto(
   chatId: string,
   photoPath: string,
   captionHtml: string,
-): Promise<{ ok: boolean; error?: string; messageId?: number }> {
+): Promise<{ ok: boolean; error?: string; messageId?: number; deliveryChatId?: string }> {
   const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
   if (!token) return { ok: false, error: 'TELEGRAM_BOT_TOKEN 없음' };
   if (!chatId) return { ok: false, error: 'chat_id 없음' };
@@ -222,7 +240,7 @@ export async function sendTelegramPhoto(
     const { data } = await axios.post<{
       ok?: boolean;
       description?: string;
-      result?: { message_id?: number };
+      result?: { message_id?: number; chat?: { id?: number } };
     }>(
       `https://api.telegram.org/bot${token}/sendPhoto`,
       form,
@@ -237,7 +255,8 @@ export async function sendTelegramPhoto(
       console.warn('[telegram] photo send failed:', detail);
       return { ok: false, error: detail };
     }
-    return { ok: true, messageId: data.result?.message_id };
+    const deliveryChatId = absorbTelegramDeliveryChat(chatId, data.result?.chat?.id);
+    return { ok: true, messageId: data.result?.message_id, deliveryChatId };
   } catch (err) {
     const detail = formatTelegramAxiosError(err, 'sendPhoto failed');
     console.warn('[telegram] photo send failed:', detail, err);
@@ -396,8 +415,12 @@ export async function notifyCaptchaTelegram(
 
   const caption = lines.join('\n');
 
-  const trackOutbound = (messageId?: number) => {
-    if (messageId) registerCaptchaTelegramOutboundMessage(chatId, messageId, params.jobId);
+  const trackOutbound = (messageId?: number, regChatId?: string) => {
+    if (!messageId) return;
+    registerCaptchaTelegramOutboundMessage(regChatId ?? chatId, messageId, params.jobId);
+    if (regChatId && normalizeTelegramChatId(regChatId) !== normalizeTelegramChatId(chatId)) {
+      registerCaptchaTelegramOutboundMessage(chatId, messageId, params.jobId);
+    }
   };
 
   if (params.screenshotPath && !params.completed && !params.timedOut) {
@@ -405,7 +428,7 @@ export async function notifyCaptchaTelegram(
       await access(params.screenshotPath);
       const photo = await sendTelegramPhoto(chatId, params.screenshotPath, caption);
       if (photo.ok) {
-        trackOutbound(photo.messageId);
+        trackOutbound(photo.messageId, photo.deliveryChatId);
         return photo;
       }
       console.warn('[telegram] captcha photo fallback to text:', photo.error);
@@ -415,7 +438,7 @@ export async function notifyCaptchaTelegram(
   }
 
   const text = await sendTelegramHtml(chatId, caption);
-  if (text.ok) trackOutbound(text.messageId);
+  if (text.ok) trackOutbound(text.messageId, text.deliveryChatId);
   return text;
 }
 

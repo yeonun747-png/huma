@@ -24,7 +24,7 @@ import { ensureNaverLoginCredentialsForCaptcha } from '../../lib/naver-login-fie
 import { vncSlotLabelKo } from '../../lib/vnc-window-layout.js';
 import { enforceVncWindowBounds } from '../../lib/vnc-window-guard.js';
 import { purgePostBlogStorageMedia } from '../../lib/cleanup-post-blog-storage.js';
-import { notifyCaptchaTelegram, resolveVncUrl, buildJobWebUrl } from './telegram.js';
+import { notifyCaptchaTelegram, resolveTelegramChatId, resolveVncUrl, buildJobWebUrl } from './telegram.js';
 import { deleteCaptchaHoldScreenshot, saveCaptchaHoldScreenshot } from '../../lib/captcha-hold-screenshot.js';
 import { clearCaptchaTelegramMessagesForJob } from '../../lib/captcha-telegram-registry.js';
 import { consolidateNaverLoginTabs } from '../../lib/naver-login-session.js';
@@ -76,6 +76,9 @@ interface CaptchaHoldEntry extends CaptchaHoldInput {
   captchaCurrentlyVisible: boolean;
   captchaClearedOnce: boolean;
   lastSecondCaptchaNotifyAt?: number;
+  /** 텔레그램 CAPTCHA 알림 message_id (pm2 재시작 후 답장 매칭 복구) */
+  lastTelegramChatId?: string;
+  lastTelegramMessageId?: number;
 }
 
 const holds = new Map<string, CaptchaHoldEntry>();
@@ -192,7 +195,8 @@ async function notifySecondCaptchaTelegram(entry: CaptchaHoldEntry): Promise<voi
     ? vncSlotLabelKo(entry.modemSession.proxyPort)
     : undefined;
 
-  await notifyCaptchaTelegram({
+  const envChatId = resolveTelegramChatId(entry.workspace);
+  const telegram = await notifyCaptchaTelegram({
     jobId: entry.jobId,
     workspace: entry.workspace,
     accountLabel: entry.accountLabel,
@@ -205,6 +209,7 @@ async function notifySecondCaptchaTelegram(entry: CaptchaHoldEntry): Promise<voi
     screenshotPath: entry.screenshotPath,
     vncSlotLabel,
   });
+  rememberCaptchaTelegramOutbound(entry, telegram, envChatId);
 
   await logOperation({
     level: 'warn',
@@ -270,6 +275,8 @@ function scheduleReminders(entry: CaptchaHoldEntry): void {
         remindIndex: i,
         drill: entry.isDrill,
         force: entry.isDrill,
+      }).then((telegram) => {
+        rememberCaptchaTelegramOutbound(entry, telegram, resolveTelegramChatId(entry.workspace));
       });
     }, remindMs * i);
     entry.timers.push(t);
@@ -342,6 +349,34 @@ export function getCaptchaHold(jobId: string): CaptchaHoldEntry | undefined {
 
 export function listCaptchaHoldJobIds(): string[] {
   return [...holds.keys()];
+}
+
+export function listCaptchaHoldTelegramOutboundForRegistry(): Array<{
+  jobId: string;
+  chatId: string;
+  messageId: number;
+}> {
+  const rows: Array<{ jobId: string; chatId: string; messageId: number }> = [];
+  for (const [jobId, entry] of holds) {
+    if (entry.lastTelegramMessageId && entry.lastTelegramChatId) {
+      rows.push({
+        jobId,
+        chatId: entry.lastTelegramChatId,
+        messageId: entry.lastTelegramMessageId,
+      });
+    }
+  }
+  return rows;
+}
+
+function rememberCaptchaTelegramOutbound(
+  entry: CaptchaHoldEntry,
+  result: { ok?: boolean; messageId?: number; deliveryChatId?: string },
+  envChatId: string | null,
+): void {
+  if (!result.ok || !result.messageId) return;
+  entry.lastTelegramMessageId = result.messageId;
+  entry.lastTelegramChatId = result.deliveryChatId ?? envChatId ?? undefined;
 }
 
 /** CAPTCHA·2FA hold — 로그인 탭을 about:blank 로 되돌리면 안 됨 */
@@ -467,6 +502,7 @@ export async function enterCaptchaHold(
     vncSlotLabel,
     screenshotPath: entry.screenshotPath,
   });
+  rememberCaptchaTelegramOutbound(entry, telegram, resolveTelegramChatId(input.workspace));
 
   await logOperation({
     level: isDrill ? 'info' : 'warn',

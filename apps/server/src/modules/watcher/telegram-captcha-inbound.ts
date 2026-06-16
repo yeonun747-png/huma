@@ -3,8 +3,9 @@ import axios from 'axios';
 import { submitCaptchaAnswerForJob } from '../../lib/captcha-answer-submit.js';
 import {
   lookupCaptchaJobByTelegramReply,
+  rehydrateCaptchaTelegramRegistry,
 } from '../../lib/captcha-telegram-registry.js';
-import { getCaptchaHold, listCaptchaHoldJobIds } from './captcha-hold.js';
+import { getCaptchaHold, listCaptchaHoldJobIds, listCaptchaHoldTelegramOutboundForRegistry } from './captcha-hold.js';
 import {
   formatTelegramAxiosError,
   isAllowedTelegramChatId,
@@ -32,10 +33,32 @@ type TelegramUpdate = {
 
 const processingJobs = new Set<string>();
 
+const TELEGRAM_LONG_POLL_SEC = 25;
+const TELEGRAM_HTTP_TIMEOUT_MS = (TELEGRAM_LONG_POLL_SEC + 15) * 1000;
+const POLL_INTERVAL_MS = 400;
+const CONFLICT_BACKOFF_MS = 15_000;
+
 let pollOffset = 0;
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
+let pollAbort: AbortController | null = null;
 let polling = false;
 let stopped = false;
+let inboundStarted = false;
+let nextPollDelayMs = POLL_INTERVAL_MS;
+
+function isTelegramGetUpdatesConflict(err: unknown): boolean {
+  const ax = err as {
+    response?: { status?: number; data?: { description?: string } };
+    message?: string;
+  };
+  const description = ax.response?.data?.description ?? ax.message ?? '';
+  return ax.response?.status === 409 || description.includes('Conflict');
+}
+
+function isPollAborted(err: unknown): boolean {
+  if (!axios.isCancel(err)) return false;
+  return stopped || pollAbort?.signal.aborted === true;
+}
 
 function lookupJobByReply(chatId: string | number, replyMessageId: number): string | null {
   return lookupCaptchaJobByTelegramReply(chatId, replyMessageId);
@@ -72,10 +95,23 @@ async function replyTelegram(chatId: number, html: string): Promise<void> {
 
 async function handleTelegramCaptchaAnswer(message: TelegramMessage): Promise<void> {
   const chatId = message.chat.id;
+  const chatLabel = normalizeTelegramChatId(chatId);
+  const preview = (message.text ?? '').trim().slice(0, 40);
+
+  console.info(
+    `[telegram-inbound] recv chat=${chatLabel} type=${message.chat.type ?? '?'} reply=${message.reply_to_message?.message_id ?? 'none'} text="${preview}"`,
+  );
+
   if (!isAllowedTelegramChatId(chatId)) {
     console.warn(
-      `[telegram-inbound] ignored chat ${normalizeTelegramChatId(chatId)} (env yeonun=${process.env.TELEGRAM_CHAT_ID_YEONUN ?? '?'})`,
+      `[telegram-inbound] ignored chat ${chatLabel} (env yeonun=${process.env.TELEGRAM_CHAT_ID_YEONUN ?? '?'})`,
     );
+    if (message.reply_to_message && preview) {
+      await replyTelegram(
+        chatId,
+        `⚠️ chat_id 불일치 — 서버가 이 그룹 답장을 처리하지 못합니다.\n수신 id: <code>${chatLabel}</code>\nenv: <code>${process.env.TELEGRAM_CHAT_ID_YEONUN ?? '?'}</code>\n\n.env에 <code>TELEGRAM_CHAT_ID_YEONUN=${chatLabel}</code> (또는 쉼표로 병기) 후 pm2 restart huma-server`,
+      );
+    }
     return;
   }
 
@@ -164,9 +200,18 @@ async function handleTelegramUpdate(update: TelegramUpdate): Promise<void> {
   await handleTelegramCaptchaAnswer(message);
 }
 
+function scheduleNextPoll(delayMs = nextPollDelayMs): void {
+  if (stopped) return;
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = setTimeout(() => void pollTelegramUpdates(), delayMs);
+}
+
 async function pollTelegramUpdates(): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
-  if (!token || stopped) return;
+  if (!token || stopped || polling) return;
+
+  pollAbort = new AbortController();
+  const signal = pollAbort.signal;
 
   polling = true;
   try {
@@ -176,19 +221,29 @@ async function pollTelegramUpdates(): Promise<void> {
       description?: string;
     }>(`https://api.telegram.org/bot${token}/getUpdates`, {
       ...TELEGRAM_AXIOS_OPTS,
-      timeout: 35_000,
+      signal,
+      timeout: TELEGRAM_HTTP_TIMEOUT_MS,
       params: {
         offset: pollOffset,
-        timeout: 25,
+        timeout: TELEGRAM_LONG_POLL_SEC,
         allowed_updates: JSON.stringify(['message']),
       },
     });
 
     if (!data.ok) {
-      console.warn('[telegram-inbound] getUpdates:', data.description ?? 'ok:false');
+      const description = data.description ?? 'ok:false';
+      if (description.includes('Conflict')) {
+        nextPollDelayMs = CONFLICT_BACKOFF_MS;
+        console.warn(
+          '[telegram-inbound] Conflict — 다른 getUpdates 소비자와 충돌. 15초 후 재시도 (브라우저 getUpdates 탭·중복 서버 확인)',
+        );
+      } else {
+        console.warn('[telegram-inbound] getUpdates:', description);
+      }
       return;
     }
 
+    nextPollDelayMs = POLL_INTERVAL_MS;
     for (const update of data.result ?? []) {
       pollOffset = update.update_id + 1;
       await handleTelegramUpdate(update).catch((err) => {
@@ -196,34 +251,66 @@ async function pollTelegramUpdates(): Promise<void> {
       });
     }
   } catch (err) {
+    if (isPollAborted(err)) return;
+    if (isTelegramGetUpdatesConflict(err)) {
+      nextPollDelayMs = CONFLICT_BACKOFF_MS;
+      console.warn(
+        '[telegram-inbound] Conflict — 다른 getUpdates 소비자와 충돌. 15초 후 재시도 (브라우저 getUpdates 탭·중복 서버 확인)',
+      );
+      return;
+    }
     console.warn('[telegram-inbound]', formatTelegramAxiosError(err, 'getUpdates failed'));
   } finally {
     polling = false;
-    if (!stopped) {
-      pollTimer = setTimeout(() => void pollTelegramUpdates(), 400);
-    }
+    if (!stopped) scheduleNextPoll();
   }
+}
+
+function isTelegramInboundPollEnabled(): boolean {
+  const flag = process.env.TELEGRAM_INBOUND_POLL?.trim().toLowerCase();
+  if (flag === 'false' || flag === '0' || flag === 'off' || flag === 'no') return false;
+  if (flag === 'true' || flag === '1' || flag === 'on' || flag === 'yes') return true;
+  return process.env.NODE_ENV === 'production';
 }
 
 /** 텔레그램 답장·메시지로 CAPTCHA 정답 수신 (long polling) */
 export function startTelegramCaptchaInbound(): void {
   const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
   if (!token) return;
+  if (!isTelegramInboundPollEnabled()) {
+    console.info(
+      `[telegram-inbound] getUpdates 폴링 비활성 — NODE_ENV=${process.env.NODE_ENV ?? 'unset'}, TELEGRAM_INBOUND_POLL=${process.env.TELEGRAM_INBOUND_POLL ?? 'unset'} (i7 production만 자동 활성)`,
+    );
+    return;
+  }
+  if (inboundStarted && !stopped) return;
 
+  inboundStarted = true;
   stopped = false;
-  console.info('[telegram-inbound] CAPTCHA 정답 수신 폴링 시작');
+  nextPollDelayMs = POLL_INTERVAL_MS;
+  const rehydrateRows = listCaptchaHoldTelegramOutboundForRegistry();
+  if (rehydrateRows.length > 0) {
+    rehydrateCaptchaTelegramRegistry(rehydrateRows);
+    console.info(`[telegram-inbound] CAPTCHA 답장 매핑 ${rehydrateRows.length}건 복구`);
+  }
+  console.info(`[telegram-inbound] CAPTCHA 정답 수신 폴링 시작 pid=${process.pid}`);
   void axios
     .post(
       `https://api.telegram.org/bot${token}/deleteWebhook`,
       { drop_pending_updates: false },
       TELEGRAM_AXIOS_OPTS,
     )
-    .catch(() => {});
-  void pollTelegramUpdates();
+    .catch(() => {})
+    .finally(() => {
+      if (!stopped) scheduleNextPoll(800);
+    });
 }
 
 export function stopTelegramCaptchaInbound(): void {
   stopped = true;
+  inboundStarted = false;
+  pollAbort?.abort();
+  pollAbort = null;
   if (pollTimer) {
     clearTimeout(pollTimer);
     pollTimer = null;

@@ -1,6 +1,5 @@
 import type { BrowserContext, Page } from 'playwright';
 
-import { resolveBlogLinkUrl } from './blog-link.js';
 import { humanSleep } from '../modules/human-engine/typing.js';
 import { submitNaverLoginAfterCaptcha } from './naver-login-fields.js';
 import { isNaverCaptchaVisible, isNaverLoginPendingAfterCaptcha, pickNaverCaptchaPage } from './naver-captcha-vision.js';
@@ -182,7 +181,6 @@ export function buildPostBlogPayloadFromJob(job: {
     title: job.title,
     content: job.content,
     imageUrls: job.image_urls ?? [],
-    linkUrl: resolveBlogLinkUrl(workspace, job.link_url, job.link_url),
     hashtags: job.hashtags ?? [],
     workspace,
     contentType: job.content_type,
@@ -232,6 +230,10 @@ export async function ensurePostingSessionAfterCaptcha(
   } else if (page.url().includes('nidlogin')) {
     const nidPage = (await pickNaverCaptchaPage(context)) ?? page;
     if (nidPage && (await isNaverLoginPendingAfterCaptcha(nidPage))) {
+      if (!(await isNaverCaptchaVisible(nidPage))) {
+        await submitNaverLoginAfterCaptcha(nidPage, accountId).catch(() => {});
+        await humanSleep(...scaleMs(800, 1500));
+      }
       await nidPage
         .waitForURL((u) => !u.href.includes('nidlogin'), { timeout: loginWaitMs })
         .catch(() => {});

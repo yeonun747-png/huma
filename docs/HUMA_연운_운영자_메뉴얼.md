@@ -18,6 +18,7 @@
 7. [일일 운영 체크리스트](#7-일일-운영-체크리스트)
 8. [장애 대응 빠른 참조](#8-장애-대응-빠른-참조)
 9. [부록: 연운 인프라 매핑](#9-부록-연운-인프라-매핑)
+   - [9.6 Telegram CAPTCHA (연운 그룹)](#96-telegram-captcha-연운-그룹)
 
 ---
 
@@ -113,9 +114,9 @@
 |------|------|
 | **서비스 상태 카드** | 연운 🔮 LIVE/IDLE/오류 · 오늘 발행 건수 · **■ 정지** |
 | **통계 4칸** | 오늘 총 발행 · 큐 대기 · 오류 · 활성 계정 |
-| **7일 발행수 추이** | post_blog 파이프라인만 집계 (수동 큐·shell job 제외) |
+| **7일 발행수 추이** | post_blog 파이프라인만 집계 · **평균선** + `평균 N 발행` 라벨 (수동 큐·shell job 제외) |
 | **발행 콘텐츠 성과 · 상위 5** | GSC page 클릭(28일) ↔ `link_url` 매칭 · 미설정 시 SEO 메뉴 안내 |
-| **오늘 발행 현황** | 연운 당일 완료 글 (실제 네이버 URL만, UUID shell 제외) |
+| **오늘 발행 현황** | 연운 당일 완료 글 · **계정명** 열 (실제 네이버 URL만, UUID shell 제외) |
 | **Bot Social Activity · 연운** | C-Rank KPI: 방문·공감·댓글·이웃·카페 소통 |
 
 #### 주요 조작
@@ -157,7 +158,7 @@
 | **선택 삭제** | 완료·실패 job 일괄 삭제 |
 | **실패·지연 선택** | failed·지연 job 일괄 선택 |
 | **🔍 검증 미리보기** | dry_run 파이프라인 검증 |
-| **🚀 AI 생성 + 발행 큐 등록** | 실제 생성·발행 등록 |
+| **🚀 AI 생성 + 발행 큐 등록** | 실제 생성·발행 등록 (이미지 업로드 중 **진행률 표시**) |
 
 #### 작업 추가 주요 필드
 
@@ -190,8 +191,8 @@
 
 | 증상 | 조치 |
 |------|------|
+| CAPTCHA 대기 | **Telegram 그룹 답장** 또는 VNC → 로그인 → HUMA **발행·활동 재개** |
 | `큐 데이터를 불러오지 못했습니다` | huma-server 연결·재시작 확인 |
-| CAPTCHA 대기 | VNC 접속 → 로그인 → HUMA 활동 재개 |
 | LIVE job 삭제 불가 | **■** 로 중단 후 삭제 |
 
 ---
@@ -410,31 +411,28 @@
 
 ### 4.9 Layer4 Watcher `/watcher`
 
-**목적:** CAPTCHA·429·휴식 등 Layer4 Fail-Safe 감지 이력·설정·DRILL·Telegram/VNC 테스트를 수행합니다.
+**목적:** CAPTCHA·429·휴식 등 Layer4 Fail-Safe **감지 이력·설정**을 확인합니다.
 
 #### 화면 구성
 
 | 구역 | 내용 |
 |------|------|
 | **요약** | 감지(오늘) · 기타 ERROR · Slack ON |
-| **Fail-Safe 감지 이력** | Layer4 이벤트만 |
-| **CAPTCHA 연습** | DRILL 실행 |
+| **Fail-Safe 감지 이력** | Layer4 이벤트만 (CAPTCHA·429 등) |
 | **Fail-Safe 설정** | auto_pause · captcha_slack · cooldown · gradual_recovery |
-| **실시간 ERROR 로그** | 최근 ERROR 스트림 |
+| **실시간 ERROR 로그** | 최근 ERROR 스트림 (Layer4 외 동글·워밍업 등 포함) |
 
 #### 주요 조작
 
-| 버튼 | 설명 |
+| 항목 | 설명 |
 |------|------|
-| **연운 DRILL** | 실발행 없이 Telegram·VNC·큐 UI 검증 |
-| **Telegram 테스트 (연운)** | 알림 채널 확인 |
-| **VNC 상태 (i7)** | x11vnc 연결 확인 |
-| Fail-Safe 토글 | 즉시 중지 · Slack · 429 쿨다운 · 점진적 복구 |
+| Fail-Safe 토글 | 캡cha 감지 즉시 중지 · Slack · 429 쿨다운 · 점진적 복구 |
+
+> Telegram 테스트·VNC 확인·CAPTCHA DRILL 버튼은 UI에서 제거됨. CAPTCHA 알림·답장은 **Telegram 그룹 + env** 로 운영 ([9.6](#96-telegram-captcha-연운-그룹) 참고).
 
 #### 연운 참고
 
-- DRILL job은 `[DRILL]` 제목 · 대시보드 집계 **제외**
-- i7 x11vnc 필요
+- i7 x11vnc 필요 (VNC 수동 해결 시)
 - 사이드바 **watcher** 빨간 배지 = 미해결 Layer4 건수
 
 #### 트러블슈팅
@@ -443,7 +441,8 @@
 |------|------|
 | Layer4 | CAPTCHA·429 — Watcher 범위 |
 | 동글·워밍업·타임아웃 | 별도 처리 (Watcher 아님) |
-| Telegram 미수신 | token · chatId 확인 |
+| Telegram 알림 없음 | [9.6](#96-telegram-captcha-연운-그룹) env · BotFather · 그룹 초대 확인 |
+| Telegram 답장 무응답 | **CAPTCHA 사진에 답장** · pm2 재시작 후 **새 알림**에 답장 · [8장](#8-장애-대응-빠른-참조) |
 
 ---
 
@@ -481,7 +480,8 @@
 
 - 본문 붙여넣기 시 `https://yeonun.com` OG 카드 시뮬
 - 발행 전 검토 대기: 2~5분
-- CAPTCHA Vision 3회 실패 → Telegram → VNC
+- CAPTCHA Vision 3회 실패 → Telegram 그룹 알림 → **답장** 또는 VNC
+- 2차 CAPTCHA·로그인 재시도 시 nidlogin **ID·비밀번호 자동 재입력** (필드가 비워진 경우)
 
 ---
 
@@ -691,7 +691,7 @@
 ### 발행 운영
 
 - [ ] `/seo-keywords` — 키워드·순위 확인 → 필요 시 `/queue` 등록
-- [ ] `/queue` — CAPTCHA·지연 job 처리
+- [ ] `/queue` — CAPTCHA·지연 job 처리 (Telegram **답장** 또는 VNC)
 - [ ] `/calendar` — 당일·내일 예약 확인
 
 ### 소통 운영
@@ -711,7 +711,9 @@
 
 | 증상 | 1차 확인 | 2차 조치 |
 |------|----------|----------|
-| CAPTCHA 반복 | `/watcher` · `/queue` CAPTCHA | VNC 수동 해결 → 활동 재개 |
+| CAPTCHA 반복 | `/watcher` · `/queue` CAPTCHA | Telegram **답장** 또는 VNC → **발행·활동 재개** |
+| Telegram 답장 안 먹음 | CAPTCHA **사진**에 답장했는지 | pm2 재시작 직후면 **새 CAPTCHA** 대기 · [9.6](#96-telegram-captcha-연운-그룹) |
+| `getUpdates Conflict` (서버 로그) | 브라우저 getUpdates 탭 · 로컬 `npm run dev` | i7 `huma-server` 1개만 · [9.6.4](#964-getupdates-충돌-conflict) |
 | 발행 ERR | `/monitor` ERR 카드 | `/accounts` 재연결 · `/modems` 검사 |
 | SOCKS 오류 | `/modems` 슬롯 1~3 | 일괄 복구 → 재검사 |
 | 큐 지연(빨강) | `/queue` scheduled_at | 앞당김 또는 재등록 |
@@ -761,11 +763,105 @@ Claude SEO 글 생성
 
 ```bash
 cd ~/huma && git pull
-npm run build --workspace=@huma/server
+cd apps/server && npm run build
 pm2 restart huma-server huma-vnc-hud --update-env
 ```
 
 웹 UI 변경은 Vercel 별도 배포.
+
+> CAPTCHA Telegram 답장 수신 등 **서버 코드** 변경 후에는 위처럼 `apps/server` 빌드·재시작이 필요합니다.
+
+### 9.6 Telegram CAPTCHA (연운 그룹)
+
+연운 CAPTCHA는 **1:1 DM이 아니라 텔레그램 그룹** `연운 Huma 알림` 으로 알림을 보내고, 운영자가 **답장**으로 정답을 입력하면 i7 huma-server가 VNC 브라우저에 자동 입력합니다.
+
+#### 9.6.1 초기 설정
+
+| 단계 | 내용 |
+|------|------|
+| 1 | BotFather → `@Yeonunbot` → **Group Privacy → Turn off** (Privacy **비활성** = 그룹 답장 수신) |
+| 2 | 그룹 `연운 Huma 알림`에 봇 초대 |
+| 3 | i7 `apps/server/.env` 설정 (아래) |
+| 4 | `pm2 restart huma-server --update-env` |
+
+**`.env` 예시 (연운)**
+
+```env
+TELEGRAM_BOT_TOKEN=123456:ABC...
+TELEGRAM_CHAT_ID_YEONUN=-5583641706
+TELEGRAM_INBOUND_POLL=true
+HUMA_WEB_URL=https://romang-ai.com
+HUMA_VNC_URL_YEONUN=vnc://172.30.1.96:5900
+```
+
+| 변수 | 설명 |
+|------|------|
+| `TELEGRAM_BOT_TOKEN` | BotFather 발급 토큰 |
+| `TELEGRAM_CHAT_ID_YEONUN` | 그룹 chat id (음수). 슈퍼그룹이면 `-100…` 형식일 수 있음 — 최신 서버는 자동 매칭 |
+| `TELEGRAM_INBOUND_POLL` | i7 production에서 `true` (답장 수신). dev PC `npm run dev` 는 기본 OFF |
+| `HUMA_VNC_URL_YEONUN` | RealVNC 등 VNC 링크 (알림 본문에 표시) |
+
+**`.env` 작성 주의**
+
+- **한 줄에 `KEY=value` 하나** — 줄바꿈 누락 시 `TELEGRAM_CHAT_ID…HUMA_API_SECRET=…` 처럼 붙어서 오류
+- `source .env` 테스트 시와 PM2(dotenv) 로드 결과가 다를 수 있음 — 형식은 항상 한 줄씩
+
+#### 9.6.2 CAPTCHA 정답 보내는 방법
+
+1. 그룹에 온 **CAPTCHA 사진·알림**을 선택
+2. **답장(Reply)** 으로 정답 입력 (일반 채팅만 보내면 Privacy ON 그룹에서는 수신 안 될 수 있음)
+3. 입력 형식: 한글·숫자만, 또는 `정답: xxx` / `@Yeonunbot 정답`
+4. 처리 결과: 그룹에 `✅` / `❌` / `⚠️` 봇 메시지
+5. CAPTCHA 통과 후 huma **큐 → 발행·활동 재개**
+
+CAPTCHA 대기 job이 **1개**이면 답장 대상만 맞으면 job 자동 연결. **여러 개**이면 반드시 **해당 CAPTCHA 알림에 답장**.
+
+#### 9.6.3 pm2 재시작 시 주의
+
+| 항목 | 설명 |
+|------|------|
+| **답장 매핑** | 알림 `message_id → job_id` 는 **메모리** — `pm2 restart` 후 **사라짐** |
+| **CAPTCHA 세션** | 브라우저 hold도 재시작 시 끊길 수 있음 |
+| **운영 규칙** | 재시작·배포 후에는 **새 CAPTCHA 알림**이 온 뒤 그 알림에 답장 |
+
+#### 9.6.4 getUpdates 충돌 (Conflict)
+
+서버 로그에 `Conflict: terminated by other getUpdates request` 가 나오면 **같은 봇 토큰으로 getUpdates를 두 곳에서 동시에** 쓰는 상태입니다.
+
+| 원인 | 조치 |
+|------|------|
+| 브라우저 `api.telegram.org/bot…/getUpdates` 탭 | **전부 닫기** |
+| Windows 등에서 `npm run dev` (같은 `.env` 토큰) | dev 서버 **종료** |
+| i7 `huma-server` 중복 | `pm2 list` — 1개만 |
+| huma-server **가동 중** curl getUpdates | **하지 말 것** (Conflict 유발) |
+
+**진단 (i7)**
+
+```bash
+pm2 stop huma-server
+sleep 10
+# TOKEN은 .env에서 — huma-server 중지 상태에서만 1회
+curl -s "https://api.telegram.org/bot${TOKEN}/getUpdates?timeout=1&limit=1"
+# {"ok":true,"result":[]} 이면 외부 소비자 없음
+pm2 start huma-server --update-env
+```
+
+**로그 확인**
+
+```bash
+pm2 logs huma-server --lines 50 --nostream | grep telegram-inbound
+```
+
+- `CAPTCHA 정답 수신 폴링 시작` — 정상 기동
+- Conflict **반복** — 위 표 재확인
+- 폴링 중에는 로그가 거의 없음 (정상). 답장 시 `recv chat=…` / `CAPTCHA answer …` 기대
+
+#### 9.6.5 chat_id 불일치
+
+답장 시 봇이 `chat_id 불일치` 안내를 보내면:
+
+1. 안내에 나온 **수신 id** 를 `.env` `TELEGRAM_CHAT_ID_YEONUN` 에 반영 (기존 id와 **쉼표**로 병기 가능)
+2. `pm2 restart huma-server --update-env`
 
 ---
 
@@ -773,4 +869,5 @@ pm2 restart huma-server huma-vnc-hud --update-env
 
 | 날짜 | 내용 |
 |------|------|
+| 2026-06-15 | Telegram 그룹 CAPTCHA·getUpdates Conflict·UI(대시보드·큐·Watcher) 반영 |
 | 2026-06-15 | 최초 작성 — 연운 사이드바 전 메뉴 운영자 메뉴얼 |

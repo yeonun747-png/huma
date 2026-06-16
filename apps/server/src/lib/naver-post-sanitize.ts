@@ -1,6 +1,6 @@
 import type { ContentType } from '@huma/shared';
 
-import { blogLinkStripVariants, resolveBlogLinkUrl } from './blog-link.js';
+import { blogLinkStripVariants } from './blog-link.js';
 
 /** 본문에서 별도 타이핑할 링크·URL 제거 */
 export function stripEmbeddedBlogLinks(raw: string, linkUrl?: string | null, workspace = 'yeonun'): string {
@@ -45,7 +45,10 @@ export function prepareBlogPostForPlaywright(
   sourceLink?: string | null,
   contentType?: ContentType,
 ): { content: string; linkUrl: string | undefined } {
-  const linkUrl = resolveBlogLinkUrl(workspace, sourceLink ?? '', sourceLink ?? '');
-  const content = sanitizeBlogPostForNaver(raw, { contentType, linkUrl, workspace });
-  return { content, linkUrl: linkUrl || undefined };
+  const content = sanitizeBlogPostForNaver(raw, {
+    contentType,
+    linkUrl: sourceLink ?? undefined,
+    workspace,
+  });
+  return { content, linkUrl: undefined };
 }

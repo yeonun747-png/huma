@@ -640,11 +640,8 @@ async function submitCaptcha(
   options?: { refillPassword?: boolean },
 ): Promise<void> {
   if (options?.refillPassword === true && ctx.accountId && page.url().includes('nidlogin')) {
-    const pwVal = await page.locator('#pw').inputValue().catch(() => '');
-    if (!pwVal.trim()) {
-      await ensureNaverLoginCredentialsForCaptcha(page, ctx.accountId, { fast: true });
-      await humanSleep(150, 350);
-    }
+    await ensureNaverLoginCredentialsForCaptcha(page, ctx.accountId, { fast: true });
+    await humanSleep(150, 350);
   }
 
   const confirmed = await clickCaptchaConfirm(page);
@@ -677,7 +674,7 @@ export async function applyManualCaptchaAnswer(
   answer: string,
   ctx: NaverCaptchaVisionContext = {},
 ): Promise<{ filled: boolean; submitted: boolean; cleared: boolean; pending_login: boolean }> {
-  // ① 정답칸 마우스 이동·클릭 후 정답 입력 (비번 재입력 없음)
+  // ① 정답칸 마우스 이동·클릭 후 정답 입력
   const filled = await fillCaptchaAnswer(page, answer);
   if (!filled) return { filled: false, submitted: false, cleared: false, pending_login: false };
 
@@ -687,14 +684,7 @@ export async function applyManualCaptchaAnswer(
   let pending_login: boolean;
 
   if (page.url().includes('nidlogin')) {
-    if (ctx.accountId) {
-      const pwVal = await page.locator('#pw').inputValue().catch(() => '');
-      if (!pwVal.trim()) {
-        await ensureNaverLoginCredentialsForCaptcha(page, ctx.accountId, { fast: true });
-        await humanSleep(150, 350);
-      }
-    }
-    // nidlogin — 정답 입력 후 로그인 버튼 마우스 이동·클릭으로 제출 (Enter·코드 제출 금지)
+    // nidlogin — ID·PW 비었으면 재입력 후 로그인 버튼 클릭
     const loggedIn = await submitNaverLoginAfterCaptcha(page, ctx.accountId ?? '');
     await humanSleep(500, 1200);
     cleared = loggedIn || !(await isNaverCaptchaVisible(page));

@@ -16,12 +16,12 @@ export function workspaceBlogHomeUrl(workspace: string): string {
   return WORKSPACE_BLOG_HOME[workspace] ?? WORKSPACE_BLOG_HOME.yeonun!;
 }
 
-/** post_blog DB·큐 — OG 붙여넣기용 홈 URL */
+/** post_blog DB·큐 — landing URL 기록용 (발행 시 OG 링크 삽입에는 미사용) */
 export function normalizeBlogLinkUrl(workspace: string, _sourceUrl?: string): string {
   return workspaceBlogHomeUrl(workspace);
 }
 
-/** post_blog·Playwright — 본문 붙여넣기용 홈 URL */
+/** 레거시·UI — 워크스페이스 홈 URL (post_blog 발행 OG 삽입 없음) */
 export function resolveBlogLinkUrl(
   workspace: string,
   _linkUrl?: string | null,
