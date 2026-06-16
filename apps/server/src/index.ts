@@ -50,6 +50,8 @@ import { registerCrankRoutes } from './routes/crank.js';
 import { registerMonitorRoutes } from './routes/monitor.js';
 import { registerVncRoutes } from './routes/vnc.js';
 import { registerSeoRoutes } from './routes/seo.js';
+import { registerBlogCheckRoutes } from './routes/blog-check.js';
+import { startBlogCheckScheduler } from './modules/blog-check/service.js';
 import { assertSecretsConfigured } from './lib/secrets.js';
 
 
@@ -134,6 +136,7 @@ async function main() {
   await registerMonitorRoutes(app);
   await registerVncRoutes(app);
   await registerSeoRoutes(app);
+  await registerBlogCheckRoutes(app);
 
   await app.listen({ port: PORT, host: '0.0.0.0' });
 
@@ -218,7 +221,8 @@ async function main() {
     await recoverCrankPipeline();
     startCrankScheduler();
     startCafeActivityScheduler();
-    app.log.info('BullMQ worker + crank scheduler + cafe activity scheduler started');
+    startBlogCheckScheduler();
+    app.log.info('BullMQ worker + crank scheduler + cafe activity + blog-check scheduler started');
 
     registerGracefulShutdown(app, worker);
 

@@ -45,6 +45,7 @@ export const PAGE_META: Record<string, PageMeta> = {
   '/modems': { title: '프록시 관리', ...NO_ACTION },
   '/settings': { title: '환경 설정', ...NO_ACTION },
   '/seo-keywords': { title: 'SEO 키워드', ...NO_ACTION },
+  '/blog-check': { title: '블로그 지수 분석', ...NO_ACTION },
   '/adsense': { title: '애드센스 수익', ...NO_ACTION },
 };
 

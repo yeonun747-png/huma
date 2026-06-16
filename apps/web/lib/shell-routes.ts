@@ -15,6 +15,7 @@ export const SHELL_VIEW_LOADERS: Record<string, ShellViewLoader> = {
     import('@/components/pages/video-view').then((m) => ({ default: m.VideoPipelineView })),
   '/seo-keywords': () =>
     import('@/components/pages/workspace-views').then((m) => ({ default: m.SeoKeywordsView })),
+  '/blog-check': () => import('@/components/pages/blog-check-view').then((m) => ({ default: m.BlogCheckView })),
   '/watcher': () => import('@/components/pages/settings-view').then((m) => ({ default: m.WatcherView })),
   '/human-engine': () =>
     import('@/components/dashboard/human-engine-settings').then((m) => ({ default: m.HumanEngineSettings })),

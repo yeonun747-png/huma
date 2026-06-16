@@ -51,6 +51,7 @@ import { executeSocialCrank } from './jobs/social-crank.js';
 import { executeScheduledSocialCrank } from '../crank/scheduled-session.js';
 import { executeVideoPipeline } from './jobs/video-pipeline.js';
 import { executeContentFull } from '../claude/auto-content-orchestrator.js';
+import { executeBlogCheckJob } from './jobs/blog-check.js';
 import { executeSocialPost } from './jobs/social-post.js';
 import { scheduleRepeatIfNeeded } from '../../lib/repeat-scheduler.js';
 import { activatePendingSocialReplies } from '../../lib/social-reply-chain.js';
@@ -668,6 +669,13 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         } else if (type === 'content_full') {
           await markRunning();
           await executeContentFull(humaJobId!);
+        } else if (type === 'blog_check') {
+          const bcPayload = (payload ?? {}) as { accountId?: string | null };
+          const result = await executeBlogCheckJob(bcPayload);
+          await logOperation({
+            level: 'info',
+            message: `[blog-check] 스캔 완료 — 계정 ${result.scannedAccounts} · 포스트 ${result.scannedPosts}`,
+          });
         }
 
         if (humaJobId && type === 'social_crank') await completeJob(humaJobId);

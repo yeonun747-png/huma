@@ -687,4 +687,42 @@ export const api = {
       tailscale: boolean;
       hint: string;
     }>('/api/system/vnc-status', { sameOrigin: typeof window !== 'undefined' }),
+  blogCheckAccounts: () =>
+    request<{
+      accounts: Array<{
+        id: string;
+        label: string;
+        svc: string;
+        url: string;
+        idx: number;
+        posts: number;
+        ok: number;
+        miss: number;
+        ext: number;
+        pattern: '낮음' | '중간' | '높음';
+        session: '정상' | '오류';
+        trend: number[];
+      }>;
+      lastScanAt: string | null;
+      scanning: boolean;
+      scanProgress: { done: number; total: number };
+    }>('/api/blog-check/accounts'),
+  blogCheckPosts: (accountId: string) =>
+    request<{
+      posts: Array<{
+        date: string;
+        title: string;
+        chars: number;
+        img: number;
+        ext: number;
+        status: 'ok' | 'miss';
+        missReason: string | null;
+        postUrl: string;
+      }>;
+    }>(`/api/blog-check/posts/${accountId}`),
+  blogCheckScan: (accountId?: string) =>
+    request<{ queued: true; accountId?: string }>(
+      accountId ? `/api/blog-check/scan/${accountId}` : '/api/blog-check/scan',
+      { method: 'POST', timeoutMs: 30_000 },
+    ),
 };
