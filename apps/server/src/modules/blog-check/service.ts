@@ -1,11 +1,18 @@
+import type { Page } from 'playwright';
 import { supabase } from '../../middleware/auth.js';
 import { formatKstDateKey, getKstClock } from '../../lib/crank-schedule-config.js';
 import { logOperation } from '../../lib/log-emitter.js';
 import { sleep } from '../../lib/utils.js';
 import { enqueueJob } from '../queue/producer.js';
-import { extractBlogIdFromUrl, extractPostNoFromUrl } from './blog-url.js';
+import {
+  extractBlogIdFromUrl,
+  extractPostNoFromUrl,
+  plainTextLength,
+  postRowMergeKey,
+  resolveExtLinkCount,
+} from './blog-url.js';
+import { getCachedBlogPostList, loadBlogPostList, refreshBlogPostListCache } from './blog-post-list.js';
 import { computeBlogIndexScore, scrapeBlogStats } from './index-score.js';
-import { inferMissReason, type MissReason } from './miss-reason.js';
 import { notifyBlogCheckCaptcha, notifyBlogCheckIndexParseFailed } from './notify.js';
 import {
   acquireBlogCheckScanLock,
@@ -34,6 +41,7 @@ const WORKSPACE_SORT: Record<string, number> = {
 };
 
 const POST_LIMIT = 30;
+const JOB_FETCH_LIMIT = 200;
 
 export type TrendDirection = '안정' | '악화' | '개선' | '데이터 부족';
 
@@ -137,17 +145,175 @@ async function listActivePostingAccounts(accountId?: string): Promise<AccountRow
   return sortAccounts((data ?? []) as AccountRow[]);
 }
 
-/** published_at 내림차순 최근 30건 */
-async function fetchRecentPosts(accountId: string): Promise<PostRow[]> {
-  const { data, error } = await supabase
-    .from('posts')
-    .select('*')
-    .eq('account_id', accountId)
-    .order('published_at', { ascending: false })
-    .limit(POST_LIMIT);
+interface JobPostSource {
+  result_url: string | null;
+  title: string | null;
+  content: string | null;
+  link_url: string | null;
+  image_urls: string[] | null;
+  completed_at: string | null;
+  scheduled_at: string | null;
+  created_at: string;
+}
+
+/** posts.ext_link_count 보정 — huma_jobs·워크스페이스 기준 */
+async function reconcileExtLinkCountsFromJobs(
+  accountId: string,
+  posts: Map<string, PostRow>,
+  jobs: JobPostSource[] | null,
+  workspace?: string | null,
+): Promise<void> {
+  if (!jobs?.length) return;
+
+  const jobByKey = new Map<string, JobPostSource>();
+  for (const job of jobs) {
+    const url = String(job.result_url ?? '').trim();
+    if (!url) continue;
+    jobByKey.set(postRowMergeKey(url, extractPostNoFromUrl(url)), job);
+  }
+
+  for (const row of posts.values()) {
+    if (row.ext_link_cleared) continue;
+    const job =
+      jobByKey.get(postRowMergeKey(row.post_url, row.post_no)) ??
+      jobByKey.get(postRowMergeKey(row.post_url, extractPostNoFromUrl(row.post_url)));
+
+    const fromJob = job
+      ? resolveExtLinkCount(job.content, job.link_url, workspace)
+      : resolveExtLinkCount(null, null, workspace);
+
+    const next = Math.max(row.ext_link_count, fromJob);
+    if (next <= row.ext_link_count) continue;
+
+    row.ext_link_count = next;
+    let q = supabase
+      .from('posts')
+      .update({ ext_link_count: next })
+      .eq('account_id', accountId)
+      .eq('ext_link_cleared', false);
+    if (row.post_no) q = q.eq('post_no', row.post_no);
+    else q = q.eq('post_url', row.post_url);
+    const { error } = await q;
+    if (error) {
+      console.error('[blog-check] ext_link_count reconcile failed:', error.message);
+    }
+  }
+}
+
+function jobToPostRow(accountId: string, job: JobPostSource, workspace?: string | null): PostRow {
+  const postUrl = String(job.result_url ?? '').trim();
+  const postNo = extractPostNoFromUrl(postUrl);
+  return {
+    id: postUrl,
+    account_id: accountId,
+    post_url: postUrl,
+    post_no: postNo,
+    title: job.title ?? null,
+    published_at:
+      job.completed_at ?? job.scheduled_at ?? job.created_at ?? new Date().toISOString(),
+    char_count: plainTextLength(job.content),
+    img_count: job.image_urls?.length ?? 0,
+    ext_link_count: resolveExtLinkCount(job.content, job.link_url, workspace),
+    ext_link_cleared: false,
+  };
+}
+
+/** published_at 내림차순 최근 30건 — 블로그 공개 목록 + huma_jobs/posts 병합 */
+async function fetchRecentPosts(
+  accountId: string,
+  opts?: { page?: Page; blogId?: string | null; refreshIfMissing?: boolean },
+): Promise<PostRow[]> {
+  const { data: acc } = await supabase
+    .from('huma_accounts')
+    .select('workspace, blog_url, naver_id')
+    .eq('id', accountId)
+    .maybeSingle();
+  const workspace = (acc?.workspace as string | undefined) ?? null;
+  const blogId = opts?.blogId ?? extractBlogIdFromUrl(acc?.blog_url, acc?.naver_id);
+
+  let blogPosts: Awaited<ReturnType<typeof loadBlogPostList>> = [];
+  if (blogId) {
+    try {
+      if (opts?.page) {
+        blogPosts = await loadBlogPostList(accountId, blogId, opts.page);
+      } else if (opts?.refreshIfMissing) {
+        blogPosts = await loadBlogPostList(accountId, blogId);
+      } else {
+        blogPosts = (await getCachedBlogPostList(accountId)) ?? [];
+      }
+    } catch (err) {
+      console.error('[blog-check] blog post list load failed:', err);
+    }
+  }
+
+  const [{ data: fromPosts, error }, { data: jobs, error: jobErr }] = await Promise.all([
+    supabase.from('posts').select('*').eq('account_id', accountId).order('published_at', { ascending: false }).limit(JOB_FETCH_LIMIT),
+    supabase
+      .from('huma_jobs')
+      .select('result_url, title, content, link_url, image_urls, completed_at, scheduled_at, created_at')
+      .eq('account_id', accountId)
+      .eq('job_type', 'post_blog')
+      .eq('status', 'completed')
+      .not('result_url', 'is', null)
+      .order('completed_at', { ascending: false })
+      .limit(JOB_FETCH_LIMIT),
+  ]);
 
   if (error) throw new Error(error.message);
-  return (data ?? []) as PostRow[];
+  if (jobErr) throw new Error(jobErr.message);
+
+  const merged = new Map<string, PostRow>();
+
+  for (const bp of blogPosts) {
+    merged.set(`no:${bp.postNo}`, {
+      id: bp.postUrl,
+      account_id: accountId,
+      post_url: bp.postUrl,
+      post_no: bp.postNo,
+      title: bp.title,
+      published_at: bp.publishedAt ?? new Date(0).toISOString(),
+      char_count: 0,
+      img_count: 0,
+      ext_link_count: resolveExtLinkCount(null, null, workspace),
+      ext_link_cleared: false,
+    });
+  }
+
+  for (const job of jobs ?? []) {
+    const postUrl = String(job.result_url ?? '').trim();
+    if (!postUrl) continue;
+    const key = postRowMergeKey(postUrl, extractPostNoFromUrl(postUrl));
+    merged.set(key, jobToPostRow(accountId, job as JobPostSource, workspace));
+  }
+
+  for (const row of (fromPosts ?? []) as PostRow[]) {
+    const key = postRowMergeKey(row.post_url, row.post_no);
+    const existing = merged.get(key);
+    if (existing) {
+      merged.set(key, {
+        ...existing,
+        ...row,
+        char_count: row.char_count || existing.char_count,
+        ext_link_count: Math.max(
+          row.ext_link_cleared ? 0 : row.ext_link_count,
+          existing.ext_link_count,
+        ),
+      });
+    } else {
+      merged.set(key, {
+        ...row,
+        ext_link_count: row.ext_link_cleared
+          ? 0
+          : Math.max(row.ext_link_count, resolveExtLinkCount(null, null, workspace)),
+      });
+    }
+  }
+
+  await reconcileExtLinkCountsFromJobs(accountId, merged, (jobs ?? []) as JobPostSource[], workspace);
+
+  return Array.from(merged.values())
+    .sort((a, b) => new Date(b.published_at).getTime() - new Date(a.published_at).getTime())
+    .slice(0, POST_LIMIT);
 }
 
 async function fetchLatestStatusByPostNo(accountId: string): Promise<Map<string, StatusRow>> {
@@ -224,7 +390,9 @@ export async function runBlogCheckScan(accountId?: string): Promise<{
         continue;
       }
 
-      const posts = await fetchRecentPosts(acc.id);
+      await refreshBlogPostListCache(acc.id, blogId, page);
+
+      const posts = await fetchRecentPosts(acc.id, { page, blogId });
       const label = acc.name || acc.slot_label || acc.naver_id;
       let accountAborted = false;
 
@@ -360,7 +528,7 @@ export async function buildBlogCheckAccountsResponse(allowedWorkspaces: string[]
   const result = [];
   for (const acc of accounts) {
     const blogId = extractBlogIdFromUrl(acc.blog_url, acc.naver_id) ?? acc.naver_id;
-    const recentPosts = await fetchRecentPosts(acc.id);
+    const recentPosts = await fetchRecentPosts(acc.id, { blogId });
     const statusMap = await fetchLatestStatusByPostNo(acc.id);
 
     let okCount = 0;
@@ -420,22 +588,25 @@ export async function buildBlogCheckAccountsResponse(allowedWorkspaces: string[]
 }
 
 export async function buildBlogCheckPostsResponse(accountId: string) {
-  const posts = await fetchRecentPosts(accountId);
+  const { data: acc } = await supabase
+    .from('huma_accounts')
+    .select('workspace, blog_url, naver_id')
+    .eq('id', accountId)
+    .maybeSingle();
+  const workspace = (acc?.workspace as string | undefined) ?? null;
+  const blogId = extractBlogIdFromUrl(acc?.blog_url, acc?.naver_id);
+
+  const posts = await fetchRecentPosts(accountId, { blogId, refreshIfMissing: true });
   const statusMap = await fetchLatestStatusByPostNo(accountId);
 
   return {
     posts: posts.map((post) => {
       const postNo = post.post_no ?? extractPostNoFromUrl(post.post_url) ?? '';
       const st = postNo ? statusMap.get(postNo) : undefined;
-      const extCount = post.ext_link_cleared ? 0 : post.ext_link_count;
+      const extCount = post.ext_link_cleared
+        ? 0
+        : Math.max(post.ext_link_count, resolveExtLinkCount(null, null, workspace));
       const status = st?.status ?? null;
-      let missReason: MissReason | '—' = '—';
-      if (status === 'miss') {
-        missReason = inferMissReason({
-          extLinkCount: extCount,
-          charCount: post.char_count,
-        });
-      }
 
       return {
         post_url: post.post_url,
@@ -446,7 +617,6 @@ export async function buildBlogCheckPostsResponse(accountId: string) {
         img_count: post.img_count,
         ext_link_count: extCount,
         status,
-        miss_reason: missReason,
       };
     }),
   };

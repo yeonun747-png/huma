@@ -1,3 +1,5 @@
+import { ensureHttpsUrl, workspaceBlogHomeUrl } from '../../lib/blog-link.js';
+
 const BLOG_ID_RE = /blog\.naver\.com\/([^/?#]+)/i;
 const POST_NO_RE = /(?:logNo=|\/)(\d{6,})(?:[/?#]|$)/;
 
@@ -21,6 +23,16 @@ export function extractPostNoFromUrl(postUrl: string): string | null {
   return m?.[1] ?? null;
 }
 
+export function normalizePostUrlKey(postUrl: string): string {
+  return ensureHttpsUrl(postUrl.trim()).replace(/\/$/, '').toLowerCase();
+}
+
+export function postRowMergeKey(postUrl: string, postNo?: string | null): string {
+  const no = postNo ?? extractPostNoFromUrl(postUrl);
+  if (no) return `no:${no}`;
+  return normalizePostUrlKey(postUrl);
+}
+
 export function normalizeBlogPostUrl(blogId: string, postNo: string): string {
   return `https://blog.naver.com/${blogId}/${postNo}`;
 }
@@ -31,12 +43,12 @@ export function countExternalLinks(content: string | null | undefined, linkUrl?:
   const seen = new Set<string>();
 
   const add = (raw: string) => {
-    const url = raw.trim();
+    const url = ensureHttpsUrl(raw);
     if (!url || seen.has(url)) return;
-    if (/^https?:\/\//i.test(url) && !/blog\.naver\.com|naver\.me|naver\.com\/blog/i.test(url)) {
-      seen.add(url);
-      count += 1;
-    }
+    if (!/^https?:\/\//i.test(url)) return;
+    if (/blog\.naver\.com|naver\.me|naver\.com\/blog/i.test(url)) return;
+    seen.add(url);
+    count += 1;
   };
 
   if (linkUrl?.trim()) add(linkUrl);
@@ -47,7 +59,29 @@ export function countExternalLinks(content: string | null | undefined, linkUrl?:
   const bare = content?.matchAll(/https?:\/\/[^\s)\]"'<>]+/g) ?? [];
   for (const m of bare) add(m[0]);
 
+  if (/yeonun\.com/i.test(content ?? '')) add('https://yeonun.com');
+  else if (/myquizoasis\.com/i.test(content ?? '')) add('https://myquizoasis.com');
+  else if (/panana\.com/i.test(content ?? '')) add('https://panana.com');
+
   return count;
+}
+
+/** post_blog — link_url·본문·워크스페이스 기준 외부링크 수 (최소 1: HUMA 발행 OG 링크) */
+export function resolveExtLinkCount(
+  content: string | null | undefined,
+  linkUrl: string | null | undefined,
+  workspace?: string | null,
+): number {
+  const fromText = countExternalLinks(content, linkUrl);
+  if (fromText > 0) return fromText;
+  if (linkUrl?.trim()) return 1;
+  if (workspace && ['yeonun', 'quizoasis', 'panana'].includes(workspace)) return 1;
+  try {
+    if (workspace && countExternalLinks(content, workspaceBlogHomeUrl(workspace)) > 0) return 1;
+  } catch {
+    /* ignore */
+  }
+  return 0;
 }
 
 export function plainTextLength(content: string | null | undefined): number {

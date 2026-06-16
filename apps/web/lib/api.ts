@@ -717,7 +717,6 @@ export const api = {
         img_count: number;
         ext_link_count: number;
         status: 'ok' | 'miss' | null;
-        miss_reason: string;
       }>;
     }>(`/api/blog-check/posts/${accountId}`),
   blogCheckScan: (accountId?: string) =>

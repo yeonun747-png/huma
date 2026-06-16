@@ -24,17 +24,6 @@ function formatLastScan(iso: string | null): string {
   return `마지막 스캔: ${hh}:${mm}`;
 }
 
-function missReasonUi(post: BcPost): { cls: string; text: string } {
-  if (post.status === 'ok') return { cls: 'none', text: '—' };
-  if (post.miss_reason && post.miss_reason !== '—') {
-    if (post.miss_reason.includes('외부링크')) return { cls: 'ext', text: post.miss_reason };
-    return { cls: 'ai', text: post.miss_reason };
-  }
-  if (post.ext_link_count > 0) return { cls: 'ext', text: '외부링크 포함' };
-  if (post.chars < 300) return { cls: 'ai', text: '글자수 부족' };
-  return { cls: 'ai', text: 'AI패턴 의심' };
-}
-
 function trendLabel(dir: BcAccount['trend_direction']): { text: string; color: string } {
   if (dir === '데이터 부족') return { text: '— 데이터 부족', color: 'var(--t3)' };
   if (dir === '안정') return { text: '✓ 안정', color: 'var(--ok)' };
@@ -46,6 +35,7 @@ export function BlogCheckView() {
   const [accounts, setAccounts] = useState<BcAccount[]>([]);
   const [lastScanAt, setLastScanAt] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [scanningAccountId, setScanningAccountId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -104,6 +94,7 @@ export function BlogCheckView() {
       void loadAccounts().then((data) => {
         if (data && !data.scanning) {
           setScanning(false);
+          setScanningAccountId(null);
           if (curAcc) void loadPosts(curAcc);
         }
       });
@@ -133,14 +124,16 @@ export function BlogCheckView() {
 
   const totalMiss = useMemo(() => accounts.reduce((s, a) => s + a.miss_count, 0), [accounts]);
 
-  const startScan = async () => {
+  const startScan = async (accountId?: string) => {
     if (scanning) return;
     try {
       setScanning(true);
-      await api.blogCheckScan();
+      setScanningAccountId(accountId ?? null);
+      await api.blogCheckScan(accountId);
       await loadAccounts();
     } catch (e) {
       setScanning(false);
+      setScanningAccountId(null);
       const msg = (e as Error).message;
       if (msg.includes('스캔이 이미')) {
         showToast('스캔이 이미 진행 중입니다');
@@ -201,14 +194,35 @@ export function BlogCheckView() {
           const today = new Date();
 
           return (
-            <button
+            <div
               key={a.account_id}
-              type="button"
+              role="button"
+              tabIndex={0}
               className={cn('bci-card', curAcc === a.account_id && 'selected')}
               onClick={() => setCurAcc(a.account_id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') setCurAcc(a.account_id);
+              }}
             >
-              <div className="bci-svc" style={{ color: svcColor(a.svc) }}>
-                {a.svc}
+              <div className="bci-card-top">
+                <div className="bci-svc" style={{ color: svcColor(a.svc) }}>
+                  {a.svc}
+                </div>
+                <button
+                  type="button"
+                  className={cn(
+                    'bci-scan-btn',
+                    scanning && scanningAccountId === a.account_id && 'scanning',
+                  )}
+                  title={`${a.label} 스캔`}
+                  disabled={scanning}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void startScan(a.account_id);
+                  }}
+                >
+                  {scanning && scanningAccountId === a.account_id ? '⏳ 스캔 중' : '⟳ 스캔'}
+                </button>
               </div>
               <div className="bci-name">{a.label}</div>
               <div className="bci-url">blog.naver.com/{a.blog_url}</div>
@@ -287,7 +301,7 @@ export function BlogCheckView() {
                   세션 {a.session_status}
                 </span>
               </div>
-            </button>
+            </div>
           );
         })}
       </div>
@@ -296,8 +310,8 @@ export function BlogCheckView() {
         <div className="bcp-header">
           <div className="bcp-title">
             {selectedAcc
-              ? `${selectedAcc.label}  —  발행글 ${posts.length}건 중 누락 ${posts.filter((p) => p.status === 'miss').length}건`
-              : '← 계정 카드를 선택하면 발행글이 표시됩니다'}
+              ? `${selectedAcc.label}  —  최근 ${posts.length}건 (최대 30건) · 누락 ${posts.filter((p) => p.status === 'miss').length}건`
+              : '← 계정 카드를 선택하면 최근 발행 30건이 표시됩니다'}
           </div>
           <div className="bcp-filter">
             {(['all', 'miss', 'ok'] as const).map((f) => (
@@ -321,28 +335,25 @@ export function BlogCheckView() {
               <th>이미지</th>
               <th>외부링크</th>
               <th>수집 여부</th>
-              <th>누락 원인</th>
             </tr>
           </thead>
           <tbody>
             {!curAcc ? (
               <tr>
-                <td colSpan={7} className="py-8 text-center text-[12.5px] text-huma-t3">
+                <td colSpan={6} className="py-8 text-center text-[12.5px] text-huma-t3">
                   위 계정 카드를 클릭하세요
                 </td>
               </tr>
             ) : filteredPosts.length === 0 ? (
               <tr>
-                <td colSpan={7} className="py-6 text-center text-[12.5px] text-huma-t3">
+                <td colSpan={6} className="py-6 text-center text-[12.5px] text-huma-t3">
                   {posts.length === 0
                     ? '발행 이력 없음 — posts 테이블 확인 후 ⟳ 전체 스캔'
                     : '해당 조건의 포스트 없음'}
                 </td>
               </tr>
             ) : (
-              filteredPosts.map((p) => {
-                const reason = missReasonUi(p);
-                return (
+              filteredPosts.map((p) => (
                   <tr key={p.post_url}>
                     <td className="whitespace-nowrap font-mono text-[11px] text-huma-t3">{p.date}</td>
                     <td className="max-w-[200px] overflow-hidden text-ellipsis whitespace-nowrap" title={p.title}>
@@ -366,12 +377,8 @@ export function BlogCheckView() {
                         <span className="font-mono text-[11px] text-huma-t4">미스캔</span>
                       )}
                     </td>
-                    <td>
-                      <span className={cn('bc-reason', reason.cls)}>{reason.text}</span>
-                    </td>
                   </tr>
-                );
-              })
+                ))
             )}
           </tbody>
         </table>

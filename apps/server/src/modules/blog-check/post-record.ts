@@ -1,5 +1,5 @@
 import { supabase } from '../../middleware/auth.js';
-import { countExternalLinks, extractPostNoFromUrl, plainTextLength } from './blog-url.js';
+import { extractPostNoFromUrl, plainTextLength, resolveExtLinkCount } from './blog-url.js';
 
 export interface RecordPublishedPostInput {
   accountId: string;
@@ -9,6 +9,7 @@ export interface RecordPublishedPostInput {
   linkUrl?: string | null;
   imageUrls?: string[] | null;
   publishedAt?: string | null;
+  workspace?: string | null;
 }
 
 /** post_blog 발행 완료 시 posts 테이블에 기록 */
@@ -28,7 +29,7 @@ export async function recordPublishedPost(input: RecordPublishedPostInput): Prom
       published_at: publishedAt,
       char_count: plainTextLength(input.content),
       img_count: input.imageUrls?.length ?? 0,
-      ext_link_count: countExternalLinks(input.content, input.linkUrl),
+      ext_link_count: resolveExtLinkCount(input.content, input.linkUrl, input.workspace),
       ext_link_cleared: false,
     },
     { onConflict: 'account_id,post_url' },
