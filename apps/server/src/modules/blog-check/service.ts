@@ -1,16 +1,25 @@
 import { supabase } from '../../middleware/auth.js';
 import { formatKstDateKey, getKstClock } from '../../lib/crank-schedule-config.js';
 import { logOperation } from '../../lib/log-emitter.js';
+import { sleep } from '../../lib/utils.js';
 import { enqueueJob } from '../queue/producer.js';
 import { extractBlogIdFromUrl, extractPostNoFromUrl } from './blog-url.js';
 import { computeBlogIndexScore, scrapeBlogStats } from './index-score.js';
 import { inferMissReason, type MissReason } from './miss-reason.js';
+import { notifyBlogCheckCaptcha, notifyBlogCheckIndexParseFailed } from './notify.js';
 import {
   acquireBlogCheckScanLock,
   isBlogCheckScanLocked,
   releaseBlogCheckScanLock,
 } from './scan-lock.js';
-import { checkPostIndexed, resolveBlogId, withBlogCheckBrowser } from './scanner.js';
+import {
+  BlogCheckCaptchaError,
+  checkPostIndexed,
+  detectBlogCheckCaptcha,
+  randomScanDelayMs,
+  resolveBlogId,
+  withBlogCheckBrowser,
+} from './scanner.js';
 
 const WS_LABEL: Record<string, string> = {
   yeonun: '연운',
@@ -24,7 +33,9 @@ const WORKSPACE_SORT: Record<string, number> = {
   quizoasis: 2,
 };
 
-const LOOKBACK_DAYS = 30;
+const POST_LIMIT = 30;
+
+export type TrendDirection = '안정' | '악화' | '개선' | '데이터 부족';
 
 interface AccountRow {
   id: string;
@@ -33,8 +44,8 @@ interface AccountRow {
   blog_url: string | null;
   workspace: string;
   slot_label: string | null;
-  health_score: number | null;
   proxy_port: number | null;
+  session_status: string | null;
 }
 
 interface PostRow {
@@ -54,9 +65,6 @@ interface StatusRow {
   post_no: string;
   status: 'ok' | 'miss';
   scanned_at: string;
-  chars: number;
-  img_count: number;
-  ext_link_count: number;
 }
 
 function sortAccounts(accounts: AccountRow[]): AccountRow[] {
@@ -78,10 +86,15 @@ function formatPostDate(iso: string): string {
   return `${mm}.${dd}`;
 }
 
-function trendDirection(trend: number[]): '안정' | '악화' | '개선' {
-  if (trend.every((v) => v === 0)) return '안정';
-  const first = trend[0] ?? 0;
-  const last = trend[trend.length - 1] ?? 0;
+function mapSessionStatus(raw: string | null | undefined): '정상' | '오류' {
+  return raw === 'active' ? '정상' : '오류';
+}
+
+export function trendDirection(trend: (number | null)[]): TrendDirection {
+  const scanned = trend.filter((v): v is number => v !== null);
+  if (scanned.length < 2) return '데이터 부족';
+  const first = scanned[0] ?? 0;
+  const last = scanned[scanned.length - 1] ?? 0;
   if (last > first) return '악화';
   if (last < first) return '개선';
   return '안정';
@@ -90,7 +103,7 @@ function trendDirection(trend: number[]): '안정' | '악화' | '개선' {
 async function listActivePostingAccounts(accountId?: string): Promise<AccountRow[]> {
   let q = supabase
     .from('huma_accounts')
-    .select('id, name, naver_id, blog_url, workspace, slot_label, health_score, proxy_port')
+    .select('id, name, naver_id, blog_url, workspace, slot_label, proxy_port, session_status')
     .eq('account_type', 'posting')
     .eq('is_active', true);
 
@@ -101,16 +114,14 @@ async function listActivePostingAccounts(accountId?: string): Promise<AccountRow
   return sortAccounts((data ?? []) as AccountRow[]);
 }
 
+/** published_at 내림차순 최근 30건 */
 async function fetchRecentPosts(accountId: string): Promise<PostRow[]> {
-  const since = new Date();
-  since.setDate(since.getDate() - LOOKBACK_DAYS);
-
   const { data, error } = await supabase
     .from('posts')
     .select('*')
     .eq('account_id', accountId)
-    .gte('published_at', since.toISOString())
-    .order('published_at', { ascending: false });
+    .order('published_at', { ascending: false })
+    .limit(POST_LIMIT);
 
   if (error) throw new Error(error.message);
   return (data ?? []) as PostRow[];
@@ -119,7 +130,7 @@ async function fetchRecentPosts(accountId: string): Promise<PostRow[]> {
 async function fetchLatestStatusByPostNo(accountId: string): Promise<Map<string, StatusRow>> {
   const { data, error } = await supabase
     .from('blog_post_status')
-    .select('post_no, status, scanned_at, chars, img_count, ext_link_count')
+    .select('post_no, status, scanned_at')
     .eq('account_id', accountId)
     .order('scanned_at', { ascending: false });
 
@@ -133,47 +144,38 @@ async function fetchLatestStatusByPostNo(accountId: string): Promise<Map<string,
   return map;
 }
 
-async function buildSevenDayMissTrend(accountId: string): Promise<number[]> {
-  const since = new Date();
-  since.setDate(since.getDate() - 6);
-  since.setHours(0, 0, 0, 0);
+/** 7일 추이 — 스캔 안 한 날은 null */
+async function buildSevenDayMissTrend(accountId: string): Promise<(number | null)[]> {
+  const dayKeys: string[] = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() - (6 - i));
+    dayKeys.push(formatKstDateKey(d));
+  }
 
   const { data, error } = await supabase
     .from('blog_post_status')
     .select('scanned_at, status')
     .eq('account_id', accountId)
-    .eq('status', 'miss')
-    .gte('scanned_at', formatKstDateKey(since));
+    .gte('scanned_at', dayKeys[0]);
 
-  if (error) return Array(7).fill(0);
+  if (error) return dayKeys.map(() => null);
 
-  const counts = new Map<string, number>();
-  for (let i = 0; i < 7; i++) {
-    const d = new Date();
-    d.setDate(d.getDate() - (6 - i));
-    counts.set(formatKstDateKey(d), 0);
-  }
+  const scannedDays = new Set<string>();
+  const missByDay = new Map<string, number>();
 
   for (const row of data ?? []) {
     const day = String(row.scanned_at).slice(0, 10);
-    if (counts.has(day)) counts.set(day, (counts.get(day) ?? 0) + 1);
+    scannedDays.add(day);
+    if (row.status === 'miss') {
+      missByDay.set(day, (missByDay.get(day) ?? 0) + 1);
+    }
   }
 
-  return Array.from(counts.values());
-}
-
-async function sessionStatus(accountId: string, healthScore: number | null): Promise<'정상' | '오류'> {
-  if ((healthScore ?? 100) < 50) return '오류';
-  const since = new Date();
-  since.setDate(since.getDate() - 3);
-  const { count } = await supabase
-    .from('huma_jobs')
-    .select('*', { count: 'exact', head: true })
-    .eq('account_id', accountId)
-    .eq('job_type', 'post_blog')
-    .eq('status', 'failed')
-    .gte('created_at', since.toISOString());
-  return (count ?? 0) >= 2 ? '오류' : '정상';
+  return dayKeys.map((day) => {
+    if (!scannedDays.has(day)) return null;
+    return missByDay.get(day) ?? 0;
+  });
 }
 
 export async function runBlogCheckScan(accountId?: string): Promise<{
@@ -200,17 +202,19 @@ export async function runBlogCheckScan(accountId?: string): Promise<{
       }
 
       const posts = await fetchRecentPosts(acc.id);
+      const label = acc.name || acc.slot_label || acc.naver_id;
+      let accountAborted = false;
 
-      const stats = await scrapeBlogStats(page, blogId);
-      if (stats) {
-        const idxScore = computeBlogIndexScore(stats);
+      const parsed = await scrapeBlogStats(page, blogId);
+      if (parsed) {
+        const idxScore = computeBlogIndexScore(parsed.stats);
         const { error: idxErr } = await supabase.from('blog_index_history').insert({
           account_id: acc.id,
           scanned_at: scanDate,
           idx_score: idxScore,
-          visitor_count: stats.visitorCount,
-          buddy_count: stats.buddyCount,
-          post_count: stats.postCount,
+          visitor_count: parsed.stats.visitorCount,
+          buddy_count: parsed.stats.buddyCount,
+          post_count: parsed.stats.postCount,
         });
         if (idxErr) {
           await logOperation({
@@ -219,38 +223,72 @@ export async function runBlogCheckScan(accountId?: string): Promise<{
             account_id: acc.id,
           });
         }
+      } else {
+        await supabase.from('blog_index_history').insert({
+          account_id: acc.id,
+          scanned_at: scanDate,
+          idx_score: null,
+          visitor_count: 0,
+          buddy_count: 0,
+          post_count: 0,
+        });
+        await notifyBlogCheckIndexParseFailed(blogId, acc.workspace);
+        await logOperation({
+          level: 'warn',
+          message: `[blog-check] 지수 파싱 실패 (${blogId}) — idx_score=null`,
+          account_id: acc.id,
+        });
       }
 
-      for (const post of posts) {
+      if (await detectBlogCheckCaptcha(page)) {
+        await notifyBlogCheckCaptcha(blogId, label, acc.workspace);
+        accountAborted = true;
+      }
+
+      for (let i = 0; i < posts.length && !accountAborted; i++) {
+        const post = posts[i];
         const postNo = post.post_no ?? extractPostNoFromUrl(post.post_url);
         if (!postNo) continue;
 
-        const indexed = await checkPostIndexed(page, blogId, postNo);
-        const status = indexed ? 'ok' : 'miss';
-        const extCount = post.ext_link_cleared ? 0 : post.ext_link_count;
+        try {
+          const indexed = await checkPostIndexed(page, blogId, postNo);
+          const status = indexed ? 'ok' : 'miss';
+          const extCount = post.ext_link_cleared ? 0 : post.ext_link_count;
 
-        const { error: insErr } = await supabase.from('blog_post_status').insert({
-          account_id: acc.id,
-          post_url: post.post_url,
-          post_no: postNo,
-          title: post.title,
-          scanned_at: scanDate,
-          status,
-          chars: post.char_count,
-          img_count: post.img_count,
-          ext_link_count: extCount,
-        });
+          const { error: insErr } = await supabase.from('blog_post_status').insert({
+            account_id: acc.id,
+            post_url: post.post_url,
+            post_no: postNo,
+            title: post.title,
+            scanned_at: scanDate,
+            status,
+            chars: post.char_count,
+            img_count: post.img_count,
+            ext_link_count: extCount,
+          });
 
-        if (insErr) {
-          throw new Error(`blog_post_status insert 실패: ${insErr.message}`);
+          if (insErr) throw new Error(`blog_post_status insert 실패: ${insErr.message}`);
+          scannedPosts += 1;
+        } catch (err) {
+          if (err instanceof BlogCheckCaptchaError) {
+            await notifyBlogCheckCaptcha(blogId, label, acc.workspace);
+            await logOperation({
+              level: 'warn',
+              message: `[blog-check] 캡차 감지 — ${label} 스캔 중단`,
+              account_id: acc.id,
+            });
+            break;
+          }
+          throw err;
         }
-        scannedPosts += 1;
+
+        if (i < posts.length - 1) await sleep(randomScanDelayMs());
       }
 
       scannedAccounts += 1;
       await logOperation({
         level: 'info',
-        message: `[blog-check] ${acc.name} — 포스트 ${posts.length}건 · 지수 ${stats ? computeBlogIndexScore(stats) : '—'}`,
+        message: `[blog-check] ${label} — 포스트 ${posts.length}건 · 지수 ${parsed ? computeBlogIndexScore(parsed.stats) : 'null'}`,
         account_id: acc.id,
       });
     }
@@ -319,7 +357,7 @@ export async function buildBlogCheckAccountsResponse(allowedWorkspaces: string[]
 
     const { data: idxRow } = await supabase
       .from('blog_index_history')
-      .select('idx_score, scanned_at')
+      .select('idx_score')
       .eq('account_id', acc.id)
       .order('scanned_at', { ascending: false })
       .limit(1)
@@ -337,7 +375,7 @@ export async function buildBlogCheckAccountsResponse(allowedWorkspaces: string[]
       miss_rate: missRate,
       trend,
       trend_direction: trendDirection(trend),
-      session_status: await sessionStatus(acc.id, acc.health_score),
+      session_status: mapSessionStatus(acc.session_status),
     });
   }
 
@@ -361,7 +399,6 @@ export async function buildBlogCheckAccountsResponse(allowedWorkspaces: string[]
 export async function buildBlogCheckPostsResponse(accountId: string) {
   const posts = await fetchRecentPosts(accountId);
   const statusMap = await fetchLatestStatusByPostNo(accountId);
-  const publishTimes = posts.map((p) => p.published_at);
 
   return {
     posts: posts.map((post) => {
@@ -374,7 +411,6 @@ export async function buildBlogCheckPostsResponse(accountId: string) {
         missReason = inferMissReason({
           extLinkCount: extCount,
           charCount: post.char_count,
-          recentPublishTimes: publishTimes,
         });
       }
 
@@ -391,16 +427,6 @@ export async function buildBlogCheckPostsResponse(accountId: string) {
       };
     }),
   };
-}
-
-export async function clearPostExtLinkFlag(accountId: string, postUrl: string): Promise<void> {
-  const { error } = await supabase
-    .from('posts')
-    .update({ ext_link_count: 0, ext_link_cleared: true })
-    .eq('account_id', accountId)
-    .eq('post_url', postUrl);
-
-  if (error) throw new Error(error.message);
 }
 
 let lastScheduledKey = '';

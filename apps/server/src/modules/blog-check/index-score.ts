@@ -7,71 +7,103 @@ export interface BlogStats {
   postCount: number;
 }
 
-/** idx = (방문자/1000×0.5) + (이웃/100×0.3) + (게시글/100×0.2), 최대 10.0 */
+export interface ScrapeBlogStatsResult {
+  stats: BlogStats;
+  /** 파싱에 성공한 방법 (코드 주석용 메타) */
+  method: string;
+}
+
+/** HUMA 자체 지수 — 방문 MIN(v/500,1)×5 + 이웃 MIN(b/300,1)×3 + 게시글 MIN(p/100,1)×2, 최대 10.0 */
 export function computeBlogIndexScore(stats: BlogStats): number {
-  const raw =
-    (stats.visitorCount / 1000) * 0.5 +
-    (stats.buddyCount / 100) * 0.3 +
-    (stats.postCount / 100) * 0.2;
+  const visitorScore = Math.min(stats.visitorCount / 500, 1) * 5;
+  const buddyScore = Math.min(stats.buddyCount / 300, 1) * 3;
+  const postScore = Math.min(stats.postCount / 100, 1) * 2;
+  const raw = visitorScore + buddyScore + postScore;
   return Math.min(10, Math.round(raw * 10) / 10);
 }
 
-function parseCount(raw: string | null | undefined): number {
-  if (!raw) return 0;
+function parseCount(raw: string): number {
   const n = Number(raw.replace(/,/g, '').trim());
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
 }
 
-/** m.blog.naver.com/{blogId} — 방문자·이웃·게시글 파싱 후 지수 계산 */
-export async function scrapeBlogStats(page: Page, blogId: string): Promise<BlogStats | null> {
+/** 1순위: "방문자"|"이웃"|"게시글" 키워드 주변 숫자 */
+function extractKeywordCount(text: string, keywords: string[]): number | null {
+  for (const kw of keywords) {
+    const re = new RegExp(`${kw}[^\\d]{0,24}([\\d,]+)`, 'i');
+    const m = text.match(re);
+    if (m?.[1]) {
+      const n = parseCount(m[1]);
+      if (n > 0) return n;
+    }
+  }
+  return null;
+}
+
+/** 2순위: 통계 영역 줄 단위 스캔 (키워드+숫자 동일 줄) */
+function extractFromStatsRegion(text: string): BlogStats | null {
+  const lines = text.split(/\n/).map((l) => l.trim()).filter(Boolean);
+  let visitorCount: number | null = null;
+  let buddyCount: number | null = null;
+  let postCount: number | null = null;
+
+  for (const line of lines) {
+    const nums = [...line.matchAll(/[\d,]+/g)]
+      .map((m) => parseCount(m[0]))
+      .filter((n) => n > 0);
+    if (!nums.length) continue;
+
+    if (/방문|visitor|today|total/i.test(line) && visitorCount === null) {
+      visitorCount = Math.max(...nums);
+    }
+    if (/이웃|buddy|neighbor|친구/i.test(line) && buddyCount === null) {
+      buddyCount = nums[0];
+    }
+    if (/게시|post|글\s*\d|작성/i.test(line) && postCount === null) {
+      postCount = nums[0];
+    }
+  }
+
+  if (visitorCount === null && buddyCount === null && postCount === null) return null;
+  return {
+    visitorCount: visitorCount ?? 0,
+    buddyCount: buddyCount ?? 0,
+    postCount: postCount ?? 0,
+  };
+}
+
+/**
+ * m.blog.naver.com/{blogId}
+ * 셀렉터 하드코딩 없음 — 키워드 텍스트 → 통계 영역 순.
+ * 성공 시 method: 'keyword-text' | 'stats-region'
+ */
+export async function scrapeBlogStats(page: Page, blogId: string): Promise<ScrapeBlogStatsResult | null> {
   const url = `https://m.blog.naver.com/${blogId}`;
   await page.goto(url, { waitUntil: 'domcontentloaded' });
   await sleep(1800);
 
-  const html = await page.content().catch(() => '');
   const text = await page.locator('body').innerText().catch(() => '');
+  if (!text.trim()) return null;
 
-  // 셀렉터 시도 (2026-06 m.blog 기준 — 변경 시 HTML regex fallback)
-  const selectorHits = await page.evaluate(() => {
-    const pick = (sel: string) => {
-      const el = document.querySelector(sel);
-      return el?.textContent?.replace(/[^\d,]/g, '') ?? '';
+  const visitorKw = extractKeywordCount(text, ['전체', '방문자', '방문', 'visitor']);
+  const buddyKw = extractKeywordCount(text, ['이웃', 'buddy', '서로이웃', '서로 이웃']);
+  const postKw = extractKeywordCount(text, ['게시글', '게시', '글']);
+
+  if (visitorKw != null || buddyKw != null || postKw != null) {
+    const stats: BlogStats = {
+      visitorCount: visitorKw ?? 0,
+      buddyCount: buddyKw ?? 0,
+      postCount: postKw ?? 0,
     };
-    return {
-      visitor: pick('.blog_visitor_count') || pick('[class*="visitor"]') || pick('#visitorCounter'),
-      buddy: pick('.buddy_count') || pick('[class*="buddy"]') || pick('#buddyCount'),
-      posts: pick('.post_count') || pick('[class*="post_count"]') || pick('#postCount'),
-    };
-  });
-
-  let visitorCount = parseCount(selectorHits.visitor);
-  let buddyCount = parseCount(selectorHits.buddy);
-  let postCount = parseCount(selectorHits.posts);
-
-  // regex fallback — 실제 페이지 텍스트/HTML에서 숫자 추출
-  if (visitorCount === 0) {
-    const vm =
-      text.match(/전체\s*([\d,]+)/) ??
-      html.match(/visitorCount["'\s:]*([\d,]+)/i) ??
-      text.match(/방문[^\d]*([\d,]+)/);
-    visitorCount = parseCount(vm?.[1]);
-  }
-  if (buddyCount === 0) {
-    const bm =
-      text.match(/이웃\s*([\d,]+)/) ??
-      html.match(/buddyCount["'\s:]*([\d,]+)/i) ??
-      text.match(/서로\s*이웃\s*([\d,]+)/);
-    buddyCount = parseCount(bm?.[1]);
-  }
-  if (postCount === 0) {
-    const pm =
-      text.match(/게시글\s*([\d,]+)/) ??
-      html.match(/postCount["'\s:]*([\d,]+)/i) ??
-      text.match(/글\s*([\d,]+)\s*개/);
-    postCount = parseCount(pm?.[1]);
+    if (stats.visitorCount + stats.buddyCount + stats.postCount > 0) {
+      return { stats, method: 'keyword-text' };
+    }
   }
 
-  if (visitorCount === 0 && buddyCount === 0 && postCount === 0) return null;
+  const region = extractFromStatsRegion(text);
+  if (region && region.visitorCount + region.buddyCount + region.postCount > 0) {
+    return { stats: region, method: 'stats-region' };
+  }
 
-  return { visitorCount, buddyCount, postCount };
+  return null;
 }

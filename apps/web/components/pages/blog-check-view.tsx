@@ -19,12 +19,9 @@ function svcColor(svc: string): string {
 function formatLastScan(iso: string | null): string {
   if (!iso) return '마지막 스캔: —';
   const d = new Date(iso);
-  const now = new Date();
-  const diffMin = Math.round((now.getTime() - d.getTime()) / 60_000);
   const hh = String(d.getHours()).padStart(2, '0');
   const mm = String(d.getMinutes()).padStart(2, '0');
-  if (diffMin < 2) return `마지막 스캔: 방금 ${hh}:${mm}`;
-  return `마지막 스캔: ${d.toDateString() === now.toDateString() ? `오늘 ${hh}:${mm}` : `${hh}:${mm}`}`;
+  return `마지막 스캔: ${hh}:${mm}`;
 }
 
 function missReasonUi(post: BcPost): { cls: string; text: string } {
@@ -34,10 +31,12 @@ function missReasonUi(post: BcPost): { cls: string; text: string } {
     return { cls: 'ai', text: post.miss_reason };
   }
   if (post.ext_link_count > 0) return { cls: 'ext', text: '외부링크 포함' };
+  if (post.chars < 300) return { cls: 'ai', text: '글자수 부족' };
   return { cls: 'ai', text: 'AI패턴 의심' };
 }
 
 function trendLabel(dir: BcAccount['trend_direction']): { text: string; color: string } {
+  if (dir === '데이터 부족') return { text: '— 데이터 부족', color: 'var(--t3)' };
   if (dir === '안정') return { text: '✓ 안정', color: 'var(--ok)' };
   if (dir === '악화') return { text: '▲ 악화', color: 'var(--err)' };
   return { text: '▼ 개선', color: 'var(--ok)' };
@@ -49,10 +48,18 @@ export function BlogCheckView() {
   const [scanning, setScanning] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
   const [curAcc, setCurAcc] = useState<string | null>(null);
   const [posts, setPosts] = useState<BcPost[]>([]);
   const [filter, setFilter] = useState<'all' | 'miss' | 'ok'>('all');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 4000);
+  }, []);
 
   const loadAccounts = useCallback(async () => {
     try {
@@ -106,6 +113,13 @@ export function BlogCheckView() {
     };
   }, [scanning, loadAccounts, curAcc, loadPosts]);
 
+  useEffect(
+    () => () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    },
+    [],
+  );
+
   const selectedAcc = useMemo(
     () => accounts.find((a) => a.account_id === curAcc),
     [accounts, curAcc],
@@ -127,16 +141,12 @@ export function BlogCheckView() {
       await loadAccounts();
     } catch (e) {
       setScanning(false);
-      alert((e as Error).message);
-    }
-  };
-
-  const clearExtLink = async (accountId: string, postUrl: string) => {
-    try {
-      await api.blogCheckClearExtLink(accountId, postUrl);
-      await loadPosts(accountId);
-    } catch (e) {
-      alert((e as Error).message);
+      const msg = (e as Error).message;
+      if (msg.includes('스캔이 이미')) {
+        showToast('스캔이 이미 진행 중입니다');
+      } else {
+        showToast(msg);
+      }
     }
   };
 
@@ -150,15 +160,23 @@ export function BlogCheckView() {
 
   return (
     <div className="blog-check-view animate-fadeIn">
+      {toast && (
+        <div className="bc-toast" role="status">
+          {toast}
+        </div>
+      )}
+
       <div className="mb-2.5 flex items-center justify-between gap-3">
         <div className="font-mono text-[11px] text-huma-t3">
-          계정 카드 클릭 → 발행글 상세 · 스파크라인 = 7일 누락 추이
+          HUMA 자체 지수 · 네이버 공식 지수 아님 · 스파크라인 = 7일 누락 추이
           {totalMiss > 0 && (
             <span className="ml-2 text-huma-err">누락 {totalMiss}건</span>
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2.5">
-          <span className="font-mono text-[11.5px] text-huma-t3">{formatLastScan(lastScanAt)}</span>
+          <span className="bc-last-scan font-mono text-[11.5px] text-huma-t3">
+            {formatLastScan(lastScanAt)}
+          </span>
           <button
             type="button"
             className={cn('bc-scan-btn', scanning && 'scanning')}
@@ -177,7 +195,8 @@ export function BlogCheckView() {
           const idx = a.idx_score ?? 0;
           const idxPct = Math.round((idx / 10) * 100);
           const sessColor = a.session_status === '오류' ? 'var(--err)' : 'var(--ok)';
-          const maxT = Math.max(...a.trend, 1);
+          const numericTrend = a.trend.filter((v): v is number => v !== null);
+          const maxT = Math.max(...numericTrend, 1);
           const trendUi = trendLabel(a.trend_direction);
           const today = new Date();
 
@@ -193,7 +212,7 @@ export function BlogCheckView() {
               </div>
               <div className="bci-name">{a.label}</div>
               <div className="bci-url">blog.naver.com/{a.blog_url}</div>
-              <div className="mb-0.5 font-mono text-[10px] text-huma-t3">블로그 지수</div>
+              <div className="mb-0.5 font-mono text-[10px] text-huma-t3">HUMA 자체 지수</div>
               <div className="bci-idx-row">
                 <div className="bci-idx-bar">
                   <div className="bci-idx-fill" style={{ width: `${idxPct}%` }} />
@@ -227,10 +246,19 @@ export function BlogCheckView() {
                 </div>
                 <div className="spark-bars">
                   {a.trend.map((v, i) => {
-                    const h = Math.max(Math.round((v / maxT) * 26), 2);
-                    const barColor = v === 0 ? 'var(--ok)' : v >= 4 ? 'var(--err)' : 'var(--warn)';
                     const d = new Date(today);
                     d.setDate(d.getDate() - (6 - i));
+                    if (v === null) {
+                      return (
+                        <div
+                          key={i}
+                          className="spark-bar spark-bar-null"
+                          title={`${DAYS[d.getDay()]}: 미스캔`}
+                        />
+                      );
+                    }
+                    const h = Math.max(Math.round((v / maxT) * 26), 2);
+                    const barColor = v === 0 ? 'var(--ok)' : v >= 4 ? 'var(--err)' : 'var(--warn)';
                     return (
                       <div
                         key={i}
@@ -294,21 +322,20 @@ export function BlogCheckView() {
               <th>외부링크</th>
               <th>수집 여부</th>
               <th>누락 원인</th>
-              <th>조치</th>
             </tr>
           </thead>
           <tbody>
             {!curAcc ? (
               <tr>
-                <td colSpan={8} className="py-8 text-center text-[12.5px] text-huma-t3">
+                <td colSpan={7} className="py-8 text-center text-[12.5px] text-huma-t3">
                   위 계정 카드를 클릭하세요
                 </td>
               </tr>
             ) : filteredPosts.length === 0 ? (
               <tr>
-                <td colSpan={8} className="py-6 text-center text-[12.5px] text-huma-t3">
+                <td colSpan={7} className="py-6 text-center text-[12.5px] text-huma-t3">
                   {posts.length === 0
-                    ? '발행 이력 없음 — posts 테이블·v3_43 마이그레이션 확인 후 ⟳ 전체 스캔'
+                    ? '발행 이력 없음 — posts 테이블 확인 후 ⟳ 전체 스캔'
                     : '해당 조건의 포스트 없음'}
                 </td>
               </tr>
@@ -341,19 +368,6 @@ export function BlogCheckView() {
                     </td>
                     <td>
                       <span className={cn('bc-reason', reason.cls)}>{reason.text}</span>
-                    </td>
-                    <td>
-                      {p.status === 'miss' && p.ext_link_count > 0 && curAcc ? (
-                        <button
-                          type="button"
-                          className="rounded border border-huma-err bg-[var(--err-bg)] px-2 py-0.5 text-[10.5px] text-huma-err"
-                          onClick={() => void clearExtLink(curAcc, p.post_url)}
-                        >
-                          링크 제거
-                        </button>
-                      ) : (
-                        <span className="text-[11px] text-huma-t4">—</span>
-                      )}
                     </td>
                   </tr>
                 );

@@ -699,8 +699,8 @@ export const api = {
         ok_count: number;
         miss_count: number;
         miss_rate: number;
-        trend: number[];
-        trend_direction: '안정' | '악화' | '개선';
+        trend: (number | null)[];
+        trend_direction: '안정' | '악화' | '개선' | '데이터 부족';
         session_status: '정상' | '오류';
       }>;
       lastScanAt: string | null;
@@ -725,9 +725,4 @@ export const api = {
       accountId ? `/api/blog-check/scan/${accountId}` : '/api/blog-check/scan',
       { method: 'POST' },
     ),
-  blogCheckClearExtLink: (accountId: string, postUrl: string) =>
-    request<{ ok: true }>(`/api/blog-check/posts/${accountId}/clear-link`, {
-      method: 'POST',
-      body: JSON.stringify({ post_url: postUrl }),
-    }),
 };

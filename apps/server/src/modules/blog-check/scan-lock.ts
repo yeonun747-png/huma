@@ -1,7 +1,7 @@
 import { redisConnection } from '../queue/producer.js';
 
 const SCAN_LOCK_KEY = 'blog_check:scan_lock';
-const SCAN_LOCK_TTL_SEC = 600;
+const SCAN_LOCK_TTL_SEC = 1800;
 
 export async function acquireBlogCheckScanLock(): Promise<boolean> {
   const ok = await redisConnection.set(SCAN_LOCK_KEY, String(Date.now()), 'EX', SCAN_LOCK_TTL_SEC, 'NX');
