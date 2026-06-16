@@ -46,6 +46,7 @@ interface AccountRow {
   slot_label: string | null;
   proxy_port: number | null;
   session_status: string | null;
+  is_active?: boolean;
 }
 
 interface PostRow {
@@ -86,8 +87,9 @@ function formatPostDate(iso: string): string {
   return `${mm}.${dd}`;
 }
 
-function mapSessionStatus(raw: string | null | undefined): '정상' | '오류' {
-  return raw === 'active' ? '정상' : '오류';
+function mapSessionStatus(raw: string | null | undefined, isActive?: boolean): '정상' | '오류' {
+  if (raw != null && raw !== '') return raw === 'active' ? '정상' : '오류';
+  return isActive !== false ? '정상' : '오류';
 }
 
 export function trendDirection(trend: (number | null)[]): TrendDirection {
@@ -101,15 +103,36 @@ export function trendDirection(trend: (number | null)[]): TrendDirection {
 }
 
 async function listActivePostingAccounts(accountId?: string): Promise<AccountRow[]> {
-  let q = supabase
-    .from('huma_accounts')
-    .select('id, name, naver_id, blog_url, workspace, slot_label, proxy_port, session_status')
-    .eq('account_type', 'posting')
-    .eq('is_active', true);
+  const withSessionStatus = 'id, name, naver_id, blog_url, workspace, slot_label, proxy_port, session_status';
+  const withoutSessionStatus =
+    'id, name, naver_id, blog_url, workspace, slot_label, proxy_port, is_active';
 
-  if (accountId) q = q.eq('id', accountId);
+  const buildQuery = (fields: string) => {
+    let q = supabase
+      .from('huma_accounts')
+      .select(fields)
+      .eq('account_type', 'posting')
+      .eq('is_active', true);
+    if (accountId) q = q.eq('id', accountId);
+    return q;
+  };
 
-  const { data, error } = await q;
+  const { data, error } = await buildQuery(withSessionStatus);
+
+  if (error?.message?.includes('session_status')) {
+    const { data: fallback, error: err2 } = await buildQuery(withoutSessionStatus);
+    if (err2) throw new Error(err2.message);
+    return sortAccounts(
+      (fallback ?? []).map((row) => {
+        const acc = row as AccountRow & { is_active?: boolean };
+        return {
+          ...acc,
+          session_status: acc.is_active !== false ? 'active' : 'error',
+        };
+      }),
+    );
+  }
+
   if (error) throw new Error(error.message);
   return sortAccounts((data ?? []) as AccountRow[]);
 }
@@ -375,7 +398,7 @@ export async function buildBlogCheckAccountsResponse(allowedWorkspaces: string[]
       miss_rate: missRate,
       trend,
       trend_direction: trendDirection(trend),
-      session_status: mapSessionStatus(acc.session_status),
+      session_status: mapSessionStatus(acc.session_status, acc.is_active),
     });
   }
 
