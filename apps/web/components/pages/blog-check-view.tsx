@@ -12,6 +12,8 @@ type BcScanProgress = NonNullable<Awaited<ReturnType<typeof api.blogCheckAccount
 
 const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
 const DELTA_SCAN_LABEL = '🆕 새글만 스캔';
+const ACCOUNT_FULL_SCAN_LABEL = '⟳ 이 계정만 스캔';
+const GLOBAL_FULL_SCAN_LABEL = '⟳ 전체 다시 스캔';
 
 function scanPercent(progress: BcScanProgress | null, scanning: boolean): number {
   if (!scanning) return 0;
@@ -293,7 +295,7 @@ export function BlogCheckView() {
             {scanning ? (
               <ScanProgressBar percent={globalScanPercent} />
             ) : (
-              '⟳ 전체 스캔'
+              GLOBAL_FULL_SCAN_LABEL
             )}
           </button>
         </div>
@@ -333,7 +335,7 @@ export function BlogCheckView() {
                       'bci-scan-btn',
                       scanning && cardShowsProgress(a.account_id) && 'scanning',
                     )}
-                    title={`${a.label} 전체 스캔`}
+                    title={`${a.label} — 최근 10건 전체 스캔`}
                     disabled={scanning}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -344,7 +346,7 @@ export function BlogCheckView() {
                     {scanning && cardShowsProgress(a.account_id) ? (
                       <ScanProgressBar percent={globalScanPercent} compact />
                     ) : (
-                      '⟳ 전체'
+                      ACCOUNT_FULL_SCAN_LABEL
                     )}
                   </button>
                   <button

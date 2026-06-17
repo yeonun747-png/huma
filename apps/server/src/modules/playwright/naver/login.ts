@@ -10,6 +10,7 @@ import {
   clickNaverLoginButton,
   ensureNaverLoginIdPhoneTab,
   typeIntoNaverLoginField,
+  ensureNaverIpSecurityOff,
 } from '../../../lib/naver-login-fields.js';
 import {
   acquireNaverLoginPage,
@@ -133,6 +134,7 @@ async function performNaverLoginOnPage(
   } catch (err) {
     throw wrapNaverLoginTimeout('login_form', err);
   }
+  await ensureNaverIpSecurityOff(page);
   await humanSleep(1000, 2000);
 
   const password = decrypt(account.naver_pw_enc);

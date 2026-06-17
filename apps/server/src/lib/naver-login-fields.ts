@@ -20,6 +20,38 @@ const NAVER_LOGIN_BTN_SELECTORS = [
   'button[type="submit"]',
 ];
 
+/** nidlogin IP보안(#ip_on) — 모뎀·프록시 환경에서는 OFF(체크 해제) 필요 */
+export async function ensureNaverIpSecurityOff(page: Page): Promise<void> {
+  if (!page.url().includes('nidlogin')) return;
+  await ensureNaverLoginIdPhoneTab(page);
+
+  const ipOn = page.locator('#ip_on');
+  if ((await ipOn.count().catch(() => 0)) === 0) return;
+  if (!(await ipOn.isVisible().catch(() => false))) return;
+
+  const checked = await ipOn.isChecked().catch(() => true);
+  if (!checked) return;
+
+  const label = page.locator('#label_ip_on, label[for="ip_on"]').first();
+  if (await label.isVisible().catch(() => false)) {
+    await humanClickLocator(page, label);
+  } else {
+    await humanClickLocator(page, ipOn);
+  }
+  await sleep(randomBetween(150, 350));
+
+  if (await ipOn.isChecked().catch(() => false)) {
+    await page
+      .evaluate(() => {
+        const el = document.querySelector('#ip_on') as HTMLInputElement | null;
+        if (!el?.checked) return;
+        el.checked = false;
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      })
+      .catch(() => {});
+  }
+}
+
 /** 사람처럼 필드 클릭→포커스 후 한 글자씩 입력 (keydown/keyup/input 이벤트 발생). */
 export async function typeIntoNaverLoginField(
   page: Page,
@@ -28,6 +60,7 @@ export async function typeIntoNaverLoginField(
   options?: { fast?: boolean; clear?: boolean },
 ): Promise<void> {
   await ensureNaverLoginIdPhoneTab(page);
+  await ensureNaverIpSecurityOff(page);
 
   const loc = page.locator(selector);
   await loc.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
