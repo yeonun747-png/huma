@@ -14,8 +14,10 @@ import { getCachedBlogPostList, loadBlogPostList, refreshBlogPostListCache } fro
 import { emptyPostContentStats, mergePostContentStats, parsePostContentStats, type PostContentStats } from './content-stats.js';
 import {
   BLOG_CHECK_ACCOUNT_GAP_MS,
+  BLOG_CHECK_DELTA_HOURS,
   BLOG_CHECK_POST_LIMIT,
   BLOG_CHECK_SCAN_CONCURRENCY,
+  type BlogCheckScanMode,
 } from './constants.js';
 import { computeBlogIndexScore, scrapeBlogStats } from './index-score.js';
 import { scrapePostContentStats } from './post-content-scraper.js';
@@ -467,6 +469,76 @@ async function fetchLatestStatusByPostNo(accountId: string): Promise<Map<string,
   return map;
 }
 
+export interface BlogCheckScanOptions {
+  mode?: BlogCheckScanMode;
+  postNos?: string[];
+}
+
+export interface BlogCheckJobPayload {
+  accountId?: string | null;
+  mode?: BlogCheckScanMode | string | null;
+  postNos?: string[] | null;
+}
+
+export function normalizeBlogCheckScanMode(mode?: string | null): BlogCheckScanMode {
+  if (mode === 'delta' || mode === 'posts') return mode;
+  return 'full';
+}
+
+function postNoFromRow(post: PostRow): string | null {
+  return post.post_no ?? extractPostNoFromUrl(post.post_url);
+}
+
+function isPostScannedToday(st: StatusRow | undefined, scanDate: string): boolean {
+  if (!st?.scanned_at) return false;
+  return String(st.scanned_at).slice(0, 10) === scanDate;
+}
+
+function isPostPublishedWithinDelta(post: PostRow, hours: number): boolean {
+  const ts = Date.parse(post.published_at);
+  if (!Number.isFinite(ts)) return false;
+  return Date.now() - ts <= hours * 3_600_000;
+}
+
+/** full=최근 10건 · delta=24h 이내+오늘 미스캔 · posts=postNos 지정 */
+export function selectPostsForScan(
+  posts: PostRow[],
+  options: BlogCheckScanOptions,
+  statusMap: Map<string, StatusRow>,
+  scanDate: string,
+): PostRow[] {
+  const scannable = posts.filter((p) => postNoFromRow(p));
+  const mode = normalizeBlogCheckScanMode(options.mode);
+
+  if (mode === 'posts' && options.postNos?.length) {
+    const want = new Set(options.postNos.map(String));
+    return scannable.filter((p) => {
+      const no = postNoFromRow(p);
+      return no != null && want.has(no);
+    });
+  }
+
+  if (mode === 'delta') {
+    return scannable.filter((p) => {
+      if (isPostScannedToday(statusMap.get(postNoFromRow(p)!), scanDate)) return false;
+      return isPostPublishedWithinDelta(p, BLOG_CHECK_DELTA_HOURS);
+    });
+  }
+
+  return scannable;
+}
+
+async function hasTodayBlogIndex(accountId: string, scanDate: string): Promise<boolean> {
+  const { data } = await supabase
+    .from('blog_index_history')
+    .select('id')
+    .eq('account_id', accountId)
+    .eq('scanned_at', scanDate)
+    .limit(1)
+    .maybeSingle();
+  return data != null;
+}
+
 /** 7일 추이 — 스캔 안 한 날은 null */
 async function buildSevenDayMissTrend(accountId: string): Promise<(number | null)[]> {
   const dayKeys: string[] = [];
@@ -529,13 +601,22 @@ async function prepareAccountWorkItem(acc: AccountRow, page: Page): Promise<Scan
   return { acc, blogId, label, posts };
 }
 
-async function estimateTotalSteps(accounts: AccountRow[]): Promise<number> {
+async function estimateTotalSteps(
+  accounts: AccountRow[],
+  options: BlogCheckScanOptions = { mode: 'full' },
+): Promise<number> {
+  const scanDate = todayKstDate();
+  const mode = normalizeBlogCheckScanMode(options.mode);
   let total = 0;
   for (const acc of accounts) {
     const blogId = resolveBlogId(acc.blog_url, acc.naver_id);
     if (!blogId) continue;
     const posts = await fetchRecentPosts(acc.id, { blogId, refreshIfMissing: false });
-    total += countScannablePosts(posts) + 1;
+    const statusMap = await fetchLatestStatusByPostNo(acc.id);
+    const selected = selectPostsForScan(posts, options, statusMap, scanDate);
+    total += countScannablePosts(selected);
+    const skipIndex = mode !== 'full' && (await hasTodayBlogIndex(acc.id, scanDate));
+    if (!skipIndex) total += 1;
   }
   return total;
 }
@@ -617,62 +698,71 @@ async function scanAccountWorkItem(
   item: ScanWorkItem,
   scanDate: string,
   onStep: (accountId: string, label: string) => Promise<void>,
+  options: BlogCheckScanOptions = { mode: 'full' },
 ): Promise<{ scannedPosts: number; aborted: boolean }> {
   const { acc, blogId, label, posts } = item;
+  const mode = normalizeBlogCheckScanMode(options.mode);
   let accountAborted = false;
   let scannedPosts = 0;
 
-  const parsed = await scrapeBlogStats(page, blogId);
-  if (parsed) {
-    const idxScore = computeBlogIndexScore(parsed.stats);
-    const { error: idxErr } = await supabase.from('blog_index_history').insert({
-      account_id: acc.id,
-      scanned_at: scanDate,
-      idx_score: idxScore,
-      visitor_count: parsed.stats.visitorCount,
-      buddy_count: parsed.stats.buddyCount,
-      post_count: parsed.stats.postCount,
-    });
-    if (idxErr) {
+  const statusMap = await fetchLatestStatusByPostNo(acc.id);
+  const scannablePosts = selectPostsForScan(posts, options, statusMap, scanDate);
+  const skipIndex = mode !== 'full' && (await hasTodayBlogIndex(acc.id, scanDate));
+
+  let parsed: Awaited<ReturnType<typeof scrapeBlogStats>> | null = null;
+  if (!skipIndex) {
+    parsed = await scrapeBlogStats(page, blogId);
+    if (parsed) {
+      const idxScore = computeBlogIndexScore(parsed.stats);
+      const { error: idxErr } = await supabase.from('blog_index_history').insert({
+        account_id: acc.id,
+        scanned_at: scanDate,
+        idx_score: idxScore,
+        visitor_count: parsed.stats.visitorCount,
+        buddy_count: parsed.stats.buddyCount,
+        post_count: parsed.stats.postCount,
+      });
+      if (idxErr) {
+        await logOperation({
+          level: 'warn',
+          message: `[blog-check] blog_index_history insert: ${idxErr.message}`,
+          account_id: acc.id,
+        });
+      }
+    } else {
+      await supabase.from('blog_index_history').insert({
+        account_id: acc.id,
+        scanned_at: scanDate,
+        idx_score: null,
+        visitor_count: 0,
+        buddy_count: 0,
+        post_count: 0,
+      });
+      await notifyBlogCheckIndexParseFailed(blogId, acc.workspace);
       await logOperation({
         level: 'warn',
-        message: `[blog-check] blog_index_history insert: ${idxErr.message}`,
+        message: `[blog-check] 지수 파싱 실패 (${blogId}) — idx_score=null`,
         account_id: acc.id,
       });
     }
-  } else {
-    await supabase.from('blog_index_history').insert({
-      account_id: acc.id,
-      scanned_at: scanDate,
-      idx_score: null,
-      visitor_count: 0,
-      buddy_count: 0,
-      post_count: 0,
-    });
-    await notifyBlogCheckIndexParseFailed(blogId, acc.workspace);
-    await logOperation({
-      level: 'warn',
-      message: `[blog-check] 지수 파싱 실패 (${blogId}) — idx_score=null`,
-      account_id: acc.id,
-    });
+
+    if (await detectBlogCheckCaptcha(page)) {
+      await notifyBlogCheckCaptcha(blogId, label, acc.workspace);
+      accountAborted = true;
+    }
+
+    await onStep(acc.id, label);
   }
 
-  if (await detectBlogCheckCaptcha(page)) {
-    await notifyBlogCheckCaptcha(blogId, label, acc.workspace);
-    accountAborted = true;
-  }
-
-  await onStep(acc.id, label);
-
-  const postNos = posts
-    .map((p) => p.post_no ?? extractPostNoFromUrl(p.post_url))
+  const postNosToClear = scannablePosts
+    .map((p) => postNoFromRow(p))
     .filter((n): n is string => Boolean(n));
-  if (postNos.length > 0) {
+  if (postNosToClear.length > 0) {
     const { error: clearErr } = await supabase
       .from('blog_post_status')
       .delete()
       .eq('account_id', acc.id)
-      .in('post_no', postNos);
+      .in('post_no', postNosToClear);
     if (clearErr) {
       await logOperation({
         level: 'warn',
@@ -682,7 +772,15 @@ async function scanAccountWorkItem(
     }
   }
 
-  const scannablePosts = posts.filter((p) => p.post_no ?? extractPostNoFromUrl(p.post_url));
+  if (scannablePosts.length === 0) {
+    await logOperation({
+      level: 'info',
+      message: `[blog-check] ${label} — 스캔 대상 없음 (mode=${mode})`,
+      account_id: acc.id,
+    });
+    return { scannedPosts: 0, aborted: accountAborted };
+  }
+
   const poolSize = Math.min(BLOG_CHECK_SCAN_CONCURRENCY, Math.max(1, scannablePosts.length));
   const workerPages = await createPostScanWorkerPages(page, poolSize);
 
@@ -730,7 +828,7 @@ async function scanAccountWorkItem(
 
   await logOperation({
     level: 'info',
-    message: `[blog-check] ${label} — 포스트 ${posts.length}건 · 지수 ${parsed ? computeBlogIndexScore(parsed.stats) : 'null'}`,
+    message: `[blog-check] ${label} — 포스트 ${scannablePosts.length}/${posts.length}건(mode=${mode}) · 지수 ${parsed ? computeBlogIndexScore(parsed.stats) : skipIndex ? '생략' : 'null'}`,
     account_id: acc.id,
   });
 
@@ -756,18 +854,22 @@ async function reportScanProgress(params: {
   });
 }
 
-export async function runBlogCheckScan(accountId?: string): Promise<{
+export async function runBlogCheckScan(
+  accountId?: string,
+  options: BlogCheckScanOptions = { mode: 'full' },
+): Promise<{
   scannedAccounts: number;
   scannedPosts: number;
 }> {
   const scanDate = todayKstDate();
+  const scanOptions = { ...options, mode: normalizeBlogCheckScanMode(options.mode) };
   let scannedAccounts = 0;
   let scannedPosts = 0;
 
   const accounts = await listActivePostingAccounts(accountId);
   if (!accounts.length) return { scannedAccounts: 0, scannedPosts: 0 };
 
-  const totalSteps = await estimateTotalSteps(accounts);
+  const totalSteps = await estimateTotalSteps(accounts, scanOptions);
   let completedSteps = 0;
   const isolateByAccount = !accountId;
 
@@ -793,7 +895,7 @@ export async function runBlogCheckScan(accountId?: string): Promise<{
     await withBlogCheckBrowser(async (page) => {
       const item = await prepareAccountWorkItem(acc, page);
       if (!item) return;
-      const result = await scanAccountWorkItem(page, item, scanDate, onStep);
+      const result = await scanAccountWorkItem(page, item, scanDate, onStep, scanOptions);
       scannedPosts += result.scannedPosts;
       if (!result.aborted) scannedAccounts += 1;
     });
@@ -809,7 +911,7 @@ export async function runBlogCheckScan(accountId?: string): Promise<{
       for (const acc of accounts) {
         const item = await prepareAccountWorkItem(acc, page);
         if (!item) continue;
-        const result = await scanAccountWorkItem(page, item, scanDate, onStep);
+        const result = await scanAccountWorkItem(page, item, scanDate, onStep, scanOptions);
         scannedPosts += result.scannedPosts;
         if (!result.aborted) scannedAccounts += 1;
       }
@@ -828,26 +930,38 @@ export async function runBlogCheckScan(accountId?: string): Promise<{
   return { scannedAccounts, scannedPosts };
 }
 
-export async function requestBlogCheckScan(accountId?: string): Promise<{ queued: true; accountId?: string }> {
+export async function requestBlogCheckScan(
+  accountId?: string,
+  options: BlogCheckScanOptions = { mode: 'full' },
+): Promise<{ queued: true; accountId?: string; mode: BlogCheckScanMode }> {
   if (!(await acquireBlogCheckScanLock())) {
     throw new Error('SCAN_ALREADY_RUNNING');
   }
 
+  const mode = normalizeBlogCheckScanMode(options.mode);
   try {
     await enqueueJob({
       type: 'blog_check',
-      payload: { accountId: accountId ?? null },
+      payload: {
+        accountId: accountId ?? null,
+        mode,
+        postNos: options.postNos ?? null,
+      },
     });
-    return { queued: true, accountId };
+    return { queued: true, accountId, mode };
   } catch (err) {
     await releaseBlogCheckScanLock();
     throw err;
   }
 }
 
-export async function executeBlogCheckJob(payload: { accountId?: string | null }) {
+export async function executeBlogCheckJob(payload: BlogCheckJobPayload) {
+  const options: BlogCheckScanOptions = {
+    mode: normalizeBlogCheckScanMode(payload.mode),
+    postNos: payload.postNos?.filter(Boolean) ?? undefined,
+  };
   try {
-    return await runBlogCheckScan(payload.accountId ?? undefined);
+    return await runBlogCheckScan(payload.accountId ?? undefined, options);
   } finally {
     await releaseBlogCheckScanLock();
     await clearScanProgress();

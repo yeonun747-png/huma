@@ -1862,6 +1862,22 @@ async function ensureBodyFocusForPaste(page: Page, editable: Locator): Promise<v
   }
 }
 
+/** 본문 타이핑 직전 — 제목 blur 후 본문 editable 포커스 확정 (placeholder 클릭만으로는 부족할 수 있음) */
+export async function ensureBlogBodyFocusForTyping(page: Page, bodyLoc: Locator): Promise<Locator> {
+  await blurBlogTitleField(page);
+  const editable = await resolveBodyEditableLocator(bodyLoc);
+  if ((await isFocusInTitleArea(page)) || !(await isFocusInBodyArea(page))) {
+    await humanClickLocator(page, editable);
+    await sleep(200);
+    await focusBodyEditableNode(editable);
+    await ensureBodyFocusForPaste(page, editable);
+  }
+  if (await isFocusInTitleArea(page)) {
+    throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
+  }
+  return editable;
+}
+
 /**
  * SE ONE 본문 입력.
  * afterPlaceholderClick: placeholder humanClick 직후 — 재탐색·재클릭 없이 insertText만.
@@ -1877,9 +1893,7 @@ export async function pasteBlogBodyContent(
   }
 
   if (options?.afterPlaceholderClick) {
-    if (await isFocusInTitleArea(page)) {
-      await blurBlogTitleField(page);
-    }
+    await ensureBlogBodyFocusForTyping(page, bodyLoc);
   } else {
     const editable = await resolveBodyEditableLocator(bodyLoc);
     if (options?.skipClick) {
@@ -1889,11 +1903,7 @@ export async function pasteBlogBodyContent(
       await humanClickLocator(page, editable);
       await sleep(200);
     } else {
-      await blurBlogTitleField(page);
-      await humanClickLocator(page, editable);
-      await sleep(200);
-      await focusBodyEditableNode(editable);
-      await ensureBodyFocusForPaste(page, editable);
+      await ensureBlogBodyFocusForTyping(page, bodyLoc);
     }
   }
 
@@ -1909,11 +1919,10 @@ export async function pasteBlogBodyContent(
   for (let i = 0; i < paragraphs.length; i += 1) {
     if (await isFocusInTitleArea(page)) {
       await blurBlogTitleField(page);
-      if (!options?.afterPlaceholderClick) {
-        const editable = await resolveBodyEditableLocatorRelaxed(bodyLoc);
-        await humanClickLocator(page, editable);
-        await sleep(150);
-      }
+      const editable = await resolveBodyEditableLocatorRelaxed(bodyLoc);
+      await humanClickLocator(page, editable);
+      await sleep(150);
+      await focusBodyEditableNode(editable);
       if (await isFocusInTitleArea(page)) {
         throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
       }
@@ -1952,24 +1961,16 @@ export async function typeBlogBodyContent(
   }
 
   if (options?.afterPlaceholderClick) {
+    await ensureBlogBodyFocusForTyping(page, bodyLoc);
+  } else if (options?.skipClick) {
+    const editable = await resolveBodyEditableLocator(bodyLoc);
     if (await isFocusInTitleArea(page)) {
       await blurBlogTitleField(page);
     }
+    await humanClickLocator(page, editable);
+    await sleep(200);
   } else {
-    const editable = await resolveBodyEditableLocator(bodyLoc);
-    if (options?.skipClick) {
-      if (await isFocusInTitleArea(page)) {
-        await blurBlogTitleField(page);
-      }
-      await humanClickLocator(page, editable);
-      await sleep(200);
-    } else {
-      await blurBlogTitleField(page);
-      await humanClickLocator(page, editable);
-      await sleep(200);
-      await focusBodyEditableNode(editable);
-      await ensureBodyFocusForPaste(page, editable);
-    }
+    await ensureBlogBodyFocusForTyping(page, bodyLoc);
   }
 
   if (await isFocusInTitleArea(page)) {
@@ -1988,7 +1989,7 @@ export async function typeBlogBodyContent(
     pasteIndices.add(Math.floor(Math.random() * paragraphs.length));
   }
 
-  let focused = Boolean(options?.afterPlaceholderClick);
+  let focused = true;
 
   for (let i = 0; i < paragraphs.length; i += 1) {
     const editable = await resolveBodyEditableLocatorRelaxed(bodyLoc);
@@ -1999,11 +2000,9 @@ export async function typeBlogBodyContent(
 
     if (await isFocusInTitleArea(page)) {
       await blurBlogTitleField(page);
-      if (!options?.afterPlaceholderClick) {
-        await humanClickLocator(page, editable);
-        await sleep(150);
-        focused = true;
-      }
+      await humanClickLocator(page, editable);
+      await sleep(150);
+      await focusBodyEditableNode(editable);
       if (await isFocusInTitleArea(page)) {
         throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
       }

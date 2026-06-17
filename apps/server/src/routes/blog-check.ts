@@ -4,8 +4,26 @@ import {
   buildBlogCheckAccountsResponse,
   buildBlogCheckPostsResponse,
   getBlogCheckScanState,
+  normalizeBlogCheckScanMode,
   requestBlogCheckScan,
+  type BlogCheckScanOptions,
 } from '../modules/blog-check/service.js';
+
+function parseScanBody(body: unknown): BlogCheckScanOptions {
+  const raw = (body ?? {}) as { mode?: string; postNos?: string[] };
+  return {
+    mode: normalizeBlogCheckScanMode(raw.mode),
+    postNos: Array.isArray(raw.postNos) ? raw.postNos.map(String).filter(Boolean) : undefined,
+  };
+}
+
+async function assertAccountAccess(accountId: string, allowed: string[]) {
+  const { data: acc } = await supabase.from('huma_accounts').select('workspace').eq('id', accountId).maybeSingle();
+  if (!acc || !allowed.includes(acc.workspace as string)) {
+    return false;
+  }
+  return true;
+}
 
 export async function registerBlogCheckRoutes(app: FastifyInstance) {
   app.get('/api/blog-check/accounts', { preHandler: authMiddleware }, async (request) => {
@@ -17,8 +35,7 @@ export async function registerBlogCheckRoutes(app: FastifyInstance) {
     const { id } = request.params as { id: string };
     const allowed = getWorkspaceFilter(request);
 
-    const { data: acc } = await supabase.from('huma_accounts').select('workspace').eq('id', id).maybeSingle();
-    if (!acc || !allowed.includes(acc.workspace as string)) {
+    if (!(await assertAccountAccess(id, allowed))) {
       return reply.code(403).send({ error: '계정 접근 권한 없음' });
     }
 
@@ -29,9 +46,9 @@ export async function registerBlogCheckRoutes(app: FastifyInstance) {
     return getBlogCheckScanState();
   });
 
-  app.post('/api/blog-check/scan', { preHandler: authMiddleware }, async (_request, reply) => {
+  app.post('/api/blog-check/scan', { preHandler: authMiddleware }, async (request, reply) => {
     try {
-      return await requestBlogCheckScan();
+      return await requestBlogCheckScan(undefined, parseScanBody(request.body));
     } catch (err) {
       const message = (err as Error).message;
       if (message === 'SCAN_ALREADY_RUNNING') {
@@ -44,14 +61,13 @@ export async function registerBlogCheckRoutes(app: FastifyInstance) {
   app.post('/api/blog-check/scan/:id', { preHandler: authMiddleware }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const allowed = getWorkspaceFilter(request);
-    const { data: acc } = await supabase.from('huma_accounts').select('workspace').eq('id', id).maybeSingle();
 
-    if (!acc || !allowed.includes(acc.workspace as string)) {
+    if (!(await assertAccountAccess(id, allowed))) {
       return reply.code(403).send({ error: '계정 접근 권한 없음' });
     }
 
     try {
-      return await requestBlogCheckScan(id);
+      return await requestBlogCheckScan(id, parseScanBody(request.body));
     } catch (err) {
       const message = (err as Error).message;
       if (message === 'SCAN_ALREADY_RUNNING') {

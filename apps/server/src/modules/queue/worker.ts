@@ -686,7 +686,11 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
           await markRunning();
           await executeContentFull(humaJobId!);
         } else if (type === 'blog_check') {
-          const bcPayload = (payload ?? {}) as { accountId?: string | null };
+          const bcPayload = (payload ?? {}) as {
+            accountId?: string | null;
+            mode?: string | null;
+            postNos?: string[] | null;
+          };
           const result = await executeBlogCheckJob(bcPayload);
           await logOperation({
             level: 'info',

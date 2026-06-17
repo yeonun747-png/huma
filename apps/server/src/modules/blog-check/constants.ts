@@ -4,6 +4,11 @@ export const BLOG_CHECK_POST_LIMIT = 10;
 /** 동시에 스캔하는 포스트 수 (같은 브라우저 컨텍스트, 별도 Page) */
 export const BLOG_CHECK_SCAN_CONCURRENCY = 2;
 
+/** delta 모드 — 최근 N시간 이내 발행 + 오늘 미스캔 글 대상 */
+export const BLOG_CHECK_DELTA_HOURS = 24;
+
+export type BlogCheckScanMode = 'full' | 'delta' | 'posts';
+
 /** 포스트 간 스캔 간격 (ms) — 배치 사이에만 적용 */
 export const BLOG_CHECK_SCAN_DELAY_MIN_MS = 0;
 export const BLOG_CHECK_SCAN_DELAY_MAX_MS = 30;

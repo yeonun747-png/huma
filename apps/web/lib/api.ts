@@ -739,9 +739,15 @@ export const api = {
         ext_link_count: number;
       }>;
     }>(`/api/blog-check/posts/${accountId}`),
-  blogCheckScan: (accountId?: string) =>
-    request<{ queued: true; accountId?: string }>(
+  blogCheckScan: (
+    accountId?: string,
+    opts?: { mode?: 'full' | 'delta' | 'posts'; postNos?: string[] },
+  ) =>
+    request<{ queued: true; accountId?: string; mode?: string }>(
       accountId ? `/api/blog-check/scan/${accountId}` : '/api/blog-check/scan',
-      { method: 'POST' },
+      {
+        method: 'POST',
+        body: JSON.stringify(opts ?? { mode: 'full' }),
+      },
     ),
 };

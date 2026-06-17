@@ -11,6 +11,7 @@ type BcPost = Awaited<ReturnType<typeof api.blogCheckPosts>>['posts'][number];
 type BcScanProgress = NonNullable<Awaited<ReturnType<typeof api.blogCheckAccounts>>['scanProgress']>;
 
 const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
+const DELTA_SCAN_LABEL = '🆕 새글만 스캔';
 
 function scanPercent(progress: BcScanProgress | null, scanning: boolean): number {
   if (!scanning) return 0;
@@ -76,6 +77,7 @@ export function BlogCheckView() {
   const [scanning, setScanning] = useState(false);
   const [scanningAccountId, setScanningAccountId] = useState<string | null>(null);
   const [scanProgress, setScanProgress] = useState<BcScanProgress | null>(null);
+  const [scanningPostNo, setScanningPostNo] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -86,6 +88,7 @@ export function BlogCheckView() {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scanningAccountIdRef = useRef<string | null>(null);
   const lastScannedAccountRef = useRef<string | null>(null);
+  const postsLoadGenRef = useRef(0);
 
   useEffect(() => {
     scanningAccountIdRef.current = scanningAccountId;
@@ -115,12 +118,19 @@ export function BlogCheckView() {
   }, []);
 
   const loadPosts = useCallback(async (accountId: string) => {
+    const gen = ++postsLoadGenRef.current;
     try {
       const data = await api.blogCheckPosts(accountId);
+      if (gen !== postsLoadGenRef.current) return;
       setPosts(data.posts);
     } catch {
+      if (gen !== postsLoadGenRef.current) return;
       setPosts([]);
     }
+  }, []);
+
+  const selectAccount = useCallback((accountId: string) => {
+    setCurAcc(accountId);
   }, []);
 
   useEffect(() => {
@@ -130,6 +140,11 @@ export function BlogCheckView() {
   useEffect(() => {
     if (curAcc) void loadPosts(curAcc);
   }, [curAcc, loadPosts]);
+
+  const curAccRef = useRef<string | null>(null);
+  useEffect(() => {
+    curAccRef.current = curAcc;
+  }, [curAcc]);
 
   useEffect(() => {
     if (!scanning) {
@@ -142,19 +157,20 @@ export function BlogCheckView() {
         if (data?.scanning && data.scanProgress?.accountId) {
           lastScannedAccountRef.current = data.scanProgress.accountId;
         }
+        const activeAcc = curAccRef.current;
+        if (data?.scanning && activeAcc) {
+          void loadPosts(activeAcc);
+        }
         if (data && !data.scanning) {
           setScanning(false);
           setScanProgress(null);
-          const finishedAccountId =
-            scanningAccountIdRef.current ??
-            lastScannedAccountRef.current ??
-            null;
+          setScanningPostNo(null);
           setScanningAccountId(null);
           scanningAccountIdRef.current = null;
-          if (finishedAccountId) {
-            setCurAcc(finishedAccountId);
-            void loadPosts(finishedAccountId);
-          }
+          void loadAccounts().then(() => {
+            const active = curAccRef.current;
+            if (active) void loadPosts(active);
+          });
         }
       });
     }, 1000);
@@ -194,13 +210,18 @@ export function BlogCheckView() {
     [scanning, scanningAccountId, scanProgress?.accountId],
   );
 
-  const startScan = async (accountId?: string) => {
+  const startScan = async (
+    accountId?: string,
+    opts?: { mode?: 'full' | 'delta' | 'posts'; postNos?: string[] },
+    focusPostNo?: string | null,
+  ) => {
     if (scanning) return;
     try {
       setScanning(true);
       setScanningAccountId(accountId ?? null);
       scanningAccountIdRef.current = accountId ?? null;
       lastScannedAccountRef.current = accountId ?? null;
+      setScanningPostNo(focusPostNo ?? null);
       if (accountId) setCurAcc(accountId);
       setScanProgress({
         accountId: accountId ?? null,
@@ -210,12 +231,13 @@ export function BlogCheckView() {
         percent: 2,
         phase: 'preparing',
       });
-      await api.blogCheckScan(accountId);
+      await api.blogCheckScan(accountId, opts ?? { mode: accountId ? 'full' : 'full' });
       await loadAccounts();
     } catch (e) {
       setScanning(false);
       setScanningAccountId(null);
       scanningAccountIdRef.current = null;
+      setScanningPostNo(null);
       setScanProgress(null);
       const msg = (e as Error).message;
       if (msg.includes('스캔이 이미')) {
@@ -255,8 +277,17 @@ export function BlogCheckView() {
           </span>
           <button
             type="button"
+            className="bc-scan-btn bc-scan-btn-delta-header"
+            onClick={() => void startScan(undefined, { mode: 'delta' })}
+            disabled={scanning}
+            title="모든 계정 · 24h 이내 미스캔 글만"
+          >
+            {DELTA_SCAN_LABEL}
+          </button>
+          <button
+            type="button"
             className={cn('bc-scan-btn', scanning && 'scanning')}
-            onClick={() => void startScan()}
+            onClick={() => void startScan(undefined, { mode: 'full' })}
             disabled={scanning}
           >
             {scanning ? (
@@ -286,35 +317,53 @@ export function BlogCheckView() {
               role="button"
               tabIndex={0}
               className={cn('bci-card', curAcc === a.account_id && 'selected')}
-              onClick={() => setCurAcc(a.account_id)}
+              onClick={() => selectAccount(a.account_id)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') setCurAcc(a.account_id);
+                if (e.key === 'Enter' || e.key === ' ') selectAccount(a.account_id);
               }}
             >
               <div className="bci-card-top">
                 <div className="bci-svc" style={{ color: svcColor(a.svc) }}>
                   {a.svc}
                 </div>
-                <button
-                  type="button"
-                  className={cn(
-                    'bci-scan-btn',
-                    scanning && cardShowsProgress(a.account_id) && 'scanning',
-                  )}
-                  title={`${a.label} 스캔`}
-                  disabled={scanning}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setCurAcc(a.account_id);
-                    void startScan(a.account_id);
-                  }}
-                >
-                  {scanning && cardShowsProgress(a.account_id) ? (
-                    <ScanProgressBar percent={globalScanPercent} compact />
-                  ) : (
-                    '⟳ 스캔'
-                  )}
-                </button>
+                <div className="bci-scan-actions">
+                  <button
+                    type="button"
+                    className={cn(
+                      'bci-scan-btn',
+                      scanning && cardShowsProgress(a.account_id) && 'scanning',
+                    )}
+                    title={`${a.label} 전체 스캔`}
+                    disabled={scanning}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      selectAccount(a.account_id);
+                      void startScan(a.account_id, { mode: 'full' });
+                    }}
+                  >
+                    {scanning && cardShowsProgress(a.account_id) ? (
+                      <ScanProgressBar percent={globalScanPercent} compact />
+                    ) : (
+                      '⟳ 전체'
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className={cn(
+                      'bci-scan-btn bci-scan-btn-delta',
+                      scanning && cardShowsProgress(a.account_id) && 'scanning',
+                    )}
+                    title={`${a.label} · 24h 이내 미스캔 글만`}
+                    disabled={scanning}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      selectAccount(a.account_id);
+                      void startScan(a.account_id, { mode: 'delta' });
+                    }}
+                  >
+                    {DELTA_SCAN_LABEL}
+                  </button>
+                </div>
               </div>
               <div className="bci-name">{a.label}</div>
               <div className="bci-url">blog.naver.com/{a.blog_url}</div>
@@ -472,13 +521,29 @@ export function BlogCheckView() {
             ) : (
               filteredPosts.map((p) => {
                 const badge = exposureBadge(p.status);
+                const rowScanning = scanning && scanningPostNo === p.post_no;
                 return (
                   <tr key={p.post_url}>
                     <td>
-                      <span className={cn('bc-exposure', badge.cls)} title={p.rank ? `${p.rank}위` : undefined}>
-                        {badge.text}
-                        {p.rank ? ` · ${p.rank}위` : ''}
-                      </span>
+                      {!p.status ? (
+                        <button
+                          type="button"
+                          className={cn('bc-exposure scan-btn none', rowScanning && 'scanning')}
+                          title="이 포스트만 스캔"
+                          disabled={scanning && !rowScanning}
+                          onClick={() => {
+                            if (!curAcc || !p.post_no) return;
+                            void startScan(curAcc, { mode: 'posts', postNos: [p.post_no] }, p.post_no);
+                          }}
+                        >
+                          {rowScanning ? '스캔…' : '미스캔'}
+                        </button>
+                      ) : (
+                        <span className={cn('bc-exposure', badge.cls)} title={p.rank ? `${p.rank}위` : undefined}>
+                          {badge.text}
+                          {p.rank ? ` · ${p.rank}위` : ''}
+                        </span>
+                      )}
                     </td>
                     <td className="max-w-[220px]">
                       <button

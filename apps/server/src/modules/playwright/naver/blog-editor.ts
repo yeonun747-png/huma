@@ -18,6 +18,7 @@ import {
   typeBlogBodyContent,
   ensureBlogTitleWritten,
   blurBlogTitleField,
+  ensureBlogBodyFocusForTyping,
   dismissSeOneHelpPanel,
   dismissSeOneMaterialPopup,
   isBlogTitleFilledEnough,
@@ -367,6 +368,7 @@ export async function postNaverBlog(params: {
 
     if (!bodyReady) {
       await clickBlogBodyPlaceholder(page);
+      await ensureBlogBodyFocusForTyping(page, editor);
       const pastePct = Math.round(resolvePasteRatio(config) * 100);
       await logOperation({
         level: 'info',
