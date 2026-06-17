@@ -1,32 +1,12 @@
-import type { Page } from 'playwright';
+import type { Frame, Page } from 'playwright';
 import { sleep } from '../../lib/utils.js';
-import { type PostContentStats, emptyPostContentStats } from './content-stats.js';
+import { type PostContentStats, emptyPostContentStats, mergePostContentStats } from './content-stats.js';
 import { BlogCheckCaptchaError, detectBlogCheckCaptcha } from './scanner.js';
 
-function parseCount(raw: unknown): number {
-  if (raw == null) return 0;
-  const n = Number(String(raw).replace(/,/g, '').trim());
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
-}
+type ScrapeContext = Page | Frame;
 
-/**
- * m.blog 포스트 뷰 크롤링 — 본문 메타·댓글·공감 실측
- * method: 'm.blog-post-view'
- */
-export async function scrapePostContentStats(
-  page: Page,
-  blogId: string,
-  postNo: string,
-): Promise<PostContentStats> {
-  const url = `https://m.blog.naver.com/${blogId}/${postNo}`;
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
-  await sleep(800);
-
-  if (await detectBlogCheckCaptcha(page)) {
-    throw new BlogCheckCaptchaError(blogId);
-  }
-
-  const scraped = await page.evaluate(
+async function evaluatePostStats(ctx: ScrapeContext, blogId: string, postNo: string): Promise<PostContentStats> {
+  return ctx.evaluate(
     async ({ blogId, postNo }) => {
       const parseNum = (raw: unknown): number | null => {
         if (raw == null) return null;
@@ -83,7 +63,8 @@ export async function scrapePostContentStats(
         document.querySelector('#viewTypeSelector') ??
         document.querySelector('.post_ct') ??
         document.querySelector('#postViewArea') ??
-        document.querySelector('.post-view');
+        document.querySelector('.post-view') ??
+        document.querySelector('#printPost1');
 
       const contentEl = root ?? document.body;
       const contentHtml = apiHtml ?? contentEl.innerHTML;
@@ -123,13 +104,13 @@ export async function scrapePostContentStats(
       );
 
       const quoteCount = Math.max(
-        contentEl.querySelectorAll('.se-quote, .se-module-quote, blockquote').length,
+        contentEl.querySelectorAll('.se-quote, .se-module-quote, blockquote, .se-quotation').length,
         (contentText.match(/^>\s?.+/gm) ?? []).length,
       );
 
       const mapCount = Math.max(
         contentEl.querySelectorAll(
-          'iframe[src*="map.naver"], iframe[src*="place.naver"], .se-map, .se-module-map, [class*="map"]',
+          'iframe[src*="map.naver"], iframe[src*="place.naver"], .se-map, .se-module-map',
         ).length,
         (contentHtml.match(/map\.naver\.com|place\.naver\.com|naver\.me\/map|\[지도\]/gi) ?? []).length,
       );
@@ -167,6 +148,7 @@ export async function scrapePostContentStats(
           /listNumComment\s*[=:]\s*['"]?(\d+)/i,
           /commentCount\s*[=:]\s*['"]?(\d+)/i,
           /"commentCnt"\s*:\s*(\d+)/,
+          /commentCnt\s*[=:]\s*['"]?(\d+)/i,
         ]);
 
       if (commentCount == null) {
@@ -215,23 +197,74 @@ export async function scrapePostContentStats(
     },
     { blogId, postNo },
   );
+}
 
-  if (!scraped || scraped.char_count <= 0) {
-    const empty = emptyPostContentStats();
-    return {
-      ...empty,
-      comment_count: parseCount(scraped?.comment_count),
-      like_count: parseCount(scraped?.like_count),
-      img_count: parseCount(scraped?.img_count),
-      video_count: parseCount(scraped?.video_count),
-      quote_count: parseCount(scraped?.quote_count),
-      gif_count: parseCount(scraped?.gif_count),
-      map_count: parseCount(scraped?.map_count),
-      hidden_count: parseCount(scraped?.hidden_count),
-      int_link_count: parseCount(scraped?.int_link_count),
-      ext_link_count: parseCount(scraped?.ext_link_count),
+async function scrapeOuterEngagement(page: Page): Promise<Partial<PostContentStats>> {
+  return page.evaluate(() => {
+    const parseNum = (raw: unknown): number => {
+      if (raw == null) return 0;
+      const n = Number(String(raw).replace(/,/g, '').trim());
+      return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
     };
+
+    const html = document.documentElement.innerHTML;
+    let commentCount = parseNum(document.querySelector('#commentCount, .comment_count')?.textContent);
+    let likeCount = parseNum(document.querySelector('#sympathyCount, em#sympathyCount')?.textContent);
+
+    if (!commentCount) {
+      const m = html.match(/commentCnt['":\s]+(\d+)/i) ?? html.match(/listNumComment\s*[=:]\s*['"]?(\d+)/i);
+      commentCount = m ? parseNum(m[1]) : 0;
+    }
+    if (!likeCount) {
+      const m = html.match(/sympathyCnt['":\s]+(\d+)/i) ?? html.match(/sympathyCount['":\s]+(\d+)/i);
+      likeCount = m ? parseNum(m[1]) : 0;
+    }
+
+    return { comment_count: commentCount, like_count: likeCount };
+  });
+}
+
+/**
+ * blog.naver.com PostView(mainFrame) + m.blog 폴백 — 본문 메타·댓글·공감 실측
+ * method: 'desktop-mainFrame' + 'm.blog-post-view'
+ */
+export async function scrapePostContentStats(
+  page: Page,
+  blogId: string,
+  postNo: string,
+): Promise<PostContentStats> {
+  const desktopUrl = `https://blog.naver.com/${blogId}/${postNo}`;
+  await page.goto(desktopUrl, { waitUntil: 'domcontentloaded' });
+  await sleep(1200);
+
+  if (await detectBlogCheckCaptcha(page)) {
+    throw new BlogCheckCaptchaError(blogId);
   }
 
-  return scraped;
+  const mainFrame = page.frame({ name: 'mainFrame' });
+  if (mainFrame) {
+    await mainFrame.waitForLoadState('domcontentloaded', { timeout: 12_000 }).catch(() => {});
+    await sleep(700);
+  }
+
+  const outerEngagement = await scrapeOuterEngagement(page);
+  let stats = mainFrame
+    ? await evaluatePostStats(mainFrame, blogId, postNo)
+    : await evaluatePostStats(page, blogId, postNo);
+
+  stats = mergePostContentStats(stats, outerEngagement);
+
+  if (stats.char_count <= 0) {
+    await page.goto(`https://m.blog.naver.com/${blogId}/${postNo}`, { waitUntil: 'domcontentloaded' });
+    await sleep(900);
+
+    if (await detectBlogCheckCaptcha(page)) {
+      throw new BlogCheckCaptchaError(blogId);
+    }
+
+    const mobileStats = await evaluatePostStats(page, blogId, postNo);
+    stats = mergePostContentStats(stats, mobileStats);
+  }
+
+  return stats;
 }

@@ -9,6 +9,14 @@ describe('postNoFromBlogHref', () => {
     );
     expect(postNoFromBlogHref('https://m.blog.naver.com/foo/224212849946')).toBe('224212849946');
   });
+
+  it('parses naver search redirect URLs', () => {
+    expect(
+      postNoFromBlogHref(
+        'https://search.naver.com/p/crd/rd?u=https%3A%2F%2Fblog.naver.com%2Fyeonun2%2F224212849946',
+      ),
+    ).toBe('224212849946');
+  });
 });
 
 describe('findPostRankInHrefs', () => {

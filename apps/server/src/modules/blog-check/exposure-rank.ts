@@ -1,12 +1,25 @@
+/** 네이버 검색 리다이렉트(crd/rd) URL → 실제 blog URL */
+export function normalizeBlogSearchHref(href: string): string {
+  const trimmed = href.trim();
+  if (!trimmed) return trimmed;
+  try {
+    const uMatch = trimmed.match(/[?&]u=([^&]+)/i);
+    if (uMatch?.[1]) return decodeURIComponent(uMatch[1]);
+  } catch {
+    /* ignore */
+  }
+  return trimmed;
+}
+
 /** 네이버 검색 결과 href → 포스트 번호 */
 export function postNoFromBlogHref(href: string): string | null {
-  const trimmed = href.trim();
-  if (!trimmed) return null;
-  const logNo = trimmed.match(/[?&]logNo=(\d+)/i);
+  const normalized = normalizeBlogSearchHref(href);
+  if (!normalized) return null;
+  const logNo = normalized.match(/[?&]logNo=(\d+)/i);
   if (logNo?.[1]) return logNo[1];
-  const path = trimmed.match(/blog\.naver\.com\/[^/?#]+\/(\d+)/i);
+  const path = normalized.match(/blog\.naver\.com\/[^/?#]+\/(\d+)/i);
   if (path?.[1]) return path[1];
-  const mobile = trimmed.match(/m\.blog\.naver\.com\/[^/?#]+\/(\d+)/i);
+  const mobile = normalized.match(/m\.blog\.naver\.com\/[^/?#]+\/(\d+)/i);
   if (mobile?.[1]) return mobile[1];
   return null;
 }

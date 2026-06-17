@@ -1,7 +1,7 @@
 import type { Page } from 'playwright';
 import { createBrowser } from '../playwright/browser.js';
 import { isNaverCaptchaVisible } from '../../lib/naver-captcha-vision.js';
-import { blogSearchUrl } from '../../lib/naver-search-links.js';
+import { blogTabAllSearchUrl } from '../../lib/naver-search-links.js';
 import { randomBetween, sleep } from '../../lib/utils.js';
 import { rankToExposureStatus, type PostRankResult } from './exposure-status.js';
 import { findPostRankInHrefs, BLOG_SEARCH_PAGE_SIZE } from './exposure-rank.js';
@@ -89,55 +89,101 @@ export async function checkPostIndexedBySite(
   return /blog\.naver\.com/i.test(bodyText) && bodyText.includes(postNo);
 }
 
-/** 블로그 탭 검색 1페이지 — 결과 블록 순서대로 제목 링크 href 수집 */
+/**
+ * ssc=tab.blog.all 관련도순 — 결과 블록당 포스트 1건, DOM 순서 유지
+ */
 async function collectBlogSearchResultHrefs(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const hrefs: string[] = [];
-    const seen = new Set<string>();
+    const seenPost = new Set<string>();
 
-    const push = (raw: string | null | undefined) => {
-      const href = (raw ?? '').trim();
-      if (!href) return;
+    const decodeHref = (raw: string | null | undefined): string => {
+      const trimmed = (raw ?? '').trim();
+      if (!trimmed) return trimmed;
+      try {
+        const uMatch = trimmed.match(/[?&]u=([^&]+)/i);
+        if (uMatch?.[1]) return decodeURIComponent(uMatch[1]);
+      } catch {
+        /* ignore */
+      }
+      return trimmed;
+    };
+
+    const postNoFrom = (raw: string | null | undefined): string | null => {
+      const href = decodeHref(raw);
+      if (!href) return null;
+      const logNo = href.match(/[?&]logNo=(\d+)/i);
+      if (logNo?.[1]) return logNo[1];
+      const path = href.match(/blog\.naver\.com\/[^/?#]+\/(\d+)/i);
+      if (path?.[1]) return path[1];
+      const mobile = href.match(/m\.blog\.naver\.com\/[^/?#]+\/(\d+)/i);
+      if (mobile?.[1]) return mobile[1];
+      return null;
+    };
+
+    const pushPost = (raw: string | null | undefined) => {
+      const href = decodeHref(raw);
       if (!href.includes('blog.naver.com') && !href.includes('m.blog.naver.com')) return;
-      const key = href.split('#')[0].split('?')[0];
-      if (seen.has(key)) return;
-      seen.add(key);
+      const postNo = postNoFrom(href);
+      if (!postNo) return;
+      if (/PostList|buddylist|commentlist|profile|prologue|mapview/i.test(href)) return;
+      if (seenPost.has(postNo)) return;
+      seenPost.add(postNo);
       hrefs.push(href);
     };
 
-    const blocks = document.querySelectorAll(
-      '#main_pack .view_wrap, #main_pack .total_wrap, #main_pack .api_subject_bx, #main_pack .detail_box',
-    );
+    const blockSelectors = [
+      '#main_pack .view_wrap',
+      '#main_pack .total_wrap',
+      '#main_pack .api_subject_bx',
+      '#main_pack .detail_box',
+      '#main_pack ul.lst_total > li',
+      '#main_pack ul.lst_view > li',
+      '#main_pack section[class*="sc_new"] > div',
+    ];
 
-    for (const block of blocks) {
-      const titleLink =
-        block.querySelector('a.api_txt_lines.total_tit') ??
-        block.querySelector('a.total_tit[href*="blog.naver.com"]') ??
-        block.querySelector('.title_area a[href*="blog.naver.com"]') ??
-        block.querySelector('a[href*="blog.naver.com/"]');
-      push(titleLink?.getAttribute('href'));
+    for (const sel of blockSelectors) {
+      for (const block of document.querySelectorAll(sel)) {
+        const titleLink =
+          block.querySelector('a.api_txt_lines.total_tit') ??
+          block.querySelector('a.title_link[href*="blog.naver.com"]') ??
+          block.querySelector('.title_area a[href*="blog.naver.com"]') ??
+          block.querySelector('a[href*="blog.naver.com/"]');
+
+        if (titleLink) {
+          pushPost(titleLink.getAttribute('href'));
+          continue;
+        }
+
+        for (const a of block.querySelectorAll('a[href*="blog.naver.com"]')) {
+          const h = a.getAttribute('href') ?? '';
+          if (postNoFrom(h)) {
+            pushPost(h);
+            break;
+          }
+        }
+      }
     }
 
     if (hrefs.length === 0) {
       document
         .querySelectorAll('#main_pack a.api_txt_lines.total_tit, #main_pack a.total_tit[href*="blog.naver.com"]')
-        .forEach((el) => push(el.getAttribute('href')));
+        .forEach((el) => pushPost(el.getAttribute('href')));
     }
 
     if (hrefs.length === 0) {
-      document.querySelectorAll('#main_pack a[href*="blog.naver.com/"]').forEach((el) => {
-        const href = el.getAttribute('href') ?? '';
-        if (/\d{6,}/.test(href)) push(href);
+      document.querySelectorAll('#main_pack a[href*="blog.naver.com"]').forEach((el) => {
+        pushPost(el.getAttribute('href'));
       });
     }
 
-    return hrefs;
+    return hrefs.slice(0, 10);
   });
 }
 
 /**
- * 제목 블로그탭 1페이지 순위(포스트번호 일치) → 미등장 시 site: URL 폴백
- * method: 'blog-tab-title-search' + 'site-url-fallback'
+ * 제목 · ssc=tab.blog.all 관련도순 1페이지 순위(포스트번호) → 미등장 시 site: 폴백
+ * method: 'blog-tab-all-title-search' + 'site-url-fallback'
  */
 export async function checkPostExposure(
   page: Page,
@@ -151,9 +197,13 @@ export async function checkPostExposure(
     return { status: indexed ? 'collect' : 'miss', rank: null };
   }
 
-  await page.goto(blogSearchUrl(query), { waitUntil: 'domcontentloaded' });
-  await page.locator('#main_pack, .view_wrap, .total_wrap').first().waitFor({ state: 'attached', timeout: 8000 }).catch(() => {});
-  await sleep(900);
+  await page.goto(blogTabAllSearchUrl(query), { waitUntil: 'domcontentloaded' });
+  await page
+    .locator('#main_pack, .view_wrap, .total_wrap, .api_subject_bx')
+    .first()
+    .waitFor({ state: 'attached', timeout: 8000 })
+    .catch(() => {});
+  await sleep(1000);
 
   if (await detectBlogCheckCaptcha(page)) {
     throw new BlogCheckCaptchaError(blogId);

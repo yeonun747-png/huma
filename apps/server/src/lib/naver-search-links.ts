@@ -190,3 +190,8 @@ export function integratedSearchUrl(keyword: string): string {
 export function blogSearchUrl(keyword: string): string {
   return `https://search.naver.com/search.naver?where=blog&query=${encodeURIComponent(keyword)}&sm=tab_jum`;
 }
+
+/** 블로그 탭 통합검색 — 관련도순 (ssc=tab.blog.all) */
+export function blogTabAllSearchUrl(keyword: string): string {
+  return `https://search.naver.com/search.naver?ssc=tab.blog.all&sm=tab_jum&query=${encodeURIComponent(keyword)}`;
+}

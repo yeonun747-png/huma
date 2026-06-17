@@ -60,7 +60,7 @@ function exposureBadge(status: BcPost['status']): { cls: string; text: string } 
 }
 
 function openTitleSearch(title: string) {
-  const url = `https://search.naver.com/search.naver?where=blog&query=${encodeURIComponent(title)}&sm=tab_jum`;
+  const url = `https://search.naver.com/search.naver?ssc=tab.blog.all&sm=tab_jum&query=${encodeURIComponent(title)}`;
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 

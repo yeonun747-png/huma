@@ -643,7 +643,23 @@ export async function runBlogCheckScan(accountId?: string): Promise<{
         const title = post.title?.trim() || '—';
 
         try {
-          const contentStats = await scrapePostContentStats(page, blogId, postNo);
+          const crawled = await scrapePostContentStats(page, blogId, postNo);
+          const contentStats = mergePostContentStats(
+            {
+              char_count: post.char_count,
+              img_count: post.img_count,
+              video_count: post.video_count,
+              quote_count: post.quote_count,
+              comment_count: post.comment_count,
+              like_count: post.like_count,
+              gif_count: post.gif_count,
+              map_count: post.map_count,
+              hidden_count: post.hidden_count,
+              int_link_count: post.int_link_count,
+              ext_link_count: post.ext_link_cleared ? 0 : post.ext_link_count,
+            },
+            crawled,
+          );
           const rankResult = await checkPostExposure(page, blogId, postNo, title);
 
           const { error: insErr } = await supabase.from('blog_post_status').insert({
