@@ -14,6 +14,7 @@ import { getCachedBlogPostList, loadBlogPostList, refreshBlogPostListCache } fro
 import { emptyPostContentStats, mergePostContentStats, parsePostContentStats, type PostContentStats } from './content-stats.js';
 import { BLOG_CHECK_POST_LIMIT } from './constants.js';
 import { computeBlogIndexScore, scrapeBlogStats } from './index-score.js';
+import { scrapePostContentStats } from './post-content-scraper.js';
 import type { PostExposureStatus } from './exposure-status.js';
 import { notifyBlogCheckCaptcha, notifyBlogCheckIndexParseFailed } from './notify.js';
 import {
@@ -75,6 +76,17 @@ interface StatusRow {
   status: PostExposureStatus;
   rank: number | null;
   scanned_at: string;
+  chars?: number | null;
+  img_count?: number | null;
+  video_count?: number | null;
+  quote_count?: number | null;
+  comment_count?: number | null;
+  like_count?: number | null;
+  gif_count?: number | null;
+  map_count?: number | null;
+  hidden_count?: number | null;
+  int_link_count?: number | null;
+  ext_link_count?: number | null;
 }
 
 function statsFromDbRow(row: Record<string, unknown>, workspace?: string | null): PostContentStats {
@@ -102,22 +114,74 @@ function statsFromDbRow(row: Record<string, unknown>, workspace?: string | null)
   return mergePostContentStats(base, merged);
 }
 
-function statusInsertPayload(post: PostRow, rankResult: { status: PostExposureStatus; rank: number | null }) {
+function statsFromStatusRow(row: StatusRow, extLinkCleared?: boolean): PostContentStats {
   return {
-    chars: post.char_count,
-    img_count: post.img_count,
-    video_count: post.video_count,
-    quote_count: post.quote_count,
-    comment_count: post.comment_count,
-    like_count: post.like_count,
-    gif_count: post.gif_count,
-    map_count: post.map_count,
-    hidden_count: post.hidden_count,
-    int_link_count: post.int_link_count,
-    ext_link_count: post.ext_link_cleared ? 0 : post.ext_link_count,
+    char_count: Number(row.chars ?? 0),
+    img_count: Number(row.img_count ?? 0),
+    video_count: Number(row.video_count ?? 0),
+    quote_count: Number(row.quote_count ?? 0),
+    comment_count: Number(row.comment_count ?? 0),
+    like_count: Number(row.like_count ?? 0),
+    gif_count: Number(row.gif_count ?? 0),
+    map_count: Number(row.map_count ?? 0),
+    hidden_count: Number(row.hidden_count ?? 0),
+    int_link_count: Number(row.int_link_count ?? 0),
+    ext_link_count: extLinkCleared ? 0 : Number(row.ext_link_count ?? 0),
+  };
+}
+
+function statusInsertPayload(
+  stats: PostContentStats,
+  rankResult: { status: PostExposureStatus; rank: number | null },
+  extLinkCleared?: boolean,
+) {
+  return {
+    chars: stats.char_count,
+    img_count: stats.img_count,
+    video_count: stats.video_count,
+    quote_count: stats.quote_count,
+    comment_count: stats.comment_count,
+    like_count: stats.like_count,
+    gif_count: stats.gif_count,
+    map_count: stats.map_count,
+    hidden_count: stats.hidden_count,
+    int_link_count: stats.int_link_count,
+    ext_link_count: extLinkCleared ? 0 : stats.ext_link_count,
     status: rankResult.status,
     rank: rankResult.rank,
   };
+}
+
+async function persistCrawledPostStats(
+  accountId: string,
+  post: PostRow,
+  stats: PostContentStats,
+): Promise<void> {
+  const { error } = await supabase.from('posts').upsert(
+    {
+      account_id: accountId,
+      post_url: post.post_url,
+      post_no: post.post_no,
+      title: post.title,
+      published_at: post.published_at,
+      char_count: stats.char_count,
+      img_count: stats.img_count,
+      video_count: stats.video_count,
+      quote_count: stats.quote_count,
+      comment_count: stats.comment_count,
+      like_count: stats.like_count,
+      gif_count: stats.gif_count,
+      map_count: stats.map_count,
+      hidden_count: stats.hidden_count,
+      int_link_count: stats.int_link_count,
+      ext_link_count: post.ext_link_cleared ? 0 : stats.ext_link_count,
+      ext_link_cleared: post.ext_link_cleared,
+    },
+    { onConflict: 'account_id,post_url' },
+  );
+  if (error) {
+    console.error('[blog-check] posts upsert failed:', error.message);
+  }
 }
 
 function sortAccounts(accounts: AccountRow[]): AccountRow[] {
@@ -372,7 +436,9 @@ async function fetchRecentPosts(
 async function fetchLatestStatusByPostNo(accountId: string): Promise<Map<string, StatusRow>> {
   const { data, error } = await supabase
     .from('blog_post_status')
-    .select('post_no, status, rank, scanned_at')
+    .select(
+      'post_no, status, rank, scanned_at, chars, img_count, video_count, quote_count, comment_count, like_count, gif_count, map_count, hidden_count, int_link_count, ext_link_count',
+    )
     .eq('account_id', accountId)
     .order('scanned_at', { ascending: false });
 
@@ -577,6 +643,7 @@ export async function runBlogCheckScan(accountId?: string): Promise<{
         const title = post.title?.trim() || '—';
 
         try {
+          const contentStats = await scrapePostContentStats(page, blogId, postNo);
           const rankResult = await checkPostExposure(page, blogId, postNo, title);
 
           const { error: insErr } = await supabase.from('blog_post_status').insert({
@@ -585,10 +652,11 @@ export async function runBlogCheckScan(accountId?: string): Promise<{
             post_no: postNo,
             title: post.title,
             scanned_at: scanDate,
-            ...statusInsertPayload(post, rankResult),
+            ...statusInsertPayload(contentStats, rankResult, post.ext_link_cleared),
           });
 
           if (insErr) throw new Error(`blog_post_status insert 실패: ${insErr.message}`);
+          await persistCrawledPostStats(acc.id, post, contentStats);
           scannedPosts += 1;
         } catch (err) {
           if (err instanceof BlogCheckCaptchaError) {
@@ -766,7 +834,9 @@ export async function buildBlogCheckPostsResponse(accountId: string) {
     posts: posts.map((post) => {
       const postNo = post.post_no ?? extractPostNoFromUrl(post.post_url) ?? '';
       const st = postNo ? statusMap.get(postNo) : undefined;
-      const stats = statsFromDbRow(post as unknown as Record<string, unknown>, workspace);
+      const stats = st
+        ? statsFromStatusRow(st, post.ext_link_cleared)
+        : statsFromDbRow(post as unknown as Record<string, unknown>, workspace);
 
       return {
         post_url: post.post_url,
