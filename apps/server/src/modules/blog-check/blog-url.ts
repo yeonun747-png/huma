@@ -109,5 +109,6 @@ export function resolveExtLinkCount(
 
 export function plainTextLength(content: string | null | undefined): number {
   if (!content?.trim()) return 0;
-  return content.replace(/[#*_`~\[\]()]/g, '').replace(/\s+/g, ' ').trim().length;
+  // blai·네이버 에디터 — 줄바꿈·공백 유지 (\\s+ 축소하면 700대→600대로 줄어듦)
+  return content.replace(/[#*_`~\[\]()]/g, '').replace(/\u00a0/g, ' ').trim().length;
 }

@@ -613,6 +613,9 @@ async function scanAccountWorkItem(
         crawled.char_count >= 80
           ? {
               ...crawled,
+              char_count: hasStoredContent
+                ? Math.max(crawled.char_count, fromPost.char_count)
+                : crawled.char_count,
               ext_link_count: post.ext_link_cleared ? 0 : crawled.ext_link_count,
             }
           : hasStoredContent
