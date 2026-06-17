@@ -8,12 +8,16 @@ import {
 import { type PostContentStats } from './content-stats.js';
 import { BlogCheckCaptchaError, detectBlogCheckCaptcha } from './scanner.js';
 
-/** SmartEditor ONE · 구형 SE · #viewTypeSelector (legacy) */
+/**
+ * SmartEditor ONE(.se-main-container) · 구형(#viewTypeSelector, .se_component_wrap)
+ * — DOM에 빈 .se-main-container만 있고 #viewTypeSelector에 본문이 있는 경우가 많음 → 텍스트 최대 노드 선택
+ */
 const CONTENT_ROOT_SELECTORS = [
   '.se-main-container',
   '#viewTypeSelector',
   'div._postView',
   '#postViewArea',
+  '.se_component_wrap',
   '.post_ct',
   '.post-view',
   '#printPost1',
@@ -22,6 +26,29 @@ const CONTENT_ROOT_SELECTORS = [
 
 const CONTENT_SELECTOR = CONTENT_ROOT_SELECTORS.join(', ');
 const CONTENT_MIN_CHARS = 80;
+
+async function waitForPostContent(frame: Frame): Promise<void> {
+  await frame.waitForLoadState('domcontentloaded', { timeout: BLOG_CHECK_FRAME_TIMEOUT_MS }).catch(() => {});
+  await frame.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {});
+  await frame.waitForSelector(CONTENT_SELECTOR, { timeout: BLOG_CHECK_FRAME_TIMEOUT_MS }).catch(() => {});
+  await frame
+    .waitForFunction(
+      ({ rootSelectors, minChars }: { rootSelectors: string[]; minChars: number }) => {
+        let bestLen = (document.body.textContent ?? '').replace(/\s+/g, ' ').trim().length;
+        for (const sel of rootSelectors) {
+          for (const el of document.querySelectorAll(sel)) {
+            const len = (el.textContent ?? '').replace(/\s+/g, ' ').trim().length;
+            if (len > bestLen) bestLen = len;
+          }
+        }
+        return bestLen >= minChars;
+      },
+      { rootSelectors: [...CONTENT_ROOT_SELECTORS], minChars: CONTENT_MIN_CHARS },
+      { timeout: BLOG_CHECK_FRAME_TIMEOUT_MS },
+    )
+    .catch(() => {});
+  await sleep(BLOG_CHECK_PAGE_SETTLE_MS);
+}
 
 /** iframe/mainFrame 또는 페이지 DOM 기준 포스트 메타 파싱 */
 async function scrapeStatsFromFrame(frame: Frame): Promise<PostContentStats> {
@@ -46,9 +73,18 @@ async function scrapeStatsFromFrame(frame: Frame): Promise<PostContentStats> {
       }
     };
 
-    const root =
-      rootSelectors.map((sel: string) => document.querySelector(sel)).find(Boolean) ??
-      document.body;
+    let best: Element = document.body;
+    let bestLen = 0;
+    for (const sel of rootSelectors) {
+      for (const el of document.querySelectorAll(sel)) {
+        const len = (el.textContent ?? '').replace(/\s+/g, ' ').trim().length;
+        if (len > bestLen) {
+          bestLen = len;
+          best = el;
+        }
+      }
+    }
+    const root = best;
 
     const contentText = (root.textContent ?? '').replace(/\s+/g, ' ').trim();
     const charCount = contentText.length;
@@ -139,27 +175,6 @@ async function scrapeStatsFromFrame(frame: Frame): Promise<PostContentStats> {
   }, [...CONTENT_ROOT_SELECTORS]);
 }
 
-async function waitForPostContent(frame: Frame): Promise<void> {
-  await frame.waitForLoadState('domcontentloaded', { timeout: BLOG_CHECK_FRAME_TIMEOUT_MS }).catch(() => {});
-  await frame.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {});
-  await frame.waitForSelector(CONTENT_SELECTOR, { timeout: BLOG_CHECK_FRAME_TIMEOUT_MS }).catch(() => {});
-  await frame
-    .waitForFunction(
-      ({ selectors, minChars }) => {
-        for (const sel of selectors) {
-          const el = document.querySelector(sel);
-          const len = (el?.textContent ?? '').replace(/\s+/g, ' ').trim().length ?? 0;
-          if (len >= minChars) return true;
-        }
-        return false;
-      },
-      { selectors: [...CONTENT_ROOT_SELECTORS], minChars: CONTENT_MIN_CHARS },
-      { timeout: BLOG_CHECK_FRAME_TIMEOUT_MS },
-    )
-    .catch(() => {});
-  await sleep(BLOG_CHECK_PAGE_SETTLE_MS);
-}
-
 async function resolveMainFrame(page: Page): Promise<Frame | null> {
   const frameElement = await page.$('iframe#mainFrame');
   if (!frameElement) return null;
@@ -171,8 +186,7 @@ async function resolveMainFrame(page: Page): Promise<Frame | null> {
   return frame;
 }
 
-async function scrapeFromFrameOrPage(page: Page, frame?: Frame | null): Promise<PostContentStats> {
-  if (frame) return scrapeStatsFromFrame(frame);
+async function scrapeFromPage(page: Page): Promise<PostContentStats> {
   await waitForPostContent(page.mainFrame());
   return scrapeStatsFromFrame(page.mainFrame());
 }
@@ -184,8 +198,18 @@ async function navigateAndScrape(page: Page, url: string, blogId: string): Promi
     throw new BlogCheckCaptchaError(blogId);
   }
 
-  const frame = (await page.$('iframe#mainFrame')) ? await resolveMainFrame(page) : null;
-  return scrapeFromFrameOrPage(page, frame);
+  let stats = await scrapeFromPage(page);
+  if (stats.char_count >= CONTENT_MIN_CHARS) return stats;
+
+  if (await page.$('iframe#mainFrame')) {
+    const frame = await resolveMainFrame(page);
+    if (frame) {
+      const frameStats = await scrapeStatsFromFrame(frame);
+      if (frameStats.char_count >= stats.char_count) stats = frameStats;
+    }
+  }
+
+  return stats;
 }
 
 const EMPTY_STATS: PostContentStats = {
@@ -203,8 +227,8 @@ const EMPTY_STATS: PostContentStats = {
 };
 
 /**
- * m.blog PostView → m.blog permalink → PC permalink mainFrame → PostView mainFrame
- * method: 'mblog-postview' | 'mblog-permalink' | 'desktop-permalink-mainFrame' | 'desktop-postview-mainFrame'
+ * m.blog PostView → m.blog permalink → PC permalink(mainFrame) → PostView(mainFrame)
+ * blai 등은 blog.naver.com/PostView.naver 직접 파싱 — HUMA는 m.blog 모바일 우선
  */
 export async function scrapePostContentStats(
   page: Page,

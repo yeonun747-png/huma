@@ -36,4 +36,10 @@ describe('findPostRankInHrefs', () => {
     expect(findPostRankInHrefs(hrefs, '111111111111')).toBe(1);
     expect(findPostRankInHrefs(hrefs, '222222222222')).not.toBe(1);
   });
+
+  it('finds rank beyond page 1 for weak tier', () => {
+    const long = Array.from({ length: 14 }, (_, i) => `https://blog.naver.com/other/${100000 + i}`);
+    long.push('https://blog.naver.com/foo/999999999999');
+    expect(findPostRankInHrefs(long, '999999999999')).toBe(15);
+  });
 });

@@ -5,7 +5,7 @@ export interface PostRankResult {
   rank: number | null;
 }
 
-/** 제목 검색 순위 → 노출 등급 (1페이지 내) */
+/** 제목 검색 순위 → 노출 등급 (1~30위) */
 export function rankToExposureStatus(rank: number): PostExposureStatus {
   if (rank <= 3) return 'strong';
   if (rank <= 10) return 'good';

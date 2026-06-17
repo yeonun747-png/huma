@@ -380,7 +380,7 @@ export function BlogCheckView() {
         <span className="bc-legend-label">등급</span>
         <span className="bc-exposure strong">강함 · 1~3위</span>
         <span className="bc-exposure good">양호 · 4~10위</span>
-        <span className="bc-exposure weak">약함 · 11위~</span>
+        <span className="bc-exposure weak">약함 · 11~30위</span>
         <span className="bc-exposure collect">수집 · site: 검색</span>
         <span className="bc-exposure miss">누락 · 미수집</span>
       </div>

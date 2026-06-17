@@ -26,13 +26,18 @@ export function postNoFromBlogHref(href: string): string | null {
 
 export const BLOG_SEARCH_PAGE_SIZE = 10;
 
-/** 1페이지(기본 10건) 내 포스트 순위 — 없으면 null */
+/** blai 등 — 제목 검색 3페이지(최대 30건)까지 약함(11~30위) 판정 */
+export const BLOG_SEARCH_RANK_PAGES = 3;
+
+export const BLOG_SEARCH_MAX_RANK = BLOG_SEARCH_PAGE_SIZE * BLOG_SEARCH_RANK_PAGES;
+
+/** 제목 검색 순위(1~maxRank) — 없으면 null */
 export function findPostRankInHrefs(
   hrefs: string[],
   postNo: string,
-  pageSize = BLOG_SEARCH_PAGE_SIZE,
+  maxRank = BLOG_SEARCH_MAX_RANK,
 ): number | null {
-  const limit = Math.min(hrefs.length, pageSize);
+  const limit = Math.min(hrefs.length, maxRank);
   for (let i = 0; i < limit; i++) {
     if (postNoFromBlogHref(hrefs[i]) === postNo) return i + 1;
   }

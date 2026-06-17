@@ -10,7 +10,12 @@ import {
   BLOG_CHECK_SCAN_DELAY_MIN_MS,
 } from './constants.js';
 import { rankToExposureStatus, type PostRankResult } from './exposure-status.js';
-import { findPostRankInHrefs, BLOG_SEARCH_PAGE_SIZE } from './exposure-rank.js';
+import {
+  findPostRankInHrefs,
+  postNoFromBlogHref,
+  BLOG_SEARCH_PAGE_SIZE,
+  BLOG_SEARCH_RANK_PAGES,
+} from './exposure-rank.js';
 import { extractBlogIdFromUrl, extractPostNoFromUrl } from './blog-url.js';
 
 export class BlogCheckCaptchaError extends Error {
@@ -112,7 +117,7 @@ export async function checkPostIndexedBySite(
 }
 
 /**
- * ssc=tab.blog.all 관련도순 — 결과 블록당 포스트 1건, DOM 순서 유지
+ * ssc=tab.blog.all 관련도순 — 결과 블록당 포스트 1건, DOM 순서 유지 (페이지당 최대 10건)
  */
 async function collectBlogSearchResultHrefs(page: Page): Promise<string[]> {
   return page.evaluate(() => {
@@ -203,8 +208,43 @@ async function collectBlogSearchResultHrefs(page: Page): Promise<string[]> {
   });
 }
 
+/** 제목 검색 1~3페이지(최대 30건) href — blai 약함(11~30위) 판정용 */
+async function collectTitleSearchHrefs(page: Page, query: string): Promise<string[]> {
+  const merged: string[] = [];
+  const seenPost = new Set<string>();
+
+  for (let pageIdx = 0; pageIdx < BLOG_SEARCH_RANK_PAGES; pageIdx++) {
+    const start = pageIdx * BLOG_SEARCH_PAGE_SIZE + 1;
+    await page.goto(blogTabAllSearchUrl(query, start), { waitUntil: 'domcontentloaded' });
+    await page
+      .locator('#main_pack, .view_wrap, .total_wrap, .api_subject_bx')
+      .first()
+      .waitFor({ state: 'attached', timeout: 8000 })
+      .catch(() => {});
+    await sleep(BLOG_CHECK_PAGE_SETTLE_MS);
+
+    if (await detectBlogCheckCaptcha(page)) {
+      throw new BlogCheckCaptchaError('');
+    }
+
+    const pageHrefs = await collectBlogSearchResultHrefs(page);
+    if (pageHrefs.length === 0) break;
+
+    for (const href of pageHrefs) {
+      const postNo = postNoFromBlogHref(href);
+      if (!postNo || seenPost.has(postNo)) continue;
+      seenPost.add(postNo);
+      merged.push(href);
+    }
+
+    if (pageHrefs.length < BLOG_SEARCH_PAGE_SIZE) break;
+  }
+
+  return merged;
+}
+
 /**
- * 제목 · ssc=tab.blog.all 관련도순 1페이지 순위(포스트번호) → 미등장 시 site: 폴백
+ * 제목 · ssc=tab.blog.all 관련도순 3페이지(30건) 순위(포스트번호) → 미등장 시 site: 폴백
  * method: 'blog-tab-all-title-search' + 'site-url-fallback'
  */
 export async function checkPostExposure(
@@ -219,20 +259,17 @@ export async function checkPostExposure(
     return { status: indexed ? 'collect' : 'miss', rank: null };
   }
 
-  await page.goto(blogTabAllSearchUrl(query), { waitUntil: 'domcontentloaded' });
-  await page
-    .locator('#main_pack, .view_wrap, .total_wrap, .api_subject_bx')
-    .first()
-    .waitFor({ state: 'attached', timeout: 8000 })
-    .catch(() => {});
-  await sleep(BLOG_CHECK_PAGE_SETTLE_MS);
-
-  if (await detectBlogCheckCaptcha(page)) {
-    throw new BlogCheckCaptchaError(blogId);
+  let hrefs: string[];
+  try {
+    hrefs = await collectTitleSearchHrefs(page, query);
+  } catch (err) {
+    if (err instanceof BlogCheckCaptchaError) {
+      throw new BlogCheckCaptchaError(blogId);
+    }
+    throw err;
   }
 
-  const hrefs = await collectBlogSearchResultHrefs(page);
-  const rank = findPostRankInHrefs(hrefs, postNo, BLOG_SEARCH_PAGE_SIZE);
+  const rank = findPostRankInHrefs(hrefs, postNo);
 
   if (rank != null) {
     return { status: rankToExposureStatus(rank), rank };
