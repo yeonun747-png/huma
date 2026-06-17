@@ -135,6 +135,8 @@ export function AccountsView() {
   const [error, setError] = useState('');
   const [editingAccount, setEditingAccount] = useState<HumaAccount | null>(null);
   const [editBlogUrl, setEditBlogUrl] = useState('');
+  const [editNaverId, setEditNaverId] = useState('');
+  const [editNaverPw, setEditNaverPw] = useState('');
   const [editSaving, setEditSaving] = useState(false);
   const [personaAccount, setPersonaAccount] = useState<HumaAccount | null>(null);
   const [personaSaving, setPersonaSaving] = useState(false);
@@ -142,8 +144,8 @@ export function AccountsView() {
 
   const postingColumns = useMemo(() => visiblePostingColumns(admin), [admin]);
 
-  const load = useCallback(() => {
-    Promise.all([api.accounts(), api.platformAccounts()])
+  const load = useCallback((opts?: { force?: boolean }) => {
+    Promise.all([api.accounts(opts), api.platformAccounts()])
       .then(([a, p]) => {
         setAccounts(a);
         setPlatforms(p);
@@ -249,7 +251,7 @@ export function AccountsView() {
         });
       }
       setShowForm(false);
-      load();
+      load({ force: true });
     } catch (e) {
       alertAccountError(e, { naverId: form.naver_id, platform: form.platform });
     } finally {
@@ -260,16 +262,24 @@ export function AccountsView() {
   const handleStartEditPosting = (ac: HumaAccount) => {
     setEditingAccount(ac);
     setEditBlogUrl(ac.blog_url ?? '');
+    setEditNaverId(ac.naver_id ?? '');
+    setEditNaverPw('');
     setError('');
   };
 
   const handleCancelEdit = () => {
     setEditingAccount(null);
     setEditBlogUrl('');
+    setEditNaverId('');
+    setEditNaverPw('');
   };
 
   const handleSaveEdit = async () => {
     if (!editingAccount) return;
+    if (!editNaverId.trim()) {
+      setError('네이버 ID는 필수입니다.');
+      return;
+    }
     if (!editBlogUrl.trim()) {
       setError('포스팅 계정은 블로그 URL이 필수입니다.');
       return;
@@ -277,10 +287,18 @@ export function AccountsView() {
     setEditSaving(true);
     setError('');
     try {
-      await api.updateAccount(editingAccount.id, { blog_url: editBlogUrl.trim() });
+      const body: Record<string, unknown> = {
+        blog_url: editBlogUrl.trim(),
+        naver_id: editNaverId.trim(),
+      };
+      if (editNaverPw.trim()) {
+        body.naver_pw = editNaverPw;
+      }
+      await api.updateAccount(editingAccount.id, body);
       handleCancelEdit();
-      load();
+      load({ force: true });
     } catch (e) {
+      alertAccountError(e, { naverId: editNaverId.trim() });
       setError(e instanceof Error ? e.message : '수정 실패');
     } finally {
       setEditSaving(false);
@@ -546,9 +564,24 @@ export function AccountsView() {
       {editingAccount && (
         <div className="m-panel mb-3 space-y-2">
           <div className="text-[12px] font-semibold text-huma-t">
-            블로그 URL 수정 · {editingAccount.name}
+            포스팅 계정 수정 · {editingAccount.name}
           </div>
           <div className="accounts-form-row">
+            <input
+              placeholder="네이버 ID"
+              value={editNaverId}
+              onChange={(e) => setEditNaverId(e.target.value)}
+              className="m-model-select w-full"
+              autoComplete="username"
+            />
+            <input
+              type="password"
+              placeholder="비밀번호 (변경 시에만 입력)"
+              value={editNaverPw}
+              onChange={(e) => setEditNaverPw(e.target.value)}
+              className="m-model-select w-full"
+              autoComplete="new-password"
+            />
             <input
               placeholder="https://blog.naver.com/..."
               value={editBlogUrl}
@@ -562,6 +595,9 @@ export function AccountsView() {
               취소
             </button>
           </div>
+          <p className="font-mono text-[10.5px] text-huma-t3">
+            비밀번호를 비우면 기존 비밀번호가 유지됩니다.
+          </p>
           {!editingAccount.blog_url && (
             <p className="font-mono text-[10.5px] text-huma-warn">블로그 URL 미등록 — 발행 job에 필요합니다.</p>
           )}

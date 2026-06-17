@@ -298,6 +298,13 @@ export async function registerAccountRoutes(app: FastifyInstance) {
 
     if (body.is_active !== undefined) patch.is_active = body.is_active;
     if (typeof body.name === 'string') patch.name = body.name.trim();
+    if (typeof body.naver_id === 'string') {
+      const naverId = body.naver_id.trim();
+      if (!naverId) {
+        return reply.code(400).send({ error: '네이버 ID는 비울 수 없습니다' });
+      }
+      patch.naver_id = naverId;
+    }
     if (body.wpm !== undefined) patch.wpm = body.wpm;
     if (body.health_score !== undefined) patch.health_score = body.health_score;
     if (body.blog_index !== undefined) patch.blog_index = body.blog_index;

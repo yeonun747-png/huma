@@ -302,9 +302,20 @@ export const api = {
   accounts: (opts?: { force?: boolean }) =>
     cachedFetch('accounts', 15_000, () => request<HumaAccount[]>('/api/accounts'), opts),
   createAccount: (body: Record<string, unknown>) =>
-    request('/api/accounts', { method: 'POST', body: JSON.stringify(body) }),
+    request('/api/accounts', { method: 'POST', body: JSON.stringify(body) }).then((r) => {
+      invalidateApiCache('accounts');
+      return r;
+    }),
   updateAccount: (id: string, body: Record<string, unknown>) =>
-    request(`/api/accounts/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    request(`/api/accounts/${id}`, { method: 'PATCH', body: JSON.stringify(body) }).then((r) => {
+      invalidateApiCache('accounts');
+      return r;
+    }),
+  deleteAccount: (id: string) =>
+    request(`/api/accounts/${id}`, { method: 'DELETE' }).then((r) => {
+      invalidateApiCache('accounts');
+      return r;
+    }),
   updateAccountBlogPersona: async (
     id: string,
     text: string,
@@ -334,7 +345,6 @@ export const api = {
       });
     }
   },
-  deleteAccount: (id: string) => request(`/api/accounts/${id}`, { method: 'DELETE' }),
   accountLogs: (id: string) => request(`/api/accounts/${id}/logs`),
   modems: (opts?: { probe?: boolean; slots?: number[]; timeoutMs?: number; force?: boolean }) => {
     const path = `/api/modems${qs({

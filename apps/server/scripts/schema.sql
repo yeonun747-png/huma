@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS huma_modems (
 CREATE TABLE IF NOT EXISTS huma_accounts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name VARCHAR(100) NOT NULL,
-  naver_id VARCHAR(100) NOT NULL UNIQUE,
+  naver_id VARCHAR(100) NOT NULL,
   naver_pw_enc TEXT NOT NULL,
   blog_url VARCHAR(200),
   workspace VARCHAR(20) NOT NULL,
