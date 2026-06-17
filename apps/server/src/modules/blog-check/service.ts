@@ -16,6 +16,7 @@ import { BLOG_CHECK_ACCOUNT_GAP_MS, BLOG_CHECK_POST_LIMIT } from './constants.js
 import { computeBlogIndexScore, scrapeBlogStats } from './index-score.js';
 import { scrapePostContentStats } from './post-content-scraper.js';
 import type { PostExposureStatus } from './exposure-status.js';
+import { rankToExposureStatus } from './exposure-status.js';
 import { notifyBlogCheckCaptcha, notifyBlogCheckIndexParseFailed } from './notify.js';
 import {
   acquireBlogCheckScanLock,
@@ -426,6 +427,17 @@ async function fetchRecentPosts(
     .slice(0, POST_LIMIT);
 }
 
+function resolveExposureStatusFromRow(row: StatusRow): PostExposureStatus {
+  const rank = row.rank != null ? Number(row.rank) : null;
+  if (rank != null && rank > 0) return rankToExposureStatus(rank);
+
+  const raw = String(row.status);
+  if (raw === 'ok' || raw === 'good') return 'good';
+  if (raw === 'collect') return 'weak';
+  if (raw === 'strong' || raw === 'weak' || raw === 'miss') return raw;
+  return 'miss';
+}
+
 async function fetchLatestStatusByPostNo(accountId: string): Promise<Map<string, StatusRow>> {
   const { data, error } = await supabase
     .from('blog_post_status')
@@ -441,9 +453,7 @@ async function fetchLatestStatusByPostNo(accountId: string): Promise<Map<string,
   for (const row of data ?? []) {
     const postNo = String(row.post_no);
     if (!map.has(postNo)) {
-      const raw = String(row.status);
-      const status: PostExposureStatus =
-        raw === 'ok' ? 'good' : (raw as PostExposureStatus);
+      const status = resolveExposureStatusFromRow(row as StatusRow);
       map.set(postNo, { ...(row as StatusRow), status });
     }
   }
@@ -609,6 +619,11 @@ async function scanAccountWorkItem(
             ? mergePostContentStats(fromPost, crawled)
             : crawled;
       const rankResult = await checkPostExposure(page, blogId, postNo, title);
+      // rank 기준 status가 DB·UI와 항상 일치하도록 rank 우선
+      const exposure = {
+        status: rankResult.rank != null ? rankToExposureStatus(rankResult.rank) : rankResult.status,
+        rank: rankResult.rank,
+      };
 
       const { error: insErr } = await supabase.from('blog_post_status').insert({
         account_id: acc.id,
@@ -616,7 +631,7 @@ async function scanAccountWorkItem(
         post_no: postNo,
         title: post.title,
         scanned_at: scanDate,
-        ...statusInsertPayload(contentStats, rankResult, post.ext_link_cleared),
+        ...statusInsertPayload(contentStats, exposure, post.ext_link_cleared),
       });
 
       if (insErr) throw new Error(`blog_post_status insert 실패: ${insErr.message}`);
@@ -870,18 +885,17 @@ export async function buildBlogCheckPostsResponse(accountId: string) {
     posts: posts.map((post) => {
       const postNo = post.post_no ?? extractPostNoFromUrl(post.post_url) ?? '';
       const st = postNo ? statusMap.get(postNo) : undefined;
-      const fromPost = statsFromDbRow(post as unknown as Record<string, unknown>, workspace);
-      const fromStatus = st ? statsFromStatusRow(st, post.ext_link_cleared) : null;
-      const stats = fromStatus
-        ? mergePostContentStats(fromPost, fromStatus)
-        : fromPost;
+      const stats = st
+        ? statsFromStatusRow(st, post.ext_link_cleared)
+        : statsFromDbRow(post as unknown as Record<string, unknown>, workspace);
+      const displayStatus = st ? resolveExposureStatusFromRow(st) : null;
 
       return {
         post_url: post.post_url,
         post_no: postNo || null,
         title: post.title ?? '—',
         published_at: post.published_at,
-        status: st?.status ?? null,
+        status: displayStatus,
         rank: st?.rank ?? null,
         chars: stats.char_count,
         img_count: stats.img_count,
