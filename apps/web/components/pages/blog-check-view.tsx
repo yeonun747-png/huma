@@ -84,6 +84,12 @@ export function BlogCheckView() {
   const [filter, setFilter] = useState<'all' | 'strong' | 'good' | 'weak' | 'miss'>('all');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scanningAccountIdRef = useRef<string | null>(null);
+  const lastScannedAccountRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    scanningAccountIdRef.current = scanningAccountId;
+  }, [scanningAccountId]);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -133,18 +139,29 @@ export function BlogCheckView() {
     }
     pollRef.current = setInterval(() => {
       void loadAccounts().then((data) => {
+        if (data?.scanning && data.scanProgress?.accountId) {
+          lastScannedAccountRef.current = data.scanProgress.accountId;
+        }
         if (data && !data.scanning) {
           setScanning(false);
-          setScanningAccountId(null);
           setScanProgress(null);
-          if (curAcc) void loadPosts(curAcc);
+          const finishedAccountId =
+            scanningAccountIdRef.current ??
+            lastScannedAccountRef.current ??
+            null;
+          setScanningAccountId(null);
+          scanningAccountIdRef.current = null;
+          if (finishedAccountId) {
+            setCurAcc(finishedAccountId);
+            void loadPosts(finishedAccountId);
+          }
         }
       });
     }, 1000);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [scanning, loadAccounts, curAcc, loadPosts]);
+  }, [scanning, loadAccounts, loadPosts]);
 
   useEffect(
     () => () => {
@@ -182,6 +199,9 @@ export function BlogCheckView() {
     try {
       setScanning(true);
       setScanningAccountId(accountId ?? null);
+      scanningAccountIdRef.current = accountId ?? null;
+      lastScannedAccountRef.current = accountId ?? null;
+      if (accountId) setCurAcc(accountId);
       setScanProgress({
         accountId: accountId ?? null,
         accountLabel: null,
@@ -195,6 +215,7 @@ export function BlogCheckView() {
     } catch (e) {
       setScanning(false);
       setScanningAccountId(null);
+      scanningAccountIdRef.current = null;
       setScanProgress(null);
       const msg = (e as Error).message;
       if (msg.includes('스캔이 이미')) {
@@ -284,6 +305,7 @@ export function BlogCheckView() {
                   disabled={scanning}
                   onClick={(e) => {
                     e.stopPropagation();
+                    setCurAcc(a.account_id);
                     void startScan(a.account_id);
                   }}
                 >
