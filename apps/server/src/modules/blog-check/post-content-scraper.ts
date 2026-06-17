@@ -1,6 +1,6 @@
 import type { Frame, Page } from 'playwright';
 import { sleep } from '../../lib/utils.js';
-import { mobilePostPermalink, mobilePostViewUrl } from './blog-url.js';
+import { mobilePostViewUrl } from './blog-url.js';
 import {
   BLOG_CHECK_FRAME_TIMEOUT_MS,
   BLOG_CHECK_PAGE_SETTLE_MS,
@@ -244,7 +244,6 @@ const SCRAPE_STATS_FN = ({
 
 async function waitForPostContent(frame: Frame): Promise<void> {
   await frame.waitForLoadState('domcontentloaded', { timeout: BLOG_CHECK_FRAME_TIMEOUT_MS }).catch(() => {});
-  await frame.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {});
   await frame.waitForSelector(CONTENT_SELECTOR, { timeout: BLOG_CHECK_FRAME_TIMEOUT_MS }).catch(() => {});
   await frame
     .waitForFunction(
@@ -262,7 +261,7 @@ async function waitForPostContent(frame: Frame): Promise<void> {
         return false;
       },
       { rootSelectors: [...CONTENT_ROOT_SELECTORS], minChars: CONTENT_MIN_CHARS },
-      { timeout: BLOG_CHECK_FRAME_TIMEOUT_MS },
+      { timeout: 4_000 },
     )
     .catch(() => {});
   await sleep(BLOG_CHECK_PAGE_SETTLE_MS);
@@ -341,9 +340,7 @@ export async function scrapePostContentStats(
 ): Promise<PostContentStats> {
   const strategies = [
     mobilePostViewUrl(blogId, postNo),
-    mobilePostPermalink(blogId, postNo),
     `https://blog.naver.com/PostView.naver?blogId=${encodeURIComponent(blogId)}&logNo=${encodeURIComponent(postNo)}`,
-    `https://blog.naver.com/${encodeURIComponent(blogId)}/${encodeURIComponent(postNo)}`,
   ];
 
   let best = EMPTY_STATS;
@@ -351,6 +348,7 @@ export async function scrapePostContentStats(
   for (const url of strategies) {
     const stats = await navigateAndScrape(page, url, blogId, postNo);
     if (statsQuality(stats) > statsQuality(best)) best = stats;
+    if (best.char_count >= CONTENT_MIN_CHARS) return best;
   }
 
   return best;

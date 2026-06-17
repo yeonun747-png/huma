@@ -613,6 +613,7 @@ async function scanAccountWorkItem(
     const title = post.title?.trim() || '—';
 
     try {
+      const rankResult = await checkPostExposure(page, blogId, postNo, title);
       const crawled = await scrapePostContentStats(page, blogId, postNo);
       const hasStoredContent = post.char_count > 0 || post.img_count > 0;
       const fromPost: PostContentStats = {
@@ -638,7 +639,6 @@ async function scanAccountWorkItem(
           : hasStoredContent
             ? mergePostContentStats(fromPost, crawled)
             : crawled;
-      const rankResult = await checkPostExposure(page, blogId, postNo, title);
       // rank 기준 status가 DB·UI와 항상 일치하도록 rank 우선
       const exposure = {
         status: rankResult.rank != null ? rankToExposureStatus(rankResult.rank) : rankResult.status,

@@ -8,6 +8,8 @@ import {
   BLOG_CHECK_PAGE_SETTLE_MS,
   BLOG_CHECK_SCAN_DELAY_MAX_MS,
   BLOG_CHECK_SCAN_DELAY_MIN_MS,
+  BLOG_CHECK_SEARCH_SETTLE_MS,
+  BLOG_CHECK_SEARCH_WAIT_MS,
 } from './constants.js';
 import { rankToExposureStatus, type PostRankResult } from './exposure-status.js';
 import {
@@ -32,8 +34,8 @@ export function randomScanDelayMs(): number {
 }
 
 export async function setupBlogCheckPage(page: Page): Promise<void> {
-  page.setDefaultTimeout(18_000);
-  page.setDefaultNavigationTimeout(18_000);
+  page.setDefaultTimeout(12_000);
+  page.setDefaultNavigationTimeout(12_000);
   await page.route('**/*', (route) => {
     const type = route.request().resourceType();
     if (type === 'image' || type === 'media' || type === 'font') {
@@ -95,8 +97,7 @@ export async function checkPostIndexedBySite(
   const query = `site:blog.naver.com/${blogId}/${postNo}`;
   const url = `https://search.naver.com/search.naver?where=nexearch&sm=top_hty&query=${encodeURIComponent(query)}`;
   await page.goto(url, { waitUntil: 'domcontentloaded' });
-  await page.locator('#main_pack, body').first().waitFor({ state: 'attached', timeout: 6000 }).catch(() => {});
-  await sleep(BLOG_CHECK_PAGE_SETTLE_MS);
+  await sleep(BLOG_CHECK_SEARCH_SETTLE_MS);
 
   if (await detectBlogCheckCaptcha(page)) {
     throw new BlogCheckCaptchaError(blogId);
@@ -210,8 +211,13 @@ async function collectBlogSearchResultHrefs(page: Page): Promise<string[]> {
   });
 }
 
-/** 제목 검색 1~3페이지(최대 30건) href — blai 약함(11~30위) 판정용 */
-async function collectTitleSearchHrefs(page: Page, query: string): Promise<string[]> {
+/** 제목 검색 1~3페이지 — 해당 포스트 순위 확정 시 조기 종료 */
+async function collectTitleSearchHrefs(
+  page: Page,
+  query: string,
+  blogId: string,
+  postNo: string,
+): Promise<string[]> {
   const merged: string[] = [];
   const seenPost = new Set<string>();
 
@@ -221,9 +227,9 @@ async function collectTitleSearchHrefs(page: Page, query: string): Promise<strin
     await page
       .locator('#main_pack, .view_wrap, .total_wrap, .api_subject_bx')
       .first()
-      .waitFor({ state: 'attached', timeout: 8000 })
+      .waitFor({ state: 'attached', timeout: BLOG_CHECK_SEARCH_WAIT_MS })
       .catch(() => {});
-    await sleep(BLOG_CHECK_PAGE_SETTLE_MS);
+    await sleep(BLOG_CHECK_SEARCH_SETTLE_MS);
 
     if (await detectBlogCheckCaptcha(page)) {
       throw new BlogCheckCaptchaError('');
@@ -233,10 +239,14 @@ async function collectTitleSearchHrefs(page: Page, query: string): Promise<strin
     if (pageHrefs.length === 0) break;
 
     for (const href of pageHrefs) {
-      const postNo = postNoFromBlogHref(href);
-      if (!postNo || seenPost.has(postNo)) continue;
-      seenPost.add(postNo);
+      const hrefPostNo = postNoFromBlogHref(href);
+      if (!hrefPostNo || seenPost.has(hrefPostNo)) continue;
+      seenPost.add(hrefPostNo);
       merged.push(href);
+    }
+
+    if (findPostRankInHrefs(merged, blogId, postNo) != null) {
+      return merged;
     }
 
     if (pageHrefs.length < BLOG_SEARCH_PAGE_SIZE) break;
@@ -263,7 +273,7 @@ export async function checkPostExposure(
 
   let hrefs: string[];
   try {
-    hrefs = await collectTitleSearchHrefs(page, query);
+    hrefs = await collectTitleSearchHrefs(page, query, blogId, postNo);
   } catch (err) {
     if (err instanceof BlogCheckCaptchaError) {
       throw new BlogCheckCaptchaError(blogId);
