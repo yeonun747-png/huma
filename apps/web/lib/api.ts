@@ -699,6 +699,7 @@ export const api = {
         strong_count: number;
         good_count: number;
         weak_count: number;
+        collect_count: number;
         miss_count: number;
         miss_rate: number;
         trend: (number | null)[];
@@ -723,7 +724,7 @@ export const api = {
         post_no: string | null;
         title: string;
         published_at: string;
-        status: 'strong' | 'good' | 'weak' | 'miss' | null;
+        status: 'strong' | 'good' | 'weak' | 'collect' | 'miss' | null;
         rank: number | null;
         chars: number;
         img_count: number;

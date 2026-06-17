@@ -55,6 +55,7 @@ function exposureBadge(status: BcPost['status']): { cls: string; text: string } 
   if (status === 'strong') return { cls: 'strong', text: '강함' };
   if (status === 'good') return { cls: 'good', text: '양호' };
   if (status === 'weak') return { cls: 'weak', text: '약함' };
+  if (status === 'collect') return { cls: 'collect', text: '수집' };
   return { cls: 'miss', text: '누락' };
 }
 
@@ -81,7 +82,7 @@ export function BlogCheckView() {
   const [toast, setToast] = useState<string | null>(null);
   const [curAcc, setCurAcc] = useState<string | null>(null);
   const [posts, setPosts] = useState<BcPost[]>([]);
-  const [filter, setFilter] = useState<'all' | 'strong' | 'good' | 'weak' | 'miss'>('all');
+  const [filter, setFilter] = useState<'all' | 'strong' | 'good' | 'weak' | 'collect' | 'miss'>('all');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -380,15 +381,16 @@ export function BlogCheckView() {
         <span className="bc-exposure strong">강함 · 1~3위</span>
         <span className="bc-exposure good">양호 · 4~10위</span>
         <span className="bc-exposure weak">약함 · 11위~</span>
-        <span className="bc-exposure miss">누락 · 미등장</span>
+        <span className="bc-exposure collect">수집 · site: 검색</span>
+        <span className="bc-exposure miss">누락 · 미수집</span>
       </div>
 
       <div className="bcp-wrap">
         <div className="bcp-header">
           <div className="bcp-title">
             {selectedAcc
-              ? `${selectedAcc.label}  —  최근 ${posts.length}건 (최대 10건) · 누락 ${posts.filter((p) => p.status === 'miss').length}건`
-              : '← 계정 카드를 선택하면 최근 발행 10건이 표시됩니다'}
+              ? `${selectedAcc.label}  —  최근 ${posts.length}건 (최대 15건) · 누락 ${posts.filter((p) => p.status === 'miss').length}건`
+              : '← 계정 카드를 선택하면 최근 발행 15건이 표시됩니다'}
           </div>
           <div className="bcp-filter">
             {(
@@ -397,6 +399,7 @@ export function BlogCheckView() {
                 ['strong', '강함'],
                 ['good', '양호'],
                 ['weak', '약함'],
+                ['collect', '수집'],
                 ['miss', '누락'],
               ] as const
             ).map(([f, label]) => (

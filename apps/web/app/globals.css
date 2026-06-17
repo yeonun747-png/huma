@@ -1441,6 +1441,7 @@
 .blog-check-view .bc-exposure.strong { background: var(--ok); color: #fff; }
 .blog-check-view .bc-exposure.good { background: rgba(120, 210, 100, 0.35); color: #7fd97a; }
 .blog-check-view .bc-exposure.weak { background: var(--warn-bg); color: var(--warn); }
+.blog-check-view .bc-exposure.collect { background: rgba(168, 168, 168, 0.1); color: #a8a8a8; }
 .blog-check-view .bc-exposure.miss { background: #111; color: #fff; }
 .blog-check-view .bc-exposure.none { background: var(--bg3); color: var(--t4); }
 .blog-check-view .bc-legend {

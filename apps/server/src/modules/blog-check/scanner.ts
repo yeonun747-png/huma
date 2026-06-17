@@ -55,16 +55,53 @@ export async function detectBlogCheckCaptcha(page: Page): Promise<boolean> {
 }
 
 /**
- * 포스트 제목으로 네이버 블로그 탭 검색 → 1페이지(10건) 순위 파악 (스펙 §2)
- * method: 'blog-tab-title-search'
+ * site:blog.naver.com/계정ID/포스트번호 — 검색 결과에 URL 있으면 수집됨
+ * method: 'site-url-fallback'
  */
-export async function checkPostRankByTitle(
+export async function checkPostIndexedBySite(
   page: Page,
   blogId: string,
+  postNo: string,
+): Promise<boolean> {
+  const query = `site:blog.naver.com/${blogId}/${postNo}`;
+  const url = `https://search.naver.com/search.naver?where=nexearch&sm=top_hty&query=${encodeURIComponent(query)}`;
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  await sleep(600);
+
+  if (await detectBlogCheckCaptcha(page)) {
+    throw new BlogCheckCaptchaError(blogId);
+  }
+
+  const bodyText = await page.locator('body').innerText().catch(() => '');
+  if (/검색결과가 없습니다|에 대한 검색 결과가 없습니다|결과를 찾을 수 없/i.test(bodyText)) {
+    return false;
+  }
+
+  const hrefs = await page.locator('a[href*="blog.naver.com"]').evaluateAll((els) =>
+    els.map((el) => el.getAttribute('href') ?? ''),
+  );
+  if (hrefs.some((href) => href.includes(`/${postNo}`) || href.includes(`logNo=${postNo}`))) {
+    return true;
+  }
+
+  return /blog\.naver\.com/i.test(bodyText) && bodyText.includes(postNo);
+}
+
+/**
+ * 제목 블로그탭 1페이지 순위 → 미등장 시 site: URL 폴백
+ * method: 'blog-tab-title-search' + 'site-url-fallback'
+ */
+export async function checkPostExposure(
+  page: Page,
+  blogId: string,
+  postNo: string,
   title: string,
 ): Promise<PostRankResult> {
   const query = title.trim();
-  if (!query) return { status: 'miss', rank: null };
+  if (!query) {
+    const indexed = await checkPostIndexedBySite(page, blogId, postNo);
+    return { status: indexed ? 'collect' : 'miss', rank: null };
+  }
 
   const url = `https://search.naver.com/search.naver?ssc=tab.blog.all&query=${encodeURIComponent(query)}`;
   await page.goto(url, { waitUntil: 'domcontentloaded' });
@@ -110,7 +147,12 @@ export async function checkPostRankByTitle(
     return null;
   }, { blogId });
 
-  return { status: rankToExposureStatus(rank), rank };
+  if (rank != null) {
+    return { status: rankToExposureStatus(rank), rank };
+  }
+
+  const indexed = await checkPostIndexedBySite(page, blogId, postNo);
+  return { status: indexed ? 'collect' : 'miss', rank: null };
 }
 
 export function resolveBlogId(

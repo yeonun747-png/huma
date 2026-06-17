@@ -24,7 +24,7 @@ import {
 import { clearScanProgress, getScanProgress, setScanProgress, type BlogCheckScanProgress } from './scan-progress.js';
 import {
   BlogCheckCaptchaError,
-  checkPostRankByTitle,
+  checkPostExposure,
   detectBlogCheckCaptcha,
   randomScanDelayMs,
   resolveBlogId,
@@ -276,7 +276,7 @@ function mergePublishedAt(a: string, b: string): string {
   return tb > ta ? b : a;
 }
 
-/** published_at 내림차순 최근 10건 — 블로그 공개 목록 + huma_jobs/posts 병합 */
+/** published_at 내림차순 최근 15건 — 블로그 공개 목록 + huma_jobs/posts 병합 */
 async function fetchRecentPosts(
   accountId: string,
   opts?: { page?: Page; blogId?: string | null; refreshIfMissing?: boolean },
@@ -577,7 +577,7 @@ export async function runBlogCheckScan(accountId?: string): Promise<{
         const title = post.title?.trim() || '—';
 
         try {
-          const rankResult = await checkPostRankByTitle(page, blogId, title);
+          const rankResult = await checkPostExposure(page, blogId, postNo, title);
 
           const { error: insErr } = await supabase.from('blog_post_status').insert({
             account_id: acc.id,
@@ -685,6 +685,7 @@ export async function buildBlogCheckAccountsResponse(allowedWorkspaces: string[]
     let strongCount = 0;
     let goodCount = 0;
     let weakCount = 0;
+    let collectCount = 0;
     let missCount = 0;
     for (const post of recentPosts) {
       const postNo = post.post_no ?? extractPostNoFromUrl(post.post_url);
@@ -694,6 +695,7 @@ export async function buildBlogCheckAccountsResponse(allowedWorkspaces: string[]
       if (st.status === 'strong') strongCount += 1;
       else if (st.status === 'good') goodCount += 1;
       else if (st.status === 'weak') weakCount += 1;
+      else if (st.status === 'collect') collectCount += 1;
       else missCount += 1;
     }
 
@@ -719,6 +721,7 @@ export async function buildBlogCheckAccountsResponse(allowedWorkspaces: string[]
       strong_count: strongCount,
       good_count: goodCount,
       weak_count: weakCount,
+      collect_count: collectCount,
       miss_count: missCount,
       miss_rate: missRate,
       trend,
