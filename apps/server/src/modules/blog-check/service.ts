@@ -5,12 +5,24 @@ import { logOperation } from '../../lib/log-emitter.js';
 import { sleep } from '../../lib/utils.js';
 import { enqueueJob } from '../queue/producer.js';
 import {
+  type AdHocBlogCheckPost,
+  getAdHocBlogCheckCache,
+  setAdHocBlogCheckCache,
+} from './adhoc-scan.js';
+import {
   extractBlogIdFromUrl,
   extractPostNoFromUrl,
+  parseBlogCheckSearchQuery,
   postRowMergeKey,
   resolveExtLinkCount,
 } from './blog-url.js';
-import { getCachedBlogPostList, loadBlogPostList, refreshBlogPostListCache } from './blog-post-list.js';
+import {
+  getCachedBlogPostList,
+  loadBlogPostList,
+  refreshBlogPostListCache,
+  scrapeBlogPostListFromMobileApi,
+  type ScrapedBlogPost,
+} from './blog-post-list.js';
 import { emptyPostContentStats, mergePostContentStats, parsePostContentStats, type PostContentStats } from './content-stats.js';
 import {
   BLOG_CHECK_ACCOUNT_GAP_MS,
@@ -476,8 +488,18 @@ export interface BlogCheckScanOptions {
 
 export interface BlogCheckJobPayload {
   accountId?: string | null;
+  /** huma_accounts에 없는 블로그 — blogId로 최근 10건 ad-hoc 스캔 */
+  blogId?: string | null;
   mode?: BlogCheckScanMode | string | null;
   postNos?: string[] | null;
+}
+
+export interface BlogCheckLookupResult {
+  blogId: string;
+  registered: boolean;
+  accountId: string | null;
+  label: string | null;
+  svc: string | null;
 }
 
 export function normalizeBlogCheckScanMode(mode?: string | null): BlogCheckScanMode {
@@ -621,15 +643,57 @@ async function estimateTotalSteps(
   return total;
 }
 
-async function scanSinglePost(
+function scrapedBlogPostToRow(blogId: string, item: ScrapedBlogPost): PostRow {
+  const base = emptyPostContentStats();
+  return {
+    id: item.postUrl,
+    account_id: '',
+    post_url: item.postUrl,
+    post_no: item.postNo,
+    title: item.title,
+    published_at: item.publishedAt ?? new Date().toISOString(),
+    ext_link_cleared: false,
+    ...base,
+  };
+}
+
+function postRowToAdHocResult(
+  post: PostRow,
+  contentStats: PostContentStats,
+  exposure: { status: PostExposureStatus; rank: number | null },
+): AdHocBlogCheckPost {
+  const postNo = post.post_no ?? extractPostNoFromUrl(post.post_url);
+  return {
+    post_url: post.post_url,
+    post_no: postNo,
+    title: post.title ?? '—',
+    published_at: post.published_at,
+    status: exposure.status,
+    rank: exposure.rank,
+    chars: contentStats.char_count,
+    img_count: contentStats.img_count,
+    video_count: contentStats.video_count,
+    quote_count: contentStats.quote_count,
+    comment_count: contentStats.comment_count,
+    like_count: contentStats.like_count,
+    gif_count: contentStats.gif_count,
+    map_count: contentStats.map_count,
+    hidden_count: contentStats.hidden_count,
+    int_link_count: contentStats.int_link_count,
+    ext_link_count: contentStats.ext_link_count,
+  };
+}
+
+async function computePostScanResult(
   page: Page,
-  acc: AccountRow,
   blogId: string,
   post: PostRow,
-  scanDate: string,
-): Promise<boolean> {
+): Promise<{
+  contentStats: PostContentStats;
+  exposure: { status: PostExposureStatus; rank: number | null };
+}> {
   const postNo = post.post_no ?? extractPostNoFromUrl(post.post_url);
-  if (!postNo) return false;
+  if (!postNo) throw new Error('post_no 없음');
 
   const title = post.title?.trim() || '—';
   const crawled = await scrapePostContentStats(page, blogId, postNo);
@@ -661,6 +725,20 @@ async function scanSinglePost(
     status: rankResult.rank != null ? rankToExposureStatus(rankResult.rank) : rankResult.status,
     rank: rankResult.rank,
   };
+  return { contentStats, exposure };
+}
+
+async function scanSinglePost(
+  page: Page,
+  acc: AccountRow,
+  blogId: string,
+  post: PostRow,
+  scanDate: string,
+): Promise<boolean> {
+  const postNo = post.post_no ?? extractPostNoFromUrl(post.post_url);
+  if (!postNo) return false;
+
+  const { contentStats, exposure } = await computePostScanResult(page, blogId, post);
 
   const { error: insErr } = await supabase.from('blog_post_status').insert({
     account_id: acc.id,
@@ -674,6 +752,17 @@ async function scanSinglePost(
   if (insErr) throw new Error(`blog_post_status insert 실패: ${insErr.message}`);
   await persistCrawledPostStats(acc.id, post, contentStats);
   return true;
+}
+
+async function scanSinglePostAdHoc(
+  page: Page,
+  blogId: string,
+  post: PostRow,
+): Promise<AdHocBlogCheckPost | null> {
+  const postNo = post.post_no ?? extractPostNoFromUrl(post.post_url);
+  if (!postNo) return null;
+  const { contentStats, exposure } = await computePostScanResult(page, blogId, post);
+  return postRowToAdHocResult(post, contentStats, exposure);
 }
 
 async function createPostScanWorkerPages(primary: Page, poolSize: number): Promise<Page[]> {
@@ -835,6 +924,235 @@ async function scanAccountWorkItem(
   return { scannedPosts, aborted: accountAborted };
 }
 
+export async function findBlogCheckAccountByQuery(
+  query: string,
+  allowedWorkspaces: string[],
+): Promise<{ account: AccountRow; blogId: string } | null> {
+  const parsedBlogId = parseBlogCheckSearchQuery(query);
+  const q = query.trim().toLowerCase();
+  if (!q && !parsedBlogId) return null;
+
+  const accounts = (await listActivePostingAccounts()).filter((a) =>
+    allowedWorkspaces.includes(a.workspace),
+  );
+
+  if (parsedBlogId) {
+    const exact = accounts.find((acc) => {
+      const bid = resolveBlogId(acc.blog_url, acc.naver_id);
+      return bid?.toLowerCase() === parsedBlogId.toLowerCase();
+    });
+    if (exact) {
+      return { account: exact, blogId: resolveBlogId(exact.blog_url, exact.naver_id)! };
+    }
+  }
+
+  const byNaverId = accounts.find((acc) => acc.naver_id?.toLowerCase() === q);
+  if (byNaverId) {
+    const blogId = resolveBlogId(byNaverId.blog_url, byNaverId.naver_id);
+    if (blogId) return { account: byNaverId, blogId };
+  }
+
+  const byLabel = accounts.find((acc) => {
+    const label = (acc.name || acc.slot_label || '').toLowerCase();
+    return label && label.includes(q);
+  });
+  if (byLabel) {
+    const blogId = resolveBlogId(byLabel.blog_url, byLabel.naver_id);
+    if (blogId) return { account: byLabel, blogId };
+  }
+
+  return null;
+}
+
+export async function resolveBlogCheckLookup(
+  query: string,
+  allowedWorkspaces: string[],
+): Promise<BlogCheckLookupResult | null> {
+  const blogId = parseBlogCheckSearchQuery(query);
+  if (!blogId) return null;
+
+  const match = await findBlogCheckAccountByQuery(query, allowedWorkspaces);
+  if (match) {
+    const label = match.account.name || match.account.slot_label || match.account.naver_id;
+    return {
+      blogId: match.blogId,
+      registered: true,
+      accountId: match.account.id,
+      label,
+      svc: WS_LABEL[match.account.workspace] ?? match.account.workspace,
+    };
+  }
+
+  return {
+    blogId,
+    registered: false,
+    accountId: null,
+    label: blogId,
+    svc: null,
+  };
+}
+
+async function runBlogCheckAdHocScan(
+  blogId: string,
+  options: BlogCheckScanOptions = { mode: 'full' },
+): Promise<{ scannedAccounts: number; scannedPosts: number }> {
+  const scanDate = todayKstDate();
+  const scanOptions = { ...options, mode: normalizeBlogCheckScanMode(options.mode) };
+  const label = blogId;
+  let scannedPosts = 0;
+  let accountAborted = false;
+  const adHocResults: AdHocBlogCheckPost[] = [];
+  let idxScore: number | null = null;
+  let listPosts: PostRow[] = [];
+
+  await withBlogCheckBrowser(async (page) => {
+    const scraped = await scrapeBlogPostListFromMobileApi(page, blogId, POST_LIMIT);
+    const posts = scraped.map((item) => scrapedBlogPostToRow(blogId, item));
+    listPosts = posts;
+    const statusMap = new Map<string, StatusRow>();
+    const scannablePosts = selectPostsForScan(posts, scanOptions, statusMap, scanDate);
+    const totalSteps = Math.max(countScannablePosts(scannablePosts) + 1, 1);
+    let completedSteps = 0;
+
+    await reportScanProgress({
+      accountId: null,
+      accountLabel: label,
+      completed: completedSteps,
+      total: totalSteps,
+      phase: 'preparing',
+    });
+
+    const onStep = async () => {
+      completedSteps += 1;
+      await reportScanProgress({
+        accountId: null,
+        accountLabel: label,
+        completed: completedSteps,
+        total: totalSteps,
+        phase: 'scanning',
+      });
+    };
+
+    const parsed = await scrapeBlogStats(page, blogId);
+    if (parsed) {
+      idxScore = computeBlogIndexScore(parsed.stats);
+    }
+
+    if (await detectBlogCheckCaptcha(page)) {
+      await notifyBlogCheckCaptcha(blogId, label, null);
+      accountAborted = true;
+    }
+
+    await onStep();
+
+    if (scannablePosts.length === 0) {
+      await logOperation({
+        level: 'info',
+        message: `[blog-check] ${label} — ad-hoc 스캔 대상 없음 (mode=${scanOptions.mode})`,
+      });
+    } else {
+      const poolSize = Math.min(BLOG_CHECK_SCAN_CONCURRENCY, Math.max(1, scannablePosts.length));
+      const workerPages = await createPostScanWorkerPages(page, poolSize);
+
+      try {
+        for (let i = 0; i < scannablePosts.length && !accountAborted; i += poolSize) {
+          const batch = scannablePosts.slice(i, i + poolSize);
+          const outcomes = await Promise.all(
+            batch.map(async (post, j) => {
+              try {
+                const scanned = await scanSinglePostAdHoc(workerPages[j]!, blogId, post);
+                return { scanned, captcha: false, error: null as Error | null };
+              } catch (err) {
+                if (err instanceof BlogCheckCaptchaError) {
+                  return { scanned: null, captcha: true, error: err };
+                }
+                return { scanned: null, captcha: false, error: err as Error };
+              }
+            }),
+          );
+
+          for (const outcome of outcomes) {
+            if (outcome.error && !outcome.captcha) throw outcome.error;
+            if (outcome.scanned) {
+              adHocResults.push(outcome.scanned);
+              scannedPosts += 1;
+            }
+            await onStep();
+          }
+
+          if (outcomes.some((o) => o.captcha)) {
+            if (!accountAborted) {
+              await notifyBlogCheckCaptcha(blogId, label, null);
+              await logOperation({
+                level: 'warn',
+                message: `[blog-check] 캡차 감지 — ${label} ad-hoc 스캔 중단`,
+              });
+            }
+            accountAborted = true;
+          }
+
+          if (accountAborted) break;
+          if (i + poolSize < scannablePosts.length) await sleep(randomScanDelayMs());
+        }
+      } finally {
+        await closeExtraWorkerPages(workerPages);
+      }
+
+      await logOperation({
+        level: 'info',
+        message: `[blog-check] ${label} — ad-hoc 포스트 ${scannablePosts.length}/${posts.length}건 · 지수 ${idxScore ?? 'null'}`,
+      });
+    }
+  });
+
+  const scannedByNo = new Map(
+    adHocResults.filter((r) => r.post_no).map((r) => [r.post_no as string, r]),
+  );
+  const empty = emptyPostContentStats();
+  const finalPosts: AdHocBlogCheckPost[] = listPosts.map((post) => {
+    const postNo = post.post_no ?? extractPostNoFromUrl(post.post_url);
+    if (postNo && scannedByNo.has(postNo)) return scannedByNo.get(postNo)!;
+    return {
+      post_url: post.post_url,
+      post_no: postNo,
+      title: post.title ?? '—',
+      published_at: post.published_at,
+      status: null,
+      rank: null,
+      chars: empty.char_count,
+      img_count: empty.img_count,
+      video_count: empty.video_count,
+      quote_count: empty.quote_count,
+      comment_count: empty.comment_count,
+      like_count: empty.like_count,
+      gif_count: empty.gif_count,
+      map_count: empty.map_count,
+      hidden_count: empty.hidden_count,
+      int_link_count: empty.int_link_count,
+      ext_link_count: empty.ext_link_count,
+    };
+  });
+
+  await setAdHocBlogCheckCache(blogId, {
+    blogId,
+    idxScore,
+    scannedAt: scanDate,
+    posts: finalPosts,
+  });
+
+  if (finalPosts.length > 0) {
+    await reportScanProgress({
+      accountId: null,
+      accountLabel: label,
+      completed: 1,
+      total: 1,
+      phase: 'done',
+    });
+  }
+
+  return { scannedAccounts: accountAborted ? 0 : 1, scannedPosts };
+}
+
 async function reportScanProgress(params: {
   accountId?: string | null;
   accountLabel?: string | null;
@@ -857,10 +1175,15 @@ async function reportScanProgress(params: {
 export async function runBlogCheckScan(
   accountId?: string,
   options: BlogCheckScanOptions = { mode: 'full' },
+  adHocBlogId?: string,
 ): Promise<{
   scannedAccounts: number;
   scannedPosts: number;
 }> {
+  if (adHocBlogId && !accountId) {
+    return runBlogCheckAdHocScan(adHocBlogId, options);
+  }
+
   const scanDate = todayKstDate();
   const scanOptions = { ...options, mode: normalizeBlogCheckScanMode(options.mode) };
   let scannedAccounts = 0;
@@ -933,7 +1256,8 @@ export async function runBlogCheckScan(
 export async function requestBlogCheckScan(
   accountId?: string,
   options: BlogCheckScanOptions = { mode: 'full' },
-): Promise<{ queued: true; accountId?: string; mode: BlogCheckScanMode }> {
+  adHocBlogId?: string,
+): Promise<{ queued: true; accountId?: string; blogId?: string; mode: BlogCheckScanMode; registered?: boolean }> {
   if (!(await acquireBlogCheckScanLock())) {
     throw new Error('SCAN_ALREADY_RUNNING');
   }
@@ -944,15 +1268,51 @@ export async function requestBlogCheckScan(
       type: 'blog_check',
       payload: {
         accountId: accountId ?? null,
+        blogId: adHocBlogId ?? null,
         mode,
         postNos: options.postNos ?? null,
       },
     });
-    return { queued: true, accountId, mode };
+    return { queued: true, accountId, blogId: adHocBlogId, mode, registered: Boolean(accountId) };
   } catch (err) {
     await releaseBlogCheckScanLock();
     throw err;
   }
+}
+
+export async function requestBlogCheckSearchScan(
+  query: string,
+  allowedWorkspaces: string[],
+): Promise<{
+  queued: true;
+  accountId?: string;
+  blogId: string;
+  mode: BlogCheckScanMode;
+  registered: boolean;
+  label: string | null;
+}> {
+  const lookup = await resolveBlogCheckLookup(query, allowedWorkspaces);
+  if (!lookup) {
+    throw new Error('블로그 ID를 인식할 수 없습니다');
+  }
+
+  if (lookup.registered && lookup.accountId) {
+    const result = await requestBlogCheckScan(lookup.accountId, { mode: 'full' });
+    return {
+      ...result,
+      blogId: lookup.blogId,
+      registered: true,
+      label: lookup.label,
+    };
+  }
+
+  const result = await requestBlogCheckScan(undefined, { mode: 'full' }, lookup.blogId);
+  return {
+    ...result,
+    blogId: lookup.blogId,
+    registered: false,
+    label: lookup.label,
+  };
 }
 
 export async function executeBlogCheckJob(payload: BlogCheckJobPayload) {
@@ -961,7 +1321,11 @@ export async function executeBlogCheckJob(payload: BlogCheckJobPayload) {
     postNos: payload.postNos?.filter(Boolean) ?? undefined,
   };
   try {
-    return await runBlogCheckScan(payload.accountId ?? undefined, options);
+    return await runBlogCheckScan(
+      payload.accountId ?? undefined,
+      options,
+      payload.blogId ?? undefined,
+    );
   } finally {
     await releaseBlogCheckScanLock();
     await clearScanProgress();
@@ -1097,6 +1461,22 @@ export async function buildBlogCheckPostsResponse(accountId: string) {
         ext_link_count: stats.ext_link_count,
       };
     }),
+  };
+}
+
+export async function buildBlogCheckPostsByBlogResponse(blogId: string) {
+  const normalized = parseBlogCheckSearchQuery(blogId) ?? blogId.trim();
+  if (!normalized) {
+    return { blogId: '', registered: false, idxScore: null, posts: [] as AdHocBlogCheckPost[] };
+  }
+
+  const cache = await getAdHocBlogCheckCache(normalized);
+  return {
+    blogId: normalized,
+    registered: false,
+    idxScore: cache?.idxScore ?? null,
+    scannedAt: cache?.scannedAt ?? null,
+    posts: cache?.posts ?? [],
   };
 }
 

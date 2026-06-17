@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/constants';
 import { formatBlogCheckPublishedAt } from '@/lib/format-kst';
+import { blogCheckQueryMatchesBlogId, parseBlogCheckSearchQuery } from '@/lib/blog-check-search';
 import { EmptyPanel } from '@/components/ui/empty-panel';
 
 type BcAccount = Awaited<ReturnType<typeof api.blogCheckAccounts>>['accounts'][number];
@@ -14,6 +15,17 @@ const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
 const DELTA_SCAN_LABEL = '🆕 새글만 스캔';
 const ACCOUNT_FULL_SCAN_LABEL = '⟳ 이 계정만 스캔';
 const GLOBAL_FULL_SCAN_LABEL = '⟳ 전체 다시 스캔';
+const SEARCH_SCAN_LABEL = '🔍 검색 스캔';
+
+function matchesAccountSearch(a: BcAccount, query: string): boolean {
+  const q = query.trim();
+  if (!q) return true;
+  if (a.label.toLowerCase().includes(q.toLowerCase())) return true;
+  if (blogCheckQueryMatchesBlogId(q, a.blog_url)) return true;
+  const parsed = parseBlogCheckSearchQuery(q);
+  if (parsed && parsed.toLowerCase() === a.blog_url.toLowerCase()) return true;
+  return false;
+}
 
 function scanPercent(progress: BcScanProgress | null, scanning: boolean): number {
   if (!scanning) return 0;
@@ -84,6 +96,9 @@ export function BlogCheckView() {
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [curAcc, setCurAcc] = useState<string | null>(null);
+  const [adhocBlogId, setAdhocBlogId] = useState<string | null>(null);
+  const [adhocLabel, setAdhocLabel] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
   const [posts, setPosts] = useState<BcPost[]>([]);
   const [filter, setFilter] = useState<'all' | 'strong' | 'good' | 'weak' | 'miss'>('all');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -131,8 +146,22 @@ export function BlogCheckView() {
     }
   }, []);
 
+  const loadAdhocPosts = useCallback(async (blogId: string) => {
+    const gen = ++postsLoadGenRef.current;
+    try {
+      const data = await api.blogCheckPostsByBlog(blogId);
+      if (gen !== postsLoadGenRef.current) return;
+      setPosts(data.posts);
+    } catch {
+      if (gen !== postsLoadGenRef.current) return;
+      setPosts([]);
+    }
+  }, []);
+
   const selectAccount = useCallback((accountId: string) => {
     setCurAcc(accountId);
+    setAdhocBlogId(null);
+    setAdhocLabel(null);
   }, []);
 
   useEffect(() => {
@@ -140,13 +169,22 @@ export function BlogCheckView() {
   }, [loadAccounts]);
 
   useEffect(() => {
+    if (adhocBlogId) {
+      void loadAdhocPosts(adhocBlogId);
+      return;
+    }
     if (curAcc) void loadPosts(curAcc);
-  }, [curAcc, loadPosts]);
+    else setPosts([]);
+  }, [curAcc, adhocBlogId, loadPosts, loadAdhocPosts]);
 
   const curAccRef = useRef<string | null>(null);
+  const adhocBlogIdRef = useRef<string | null>(null);
   useEffect(() => {
     curAccRef.current = curAcc;
   }, [curAcc]);
+  useEffect(() => {
+    adhocBlogIdRef.current = adhocBlogId;
+  }, [adhocBlogId]);
 
   useEffect(() => {
     if (!scanning) {
@@ -160,8 +198,12 @@ export function BlogCheckView() {
           lastScannedAccountRef.current = data.scanProgress.accountId;
         }
         const activeAcc = curAccRef.current;
+        const activeAdhoc = adhocBlogIdRef.current;
         if (data?.scanning && activeAcc) {
           void loadPosts(activeAcc);
+        }
+        if (data?.scanning && activeAdhoc) {
+          void loadAdhocPosts(activeAdhoc);
         }
         if (data && !data.scanning) {
           setScanning(false);
@@ -171,7 +213,9 @@ export function BlogCheckView() {
           scanningAccountIdRef.current = null;
           void loadAccounts().then(() => {
             const active = curAccRef.current;
+            const adhoc = adhocBlogIdRef.current;
             if (active) void loadPosts(active);
+            if (adhoc) void loadAdhocPosts(adhoc);
           });
         }
       });
@@ -179,7 +223,7 @@ export function BlogCheckView() {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [scanning, loadAccounts, loadPosts]);
+  }, [scanning, loadAccounts, loadPosts, loadAdhocPosts]);
 
   useEffect(
     () => () => {
@@ -192,6 +236,11 @@ export function BlogCheckView() {
     () => accounts.find((a) => a.account_id === curAcc),
     [accounts, curAcc],
   );
+
+  const visibleAccounts = useMemo(() => {
+    if (!searchQuery.trim()) return accounts;
+    return accounts.filter((a) => matchesAccountSearch(a, searchQuery));
+  }, [accounts, searchQuery]);
 
   const filteredPosts = useMemo(() => {
     if (filter === 'all') return posts;
@@ -224,7 +273,11 @@ export function BlogCheckView() {
       scanningAccountIdRef.current = accountId ?? null;
       lastScannedAccountRef.current = accountId ?? null;
       setScanningPostNo(focusPostNo ?? null);
-      if (accountId) setCurAcc(accountId);
+      if (accountId) {
+        setCurAcc(accountId);
+        setAdhocBlogId(null);
+        setAdhocLabel(null);
+      }
       setScanProgress({
         accountId: accountId ?? null,
         accountLabel: null,
@@ -244,6 +297,55 @@ export function BlogCheckView() {
       const msg = (e as Error).message;
       if (msg.includes('스캔이 이미')) {
         showToast('스캔이 이미 진행 중입니다');
+      } else {
+        showToast(msg);
+      }
+    }
+  };
+
+  const searchAndScan = async () => {
+    const q = searchQuery.trim();
+    if (!q || scanning) return;
+    try {
+      setScanning(true);
+      setScanningPostNo(null);
+      setScanProgress({
+        accountId: null,
+        accountLabel: q,
+        completed: 0,
+        total: 1,
+        percent: 2,
+        phase: 'preparing',
+      });
+      const result = await api.blogCheckSearchScan(q);
+      if (result.registered && result.accountId) {
+        setAdhocBlogId(null);
+        setAdhocLabel(null);
+        setCurAcc(result.accountId);
+        setScanningAccountId(result.accountId);
+        scanningAccountIdRef.current = result.accountId;
+        lastScannedAccountRef.current = result.accountId;
+        showToast(`${result.label ?? result.blogId} — 등록 계정 스캔 시작`);
+      } else {
+        setCurAcc(null);
+        setAdhocBlogId(result.blogId);
+        setAdhocLabel(result.label ?? result.blogId);
+        setScanningAccountId(null);
+        scanningAccountIdRef.current = null;
+        lastScannedAccountRef.current = null;
+        showToast(`${result.blogId} — 외부 블로그 스캔 시작`);
+      }
+      await loadAccounts();
+    } catch (e) {
+      setScanning(false);
+      setScanningAccountId(null);
+      scanningAccountIdRef.current = null;
+      setScanProgress(null);
+      const msg = (e as Error).message;
+      if (msg.includes('스캔이 이미')) {
+        showToast('스캔이 이미 진행 중입니다');
+      } else if (msg.includes('인식')) {
+        showToast('블로그 ID·URL·계정명을 확인하세요');
       } else {
         showToast(msg);
       }
@@ -301,8 +403,35 @@ export function BlogCheckView() {
         </div>
       </div>
 
+      <div className="bc-search-row">
+        <input
+          type="search"
+          className="bc-search-input"
+          placeholder="goricc · blog.naver.com/goricc · 계정명"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void searchAndScan();
+          }}
+          disabled={scanning}
+        />
+        <button
+          type="button"
+          className={cn('bc-search-scan-btn', scanning && 'scanning')}
+          onClick={() => void searchAndScan()}
+          disabled={scanning || !searchQuery.trim()}
+          title="입력한 블로그 최근 10건 스캔"
+        >
+          {scanning && adhocBlogId ? (
+            <ScanProgressBar percent={globalScanPercent} compact />
+          ) : (
+            SEARCH_SCAN_LABEL
+          )}
+        </button>
+      </div>
+
       <div className="bci-grid">
-        {accounts.map((a) => {
+        {visibleAccounts.map((a) => {
           const rate = a.miss_rate;
           const rateColor = rate >= 20 ? 'var(--err)' : rate >= 10 ? 'var(--warn)' : 'var(--ok)';
           const idx = a.idx_score ?? 0;
@@ -449,6 +578,12 @@ export function BlogCheckView() {
         })}
       </div>
 
+      {searchQuery.trim() && visibleAccounts.length === 0 && (
+        <div className="bc-search-empty font-mono text-[11px] text-huma-t3">
+          등록 계정 없음 — 「{SEARCH_SCAN_LABEL}」으로 외부 블로그를 스캔할 수 있습니다
+        </div>
+      )}
+
       <div className="bc-legend" aria-label="노출 등급 범례">
         <span className="bc-legend-label">등급</span>
         <span className="bc-exposure strong">강함 · 1~3위</span>
@@ -460,9 +595,11 @@ export function BlogCheckView() {
       <div className="bcp-wrap">
         <div className="bcp-header">
           <div className="bcp-title">
-            {selectedAcc
-              ? `${selectedAcc.label}  —  최근 ${posts.length}건 (최대 10건) · 누락 ${posts.filter((p) => p.status === 'miss').length}건`
-              : '← 계정 카드를 선택하면 최근 발행 10건이 표시됩니다'}
+            {adhocBlogId
+              ? `${adhocLabel ?? adhocBlogId}  —  최근 ${posts.length}건 (외부 · 미등록) · 누락 ${posts.filter((p) => p.status === 'miss').length}건`
+              : selectedAcc
+                ? `${selectedAcc.label}  —  최근 ${posts.length}건 (최대 10건) · 누락 ${posts.filter((p) => p.status === 'miss').length}건`
+                : '← 계정 카드를 선택하거나 검색 스캔하세요'}
           </div>
           <div className="bcp-filter">
             {(
@@ -506,10 +643,10 @@ export function BlogCheckView() {
             </tr>
           </thead>
           <tbody>
-            {!curAcc ? (
+            {!curAcc && !adhocBlogId ? (
               <tr>
                 <td colSpan={14} className="py-8 text-center text-[12.5px] text-huma-t3">
-                  위 계정 카드를 클릭하세요
+                  위 계정 카드를 클릭하거나 검색란에서 블로그를 스캔하세요
                 </td>
               </tr>
             ) : filteredPosts.length === 0 ? (
@@ -528,18 +665,22 @@ export function BlogCheckView() {
                   <tr key={p.post_url}>
                     <td>
                       {!p.status ? (
-                        <button
-                          type="button"
-                          className={cn('bc-exposure scan-btn none', rowScanning && 'scanning')}
-                          title="이 포스트만 스캔"
-                          disabled={scanning && !rowScanning}
-                          onClick={() => {
-                            if (!curAcc || !p.post_no) return;
-                            void startScan(curAcc, { mode: 'posts', postNos: [p.post_no] }, p.post_no);
-                          }}
-                        >
-                          {rowScanning ? '스캔…' : '미스캔'}
-                        </button>
+                        curAcc && !adhocBlogId ? (
+                          <button
+                            type="button"
+                            className={cn('bc-exposure scan-btn none', rowScanning && 'scanning')}
+                            title="이 포스트만 스캔"
+                            disabled={scanning && !rowScanning}
+                            onClick={() => {
+                              if (!curAcc || !p.post_no) return;
+                              void startScan(curAcc, { mode: 'posts', postNos: [p.post_no] }, p.post_no);
+                            }}
+                          >
+                            {rowScanning ? '스캔…' : '미스캔'}
+                          </button>
+                        ) : (
+                          <span className="bc-exposure none">미스캔</span>
+                        )
                       ) : (
                         <span className={cn('bc-exposure', badge.cls)} title={p.rank ? `${p.rank}위` : undefined}>
                           {badge.text}

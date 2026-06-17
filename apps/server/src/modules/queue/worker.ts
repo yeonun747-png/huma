@@ -688,6 +688,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         } else if (type === 'blog_check') {
           const bcPayload = (payload ?? {}) as {
             accountId?: string | null;
+            blogId?: string | null;
             mode?: string | null;
             postNos?: string[] | null;
           };

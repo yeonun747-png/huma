@@ -1511,3 +1511,60 @@
   letter-spacing: 0.04em;
   margin-right: 2px;
 }
+.blog-check-view .bc-search-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+.blog-check-view .bc-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--bdr);
+  background: var(--bg2);
+  color: var(--t);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+}
+.blog-check-view .bc-search-input:focus {
+  outline: none;
+  border-color: var(--acc);
+  box-shadow: 0 0 0 2px var(--glow);
+}
+.blog-check-view .bc-search-input::placeholder {
+  color: var(--t4);
+}
+.blog-check-view .bc-search-scan-btn {
+  flex-shrink: 0;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 1px solid var(--acc);
+  background: rgba(120, 180, 255, 0.08);
+  color: var(--acc);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.blog-check-view .bc-search-scan-btn:hover:not(:disabled) {
+  background: rgba(120, 180, 255, 0.16);
+}
+.blog-check-view .bc-search-scan-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.blog-check-view .bc-search-scan-btn.scanning {
+  min-width: 120px;
+  background: var(--warn-bg);
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.blog-check-view .bc-search-empty {
+  margin: -4px 0 10px;
+  padding: 0 2px;
+}

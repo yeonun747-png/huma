@@ -12,6 +12,9 @@ export function extractBlogIdFromUrl(blogUrl: string | null | undefined, naverId
   return id || null;
 }
 
+/** 블로그 지수 검색 — @huma/shared 와 동일 */
+export { parseBlogCheckSearchQuery } from '@huma/shared';
+
 export function extractPostNoFromUrl(postUrl: string): string | null {
   const trimmed = postUrl.trim();
   if (!trimmed) return null;

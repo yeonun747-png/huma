@@ -739,15 +739,61 @@ export const api = {
         ext_link_count: number;
       }>;
     }>(`/api/blog-check/posts/${accountId}`),
+  blogCheckPostsByBlog: (blogId: string) =>
+    request<{
+      blogId: string;
+      registered: boolean;
+      idxScore: number | null;
+      scannedAt: string | null;
+      posts: Array<{
+        post_url: string;
+        post_no: string | null;
+        title: string;
+        published_at: string;
+        status: 'strong' | 'good' | 'weak' | 'collect' | 'miss' | null;
+        rank: number | null;
+        chars: number;
+        img_count: number;
+        video_count: number;
+        quote_count: number;
+        comment_count: number;
+        like_count: number;
+        gif_count: number;
+        map_count: number;
+        hidden_count: number;
+        int_link_count: number;
+        ext_link_count: number;
+      }>;
+    }>(`/api/blog-check/posts/by-blog/${encodeURIComponent(blogId)}`),
+  blogCheckLookup: (query: string) =>
+    request<{
+      blogId: string;
+      registered: boolean;
+      accountId: string | null;
+      label: string | null;
+      svc: string | null;
+    }>(`/api/blog-check/lookup?q=${encodeURIComponent(query)}`),
   blogCheckScan: (
     accountId?: string,
     opts?: { mode?: 'full' | 'delta' | 'posts'; postNos?: string[] },
   ) =>
-    request<{ queued: true; accountId?: string; mode?: string }>(
+    request<{ queued: true; accountId?: string; blogId?: string; mode?: string }>(
       accountId ? `/api/blog-check/scan/${accountId}` : '/api/blog-check/scan',
       {
         method: 'POST',
         body: JSON.stringify(opts ?? { mode: 'full' }),
       },
     ),
+  blogCheckSearchScan: (query: string) =>
+    request<{
+      queued: true;
+      accountId?: string;
+      blogId: string;
+      mode: string;
+      registered: boolean;
+      label: string | null;
+    }>('/api/blog-check/scan/search', {
+      method: 'POST',
+      body: JSON.stringify({ query }),
+    }),
 };
