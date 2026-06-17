@@ -51,8 +51,9 @@ async function waitForPostContent(frame: Frame): Promise<void> {
 }
 
 /** iframe/mainFrame 또는 페이지 DOM 기준 포스트 메타 파싱 */
-async function scrapeStatsFromFrame(frame: Frame): Promise<PostContentStats> {
-  return frame.evaluate((rootSelectors) => {
+async function scrapeStatsFromFrame(frame: Frame, postNo: string): Promise<PostContentStats> {
+  return frame.evaluate(
+    ({ rootSelectors, postNo: logNo }) => {
     const parseNum = (raw: unknown): number => {
       if (raw == null) return 0;
       const n = Number(String(raw).replace(/,/g, '').trim());
@@ -75,19 +76,31 @@ async function scrapeStatsFromFrame(frame: Frame): Promise<PostContentStats> {
 
     let best: Element = document.body;
     let bestLen = 0;
+    const roots: Element[] = [];
     for (const sel of rootSelectors) {
-      for (const el of document.querySelectorAll(sel)) {
-        const len = (el.textContent ?? '').replace(/\s+/g, ' ').trim().length;
-        if (len > bestLen) {
-          bestLen = len;
-          best = el;
-        }
+      for (const el of document.querySelectorAll(sel)) roots.push(el);
+    }
+    const postView = document.querySelector(`#post-view${logNo}`);
+    if (postView) roots.push(postView);
+    for (const el of roots) {
+      const len = (el.textContent ?? '').replace(/\s+/g, ' ').trim().length;
+      if (len > bestLen) {
+        bestLen = len;
+        best = el;
       }
     }
     const root = best;
 
     const contentText = (root.textContent ?? '').replace(/\s+/g, ' ').trim();
-    const charCount = contentText.length;
+    let charCount = contentText.length;
+    if (charCount < 80) {
+      const ogDesc =
+        document.querySelector('meta[property="og:description"]')?.getAttribute('content') ??
+        document.querySelector('meta[name="description"]')?.getAttribute('content') ??
+        '';
+      const ogText = ogDesc.replace(/\s+/g, ' ').trim();
+      if (ogText.length > charCount) charCount = ogText.length;
+    }
 
     const allImgs = [...root.querySelectorAll('img')];
     const gifCount = allImgs.filter((img) => /\.gif($|\?)/i.test(img.getAttribute('src') ?? '')).length;
@@ -172,7 +185,9 @@ async function scrapeStatsFromFrame(frame: Frame): Promise<PostContentStats> {
       int_link_count: intLinkCount,
       ext_link_count: extLinkCount,
     };
-  }, [...CONTENT_ROOT_SELECTORS]);
+  },
+    { rootSelectors: [...CONTENT_ROOT_SELECTORS], postNo },
+  );
 }
 
 async function resolveMainFrame(page: Page): Promise<Frame | null> {
@@ -186,25 +201,30 @@ async function resolveMainFrame(page: Page): Promise<Frame | null> {
   return frame;
 }
 
-async function scrapeFromPage(page: Page): Promise<PostContentStats> {
+async function scrapeFromPage(page: Page, postNo: string): Promise<PostContentStats> {
   await waitForPostContent(page.mainFrame());
-  return scrapeStatsFromFrame(page.mainFrame());
+  return scrapeStatsFromFrame(page.mainFrame(), postNo);
 }
 
-async function navigateAndScrape(page: Page, url: string, blogId: string): Promise<PostContentStats> {
+async function navigateAndScrape(
+  page: Page,
+  url: string,
+  blogId: string,
+  postNo: string,
+): Promise<PostContentStats> {
   await page.goto(url, { waitUntil: 'domcontentloaded' });
 
   if (await detectBlogCheckCaptcha(page)) {
     throw new BlogCheckCaptchaError(blogId);
   }
 
-  let stats = await scrapeFromPage(page);
+  let stats = await scrapeFromPage(page, postNo);
   if (stats.char_count >= CONTENT_MIN_CHARS) return stats;
 
   if (await page.$('iframe#mainFrame')) {
     const frame = await resolveMainFrame(page);
     if (frame) {
-      const frameStats = await scrapeStatsFromFrame(frame);
+      const frameStats = await scrapeStatsFromFrame(frame, postNo);
       if (frameStats.char_count >= stats.char_count) stats = frameStats;
     }
   }
@@ -245,7 +265,7 @@ export async function scrapePostContentStats(
   let last = EMPTY_STATS;
 
   for (const url of strategies) {
-    const stats = await navigateAndScrape(page, url, blogId);
+    const stats = await navigateAndScrape(page, url, blogId, postNo);
     last = stats;
     if (stats.char_count >= CONTENT_MIN_CHARS) return stats;
   }

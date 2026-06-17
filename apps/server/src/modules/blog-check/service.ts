@@ -870,9 +870,11 @@ export async function buildBlogCheckPostsResponse(accountId: string) {
     posts: posts.map((post) => {
       const postNo = post.post_no ?? extractPostNoFromUrl(post.post_url) ?? '';
       const st = postNo ? statusMap.get(postNo) : undefined;
-      const stats = st
-        ? statsFromStatusRow(st, post.ext_link_cleared)
-        : statsFromDbRow(post as unknown as Record<string, unknown>, workspace);
+      const fromPost = statsFromDbRow(post as unknown as Record<string, unknown>, workspace);
+      const fromStatus = st ? statsFromStatusRow(st, post.ext_link_cleared) : null;
+      const stats = fromStatus
+        ? mergePostContentStats(fromPost, fromStatus)
+        : fromPost;
 
       return {
         post_url: post.post_url,

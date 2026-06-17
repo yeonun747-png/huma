@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { findPostRankInHrefs, postNoFromBlogHref } from './exposure-rank.js';
+import {
+  blogIdFromBlogHref,
+  findPostRankInHrefs,
+  hrefMatchesBlogPost,
+  postNoFromBlogHref,
+} from './exposure-rank.js';
 
 describe('postNoFromBlogHref', () => {
   it('parses desktop and mobile blog URLs', () => {
@@ -19,6 +24,13 @@ describe('postNoFromBlogHref', () => {
   });
 });
 
+describe('blogIdFromBlogHref', () => {
+  it('parses blog id from path and query', () => {
+    expect(blogIdFromBlogHref('https://blog.naver.com/yeonun2/224212849946')).toBe('yeonun2');
+    expect(blogIdFromBlogHref('https://blog.naver.com/PostView.naver?blogId=foo&logNo=1')).toBe('foo');
+  });
+});
+
 describe('findPostRankInHrefs', () => {
   const hrefs = [
     'https://blog.naver.com/other/111111111111',
@@ -26,20 +38,28 @@ describe('findPostRankInHrefs', () => {
     'https://blog.naver.com/foo/333333333333',
   ];
 
-  it('matches exact postNo only', () => {
-    expect(findPostRankInHrefs(hrefs, '333333333333')).toBe(3);
-    expect(findPostRankInHrefs(hrefs, '222222222222')).toBe(2);
-    expect(findPostRankInHrefs(hrefs, '999999999999')).toBeNull();
+  it('matches exact blogId and postNo only', () => {
+    expect(findPostRankInHrefs(hrefs, 'foo', '333333333333')).toBe(3);
+    expect(findPostRankInHrefs(hrefs, 'foo', '222222222222')).toBe(2);
+    expect(findPostRankInHrefs(hrefs, 'foo', '999999999999')).toBeNull();
   });
 
-  it('does not match same blog different post', () => {
-    expect(findPostRankInHrefs(hrefs, '111111111111')).toBe(1);
-    expect(findPostRankInHrefs(hrefs, '222222222222')).not.toBe(1);
+  it('ignores same postNo on a different blog', () => {
+    expect(findPostRankInHrefs(hrefs, 'yeonun2', '111111111111')).toBeNull();
+    expect(findPostRankInHrefs(hrefs, 'other', '111111111111')).toBe(1);
   });
 
   it('finds rank beyond page 1 for weak tier', () => {
     const long = Array.from({ length: 14 }, (_, i) => `https://blog.naver.com/other/${100000 + i}`);
     long.push('https://blog.naver.com/foo/999999999999');
-    expect(findPostRankInHrefs(long, '999999999999')).toBe(15);
+    expect(findPostRankInHrefs(long, 'foo', '999999999999')).toBe(15);
+  });
+});
+
+describe('hrefMatchesBlogPost', () => {
+  it('requires both blogId and postNo', () => {
+    const href = 'https://blog.naver.com/yeonun2/123456789';
+    expect(hrefMatchesBlogPost(href, 'yeonun2', '123456789')).toBe(true);
+    expect(hrefMatchesBlogPost(href, 'other', '123456789')).toBe(false);
   });
 });

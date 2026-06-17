@@ -54,8 +54,7 @@ function exposureBadge(status: BcPost['status']): { cls: string; text: string } 
   if (!status) return { cls: 'none', text: '미스캔' };
   if (status === 'strong') return { cls: 'strong', text: '강함' };
   if (status === 'good') return { cls: 'good', text: '양호' };
-  if (status === 'weak') return { cls: 'weak', text: '약함' };
-  if (status === 'collect') return { cls: 'collect', text: '수집' };
+  if (status === 'weak' || status === 'collect') return { cls: 'weak', text: '약함' };
   return { cls: 'miss', text: '누락' };
 }
 
@@ -82,7 +81,7 @@ export function BlogCheckView() {
   const [toast, setToast] = useState<string | null>(null);
   const [curAcc, setCurAcc] = useState<string | null>(null);
   const [posts, setPosts] = useState<BcPost[]>([]);
-  const [filter, setFilter] = useState<'all' | 'strong' | 'good' | 'weak' | 'collect' | 'miss'>('all');
+  const [filter, setFilter] = useState<'all' | 'strong' | 'good' | 'weak' | 'miss'>('all');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -161,6 +160,7 @@ export function BlogCheckView() {
 
   const filteredPosts = useMemo(() => {
     if (filter === 'all') return posts;
+    if (filter === 'weak') return posts.filter((p) => p.status === 'weak' || p.status === 'collect');
     return posts.filter((p) => p.status === filter);
   }, [posts, filter]);
 
@@ -380,8 +380,7 @@ export function BlogCheckView() {
         <span className="bc-legend-label">등급</span>
         <span className="bc-exposure strong">강함 · 1~3위</span>
         <span className="bc-exposure good">양호 · 4~10위</span>
-        <span className="bc-exposure weak">약함 · 11~30위</span>
-        <span className="bc-exposure collect">수집 · site: 검색</span>
+        <span className="bc-exposure weak">약함 · 10위권 밖</span>
         <span className="bc-exposure miss">누락 · 미수집</span>
       </div>
 
@@ -399,7 +398,6 @@ export function BlogCheckView() {
                 ['strong', '강함'],
                 ['good', '양호'],
                 ['weak', '약함'],
-                ['collect', '수집'],
                 ['miss', '누락'],
               ] as const
             ).map(([f, label]) => (

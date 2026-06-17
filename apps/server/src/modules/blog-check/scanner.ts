@@ -13,6 +13,7 @@ import { rankToExposureStatus, type PostRankResult } from './exposure-status.js'
 import {
   findPostRankInHrefs,
   postNoFromBlogHref,
+  hrefMatchesBlogPost,
   BLOG_SEARCH_PAGE_SIZE,
   BLOG_SEARCH_RANK_PAGES,
 } from './exposure-rank.js';
@@ -109,11 +110,12 @@ export async function checkPostIndexedBySite(
   const hrefs = await page.locator('a[href*="blog.naver.com"]').evaluateAll((els) =>
     els.map((el) => el.getAttribute('href') ?? ''),
   );
-  if (hrefs.some((href) => href.includes(`/${postNo}`) || href.includes(`logNo=${postNo}`))) {
+  if (hrefs.some((href) => hrefMatchesBlogPost(href, blogId, postNo))) {
     return true;
   }
 
-  return /blog\.naver\.com/i.test(bodyText) && bodyText.includes(postNo);
+  const blogPath = `blog.naver.com/${blogId}/${postNo}`;
+  return bodyText.includes(blogPath) || (bodyText.includes(`blogId=${blogId}`) && bodyText.includes(`logNo=${postNo}`));
 }
 
 /**
@@ -256,7 +258,7 @@ export async function checkPostExposure(
   const query = title.trim();
   if (!query) {
     const indexed = await checkPostIndexedBySite(page, blogId, postNo);
-    return { status: indexed ? 'collect' : 'miss', rank: null };
+    return { status: indexed ? 'weak' : 'miss', rank: null };
   }
 
   let hrefs: string[];
@@ -269,14 +271,14 @@ export async function checkPostExposure(
     throw err;
   }
 
-  const rank = findPostRankInHrefs(hrefs, postNo);
+  const rank = findPostRankInHrefs(hrefs, blogId, postNo);
 
   if (rank != null) {
     return { status: rankToExposureStatus(rank), rank };
   }
 
   const indexed = await checkPostIndexedBySite(page, blogId, postNo);
-  return { status: indexed ? 'collect' : 'miss', rank: null };
+  return { status: indexed ? 'weak' : 'miss', rank: null };
 }
 
 export function resolveBlogId(
