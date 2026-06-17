@@ -643,6 +643,43 @@ async function estimateTotalSteps(
   return total;
 }
 
+function skeletonAdHocPosts(listPosts: PostRow[]): AdHocBlogCheckPost[] {
+  const empty = emptyPostContentStats();
+  return listPosts.map((post) => {
+    const postNo = post.post_no ?? extractPostNoFromUrl(post.post_url);
+    return {
+      post_url: post.post_url,
+      post_no: postNo,
+      title: post.title ?? '—',
+      published_at: post.published_at,
+      status: null,
+      rank: null,
+      chars: empty.char_count,
+      img_count: empty.img_count,
+      video_count: empty.video_count,
+      quote_count: empty.quote_count,
+      comment_count: empty.comment_count,
+      like_count: empty.like_count,
+      gif_count: empty.gif_count,
+      map_count: empty.map_count,
+      hidden_count: empty.hidden_count,
+      int_link_count: empty.int_link_count,
+      ext_link_count: empty.ext_link_count,
+    };
+  });
+}
+
+function mergeScannedIntoSkeleton(
+  listPosts: PostRow[],
+  scannedByNo: Map<string, AdHocBlogCheckPost>,
+): AdHocBlogCheckPost[] {
+  const skeleton = skeletonAdHocPosts(listPosts);
+  return skeleton.map((p) => {
+    if (p.post_no && scannedByNo.has(p.post_no)) return scannedByNo.get(p.post_no)!;
+    return p;
+  });
+}
+
 function scrapedBlogPostToRow(blogId: string, item: ScrapedBlogPost): PostRow {
   const base = emptyPostContentStats();
   return {
@@ -1009,6 +1046,14 @@ async function runBlogCheckAdHocScan(
     const scraped = await scrapeBlogPostListFromMobileApi(page, blogId, POST_LIMIT);
     const posts = scraped.map((item) => scrapedBlogPostToRow(blogId, item));
     listPosts = posts;
+
+    await setAdHocBlogCheckCache(blogId, {
+      blogId,
+      idxScore: null,
+      scannedAt: scanDate,
+      posts: skeletonAdHocPosts(listPosts),
+    });
+
     const statusMap = new Map<string, StatusRow>();
     const scannablePosts = selectPostsForScan(posts, scanOptions, statusMap, scanDate);
     const totalSteps = Math.max(countScannablePosts(scannablePosts) + 1, 1);
@@ -1037,6 +1082,13 @@ async function runBlogCheckAdHocScan(
     if (parsed) {
       idxScore = computeBlogIndexScore(parsed.stats);
     }
+
+    await setAdHocBlogCheckCache(blogId, {
+      blogId,
+      idxScore,
+      scannedAt: scanDate,
+      posts: skeletonAdHocPosts(listPosts),
+    });
 
     if (await detectBlogCheckCaptcha(page)) {
       await notifyBlogCheckCaptcha(blogId, label, null);
@@ -1080,6 +1132,16 @@ async function runBlogCheckAdHocScan(
             await onStep();
           }
 
+          const scannedByNo = new Map(
+            adHocResults.filter((r) => r.post_no).map((r) => [r.post_no as string, r]),
+          );
+          await setAdHocBlogCheckCache(blogId, {
+            blogId,
+            idxScore,
+            scannedAt: scanDate,
+            posts: mergeScannedIntoSkeleton(listPosts, scannedByNo),
+          });
+
           if (outcomes.some((o) => o.captcha)) {
             if (!accountAborted) {
               await notifyBlogCheckCaptcha(blogId, label, null);
@@ -1105,42 +1167,19 @@ async function runBlogCheckAdHocScan(
     }
   });
 
-  const scannedByNo = new Map(
-    adHocResults.filter((r) => r.post_no).map((r) => [r.post_no as string, r]),
-  );
-  const empty = emptyPostContentStats();
-  const finalPosts: AdHocBlogCheckPost[] = listPosts.map((post) => {
-    const postNo = post.post_no ?? extractPostNoFromUrl(post.post_url);
-    if (postNo && scannedByNo.has(postNo)) return scannedByNo.get(postNo)!;
-    return {
-      post_url: post.post_url,
-      post_no: postNo,
-      title: post.title ?? '—',
-      published_at: post.published_at,
-      status: null,
-      rank: null,
-      chars: empty.char_count,
-      img_count: empty.img_count,
-      video_count: empty.video_count,
-      quote_count: empty.quote_count,
-      comment_count: empty.comment_count,
-      like_count: empty.like_count,
-      gif_count: empty.gif_count,
-      map_count: empty.map_count,
-      hidden_count: empty.hidden_count,
-      int_link_count: empty.int_link_count,
-      ext_link_count: empty.ext_link_count,
-    };
-  });
+  if (listPosts.length > 0) {
+    const scannedByNo = new Map(
+      adHocResults.filter((r) => r.post_no).map((r) => [r.post_no as string, r]),
+    );
+    await setAdHocBlogCheckCache(blogId, {
+      blogId,
+      idxScore,
+      scannedAt: scanDate,
+      posts: mergeScannedIntoSkeleton(listPosts, scannedByNo),
+    });
+  }
 
-  await setAdHocBlogCheckCache(blogId, {
-    blogId,
-    idxScore,
-    scannedAt: scanDate,
-    posts: finalPosts,
-  });
-
-  if (finalPosts.length > 0) {
+  if (listPosts.length > 0) {
     await reportScanProgress({
       accountId: null,
       accountLabel: label,
@@ -1429,7 +1468,7 @@ export async function buildBlogCheckPostsResponse(accountId: string) {
   const workspace = (acc?.workspace as string | undefined) ?? null;
   const blogId = extractBlogIdFromUrl(acc?.blog_url, acc?.naver_id);
 
-  const posts = await fetchRecentPosts(accountId, { blogId, refreshIfMissing: true });
+  const posts = await fetchRecentPosts(accountId, { blogId, refreshIfMissing: false });
   const statusMap = await fetchLatestStatusByPostNo(accountId);
 
   return {

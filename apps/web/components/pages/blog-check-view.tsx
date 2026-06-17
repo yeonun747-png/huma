@@ -16,6 +16,7 @@ const DELTA_SCAN_LABEL = '🆕 새글만 스캔';
 const ACCOUNT_FULL_SCAN_LABEL = '⟳ 이 계정만 스캔';
 const GLOBAL_FULL_SCAN_LABEL = '⟳ 전체 다시 스캔';
 const SEARCH_SCAN_LABEL = '🔍 검색 스캔';
+const SCAN_POLL_MS = 400;
 
 function matchesAccountSearch(a: BcAccount, query: string): boolean {
   const q = query.trim();
@@ -106,6 +107,8 @@ export function BlogCheckView() {
   const scanningAccountIdRef = useRef<string | null>(null);
   const lastScannedAccountRef = useRef<string | null>(null);
   const postsLoadGenRef = useRef(0);
+  const curAccRef = useRef<string | null>(null);
+  const adhocBlogIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     scanningAccountIdRef.current = scanningAccountId;
@@ -158,6 +161,13 @@ export function BlogCheckView() {
     }
   }, []);
 
+  const refreshActivePosts = useCallback(() => {
+    const activeAcc = curAccRef.current;
+    const activeAdhoc = adhocBlogIdRef.current;
+    if (activeAcc) void loadPosts(activeAcc);
+    if (activeAdhoc) void loadAdhocPosts(activeAdhoc);
+  }, [loadPosts, loadAdhocPosts]);
+
   const selectAccount = useCallback((accountId: string) => {
     setCurAcc(accountId);
     setAdhocBlogId(null);
@@ -177,8 +187,6 @@ export function BlogCheckView() {
     else setPosts([]);
   }, [curAcc, adhocBlogId, loadPosts, loadAdhocPosts]);
 
-  const curAccRef = useRef<string | null>(null);
-  const adhocBlogIdRef = useRef<string | null>(null);
   useEffect(() => {
     curAccRef.current = curAcc;
   }, [curAcc]);
@@ -192,38 +200,41 @@ export function BlogCheckView() {
       pollRef.current = null;
       return;
     }
+
+    const tick = async () => {
+      try {
+        const status = await api.blogCheckStatus();
+        setScanning(status.scanning);
+        setScanProgress(status.scanProgress);
+        if (status.scanning) {
+          if (status.scanProgress?.accountId) {
+            lastScannedAccountRef.current = status.scanProgress.accountId;
+          }
+          refreshActivePosts();
+          return;
+        }
+
+        setScanning(false);
+        setScanProgress(null);
+        setScanningPostNo(null);
+        setScanningAccountId(null);
+        scanningAccountIdRef.current = null;
+        refreshActivePosts();
+        void loadAccounts();
+      } catch {
+        /* poll 실패 — 다음 tick 재시도 */
+      }
+    };
+
+    void tick();
     pollRef.current = setInterval(() => {
-      void loadAccounts().then((data) => {
-        if (data?.scanning && data.scanProgress?.accountId) {
-          lastScannedAccountRef.current = data.scanProgress.accountId;
-        }
-        const activeAcc = curAccRef.current;
-        const activeAdhoc = adhocBlogIdRef.current;
-        if (data?.scanning && activeAcc) {
-          void loadPosts(activeAcc);
-        }
-        if (data?.scanning && activeAdhoc) {
-          void loadAdhocPosts(activeAdhoc);
-        }
-        if (data && !data.scanning) {
-          setScanning(false);
-          setScanProgress(null);
-          setScanningPostNo(null);
-          setScanningAccountId(null);
-          scanningAccountIdRef.current = null;
-          void loadAccounts().then(() => {
-            const active = curAccRef.current;
-            const adhoc = adhocBlogIdRef.current;
-            if (active) void loadPosts(active);
-            if (adhoc) void loadAdhocPosts(adhoc);
-          });
-        }
-      });
-    }, 1000);
+      void tick();
+    }, SCAN_POLL_MS);
+
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [scanning, loadAccounts, loadPosts, loadAdhocPosts]);
+  }, [scanning, loadAccounts, refreshActivePosts]);
 
   useEffect(
     () => () => {
@@ -321,7 +332,9 @@ export function BlogCheckView() {
       if (result.registered && result.accountId) {
         setAdhocBlogId(null);
         setAdhocLabel(null);
+        adhocBlogIdRef.current = null;
         setCurAcc(result.accountId);
+        curAccRef.current = result.accountId;
         setScanningAccountId(result.accountId);
         scanningAccountIdRef.current = result.accountId;
         lastScannedAccountRef.current = result.accountId;
@@ -330,12 +343,17 @@ export function BlogCheckView() {
         setCurAcc(null);
         setAdhocBlogId(result.blogId);
         setAdhocLabel(result.label ?? result.blogId);
+        adhocBlogIdRef.current = result.blogId;
         setScanningAccountId(null);
         scanningAccountIdRef.current = null;
         lastScannedAccountRef.current = null;
         showToast(`${result.blogId} — 외부 블로그 스캔 시작`);
       }
-      await loadAccounts();
+      void api.blogCheckStatus().then((status) => {
+        setScanning(status.scanning);
+        setScanProgress(status.scanProgress);
+      });
+      refreshActivePosts();
     } catch (e) {
       setScanning(false);
       setScanningAccountId(null);

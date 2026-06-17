@@ -765,6 +765,19 @@ export const api = {
         ext_link_count: number;
       }>;
     }>(`/api/blog-check/posts/by-blog/${encodeURIComponent(blogId)}`),
+  blogCheckStatus: () =>
+    request<{
+      scanning: boolean;
+      lastScanAt: string | null;
+      scanProgress: {
+        accountId: string | null;
+        accountLabel: string | null;
+        completed: number;
+        total: number;
+        percent: number;
+        phase: 'preparing' | 'scanning' | 'done';
+      } | null;
+    }>('/api/blog-check/status'),
   blogCheckLookup: (query: string) =>
     request<{
       blogId: string;
