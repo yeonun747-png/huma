@@ -1,232 +1,122 @@
 import type { Frame, Page } from 'playwright';
 import { sleep } from '../../lib/utils.js';
-import { type PostContentStats, emptyPostContentStats, mergePostContentStats } from './content-stats.js';
+import { type PostContentStats } from './content-stats.js';
 import { BlogCheckCaptchaError, detectBlogCheckCaptcha } from './scanner.js';
 
-type ScrapeContext = Page | Frame;
-
-async function evaluatePostStats(ctx: ScrapeContext, blogId: string, postNo: string): Promise<PostContentStats> {
-  return ctx.evaluate(
-    async ({ blogId, postNo }) => {
-      const parseNum = (raw: unknown): number | null => {
-        if (raw == null) return null;
-        const n = Number(String(raw).replace(/,/g, '').trim());
-        return Number.isFinite(n) && n >= 0 ? Math.floor(n) : null;
-      };
-
-      const scriptNum = (patterns: RegExp[]): number | null => {
-        const html = document.documentElement.innerHTML;
-        for (const re of patterns) {
-          const m = html.match(re);
-          if (m?.[1] != null) {
-            const n = parseNum(m[1]);
-            if (n != null) return n;
-          }
-        }
-        return null;
-      };
-
-      let apiComment: number | null = null;
-      let apiLike: number | null = null;
-      let apiHtml: string | null = null;
-
-      try {
-        const res = await fetch(
-          `https://m.blog.naver.com/api/blogs/${blogId}/posts/${postNo}`,
-          { credentials: 'include', headers: { Accept: 'application/json' } },
-        );
-        if (res.ok) {
-          const json = (await res.json()) as {
-            isSuccess?: boolean;
-            result?: {
-              sympathyCnt?: number;
-              sympathyCount?: number;
-              commentCnt?: number;
-              commentCount?: number;
-              contents?: string;
-              postText?: string;
-            };
-          };
-          if (json?.isSuccess && json.result) {
-            const r = json.result;
-            apiComment = parseNum(r.commentCnt ?? r.commentCount);
-            apiLike = parseNum(r.sympathyCnt ?? r.sympathyCount);
-            apiHtml = r.contents ?? r.postText ?? null;
-          }
-        }
-      } catch {
-        /* API 실패 — DOM 폴백 */
-      }
-
-      const root =
-        document.querySelector('.se-main-container') ??
-        document.querySelector('#viewTypeSelector') ??
-        document.querySelector('.post_ct') ??
-        document.querySelector('#postViewArea') ??
-        document.querySelector('.post-view') ??
-        document.querySelector('#printPost1');
-
-      const contentEl = root ?? document.body;
-      const contentHtml = apiHtml ?? contentEl.innerHTML;
-      const contentText = (contentEl.textContent ?? '').replace(/\s+/g, ' ').trim();
-
-      const imgUrls = new Set<string>();
-      const collectImg = (src: string | null | undefined) => {
-        const s = (src ?? '').trim();
-        if (!s || s.startsWith('data:')) return;
-        if (/blank\.gif|spacer|icon|emoji|profile|blogpfthumb|static\.blog/i.test(s)) return;
-        imgUrls.add(s.split('#')[0].split('?')[0]);
-      };
-
-      contentEl.querySelectorAll('img').forEach((img) => {
-        collectImg(img.getAttribute('src'));
-        collectImg(img.getAttribute('data-lazy-src'));
-        collectImg(img.getAttribute('data-src'));
-      });
-
-      for (const m of contentHtml.matchAll(/(?:src|data-lazy-src|data-src)=["']([^"']+)["']/gi)) {
-        collectImg(m[1]);
-      }
-
-      let gifCount = 0;
-      let imgCount = 0;
-      for (const u of imgUrls) {
-        if (/\.gif($|\?)/i.test(u)) gifCount += 1;
-        else imgCount += 1;
-      }
-
-      const videoCount = Math.max(
-        contentEl.querySelectorAll('video, .se-video, .se-module-video').length,
-        contentEl.querySelectorAll(
-          'iframe[src*="youtube"], iframe[src*="naver.tv"], iframe[src*="tv.naver"]',
-        ).length,
-        /youtube\.com|youtu\.be|naver\.tv|tv\.naver\.com|\.mp4|\.webm|\.mov/i.test(contentHtml) ? 1 : 0,
-      );
-
-      const quoteCount = Math.max(
-        contentEl.querySelectorAll('.se-quote, .se-module-quote, blockquote, .se-quotation').length,
-        (contentText.match(/^>\s?.+/gm) ?? []).length,
-      );
-
-      const mapCount = Math.max(
-        contentEl.querySelectorAll(
-          'iframe[src*="map.naver"], iframe[src*="place.naver"], .se-map, .se-module-map',
-        ).length,
-        (contentHtml.match(/map\.naver\.com|place\.naver\.com|naver\.me\/map|\[지도\]/gi) ?? []).length,
-      );
-
-      const hiddenCount = Math.max(
-        contentEl.querySelectorAll('.se-spoiler, .se-module-spoiler, [class*="spoiler"]').length,
-        (contentText.match(/\[히든\]|<!--hidden-->|\(히든\)|스포일러|spoiler/gi) ?? []).length,
-      );
-
-      const links = new Set<string>();
-      const addLink = (raw: string) => {
-        const href = raw.trim().replace(/&amp;/g, '&');
-        if (!href || !/^https?:\/\//i.test(href)) return;
-        links.add(href.split('#')[0]);
-      };
-
-      contentEl.querySelectorAll('a[href]').forEach((a) => addLink(a.getAttribute('href') ?? ''));
-      for (const m of contentHtml.matchAll(/https?:\/\/[^\s"'<>]+/g)) addLink(m[0]);
-
-      let intLinkCount = 0;
-      let extLinkCount = 0;
-      for (const href of links) {
-        if (/blog\.naver\.com|m\.blog\.naver\.com/i.test(href)) {
-          intLinkCount += 1;
-          continue;
-        }
-        if (/^https?:\/\//i.test(href) && !/naver\.com|naver\.me|pstatic\.net|blogfiles\.naver\.net/i.test(href)) {
-          extLinkCount += 1;
-        }
-      }
-
-      let commentCount =
-        apiComment ??
-        scriptNum([
-          /listNumComment\s*[=:]\s*['"]?(\d+)/i,
-          /commentCount\s*[=:]\s*['"]?(\d+)/i,
-          /"commentCnt"\s*:\s*(\d+)/,
-          /commentCnt\s*[=:]\s*['"]?(\d+)/i,
-        ]);
-
-      if (commentCount == null) {
-        const dom =
-          document.querySelector('#commentCount, .comment_count, .total_comment, .u_cbox_count')?.textContent ??
-          '';
-        commentCount = parseNum(dom.replace(/[^\d]/g, ''));
-      }
-      if (commentCount == null) {
-        const m = document.body.innerText.match(/댓글\s*([\d,]+)/);
-        commentCount = m ? parseNum(m[1]) : 0;
-      }
-
-      let likeCount =
-        apiLike ??
-        scriptNum([
-          /sympathyCount\s*[=:]\s*['"]?(\d+)/i,
-          /"sympathyCnt"\s*:\s*(\d+)/,
-          /sympathyCnt\s*[=:]\s*['"]?(\d+)/i,
-        ]);
-
-      if (likeCount == null) {
-        const dom =
-          document.querySelector('#sympathyCount, .u_cnt._count, .sympathy_btn .count, .like_count')
-            ?.textContent ?? '';
-        likeCount = parseNum(dom.replace(/[^\d]/g, ''));
-      }
-      if (likeCount == null) {
-        const m = document.body.innerText.match(/공감\s*([\d,]+)/);
-        likeCount = m ? parseNum(m[1]) : 0;
-      }
-
-      return {
-        char_count: contentText.length,
-        img_count: imgCount,
-        video_count: videoCount,
-        quote_count: quoteCount,
-        comment_count: commentCount ?? 0,
-        like_count: likeCount ?? 0,
-        gif_count: gifCount,
-        map_count: mapCount,
-        hidden_count: hiddenCount,
-        int_link_count: intLinkCount,
-        ext_link_count: extLinkCount,
-      };
-    },
-    { blogId, postNo },
-  );
-}
-
-async function scrapeOuterEngagement(page: Page): Promise<Partial<PostContentStats>> {
-  return page.evaluate(() => {
+/** iframe#mainFrame 내부 DOM 기준 포스트 메타 파싱 */
+async function scrapeStatsFromFrame(frame: Frame): Promise<PostContentStats> {
+  return frame.evaluate(() => {
     const parseNum = (raw: unknown): number => {
       if (raw == null) return 0;
       const n = Number(String(raw).replace(/,/g, '').trim());
       return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
     };
 
-    const html = document.documentElement.innerHTML;
-    let commentCount = parseNum(document.querySelector('#commentCount, .comment_count')?.textContent);
-    let likeCount = parseNum(document.querySelector('#sympathyCount, em#sympathyCount')?.textContent);
+    const root =
+      document.querySelector('.se-main-container') ??
+      document.querySelector('#postViewArea') ??
+      document.querySelector('.post-view') ??
+      document.querySelector('#printPost1') ??
+      document.body;
 
-    if (!commentCount) {
-      const m = html.match(/commentCnt['":\s]+(\d+)/i) ?? html.match(/listNumComment\s*[=:]\s*['"]?(\d+)/i);
-      commentCount = m ? parseNum(m[1]) : 0;
-    }
-    if (!likeCount) {
-      const m = html.match(/sympathyCnt['":\s]+(\d+)/i) ?? html.match(/sympathyCount['":\s]+(\d+)/i);
-      likeCount = m ? parseNum(m[1]) : 0;
+    const contentText = (root.textContent ?? '').replace(/\s+/g, ' ').trim();
+    const charCount = contentText.length;
+
+    const allImgs = [...root.querySelectorAll('img')];
+    const gifCount = allImgs.filter((img) => /\.gif($|\?)/i.test(img.getAttribute('src') ?? '')).length;
+    const imgCount = allImgs.length - gifCount;
+
+    const videoCount =
+      root.querySelectorAll('video').length +
+      root.querySelectorAll('iframe[src*="tv.naver"], iframe[src*="naver.tv"]').length;
+
+    const quoteCount = root.querySelectorAll('blockquote').length;
+
+    const mapCount = root.querySelectorAll(
+      'iframe[src*="map.naver"], iframe[src*="place.naver"], .se-map, .se-module-map, [class*="map"]',
+    ).length;
+
+    let hiddenCount = 0;
+    for (const el of root.querySelectorAll('*')) {
+      const style = window.getComputedStyle(el);
+      const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim();
+      if (style.display === 'none' && text.length > 0) hiddenCount += 1;
     }
 
-    return { comment_count: commentCount, like_count: likeCount };
+    let intLinkCount = 0;
+    let extLinkCount = 0;
+    const seenLinks = new Set<string>();
+
+    for (const a of root.querySelectorAll('a[href]')) {
+      const href = (a.getAttribute('href') ?? '').trim();
+      if (!href || !/^https?:\/\//i.test(href)) continue;
+      const key = href.split('#')[0];
+      if (seenLinks.has(key)) continue;
+      seenLinks.add(key);
+
+      if (/blog\.naver\.com/i.test(href)) {
+        intLinkCount += 1;
+      } else if (!/naver\.com/i.test(href)) {
+        extLinkCount += 1;
+      }
+    }
+
+    let commentCount = 0;
+    for (const sel of ['#commentCount', '.comment_count', '.u_cbox_count', '.area_comment .num', '.btn_comment .num']) {
+      const t = document.querySelector(sel)?.textContent ?? '';
+      const n = parseNum(t.replace(/[^\d]/g, ''));
+      if (n > 0) commentCount = Math.max(commentCount, n);
+    }
+    const commentMatch = document.body.innerText.match(/댓글\s*([\d,]+)/);
+    if (commentMatch?.[1]) {
+      commentCount = Math.max(commentCount, parseNum(commentMatch[1]));
+    }
+
+    let likeCount = 0;
+    for (const sel of ['#sympathyCount', '.u_cnt._count', '.sympathy_btn .count', 'em.u_cnt', '.like_count']) {
+      const t = document.querySelector(sel)?.textContent ?? '';
+      const n = parseNum(t.replace(/[^\d]/g, ''));
+      if (n > 0) likeCount = Math.max(likeCount, n);
+    }
+    const likeMatch = document.body.innerText.match(/공감\s*([\d,]+)/);
+    if (likeMatch?.[1]) {
+      likeCount = Math.max(likeCount, parseNum(likeMatch[1]));
+    }
+
+    return {
+      char_count: charCount,
+      img_count: imgCount,
+      video_count: videoCount,
+      quote_count: quoteCount,
+      comment_count: commentCount,
+      like_count: likeCount,
+      gif_count: gifCount,
+      map_count: mapCount,
+      hidden_count: hiddenCount,
+      int_link_count: intLinkCount,
+      ext_link_count: extLinkCount,
+    };
   });
 }
 
+async function resolveMainFrame(page: Page, blogId: string, postNo: string): Promise<Frame | null> {
+  const frameElement = await page.$('iframe#mainFrame');
+  if (!frameElement) return null;
+
+  const frame = await frameElement.contentFrame();
+  if (!frame) return null;
+
+  await frame.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => {});
+  await frame
+    .waitForSelector('.se-main-container, #postViewArea, .post-view, #printPost1', { timeout: 15_000 })
+    .catch(() => {});
+  await sleep(800);
+  return frame;
+}
+
 /**
- * blog.naver.com PostView(mainFrame) + m.blog 폴백 — 본문 메타·댓글·공감 실측
- * method: 'desktop-mainFrame' + 'm.blog-post-view'
+ * blog.naver.com PostView — iframe#mainFrame contentFrame 진입 후 본문 메타 실측
+ * method: 'desktop-mainFrame-iframe'
  */
 export async function scrapePostContentStats(
   page: Page,
@@ -235,36 +125,31 @@ export async function scrapePostContentStats(
 ): Promise<PostContentStats> {
   const desktopUrl = `https://blog.naver.com/${blogId}/${postNo}`;
   await page.goto(desktopUrl, { waitUntil: 'domcontentloaded' });
-  await sleep(1200);
+  await sleep(1500);
 
   if (await detectBlogCheckCaptcha(page)) {
     throw new BlogCheckCaptchaError(blogId);
   }
 
-  const mainFrame = page.frame({ name: 'mainFrame' });
-  if (mainFrame) {
-    await mainFrame.waitForLoadState('domcontentloaded', { timeout: 12_000 }).catch(() => {});
-    await sleep(700);
-  }
+  let frame = await resolveMainFrame(page, blogId, postNo);
 
-  const outerEngagement = await scrapeOuterEngagement(page);
-  let stats = mainFrame
-    ? await evaluatePostStats(mainFrame, blogId, postNo)
-    : await evaluatePostStats(page, blogId, postNo);
-
-  stats = mergePostContentStats(stats, outerEngagement);
-
-  if (stats.char_count <= 0) {
-    await page.goto(`https://m.blog.naver.com/${blogId}/${postNo}`, { waitUntil: 'domcontentloaded' });
-    await sleep(900);
+  if (!frame) {
+    const postViewUrl = `https://blog.naver.com/PostView.naver?blogId=${encodeURIComponent(blogId)}&logNo=${encodeURIComponent(postNo)}`;
+    await page.goto(postViewUrl, { waitUntil: 'domcontentloaded' });
+    await sleep(1200);
 
     if (await detectBlogCheckCaptcha(page)) {
       throw new BlogCheckCaptchaError(blogId);
     }
 
-    const mobileStats = await evaluatePostStats(page, blogId, postNo);
-    stats = mergePostContentStats(stats, mobileStats);
+    frame = await resolveMainFrame(page, blogId, postNo);
   }
 
-  return stats;
+  if (frame) {
+    return scrapeStatsFromFrame(frame);
+  }
+
+  await page.waitForSelector('.se-main-container, #postViewArea, .post-view', { timeout: 15_000 }).catch(() => {});
+  await sleep(600);
+  return scrapeStatsFromFrame(page.mainFrame());
 }
