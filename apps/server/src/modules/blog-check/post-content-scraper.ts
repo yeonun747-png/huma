@@ -41,22 +41,31 @@ const SCRAPE_STATS_FN = ({
   const textLen = (el: Element | null | undefined): number =>
     countBodyChars(el ?? document.body);
 
-  /** SmartEditor 본문 글자수 — .se-text 합산(줄바꿈 유지), se-blind 제외 */
+  /** SmartEditor 본문 글자수 — 모듈당 leaf .se-text 1개만(중첩 중복 방지) */
   function countBodyChars(scope: Element | null | undefined): number {
     if (!scope) return 0;
     const parts: string[] = [];
 
     scope.querySelectorAll('.se-text').forEach((el) => {
       if (el.closest('.se-blind')) return;
+      if (el.querySelector('.se-text')) return;
       const t = (el.textContent ?? '').replace(/\u00a0/g, ' ').trim();
       if (t) parts.push(t);
     });
 
     if (parts.length === 0) {
-      scope.querySelectorAll('.se_component, .se-module-text').forEach((el) => {
-        if (el.closest('.se-blind')) return;
-        if (el.querySelector('.se-text')) return;
-        const t = (el.textContent ?? '').replace(/\u00a0/g, ' ').trim();
+      scope.querySelectorAll('.se-module-text, .se_module_text').forEach((mod) => {
+        if (mod.closest('.se-blind')) return;
+        const leaf = mod.querySelector('.se-text');
+        const t = (leaf?.textContent ?? mod.textContent ?? '').replace(/\u00a0/g, ' ').trim();
+        if (t.length >= 10) parts.push(t);
+      });
+    }
+
+    if (parts.length === 0) {
+      scope.querySelectorAll('#viewTypeSelector .se_component').forEach((comp) => {
+        if (comp.closest('.se-blind')) return;
+        const t = (comp.textContent ?? '').replace(/\u00a0/g, ' ').trim();
         if (t.length >= 20) parts.push(t);
       });
     }
@@ -64,20 +73,6 @@ const SCRAPE_STATS_FN = ({
     if (parts.length > 0) return parts.join('\n').length;
 
     return (scope.innerText ?? '').replace(/\u00a0/g, ' ').trim().length;
-  }
-
-  function countPostBodyChars(postView: Element | null, root: Element): number {
-    let n = countBodyChars(root);
-    if (!postView) return n;
-
-    const clone = postView.cloneNode(true) as Element;
-    clone
-      .querySelectorAll(
-        '.u_cbox, #comment, .post_btn, .tag_area, .post_header, .post_footer, .btn_post, .se-blind',
-      )
-      .forEach((el) => el.remove());
-
-    return Math.max(n, countBodyChars(clone));
   }
 
   const isNaverOwned = (href: string): boolean => {
@@ -138,9 +133,8 @@ const SCRAPE_STATS_FN = ({
   };
 
   const root = pickContentRoot();
-  const postView = document.querySelector(`#post-view${logNo}`);
 
-  let charCount = countPostBodyChars(postView, root);
+  let charCount = countBodyChars(root);
   if (charCount < 80) {
     const ogDesc =
       document.querySelector('meta[property="og:description"]')?.getAttribute('content') ??

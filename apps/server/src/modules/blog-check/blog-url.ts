@@ -109,6 +109,13 @@ export function resolveExtLinkCount(
 
 export function plainTextLength(content: string | null | undefined): number {
   if (!content?.trim()) return 0;
-  // blai·네이버 에디터 — 줄바꿈·공백 유지 (\\s+ 축소하면 700대→600대로 줄어듦)
-  return content.replace(/[#*_`~\[\]()]/g, '').replace(/\u00a0/g, ' ').trim().length;
+  // 발행 markdown — 이미지/링크 문법 제거 후 줄바꿈 유지 (본문 글자수에 가깝게)
+  return content
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/^>\s?/gm, '')
+    .replace(/[#*_`~]/g, '')
+    .replace(/\u00a0/g, ' ')
+    .trim()
+    .length;
 }
