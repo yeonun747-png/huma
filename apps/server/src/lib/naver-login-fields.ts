@@ -10,6 +10,7 @@ import {
   ensureNaverLoginIdPhoneTab,
   NAVER_LOGIN_ID_URL,
 } from './naver-login-session.js';
+import { isNaverAuthChallengePage } from './naver-auth-challenge.js';
 
 export { ensureNaverLoginIdPhoneTab, NAVER_LOGIN_ID_URL };
 
@@ -46,6 +47,7 @@ async function clickIpSecurityOffWithMouse(page: Page, ipOn: ReturnType<Page['lo
 /** nidlogin IP보안(#ip_on) — 모뎀·프록시 환경에서는 OFF(체크 해제) 필요. JS 폴백 없이 마우스만. */
 export async function ensureNaverIpSecurityOff(page: Page): Promise<void> {
   if (!page.url().includes('nidlogin')) return;
+  if (await isNaverAuthChallengePage(page)) return;
   await ensureNaverLoginIdPhoneTab(page);
 
   const ipOn = page.locator('#ip_on');
@@ -115,6 +117,7 @@ export async function ensureNaverLoginCredentialsForCaptcha(
   if (!page.url().includes('nidlogin')) return;
 
   await ensureNaverLoginIdPhoneTab(page);
+  if (await isNaverAuthChallengePage(page)) return;
   await ensureNaverIpSecurityOff(page);
 
   const { data: account } = await supabase
@@ -151,6 +154,7 @@ export async function submitNaverLoginAfterCaptcha(
   accountId: string,
 ): Promise<boolean> {
   if (!page.url().includes('nidlogin')) return false;
+  if (await isNaverAuthChallengePage(page)) return false;
 
   await ensureNaverLoginIdPhoneTab(page);
   await ensureNaverIpSecurityOff(page);
@@ -168,6 +172,7 @@ export async function submitNaverLoginAfterCaptcha(
 /** 로그인 버튼 — humanClickLocator만 사용 (force click 금지). */
 export async function clickNaverLoginButton(page: Page): Promise<void> {
   await ensureNaverLoginIdPhoneTab(page);
+  if (await isNaverAuthChallengePage(page)) return;
   await ensureNaverIpSecurityOff(page);
 
   for (const sel of NAVER_LOGIN_BTN_SELECTORS) {

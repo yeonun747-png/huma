@@ -2,7 +2,8 @@ import type { BrowserContext, Page } from 'playwright';
 
 import { humanSleep } from '../modules/human-engine/typing.js';
 import { submitNaverLoginAfterCaptcha } from './naver-login-fields.js';
-import { isNaverCaptchaVisible, isNaverLoginPendingAfterCaptcha, pickNaverCaptchaPage } from './naver-captcha-vision.js';
+import { isNaverAuthChallengePage } from './naver-auth-challenge.js';
+import { isNaverCaptchaVisible, pickNaverCaptchaPage } from './naver-captcha-vision.js';
 import { gotoBlogPortal, waitForBlogPortalReady } from './naver-blog-portal.js';
 import { findNaverPostwritePage } from '../modules/playwright/naver/enter-blog-editor.js';
 import { sleep } from './utils.js';
@@ -42,20 +43,7 @@ export function pickPostingWorkflowPage(context: BrowserContext): Page | undefin
   return ranked[0]?.score ? ranked[0].page : pages[0];
 }
 
-/** 2단계·기기인증 등 — 자동 재개·로그인 클릭 금지 */
-export async function isNaverAuthChallengePage(page: Page): Promise<boolean> {
-  const url = page.url().toLowerCase();
-  if (
-    url.includes('otp') ||
-    url.includes('device') ||
-    url.includes('new_env') ||
-    url.includes('2step')
-  ) {
-    return true;
-  }
-  const body = await page.locator('body').innerText({ timeout: 2500 }).catch(() => '');
-  return /2단계|인증번호|새로운 기기|기기 등록|휴대폰 인증|본인 확인/.test(body);
-}
+export { isNaverAuthChallengePage } from './naver-auth-challenge.js';
 
 /** 로그인 완료 — 긍정 지표(로그아웃·MY·글쓰기) 확인. 로딩 중 오판 방지 */
 export async function isNaverLoggedInOnPage(page: Page): Promise<boolean> {
@@ -207,7 +195,6 @@ export async function ensurePostingSessionAfterCaptcha(
   options?: { allowAutoLoginSubmit?: boolean; loginWaitMs?: number },
 ): Promise<boolean> {
   const allowAutoLoginSubmit = options?.allowAutoLoginSubmit === true;
-  const loginWaitMs = options?.loginWaitMs ?? 25_000;
 
   const loggedIn = await findLoggedInPostingPage(context);
   if (loggedIn) {
@@ -228,22 +215,7 @@ export async function ensurePostingSessionAfterCaptcha(
     await submitNaverLoginAfterCaptcha(page, accountId);
     await humanSleep(...scaleMs(800, 1500));
   } else if (page.url().includes('nidlogin')) {
-    const nidPage = (await pickNaverCaptchaPage(context)) ?? page;
-    if (nidPage && (await isNaverLoginPendingAfterCaptcha(nidPage))) {
-      if (!(await isNaverCaptchaVisible(nidPage))) {
-        await submitNaverLoginAfterCaptcha(nidPage, accountId).catch(() => {});
-        await humanSleep(...scaleMs(800, 1500));
-      }
-      await nidPage
-        .waitForURL((u) => !u.href.includes('nidlogin'), { timeout: loginWaitMs })
-        .catch(() => {});
-      const afterLogin = await findLoggedInPostingPage(context);
-      if (afterLogin) {
-        await persistPostingSessionBeforeHoldClose(context);
-        return true;
-      }
-    }
-    if (page.url().includes('nidlogin')) return false;
+    return false;
   }
 
   const probe = pickPostingWorkflowPage(context) ?? page;

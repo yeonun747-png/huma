@@ -8,6 +8,7 @@ import {
   ensureNaverLoginCredentialsForCaptcha,
   submitNaverLoginAfterCaptcha,
 } from './naver-login-fields.js';
+import { isNaverAuthChallengePage } from './naver-auth-challenge.js';
 import { logOperation } from './log-emitter.js';
 import { humanSleep } from '../modules/human-engine/typing.js';
 import {
@@ -198,6 +199,7 @@ async function waitForCaptchaCleared(page: Page, timeoutMs = 10_000): Promise<bo
 export async function isNaverLoginPendingAfterCaptcha(page: Page): Promise<boolean> {
   if (!page.url().includes('nidlogin')) return false;
   if (await isNaverCaptchaVisible(page)) return false;
+  if (await isNaverAuthChallengePage(page)) return false;
   return true;
 }
 
@@ -644,6 +646,10 @@ async function submitCaptcha(
     await ensureNaverIpSecurityOff(page);
   }
 
+  if (await isNaverAuthChallengePage(page)) {
+    return;
+  }
+
   if (options?.refillPassword === true && ctx.accountId && page.url().includes('nidlogin')) {
     await ensureNaverLoginCredentialsForCaptcha(page, ctx.accountId, { fast: true });
     await humanSleep(150, 350);
@@ -652,10 +658,10 @@ async function submitCaptcha(
   const confirmed = await clickCaptchaConfirm(page);
   if (!confirmed) {
     // nidlogin 캡차는 별도 확인 버튼이 없다 — Enter(코드 제출) 대신 로그인 버튼 마우스 클릭
-    if (page.url().includes('nidlogin')) {
+    if (page.url().includes('nidlogin') && !(await isNaverAuthChallengePage(page))) {
       await clickNaverLoginButton(page).catch(() => {});
       await sleep(randomBetween(350, 700));
-    } else {
+    } else if (!page.url().includes('nidlogin')) {
       await page.keyboard.press('Enter').catch(() => {});
       await sleep(randomBetween(350, 700));
     }
@@ -664,7 +670,7 @@ async function submitCaptcha(
   if (ctx.autoLoginSubmit === true) {
     if (ctx.resubmit) {
       await ctx.resubmit();
-    } else if (page.url().includes('nidlogin')) {
+    } else if (page.url().includes('nidlogin') && !(await isNaverAuthChallengePage(page))) {
       await clickNaverLoginButton(page);
     }
   }
@@ -683,6 +689,15 @@ export async function applyManualCaptchaAnswer(
     await ensureNaverIpSecurityOff(page);
   }
 
+  if (await isNaverAuthChallengePage(page)) {
+    return {
+      filled: true,
+      submitted: false,
+      cleared: !(await isNaverCaptchaVisible(page)),
+      pending_login: true,
+    };
+  }
+
   // ① 정답칸 마우스 이동·클릭 후 정답 입력
   const filled = await fillCaptchaAnswer(page, answer);
   if (!filled) return { filled: false, submitted: false, cleared: false, pending_login: false };
@@ -693,12 +708,20 @@ export async function applyManualCaptchaAnswer(
   let pending_login: boolean;
 
   if (page.url().includes('nidlogin')) {
-    // nidlogin — ID·PW 비었으면 재입력 후 로그인 버튼 클릭
-    const loggedIn = await submitNaverLoginAfterCaptcha(page, ctx.accountId ?? '');
-    await humanSleep(500, 1200);
-    cleared = loggedIn || !(await isNaverCaptchaVisible(page));
-    // 캡차는 통과했으나 아직 nidlogin에 머무는 경우만 pending_login
-    pending_login = cleared && !loggedIn;
+    if (await isNaverAuthChallengePage(page)) {
+      cleared = !(await isNaverCaptchaVisible(page));
+      pending_login = true;
+    } else {
+      const loggedIn = await submitNaverLoginAfterCaptcha(page, ctx.accountId ?? '');
+      await humanSleep(500, 1200);
+      if (await isNaverAuthChallengePage(page)) {
+        cleared = !(await isNaverCaptchaVisible(page));
+        pending_login = true;
+      } else {
+        cleared = loggedIn || !(await isNaverCaptchaVisible(page));
+        pending_login = cleared && !loggedIn;
+      }
+    }
   } else {
     // 비-nidlogin 챌린지(그리드·슬라이더 등) — 확인 버튼 클릭
     await submitCaptcha(page, ctx, { refillPassword: false });

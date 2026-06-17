@@ -22,6 +22,7 @@ import {
   pickNaverCaptchaPage,
 } from '../../lib/naver-captcha-vision.js';
 import { ensureNaverLoginCredentialsForCaptcha } from '../../lib/naver-login-fields.js';
+import { isNaverAuthChallengePage } from '../../lib/naver-auth-challenge.js';
 import { vncSlotLabelKo } from '../../lib/vnc-window-layout.js';
 import { enforceVncWindowBounds } from '../../lib/vnc-window-guard.js';
 import { purgePostBlogStorageMedia } from '../../lib/cleanup-post-blog-storage.js';
@@ -161,9 +162,11 @@ export async function syncCaptchaHoldState(
     options?.treatAsSecondRound === true ||
     options?.refillPassword === true;
   if (shouldRefill && shotPage.url().includes('nidlogin')) {
-    await ensureNaverLoginCredentialsForCaptcha(shotPage, entry.accountId, { fast: true }).catch(
-      () => {},
-    );
+    if (!(await isNaverAuthChallengePage(shotPage))) {
+      await ensureNaverLoginCredentialsForCaptcha(shotPage, entry.accountId, { fast: true }).catch(
+        () => {},
+      );
+    }
   }
 
   const shouldCapture =
@@ -489,7 +492,12 @@ export async function enterCaptchaHold(
   await consolidateNaverLoginTabs(input.context);
 
   const captchaPage = await pickNaverCaptchaPage(input.context);
-  if (captchaPage && !captchaPage.isClosed() && captchaPage.url().includes('nidlogin')) {
+  if (
+    captchaPage &&
+    !captchaPage.isClosed() &&
+    captchaPage.url().includes('nidlogin') &&
+    !(await isNaverAuthChallengePage(captchaPage))
+  ) {
     await ensureNaverLoginCredentialsForCaptcha(captchaPage, input.accountId, { fast: true }).catch(
       () => {},
     );
@@ -664,6 +672,9 @@ export async function completeCaptchaHold(
         holds.set(jobId, entry);
         scheduleReminders(entry);
         const nidPage = await pickNaverCaptchaPage(entry.context);
+        if (nidPage && (await isNaverAuthChallengePage(nidPage))) {
+          return { ok: false, error: 'NAVER_LOGIN_2FA' };
+        }
         if (nidPage?.url().includes('nidlogin') && (await isNaverLoginPendingAfterCaptcha(nidPage))) {
           return { ok: false, error: 'CAPTCHA_PENDING_LOGIN' };
         }
