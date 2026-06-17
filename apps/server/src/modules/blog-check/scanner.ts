@@ -1,8 +1,10 @@
 import type { Page } from 'playwright';
 import { createBrowser } from '../playwright/browser.js';
 import { isNaverCaptchaVisible } from '../../lib/naver-captcha-vision.js';
+import { blogSearchUrl } from '../../lib/naver-search-links.js';
 import { randomBetween, sleep } from '../../lib/utils.js';
 import { rankToExposureStatus, type PostRankResult } from './exposure-status.js';
+import { findPostRankInHrefs, BLOG_SEARCH_PAGE_SIZE } from './exposure-rank.js';
 import { extractBlogIdFromUrl, extractPostNoFromUrl } from './blog-url.js';
 
 export class BlogCheckCaptchaError extends Error {
@@ -87,8 +89,54 @@ export async function checkPostIndexedBySite(
   return /blog\.naver\.com/i.test(bodyText) && bodyText.includes(postNo);
 }
 
+/** 블로그 탭 검색 1페이지 — 결과 블록 순서대로 제목 링크 href 수집 */
+async function collectBlogSearchResultHrefs(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const hrefs: string[] = [];
+    const seen = new Set<string>();
+
+    const push = (raw: string | null | undefined) => {
+      const href = (raw ?? '').trim();
+      if (!href) return;
+      if (!href.includes('blog.naver.com') && !href.includes('m.blog.naver.com')) return;
+      const key = href.split('#')[0].split('?')[0];
+      if (seen.has(key)) return;
+      seen.add(key);
+      hrefs.push(href);
+    };
+
+    const blocks = document.querySelectorAll(
+      '#main_pack .view_wrap, #main_pack .total_wrap, #main_pack .api_subject_bx, #main_pack .detail_box',
+    );
+
+    for (const block of blocks) {
+      const titleLink =
+        block.querySelector('a.api_txt_lines.total_tit') ??
+        block.querySelector('a.total_tit[href*="blog.naver.com"]') ??
+        block.querySelector('.title_area a[href*="blog.naver.com"]') ??
+        block.querySelector('a[href*="blog.naver.com/"]');
+      push(titleLink?.getAttribute('href'));
+    }
+
+    if (hrefs.length === 0) {
+      document
+        .querySelectorAll('#main_pack a.api_txt_lines.total_tit, #main_pack a.total_tit[href*="blog.naver.com"]')
+        .forEach((el) => push(el.getAttribute('href')));
+    }
+
+    if (hrefs.length === 0) {
+      document.querySelectorAll('#main_pack a[href*="blog.naver.com/"]').forEach((el) => {
+        const href = el.getAttribute('href') ?? '';
+        if (/\d{6,}/.test(href)) push(href);
+      });
+    }
+
+    return hrefs;
+  });
+}
+
 /**
- * 제목 블로그탭 1페이지 순위 → 미등장 시 site: URL 폴백
+ * 제목 블로그탭 1페이지 순위(포스트번호 일치) → 미등장 시 site: URL 폴백
  * method: 'blog-tab-title-search' + 'site-url-fallback'
  */
 export async function checkPostExposure(
@@ -103,49 +151,16 @@ export async function checkPostExposure(
     return { status: indexed ? 'collect' : 'miss', rank: null };
   }
 
-  const url = `https://search.naver.com/search.naver?ssc=tab.blog.all&query=${encodeURIComponent(query)}`;
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  await page.goto(blogSearchUrl(query), { waitUntil: 'domcontentloaded' });
+  await page.locator('#main_pack, .view_wrap, .total_wrap').first().waitFor({ state: 'attached', timeout: 8000 }).catch(() => {});
   await sleep(900);
 
   if (await detectBlogCheckCaptcha(page)) {
     throw new BlogCheckCaptchaError(blogId);
   }
 
-  const rank = await page.evaluate(({ blogId }) => {
-    const seen = new Set<string>();
-    const hrefs: string[] = [];
-    const selectors = [
-      '.view_wrap a[href*="blog.naver.com"]',
-      '.total_wrap a[href*="blog.naver.com"]',
-      '.api_subject_bx a[href*="blog.naver.com"]',
-      'a[href*="blog.naver.com"]',
-    ];
-
-    for (const sel of selectors) {
-      for (const el of document.querySelectorAll(sel)) {
-        const href = el.getAttribute('href') ?? '';
-        if (!href.includes('blog.naver.com')) continue;
-        const key = href.split('#')[0].split('?')[0];
-        if (seen.has(key)) continue;
-        seen.add(key);
-        hrefs.push(href);
-        if (hrefs.length >= 10) break;
-      }
-      if (hrefs.length >= 10) break;
-    }
-
-    for (let i = 0; i < hrefs.length; i++) {
-      const href = hrefs[i];
-      if (
-        href.includes(`blog.naver.com/${blogId}/`) ||
-        href.includes(`blogId=${blogId}`) ||
-        href.includes(`/${blogId}/`)
-      ) {
-        return i + 1;
-      }
-    }
-    return null;
-  }, { blogId });
+  const hrefs = await collectBlogSearchResultHrefs(page);
+  const rank = findPostRankInHrefs(hrefs, postNo, BLOG_SEARCH_PAGE_SIZE);
 
   if (rank != null) {
     return { status: rankToExposureStatus(rank), rank };
