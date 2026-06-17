@@ -369,6 +369,43 @@ export async function registerAccountRoutes(app: FastifyInstance) {
     return { success: true };
   });
 
+  app.post('/api/accounts/:id/remote-access', { preHandler: authMiddleware }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const allowedWorkspaces = getWorkspaceFilter(request);
+    const { data: existing, loadError } = await loadAccountRow(id);
+    if (loadError === 'INVALID_ID') {
+      return reply.code(400).send({ error: '잘못된 계정 id' });
+    }
+    if (!existing) return reply.code(404).send({ error: '계정 없음' });
+    if (!assertAccountMutateAccess(existing as { account_type: string }, allowedWorkspaces)) {
+      return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
+    }
+
+    try {
+      const { startPostingRemoteAccess } = await import('../lib/posting-remote-access.js');
+      return await startPostingRemoteAccess(id);
+    } catch (err) {
+      const msg = (err as Error).message ?? '원격접속 실패';
+      if (msg === 'ACCOUNT_BUSY') {
+        return reply.code(409).send({ error: '계정이 다른 작업(발행·원격접속)에 사용 중입니다' });
+      }
+      if (msg === 'MODEM_BUSY' || msg === 'NO_IDLE_MODEM') {
+        return reply.code(409).send({ error: '동글이 다른 작업에 사용 중입니다' });
+      }
+      if (msg === 'POSTING_ACCOUNT_ONLY') {
+        return reply.code(400).send({ error: '포스팅 계정만 원격접속할 수 있습니다' });
+      }
+      if (msg === 'ACCOUNT_INACTIVE') {
+        return reply.code(400).send({ error: '정지된 계정은 원격접속할 수 없습니다' });
+      }
+      if (msg === 'PROXY_PORT_MISSING') {
+        return reply.code(400).send({ error: '프록시 포트가 설정되지 않았습니다' });
+      }
+      request.log.error(err, 'posting remote access failed');
+      return reply.code(500).send({ error: msg });
+    }
+  });
+
   app.get('/api/accounts/:id/logs', { preHandler: authMiddleware }, async (request) => {
     const { id } = request.params as { id: string };
     const { data } = await supabase

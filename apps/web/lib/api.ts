@@ -346,6 +346,19 @@ export const api = {
     }
   },
   accountLogs: (id: string) => request(`/api/accounts/${id}/logs`),
+  startPostingRemoteAccess: (accountId: string) =>
+    request<{
+      ok: true;
+      accountId: string;
+      accountName: string;
+      proxyPort: number;
+      slotLabel: string | null;
+      vncUrl: string | null;
+      reused: boolean;
+    }>(`/api/accounts/${encodeURIComponent(accountId)}/remote-access`, {
+      method: 'POST',
+      timeoutMs: 120_000,
+    }),
   modems: (opts?: { probe?: boolean; slots?: number[]; timeoutMs?: number; force?: boolean }) => {
     const path = `/api/modems${qs({
       probe: opts?.probe ? '1' : undefined,

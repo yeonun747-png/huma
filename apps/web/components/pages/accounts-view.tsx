@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import type { AccountType, HumaAccount, Workspace } from '@huma/shared';
 import {
   CRANK_POOL_WORKSPACE,
@@ -19,6 +18,7 @@ import { useRegisterPageAction } from '@/components/dashboard/page-action-contex
 import { useWorkspace } from '@/components/dashboard/workspace-context';
 import { useAuth } from '@/lib/auth-context';
 import { alertAccountError } from '@/lib/account-errors';
+import { copyVncEndpoint, parseVncEndpoint } from '@/lib/open-vnc';
 import { BlogPersonaModal } from '@/components/accounts/blog-persona-modal';
 import {
   BUSINESS_UNITS,
@@ -120,7 +120,6 @@ function emptyForm(registerUnit: BusinessUnit) {
 }
 
 export function AccountsView() {
-  const router = useRouter();
   const { admin, loading: authLoading } = useAuth();
   const { workspace: sidebarWorkspace } = useWorkspace();
   const superAdmin = isSuperAdmin(admin);
@@ -141,6 +140,7 @@ export function AccountsView() {
   const [personaAccount, setPersonaAccount] = useState<HumaAccount | null>(null);
   const [personaSaving, setPersonaSaving] = useState(false);
   const [personaError, setPersonaError] = useState('');
+  const [remoteAccessId, setRemoteAccessId] = useState<string | null>(null);
 
   const postingColumns = useMemo(() => visiblePostingColumns(admin), [admin]);
 
@@ -315,6 +315,29 @@ export function AccountsView() {
       return;
     }
     setPersonaAccount(ac);
+  };
+
+  const handleRemoteAccess = async (ac: HumaAccount) => {
+    setRemoteAccessId(ac.id);
+    try {
+      const res = await api.startPostingRemoteAccess(ac.id);
+      const slot = res.slotLabel ?? `:${res.proxyPort}`;
+      let vncNote = '';
+      if (res.vncUrl) {
+        const endpoint = parseVncEndpoint(res.vncUrl);
+        if (endpoint) {
+          await copyVncEndpoint(endpoint);
+          vncNote = `\n\nVNC 주소가 클립보드에 복사되었습니다.\n${endpoint}\n\nRealVNC Direct로 접속해 naver.com에서 수동 설정하세요.`;
+        }
+      }
+      window.alert(
+        `${res.reused ? '원격접속 세션 포커스' : '원격접속 시작'} — ${ac.name} (${slot})\n해당 계정 IP로 naver.com만 열립니다.${vncNote}`,
+      );
+    } catch (e) {
+      alertAccountError(e);
+    } finally {
+      setRemoteAccessId(null);
+    }
   };
 
   const handleSavePersona = async (text: string) => {
@@ -639,7 +662,10 @@ export function AccountsView() {
                       ]}
                       actions={[
                         { label: '편집', primary: true, onClick: () => handleStartEditPosting(ac) },
-                        { label: '▶ 모니터', onClick: () => router.push('/monitor') },
+                        {
+                          label: remoteAccessId === ac.id ? '접속 중…' : '🖥 원격접속',
+                          onClick: () => void handleRemoteAccess(ac),
+                        },
                         { label: '페르소나', onClick: () => handleOpenPersona(ac) },
                         { label: ac.is_active ? '정지' : '재개', onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(() => load({ force: true })) },
                       ]}
