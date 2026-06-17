@@ -37,6 +37,14 @@ export function normalizeBlogPostUrl(blogId: string, postNo: string): string {
   return `https://blog.naver.com/${blogId}/${postNo}`;
 }
 
+export function mobilePostViewUrl(blogId: string, postNo: string): string {
+  return `https://m.blog.naver.com/PostView.naver?blogId=${encodeURIComponent(blogId)}&logNo=${encodeURIComponent(postNo)}`;
+}
+
+export function mobilePostPermalink(blogId: string, postNo: string): string {
+  return `https://m.blog.naver.com/${encodeURIComponent(blogId)}/${encodeURIComponent(postNo)}`;
+}
+
 /** naver.com·*.naver.com·naver.me — 외부링크에서 제외(네이버 생태계) */
 export function isNaverOwnedUrl(raw: string): boolean {
   try {

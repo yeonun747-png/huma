@@ -106,7 +106,7 @@ export function mergePostContentStats(
   overlay: Partial<PostContentStats>,
 ): PostContentStats {
   return {
-    char_count: overlay.char_count ?? base.char_count,
+    char_count: Math.max(base.char_count, overlay.char_count ?? 0),
     img_count: Math.max(base.img_count, overlay.img_count ?? 0),
     video_count: Math.max(base.video_count, overlay.video_count ?? 0),
     quote_count: Math.max(base.quote_count, overlay.quote_count ?? 0),

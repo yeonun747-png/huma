@@ -38,11 +38,26 @@ export async function setupBlogCheckPage(page: Page): Promise<void> {
   });
 }
 
+/** m.blog PostView·본문 크롤용 모바일 UA (데스크톱 UA는 m.blog 본문 미렌더) */
+const BLOG_CHECK_MOBILE_UA =
+  'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
+
 /** 비로그인 전용 Playwright 컨텍스트 (Stealth 플러그인은 createBrowser 경유) */
 export async function withBlogCheckBrowser<T>(
   run: (page: Page) => Promise<T>,
 ): Promise<T> {
-  const { browser, context } = await createBrowser();
+  const { browser, context: defaultContext } = await createBrowser();
+  await defaultContext.close();
+
+  const context = await browser.newContext({
+    viewport: { width: 412, height: 915 },
+    locale: 'ko-KR',
+    timezoneId: 'Asia/Seoul',
+    userAgent: BLOG_CHECK_MOBILE_UA,
+    isMobile: true,
+    hasTouch: true,
+  });
+
   try {
     const page = await context.newPage();
     await setupBlogCheckPage(page);

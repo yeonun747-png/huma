@@ -584,6 +584,7 @@ async function scanAccountWorkItem(
 
     try {
       const crawled = await scrapePostContentStats(page, blogId, postNo);
+      const hasStoredContent = post.char_count > 0 || post.img_count > 0;
       const fromPost: PostContentStats = {
         char_count: post.char_count,
         img_count: post.img_count,
@@ -595,9 +596,18 @@ async function scanAccountWorkItem(
         map_count: post.map_count,
         hidden_count: post.hidden_count,
         int_link_count: post.int_link_count,
-        ext_link_count: post.ext_link_cleared ? 0 : post.ext_link_count,
+        ext_link_count:
+          hasStoredContent && !post.ext_link_cleared ? post.ext_link_count : 0,
       };
-          const contentStats = mergePostContentStats(fromPost, crawled);
+      const contentStats =
+        crawled.char_count >= 80
+          ? {
+              ...crawled,
+              ext_link_count: post.ext_link_cleared ? 0 : crawled.ext_link_count,
+            }
+          : hasStoredContent
+            ? mergePostContentStats(fromPost, crawled)
+            : crawled;
       const rankResult = await checkPostExposure(page, blogId, postNo, title);
 
       const { error: insErr } = await supabase.from('blog_post_status').insert({
