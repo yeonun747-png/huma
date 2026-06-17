@@ -5,7 +5,7 @@ import {
   BLOG_CHECK_FRAME_TIMEOUT_MS,
   BLOG_CHECK_PAGE_SETTLE_MS,
 } from './constants.js';
-import { type PostContentStats } from './content-stats.js';
+import { type PostContentStats, mergePostContentStats } from './content-stats.js';
 import { BlogCheckCaptchaError, detectBlogCheckCaptcha } from './scanner.js';
 
 /** SmartEditor 본문 후보 — post-view 내부만 사용 (페이지 chrome 제외) */
@@ -143,24 +143,88 @@ const SCRAPE_STATS_FN = ({
     if (ogText.length > charCount) charCount = ogText.length;
   }
 
-  const contentImgs = [
-    ...root.querySelectorAll(
-      '.se-module-image img, .se-image img, img.se_mediaImage, .se_component img, .se-module img, #viewTypeSelector img',
-    ),
-  ];
-  const allImgs =
-    contentImgs.length > 0
-      ? contentImgs
-      : [...root.querySelectorAll('img')].filter((img) => {
-          const cls = img.className ?? '';
-          if (/profile|logo|btn|icon|spinner|avatar/i.test(cls)) return false;
-          const w = img.naturalWidth || Number(img.getAttribute('width')) || 0;
-          const h = img.naturalHeight || Number(img.getAttribute('height')) || 0;
-          if (w > 0 && h > 0 && w < 40 && h < 40) return false;
-          return true;
-        });
-  const gifCount = allImgs.filter((img) => /\.gif($|\?)/i.test(img.getAttribute('src') ?? '')).length;
-  const imgCount = allImgs.length - gifCount;
+  /** SE 이미지 모듈 기준 집계 (lazy img·background-image 대응) */
+  const countImagesInScope = (scope: Element): { imgCount: number; gifCount: number } => {
+    const modules = new Set<Element>();
+    const moduleSelectors = [
+      '.se-section:not(.se-section-documentTitle) .se-component.se-image',
+      '.se-section:not(.se-section-documentTitle) .se-module-image',
+      '.se-component.se-image',
+      '.se-component-image',
+      '.se-module.se-image',
+      '[data-module="image"]',
+      '.se-image-resource',
+      '.se_component.se_image',
+      '#viewTypeSelector .se_component.se_image',
+    ];
+    for (const sel of moduleSelectors) {
+      scope.querySelectorAll(sel).forEach((el) => {
+        if (el.closest('.se-blind')) return;
+        if (el.closest('.se-section-documentTitle')) return;
+        const comp = el.closest('.se-component.se-image, .se_component.se_image') ?? el;
+        modules.add(comp);
+      });
+    }
+
+    let gifCount = 0;
+    let imgCount = 0;
+
+    if (modules.size > 0) {
+      for (const mod of modules) {
+        const img = mod.querySelector('img');
+        const src =
+          img?.getAttribute('src') ??
+          img?.getAttribute('data-lazy-src') ??
+          img?.getAttribute('data-src') ??
+          mod.getAttribute('data-lazy-src') ??
+          '';
+        if (/\.gif($|\?)/i.test(src)) gifCount += 1;
+        else imgCount += 1;
+      }
+      return { imgCount, gifCount };
+    }
+
+    const contentImgs = [
+      ...scope.querySelectorAll(
+        '.se-module-image img, .se-image img, img.se_mediaImage, .se_component img, .se-module img, #viewTypeSelector img',
+      ),
+    ];
+    const allImgs =
+      contentImgs.length > 0
+        ? contentImgs
+        : [...scope.querySelectorAll('img')].filter((img) => {
+            const cls = img.className ?? '';
+            if (/profile|logo|btn|icon|spinner|avatar/i.test(cls)) return false;
+            const w = img.naturalWidth || Number(img.getAttribute('width')) || 0;
+            const h = img.naturalHeight || Number(img.getAttribute('height')) || 0;
+            if (w > 0 && h > 0 && w < 40 && h < 40) return false;
+            return true;
+          });
+    gifCount = allImgs.filter((img) => /\.gif($|\?)/i.test(img.getAttribute('src') ?? '')).length;
+    imgCount = allImgs.length - gifCount;
+    return { imgCount, gifCount };
+  };
+
+  const pickImageScope = (): Element => {
+    const pv = document.querySelector(`#post-view${logNo}`);
+    if (pv) return pv;
+
+    let best: Element | null = null;
+    let bestScore = 0;
+    for (const el of document.querySelectorAll('.se-main-container, .se_component_wrap, #viewTypeSelector')) {
+      if (el.closest('.se-blind')) continue;
+      const { imgCount: mods } = countImagesInScope(el);
+      const chars = countBodyChars(el);
+      const score = mods * 1000 + chars;
+      if (score > bestScore) {
+        bestScore = score;
+        best = el;
+      }
+    }
+    return best ?? root;
+  };
+
+  const { imgCount, gifCount } = countImagesInScope(pickImageScope());
 
   const videoCount =
     root.querySelectorAll('video, .se-module-video, .se-video').length +
@@ -205,27 +269,42 @@ const SCRAPE_STATS_FN = ({
     }
   }
 
-  let commentCount = 0;
-  for (const sel of ['#commentCount', '.comment_count', '.u_cbox_count', '.area_comment .num', '.btn_comment .num']) {
-    const t = document.querySelector(sel)?.textContent ?? '';
-    const n = parseNum(t.replace(/[^\d]/g, ''));
-    if (n > 0) commentCount = Math.max(commentCount, n);
-  }
-  const commentMatch = document.body.innerText.match(/댓글\s*([\d,]+)/);
-  if (commentMatch?.[1]) {
-    commentCount = Math.max(commentCount, parseNum(commentMatch[1]));
-  }
+  /** 댓글·공감 — 본문 텍스트(「공감 200%」 등)와 구분, 포스트 푸터 위젯만 */
+  const engagementScopes: Element[] = [];
+  const postView = document.querySelector(`#post-view${logNo}`);
+  if (postView) engagementScopes.push(postView);
+  document
+    .querySelectorAll('.wrap_postcomment, .post-btn, #spiButton, .post_recommend')
+    .forEach((el) => engagementScopes.push(el));
 
-  let likeCount = 0;
-  for (const sel of ['#sympathyCount', '.u_cnt._count', '.sympathy_btn .count', 'em.u_cnt', '.like_count']) {
-    const t = document.querySelector(sel)?.textContent ?? '';
-    const n = parseNum(t.replace(/[^\d]/g, ''));
-    if (n > 0) likeCount = Math.max(likeCount, n);
-  }
-  const likeMatch = document.body.innerText.match(/공감\s*([\d,]+)/);
-  if (likeMatch?.[1]) {
-    likeCount = Math.max(likeCount, parseNum(likeMatch[1]));
-  }
+  const pickFirstCount = (selectors: string[]): number => {
+    for (const scope of engagementScopes.length > 0 ? engagementScopes : [document.body]) {
+      for (const sel of selectors) {
+        const t = scope.querySelector(sel)?.textContent ?? '';
+        const n = parseNum(t.replace(/[^\d]/g, ''));
+        if (n > 0) return n;
+      }
+    }
+    return 0;
+  };
+
+  const commentCount = pickFirstCount([
+    '#commentCount',
+    '.comment_count',
+    '.u_cbox_count',
+    '.area_comment .num',
+    '.btn_comment .num',
+  ]);
+
+  const likeCount = pickFirstCount([
+    '.u_likeit_list_module._postSympathyView .u_cnt._count',
+    '.u_likeit_list_module._postSympathyView em.u_cnt',
+    '.u_likeit_list_module._postSympathyView .u_cnt',
+    '.u_likeit_list_btn .u_cnt._count',
+    '.u_likeit_list_btn em.u_cnt',
+    '#sympathyCount',
+    '.sympathy_btn .count',
+  ]);
 
   return {
     char_count: charCount,
@@ -245,6 +324,11 @@ const SCRAPE_STATS_FN = ({
 async function waitForPostContent(frame: Frame): Promise<void> {
   await frame.waitForLoadState('domcontentloaded', { timeout: BLOG_CHECK_FRAME_TIMEOUT_MS }).catch(() => {});
   await frame.waitForSelector(CONTENT_SELECTOR, { timeout: BLOG_CHECK_FRAME_TIMEOUT_MS }).catch(() => {});
+  await frame
+    .waitForSelector('.se-component.se-image, .se-module-image, .se-module-text', {
+      timeout: 4_000,
+    })
+    .catch(() => {});
   await frame
     .waitForFunction(
       ({ rootSelectors, minChars }: { rootSelectors: string[]; minChars: number }) => {
@@ -304,10 +388,6 @@ const EMPTY_STATS: PostContentStats = {
   ext_link_count: 0,
 };
 
-function statsQuality(s: PostContentStats): number {
-  return s.char_count * 1000 + s.img_count * 10 + s.ext_link_count;
-}
-
 async function navigateAndScrape(
   page: Page,
   url: string,
@@ -326,7 +406,7 @@ async function navigateAndScrape(
     const frame = await resolveMainFrame(page);
     if (frame) {
       const frameStats = await scrapeStatsFromFrame(frame, postNo);
-      if (statsQuality(frameStats) > statsQuality(stats)) stats = frameStats;
+      stats = mergePostContentStats(stats, frameStats);
     }
   }
 
@@ -347,8 +427,7 @@ export async function scrapePostContentStats(
 
   for (const url of strategies) {
     const stats = await navigateAndScrape(page, url, blogId, postNo);
-    if (statsQuality(stats) > statsQuality(best)) best = stats;
-    if (best.char_count >= CONTENT_MIN_CHARS) return best;
+    best = mergePostContentStats(best, stats);
   }
 
   return best;
