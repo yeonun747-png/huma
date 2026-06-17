@@ -432,9 +432,11 @@ function resolveExposureStatusFromRow(row: StatusRow): PostExposureStatus {
   if (rank != null && rank > 0) return rankToExposureStatus(rank);
 
   const raw = String(row.status);
-  if (raw === 'ok' || raw === 'good') return 'good';
   if (raw === 'collect') return 'weak';
-  if (raw === 'strong' || raw === 'weak' || raw === 'miss') return raw;
+  if (raw === 'strong' || raw === 'good' || raw === 'ok' || raw === 'weak' || raw === 'miss') {
+    if (raw === 'ok') return 'good';
+    return raw;
+  }
   return 'miss';
 }
 
@@ -584,6 +586,24 @@ async function scanAccountWorkItem(
   }
 
   await onStep(acc.id, label);
+
+  const postNos = posts
+    .map((p) => p.post_no ?? extractPostNoFromUrl(p.post_url))
+    .filter((n): n is string => Boolean(n));
+  if (postNos.length > 0) {
+    const { error: clearErr } = await supabase
+      .from('blog_post_status')
+      .delete()
+      .eq('account_id', acc.id)
+      .in('post_no', postNos);
+    if (clearErr) {
+      await logOperation({
+        level: 'warn',
+        message: `[blog-check] 이전 스캔 상태 삭제 실패: ${clearErr.message}`,
+        account_id: acc.id,
+      });
+    }
+  }
 
   for (let i = 0; i < posts.length && !accountAborted; i++) {
     const post = posts[i];

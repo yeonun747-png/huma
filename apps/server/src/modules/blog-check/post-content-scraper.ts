@@ -113,22 +113,21 @@ const SCRAPE_STATS_FN = ({
     }
 
     let best: Element | null = null;
-    let bestScore = -1;
+    let bestLen = 0;
     for (const el of candidates) {
-      const len = textLen(el);
-      let score = len;
-      if (el.classList.contains('se-main-container')) score += 1_000_000;
-      else if (el.id === 'viewTypeSelector') score += 500_000;
-      else if (el.classList.contains('se_component_wrap')) score += 250_000;
-      else if (postView && el === postView) score += 10_000;
-      if (score > bestScore) {
-        bestScore = score;
+      const len = countBodyChars(el);
+      if (len > bestLen) {
+        bestLen = len;
+        best = el;
+      } else if (len === bestLen && len > 0 && el.classList.contains('se-main-container')) {
         best = el;
       }
     }
 
     if (best) return best;
-    if (postView && textLen(postView) >= 80) return postView;
+    if (postView && countBodyChars(postView) >= 80) return postView;
+    const legacy = document.querySelector('#viewTypeSelector');
+    if (legacy && countBodyChars(legacy) >= 80) return legacy;
     return document.body;
   };
 
@@ -146,7 +145,7 @@ const SCRAPE_STATS_FN = ({
 
   const contentImgs = [
     ...root.querySelectorAll(
-      '.se-module-image img, .se-image img, img.se_mediaImage, .se_component img, .se-module img',
+      '.se-module-image img, .se-image img, img.se_mediaImage, .se_component img, .se-module img, #viewTypeSelector img',
     ),
   ];
   const allImgs =
@@ -292,32 +291,6 @@ async function scrapeFromPage(page: Page, postNo: string): Promise<PostContentSt
   return scrapeStatsFromFrame(page.mainFrame(), postNo);
 }
 
-async function navigateAndScrape(
-  page: Page,
-  url: string,
-  blogId: string,
-  postNo: string,
-): Promise<PostContentStats> {
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
-
-  if (await detectBlogCheckCaptcha(page)) {
-    throw new BlogCheckCaptchaError(blogId);
-  }
-
-  let stats = await scrapeFromPage(page, postNo);
-  if (stats.char_count >= CONTENT_MIN_CHARS) return stats;
-
-  if (await page.$('iframe#mainFrame')) {
-    const frame = await resolveMainFrame(page);
-    if (frame) {
-      const frameStats = await scrapeStatsFromFrame(frame, postNo);
-      if (frameStats.char_count >= stats.char_count) stats = frameStats;
-    }
-  }
-
-  return stats;
-}
-
 const EMPTY_STATS: PostContentStats = {
   char_count: 0,
   img_count: 0,
@@ -332,6 +305,35 @@ const EMPTY_STATS: PostContentStats = {
   ext_link_count: 0,
 };
 
+function statsQuality(s: PostContentStats): number {
+  return s.char_count * 1000 + s.img_count * 10 + s.ext_link_count;
+}
+
+async function navigateAndScrape(
+  page: Page,
+  url: string,
+  blogId: string,
+  postNo: string,
+): Promise<PostContentStats> {
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
+
+  if (await detectBlogCheckCaptcha(page)) {
+    throw new BlogCheckCaptchaError(blogId);
+  }
+
+  let stats = await scrapeFromPage(page, postNo);
+
+  if (await page.$('iframe#mainFrame')) {
+    const frame = await resolveMainFrame(page);
+    if (frame) {
+      const frameStats = await scrapeStatsFromFrame(frame, postNo);
+      if (statsQuality(frameStats) > statsQuality(stats)) stats = frameStats;
+    }
+  }
+
+  return stats;
+}
+
 export async function scrapePostContentStats(
   page: Page,
   blogId: string,
@@ -340,16 +342,15 @@ export async function scrapePostContentStats(
   const strategies = [
     mobilePostViewUrl(blogId, postNo),
     mobilePostPermalink(blogId, postNo),
-    `https://blog.naver.com/${encodeURIComponent(blogId)}/${encodeURIComponent(postNo)}`,
     `https://blog.naver.com/PostView.naver?blogId=${encodeURIComponent(blogId)}&logNo=${encodeURIComponent(postNo)}`,
+    `https://blog.naver.com/${encodeURIComponent(blogId)}/${encodeURIComponent(postNo)}`,
   ];
 
   let best = EMPTY_STATS;
 
   for (const url of strategies) {
     const stats = await navigateAndScrape(page, url, blogId, postNo);
-    if (stats.char_count > best.char_count) best = stats;
-    if (stats.char_count >= CONTENT_MIN_CHARS) return stats;
+    if (statsQuality(stats) > statsQuality(best)) best = stats;
   }
 
   return best;
