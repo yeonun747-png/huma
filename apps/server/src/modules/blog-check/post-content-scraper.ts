@@ -288,6 +288,45 @@ const SCRAPE_STATS_FN = ({
     return 0;
   };
 
+  const parseLikeCount = (): number => {
+    const scopes = engagementScopes.length > 0 ? engagementScopes : [document.body];
+
+    for (const scope of scopes) {
+      const likeEl = scope.querySelector(
+        '.u_likeit_list.like .u_likeit_list_count._count, .u_likeit_list_button[data-type="like"] .u_likeit_list_count._count',
+      );
+      if (likeEl?.textContent?.trim()) {
+        const n = parseNum(likeEl.textContent);
+        if (Number.isFinite(n)) return n;
+      }
+
+      const faceCount = scope.querySelector(
+        '.u_likeit_button._face .u_likeit_text._count.num, .u_likeit_list_module._reactionModule .u_likeit_text._count.num',
+      );
+      if (faceCount?.textContent?.trim()) {
+        const n = parseNum(faceCount.textContent);
+        if (Number.isFinite(n)) return n;
+      }
+
+      const symBtn = scope.querySelector(`#Sympathy${logNo}`);
+      if (symBtn?.textContent) {
+        const m = symBtn.textContent.match(/공감\s*(\d+)/);
+        if (m?.[1]) return parseNum(m[1]);
+      }
+    }
+
+    return pickFirstCount([
+      '.u_likeit_list_module._postSympathyView .u_cnt._count',
+      '.u_likeit_list_module._postSympathyView em.u_cnt',
+      '.u_likeit_list_module._postSympathyView .u_cnt',
+      '.u_likeit_list_module._reactionModule .u_likeit_list.like .u_likeit_list_count._count',
+      '.u_likeit_list_btn .u_cnt._count',
+      '.u_likeit_list_btn em.u_cnt',
+      '#sympathyCount',
+      '.sympathy_btn .count',
+    ]);
+  };
+
   const commentCount = pickFirstCount([
     '#commentCount',
     '.comment_count',
@@ -296,15 +335,7 @@ const SCRAPE_STATS_FN = ({
     '.btn_comment .num',
   ]);
 
-  const likeCount = pickFirstCount([
-    '.u_likeit_list_module._postSympathyView .u_cnt._count',
-    '.u_likeit_list_module._postSympathyView em.u_cnt',
-    '.u_likeit_list_module._postSympathyView .u_cnt',
-    '.u_likeit_list_btn .u_cnt._count',
-    '.u_likeit_list_btn em.u_cnt',
-    '#sympathyCount',
-    '.sympathy_btn .count',
-  ]);
+  const likeCount = parseLikeCount();
 
   return {
     char_count: charCount,
@@ -351,6 +382,166 @@ async function waitForPostContent(frame: Frame): Promise<void> {
   await sleep(BLOG_CHECK_PAGE_SETTLE_MS);
 }
 
+function parseJsonpPayload(text: string): unknown {
+  const trimmed = text.trim();
+  const start = trimmed.indexOf('(');
+  const end = trimmed.lastIndexOf(')');
+  if (start < 0 || end <= start) return null;
+  try {
+    return JSON.parse(trimmed.slice(start + 1, end));
+  } catch {
+    return null;
+  }
+}
+
+function parseLikeFromLikeApiPayload(json: unknown): number {
+  if (!json || typeof json !== 'object') return 0;
+  const root = json as Record<string, unknown>;
+
+  for (const item of (root.contents as unknown[]) ?? []) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as Record<string, unknown>;
+
+    for (const reaction of (row.reactions as unknown[]) ?? []) {
+      if (!reaction || typeof reaction !== 'object') continue;
+      const rx = reaction as Record<string, unknown>;
+      if (rx.reactionType === 'like') {
+        return Math.max(0, Number(rx.count ?? rx.reactionCount ?? 0));
+      }
+    }
+
+    const map = row.reactionMap as Record<string, unknown> | null | undefined;
+    if (map?.like != null) {
+      if (typeof map.like === 'number') return Math.max(0, map.like);
+      if (typeof map.like === 'object') {
+        const like = map.like as Record<string, unknown>;
+        return Math.max(0, Number(like.count ?? like.reactionCount ?? 0));
+      }
+    }
+  }
+
+  return 0;
+}
+
+/** reaction 모듈 JS 로드·data-loaded 대기 (공감 0이어도 모듈 attach 시 종료) */
+async function waitForEngagementWidgets(page: Page): Promise<void> {
+  const frame = page.mainFrame();
+  await frame
+    .waitForSelector('.u_likeit_list_module._reactionModule, .u_likeit_list_module._postSympathyView, [id^="Sympathy"]', {
+      timeout: 5_000,
+    })
+    .catch(() => {});
+  await frame
+    .waitForFunction(
+      () => {
+        const mod = document.querySelector(
+          '.u_likeit_list_module._reactionModule, .u_likeit_list_module._postSympathyView',
+        );
+        if (mod?.getAttribute('data-loaded') === '1') return true;
+        if (mod?.querySelector('.u_likeit_list_count._count, .u_likeit_text._count.num')) return true;
+
+        const symBtn = document.querySelector('[id^="Sympathy"]');
+        if (symBtn?.textContent?.match(/공감\s*\d+/)) return true;
+
+        return false;
+      },
+      { timeout: 5_000 },
+    )
+    .catch(() => {});
+  await sleep(BLOG_CHECK_PAGE_SETTLE_MS);
+}
+
+async function fetchSympathyViaLikeApi(page: Page, blogId: string, postNo: string): Promise<number> {
+  const cid = `${blogId}_${postNo}`;
+  const isMobile = page.url().includes('m.blog.naver.com');
+  const params = new URLSearchParams({
+    suppress_response_codes: 'true',
+    q: `BLOG[${cid}]`,
+    isDuplication: 'false',
+    cssIds: isMobile ? 'BASIC_MOBILE,MULTI_MOBILE' : 'BASIC_PC,MULTI_PC',
+  });
+
+  try {
+    const res = await page.request.get(`https://route-like.naver.com/v1/search/contents?${params.toString()}`, {
+      headers: {
+        Referer: page.url(),
+        Accept: 'application/json, text/javascript, */*',
+      },
+    });
+    const text = await res.text();
+    return parseLikeFromLikeApiPayload(parseJsonpPayload(text));
+  } catch {
+    return 0;
+  }
+}
+
+async function scrapeEngagementFromPage(page: Page, postNo: string): Promise<Pick<PostContentStats, 'comment_count' | 'like_count'>> {
+  await waitForEngagementWidgets(page);
+  return page.mainFrame().evaluate(
+    (logNo) => {
+      const parseNum = (raw: unknown): number => {
+        if (raw == null) return 0;
+        const n = Number(String(raw).replace(/,/g, '').trim());
+        return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+      };
+
+      const scopes: Element[] = [];
+      const postView = document.querySelector(`#post-view${logNo}`);
+      if (postView) scopes.push(postView);
+      document
+        .querySelectorAll('.wrap_postcomment, .post-btn, #spiButton, .post_recommend, .floating_bottom')
+        .forEach((el) => scopes.push(el));
+
+      const pickFirst = (selectors: string[]): number => {
+        for (const scope of scopes.length > 0 ? scopes : [document.body]) {
+          for (const sel of selectors) {
+            const t = scope.querySelector(sel)?.textContent ?? '';
+            const n = parseNum(t.replace(/[^\d]/g, ''));
+            if (n > 0) return n;
+          }
+        }
+        return 0;
+      };
+
+      let likeCount = 0;
+      for (const scope of scopes.length > 0 ? scopes : [document.body]) {
+        const likeEl = scope.querySelector(
+          '.u_likeit_list.like .u_likeit_list_count._count, .u_likeit_list_button[data-type="like"] .u_likeit_list_count._count',
+        );
+        if (likeEl?.textContent?.trim()) {
+          likeCount = parseNum(likeEl.textContent);
+          break;
+        }
+        const faceCount = scope.querySelector('.u_likeit_button._face .u_likeit_text._count.num');
+        if (faceCount?.textContent?.trim()) {
+          likeCount = parseNum(faceCount.textContent);
+          break;
+        }
+        const symBtn = scope.querySelector(`#Sympathy${logNo}`);
+        const symMatch = symBtn?.textContent?.match(/공감\s*(\d+)/);
+        if (symMatch?.[1]) {
+          likeCount = parseNum(symMatch[1]);
+          break;
+        }
+      }
+
+      if (likeCount === 0) {
+        likeCount = pickFirst([
+          '.u_likeit_list_module._reactionModule .u_likeit_list.like .u_likeit_list_count._count',
+          '.u_likeit_list_module._postSympathyView .u_cnt._count',
+          '.u_likeit_list_btn .u_cnt._count',
+        ]);
+      }
+
+      return {
+        comment_count: pickFirst(['#commentCount', '.comment_count', '.u_cbox_count', '.area_comment .num']),
+        like_count: likeCount,
+      };
+    },
+    postNo,
+  );
+}
+
 async function scrapeStatsFromFrame(frame: Frame, postNo: string): Promise<PostContentStats> {
   return frame.evaluate(SCRAPE_STATS_FN, {
     rootSelectors: [...CONTENT_ROOT_SELECTORS],
@@ -394,11 +585,36 @@ async function navigateAndScrape(
   blogId: string,
   postNo: string,
 ): Promise<PostContentStats> {
+  const likeApiResponse = page
+    .waitForResponse(
+      (resp) =>
+        resp.url().includes('route-like.naver.com/v1/search/contents') &&
+        resp.url().includes(encodeURIComponent(blogId)) &&
+        resp.status() === 200,
+      { timeout: 10_000 },
+    )
+    .catch(() => null);
+
   await page.goto(url, { waitUntil: 'domcontentloaded' });
 
   if (await detectBlogCheckCaptcha(page)) {
     throw new BlogCheckCaptchaError(blogId);
   }
+
+  let likeFromNetwork = 0;
+  const likeResp = await likeApiResponse;
+  if (likeResp) {
+    try {
+      likeFromNetwork = parseLikeFromLikeApiPayload(parseJsonpPayload(await likeResp.text()));
+    } catch {
+      likeFromNetwork = 0;
+    }
+  }
+
+  const [engagement, likeFromApi] = await Promise.all([
+    scrapeEngagementFromPage(page, postNo),
+    fetchSympathyViaLikeApi(page, blogId, postNo),
+  ]);
 
   let stats = await scrapeFromPage(page, postNo);
 
@@ -409,6 +625,11 @@ async function navigateAndScrape(
       stats = mergePostContentStats(stats, frameStats);
     }
   }
+
+  stats = mergePostContentStats(stats, {
+    comment_count: engagement.comment_count,
+    like_count: Math.max(engagement.like_count, likeFromNetwork, likeFromApi),
+  });
 
   return stats;
 }
