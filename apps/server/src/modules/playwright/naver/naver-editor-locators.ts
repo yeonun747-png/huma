@@ -6,6 +6,7 @@ import { humanBriefPauseMs, humanPressSequentially } from '../../human-engine/ko
 import { humanSleep } from '../../human-engine/typing.js';
 import type { HumanEngineConfig } from '../../../lib/settings.js';
 import { resolvePasteRatio } from '../../../lib/settings.js';
+import { pasteTextViaClipboardEvent } from './paste-clipboard-event.js';
 import { randomBetween, sleep } from '../../../lib/utils.js';
 import { logOperation } from '../../../lib/log-emitter.js';
 
@@ -1022,7 +1023,7 @@ export async function waitForBlogTitleWritten(
   return verifyBlogTitleField(page, titleLoc, expected);
 }
 
-/** 제목 1회 입력 확정 — IME 타이핑. 기대 제목이 이미 있으면 재입력 금지 */
+/** 제목 1회 입력 확정 — ClipboardEvent 복붙. 기대 제목이 이미 있으면 재입력 금지 */
 export async function ensureBlogTitleWritten(
   page: Page,
   titleLoc: Locator,
@@ -1045,7 +1046,7 @@ export async function ensureBlogTitleWritten(
     await blurBlogTitleField(page);
     return;
   }
-  await typeBlogTitleField(page, titleLoc, text, humanConfig);
+  await pasteBlogTitleField(page, titleLoc, text, humanConfig);
 }
 
 export async function readBlogTitleText(titleLoc: Locator): Promise<string> {
@@ -1723,14 +1724,7 @@ async function logTitleDebug(message: string): Promise<void> {
 }
 
 async function pastePlainTextAtCaret(page: Page, text: string): Promise<void> {
-  const plain = text.replace(/\*\*([^*]+)\*\*/g, '$1');
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
-  await page.evaluate(async (t) => {
-    await navigator.clipboard.writeText(t);
-  }, plain);
-  await sleep(randomBetween(80, 200));
-  await page.keyboard.press('Control+v');
-  await sleep(randomBetween(400, 900));
+  await pasteTextViaClipboardEvent(page, text);
 }
 
 function titleVerifyTimeoutMs(text: string): number {
@@ -1738,9 +1732,9 @@ function titleVerifyTimeoutMs(text: string): number {
 }
 
 /**
- * SE ONE 제목 — 1회 클릭·pressSequentially 후 본문으로 blur (insertText·재타이핑 없음).
+ * SE ONE 제목 — ClipboardEvent 복붙 후 본문 blur.
  */
-export async function typeBlogTitleField(
+export async function pasteBlogTitleField(
   page: Page,
   titleLoc: Locator,
   text: string,
@@ -1816,14 +1810,14 @@ export async function typeBlogTitleField(
   }
   await focusTitleEditableNode(editable);
 
-  await logTitleDebug(`pressSequentially 시작 (${titleText.length}자·wpm≈${humanConfig.wpm_mean})`);
-  await humanPressSequentially(page, editable, titleText, humanConfig, { typos: true });
+  await logTitleDebug(`ClipboardEvent 복붙 시작 (${titleText.length}자)`);
+  await pasteTextViaClipboardEvent(page, titleText);
   await sleep(humanBriefPauseMs(humanConfig, 0.12, 0.28));
 
   await waitForBlogTitleWritten(page, titleLoc, titleText, Math.min(8_000, titleVerifyTimeoutMs(titleText)));
 
   const after = await readBlogTitleTextAll(page, titleLoc, editable);
-  await logTitleDebug(`타이핑 후="${after}"`);
+  await logTitleDebug(`복붙 후="${after}"`);
 
   if (
     (titleContainsExpected(after, titleText) && !isDuplicatedBlogTitle(after, titleText)) ||
@@ -1836,21 +1830,21 @@ export async function typeBlogTitleField(
 
   if (await isBlogTitlePlaceholderGone(page)) {
     await blurBlogTitleField(page);
-    await logTitleDebug('placeholder 사라짐 — pressSequentially 성공으로 간주');
+    await logTitleDebug('placeholder 사라짐 — 복붙 성공으로 간주');
     return;
   }
 
   throw new Error('BLOG_TITLE_WRITE_FAILED');
 }
 
-/** @deprecated typeBlogTitleField 사용 */
-export async function pasteBlogTitleField(
+/** @deprecated pasteBlogTitleField 사용 */
+export async function typeBlogTitleField(
   page: Page,
   titleLoc: Locator,
   text: string,
   humanConfig: HumanEngineConfig,
 ): Promise<void> {
-  await typeBlogTitleField(page, titleLoc, text, humanConfig);
+  await pasteBlogTitleField(page, titleLoc, text, humanConfig);
 }
 
 async function ensureBodyFocusForPaste(page: Page, editable: Locator): Promise<void> {
@@ -1879,14 +1873,17 @@ export async function ensureBlogBodyFocusForTyping(page: Page, bodyLoc: Locator)
 }
 
 /**
- * SE ONE 본문 입력.
- * afterPlaceholderClick: placeholder humanClick 직후 — 재탐색·재클릭 없이 insertText만.
+ * SE ONE 본문 — ClipboardEvent 복붙(단락별).
  */
 export async function pasteBlogBodyContent(
   page: Page,
   bodyLoc: Locator,
   content: string,
-  options?: { skipClick?: boolean; afterPlaceholderClick?: boolean },
+  options?: {
+    skipClick?: boolean;
+    afterPlaceholderClick?: boolean;
+    onAfterParagraph?: (paragraphIndex: number) => Promise<void>;
+  },
 ): Promise<void> {
   if (await isDraftResumePopupVisible(page)) {
     throw new Error('DRAFT_RESUME_POPUP_STILL_VISIBLE');
@@ -1927,8 +1924,10 @@ export async function pasteBlogBodyContent(
         throw new Error('BLOG_BODY_INSERTED_INTO_TITLE');
       }
     }
-    await page.keyboard.insertText(paragraphs[i]!);
-    await sleep(200);
+    await pasteTextViaClipboardEvent(page, paragraphs[i]!);
+    if (options?.onAfterParagraph) {
+      await options.onAfterParagraph(i);
+    }
     if (i < paragraphs.length - 1) {
       await page.keyboard.press('Enter');
       await page.keyboard.press('Enter');
@@ -2183,14 +2182,14 @@ async function clearTitleFieldViaKeyboard(page: Page, editable: Locator): Promis
   return !final || isTitlePlaceholderText(final);
 }
 
-/** SE ONE 제목 — typeBlogTitleField 위임 */
+/** SE ONE 제목 — pasteBlogTitleField 위임 */
 export async function typeTextIntoBlogTitleField(
   page: Page,
   titleLoc: Locator,
   text: string,
   humanConfig: HumanEngineConfig,
 ): Promise<void> {
-  await typeBlogTitleField(page, titleLoc, text, humanConfig);
+  await pasteBlogTitleField(page, titleLoc, text, humanConfig);
 }
 
 export async function findVisibleLocator(

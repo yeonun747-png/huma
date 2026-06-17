@@ -3,7 +3,6 @@ import type { Locator, Page } from 'playwright';
 import { humanSleep } from '../../human-engine/typing.js';
 import { scaledHumanSleep } from '../../human-engine/timing.js';
 import type { HumanEngineConfig } from '../../../lib/settings.js';
-import { resolvePasteRatio } from '../../../lib/settings.js';
 import { parsePersona, type AccountPersona } from '../persona.js';
 import {
   enterBlogEditor,
@@ -15,7 +14,7 @@ import {
   findBlogTitleLocator,
   blogBodySectionLocator,
   clickBlogBodyPlaceholder,
-  typeBlogBodyContent,
+  pasteBlogBodyContent,
   ensureBlogTitleWritten,
   blurBlogTitleField,
   ensureBlogBodyFocusForTyping,
@@ -75,7 +74,7 @@ async function typeSeOneBlogBody(
   const inBodyImages =
     imageUrls && imageUrls.length > 1 ? buildInBodyImageMap(content, imageUrls) : new Map<number, string>();
 
-  await typeBlogBodyContent(page, bodyLoc, content, humanConfig, {
+  await pasteBlogBodyContent(page, bodyLoc, content, {
     afterPlaceholderClick: true,
     onAfterParagraph:
       inBodyImages.size > 0
@@ -335,7 +334,7 @@ export async function postNaverBlog(params: {
       }
       await logOperation({
         level: 'info',
-        message: '[post_blog] 제목칸 준비 — pressSequentially 타이핑 시작',
+        message: '[post_blog] 제목칸 준비 — ClipboardEvent 복붙 시작',
         account_id: params.accountId,
       });
 
@@ -369,10 +368,9 @@ export async function postNaverBlog(params: {
     if (!bodyReady) {
       await clickBlogBodyPlaceholder(page);
       await ensureBlogBodyFocusForTyping(page, editor);
-      const pastePct = Math.round(resolvePasteRatio(config) * 100);
       await logOperation({
         level: 'info',
-        message: `[post_blog] 본문 입력 시작 (복붙${pastePct}%·타이핑${100 - pastePct}%)`,
+        message: '[post_blog] 본문 입력 시작 (ClipboardEvent 복붙)',
         account_id: params.accountId,
       }).catch(() => {});
 
@@ -465,10 +463,12 @@ export async function postNaverBlog(params: {
       humanConfig: config,
       scale,
     });
+    await humanSleep(2000, 5000);
     return { resultUrl };
   }
 
   await humanSleep(1000, 2000);
   const resultUrl = await waitForNaverPublishSuccess(page);
+  await humanSleep(2000, 5000);
   return { resultUrl };
 }

@@ -4,9 +4,10 @@ import { sleep } from '../../../lib/utils.js';
 import type { HumanEngineConfig } from '../../../lib/settings.js';
 import { normalizeHashtagTag } from '../../../lib/hashtag-sanitize.js';
 import { humanClickLocator, humanMouseMove } from '../../human-engine/mouse.js';
-import { humanBriefPauseMs, humanPressSequentially } from '../../human-engine/korean-ime.js';
+import { humanBriefPauseMs } from '../../human-engine/korean-ime.js';
 import { humanSleep } from '../../human-engine/typing.js';
 import { scaledHumanSleep } from '../../human-engine/timing.js';
+import { pasteTextViaClipboardEvent } from './paste-clipboard-event.js';
 import { prepareSeOneEditorSurface } from './enter-blog-editor.js';
 import {
   findVisibleLocator,
@@ -137,7 +138,7 @@ export async function selectPublishCategory(
   return true;
 }
 
-export async function typePublishTags(
+export async function pastePublishTags(
   page: Page,
   hashtags: string[],
   humanConfig: HumanEngineConfig,
@@ -150,14 +151,12 @@ export async function typePublishTags(
   if (!input) return false;
 
   for (let i = 0; i < tags.length; i += 1) {
-    if (i === 0) {
-      await humanClickLocator(page, input);
-      await humanSleep(
-        Math.floor(humanBriefPauseMs(humanConfig, 0.1, 0.2) * scale),
-        Math.floor(humanBriefPauseMs(humanConfig, 0.15, 0.35) * scale),
-      );
-    }
-    await humanPressSequentially(page, input, tags[i]!, humanConfig);
+    await humanClickLocator(page, input);
+    await humanSleep(
+      Math.floor(humanBriefPauseMs(humanConfig, 0.1, 0.2) * scale),
+      Math.floor(humanBriefPauseMs(humanConfig, 0.15, 0.35) * scale),
+    );
+    await pasteTextViaClipboardEvent(page, tags[i]!);
     const [pLo, pHi] = humanConfig.paragraph_pause_ms;
     await humanSleep(
       Math.floor(pLo * 0.06 * scale),
@@ -172,6 +171,16 @@ export async function typePublishTags(
 
   await scaledHumanSleep(400, 900, scale);
   return true;
+}
+
+/** @deprecated pastePublishTags */
+export async function typePublishTags(
+  page: Page,
+  hashtags: string[],
+  humanConfig: HumanEngineConfig,
+  scale = 1,
+): Promise<boolean> {
+  return pastePublishTags(page, hashtags, humanConfig, scale);
 }
 
 export async function clickConfirmPublish(page: Page): Promise<void> {
@@ -242,7 +251,7 @@ export async function completeNaverPublishDialog(params: {
   await selectPublishCategory(page, category, scale).catch(() => false);
 
   if (params.hashtags?.length) {
-    await typePublishTags(page, params.hashtags, params.humanConfig, scale);
+    await pastePublishTags(page, params.hashtags, params.humanConfig, scale);
   }
 
   await scaledHumanSleep(400, 900, scale);
