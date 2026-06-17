@@ -18,6 +18,7 @@ import {
   type BlogPostLengthRange,
   type BlogPostLengthTier,
 } from '../../lib/blog-post-length.js';
+import { YEONUN_BODY_LINK_LABEL } from '../../lib/blog-writing-persona.js';
 
 export interface ContentGenerationInput {
   title: string;
@@ -56,7 +57,7 @@ const SYSTEM_PROMPTS: Record<string, string> = {
 톤: ~요체, 가볍고 친근, 친구에게 카톡하듯. 경험담·솔직한 감정·짧은 추임새(ㅎㅎ, ㅠㅠ)를 적절히.
 금지: AI/마케팅 문체 — 「정리했습니다」「안내합니다」「살펴보겠습니다」「흐름과 실천 포인트를 정리」 같은 표현.
 필수: 입력에 [말투]·[캐릭터 포스팅 톤 지침]·character_mode_prompts가 있으면 그 말투를 본문에 그대로 반영.
-서비스 URL은 본문에 yeonun.com 도메인만 1~2회 자연스럽게 (전체 경로·https 금지).`,
+서비스 언급은 본문에 「 연운 (yeonun . com) 」 형식만 1~2회 (앞뒤 공백·yeonun . com 점 앞뒤 공백 그대로, yeonun.com/https·전체 URL 금지).`,
   quizoasis: `당신은 퀴즈오아시스 글로벌 심리테스트 플랫폼의 콘텐츠 마케터입니다.
 톤: 재미있고 공유 욕구를 자극하는 가벼운 문체. 테스트 링크 포함.`,
   panana: `당신은 파나나(PANANA) AI 캐릭터 콘텐츠 플랫폼의 콘텐츠 마케터입니다.
@@ -67,10 +68,12 @@ function finalizeBlogPost(text: string): string {
   return sanitizeBlogLinksInPost(text.trim());
 }
 
+/** Claude가 yeonun.com 단독을 쓴 경우만 생성 직후 라벨 형식으로 정규화 (발행 strip 회피) */
 function sanitizeBlogLinksInPost(text: string): string {
   return text
-    .replace(/https?:\/\/(www\.)?yeonun\.com[^\s\n]*/gi, 'yeonun.com')
-    .replace(/www\.yeonun\.com/gi, 'yeonun.com');
+    .replace(/https?:\/\/(www\.)?yeonun\.com[^\s\n]*/gi, YEONUN_BODY_LINK_LABEL)
+    .replace(/\bwww\.yeonun\.com\b/gi, YEONUN_BODY_LINK_LABEL)
+    .replace(/\byeonun\.com\b/gi, YEONUN_BODY_LINK_LABEL);
 }
 
 const SEO_TITLE_MAX = 32;
@@ -259,7 +262,7 @@ function fallbackContent(
       '',
       urlSummary.slice(0, summaryLen),
       '',
-      'yeonun.com 에서 확인',
+      `${YEONUN_BODY_LINK_LABEL}에서 확인`,
     ].join('\n'),
   );
   const short = `${input.title}. ${(input.synopsis ?? urlSummary).slice(0, 80).trim()}`;
@@ -322,7 +325,7 @@ ${lengthGuide}
 순수 JSON만 (코드블록 없이):
 {
   "seo_title": "네이버 검색 최적화 제목 32자 이내. 핵심 키워드를 앞쪽에 배치, 클릭 유도. 과장·특수문자 남발 금지",
-  "blog_post": "네이버 블로그 글 ${min}~${max}자 (필수·중간 끊김 금지·완결된 글, ~요체·경험담·사람 말투). 본문 URL은 yeonun.com 만",
+  "blog_post": "네이버 블로그 글 ${min}~${max}자 (필수·중간 끊김 금지·완결된 글, ~요체·경험담·사람 말투). 서비스 언급은 「 연운 (yeonun . com) 」 형식만 (앞뒤 공백·점 앞뒤 공백 유지)",
   "tiktok_caption": "TikTok 캡션 150자 이내",
   "instagram_caption": "Instagram 캡션 300자 이내",
   "threads_text": "Threads 텍스트 500자 이내, 링크 포함",

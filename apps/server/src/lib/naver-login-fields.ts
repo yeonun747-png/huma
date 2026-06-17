@@ -22,53 +22,82 @@ const NAVER_LOGIN_BTN_SELECTORS = [
   'button[type="submit"]',
 ];
 
-async function clickIpSecurityOffWithMouse(page: Page, ipOn: ReturnType<Page['locator']>): Promise<void> {
-  if (await isNaverAuthChallengePage(page)) return;
-  const label = page.locator('#label_ip_on, label[for="ip_on"]').first();
-  const targets = [label, ipOn];
-  for (const target of targets) {
-    if ((await target.count().catch(() => 0)) === 0) continue;
-    if (!(await target.isVisible().catch(() => false))) continue;
-    await humanClickLocator(page, target);
-    await sleep(randomBetween(150, 350));
-    if (!(await ipOn.isChecked().catch(() => false))) return;
+/** IP보안 슬라이드 — #ip_on 체크박스는 hidden, 클릭은 label·switch_btn */
+const IP_SECURITY_SWITCH_SELECTORS = [
+  '#label_ip_on',
+  'label[for="ip_on"]',
+  '.switch_btn',
+  'span.switch',
+  '.switch_checkbox',
+  '.switch_on',
+];
+
+async function isNaverIpSecurityOn(page: Page): Promise<boolean | null> {
+  const ipOn = page.locator('#ip_on');
+  if ((await ipOn.count().catch(() => 0)) === 0) return null;
+  return ipOn.isChecked().catch(() => null);
+}
+
+async function findVisibleIpSecuritySwitch(page: Page) {
+  for (const sel of IP_SECURITY_SWITCH_SELECTORS) {
+    const loc = page.locator(sel).first();
+    if ((await loc.count().catch(() => 0)) === 0) continue;
+    if (await loc.isVisible().catch(() => false)) return loc;
+  }
+  return null;
+}
+
+async function clickIpSecurityOffWithMouse(page: Page): Promise<boolean> {
+  if (await isNaverAuthChallengePage(page)) return false;
+
+  const switchLoc = await findVisibleIpSecuritySwitch(page);
+  if (switchLoc) {
+    try {
+      await humanClickLocator(page, switchLoc);
+    } catch {
+      /* bbox 실패 시 좌표 클릭으로 폴백 */
+    }
+    await sleep(randomBetween(220, 480));
+    if ((await isNaverIpSecurityOn(page)) === false) return true;
   }
 
-  if (await isNaverAuthChallengePage(page)) return;
-
-  const box = await ipOn.boundingBox().catch(() => null);
-  if (box && box.width > 0 && box.height > 0) {
+  for (const sel of ['#label_ip_on', 'label[for="ip_on"]', '.switch_btn']) {
+    const loc = page.locator(sel).first();
+    const box = await loc.boundingBox().catch(() => null);
+    if (!box || box.width <= 0 || box.height <= 0) continue;
     const cx = box.x + box.width / 2 + randomBetween(-2, 2);
     const cy = box.y + box.height / 2 + randomBetween(-2, 2);
     await humanMouseMove(page, cx, cy);
     await sleep(randomBetween(100, 250));
-    if (await isNaverAuthChallengePage(page)) return;
+    if (await isNaverAuthChallengePage(page)) return false;
     await page.mouse.click(cx, cy);
-    await sleep(randomBetween(150, 350));
+    await sleep(randomBetween(220, 480));
+    if ((await isNaverIpSecurityOn(page)) === false) return true;
   }
+
+  return false;
 }
 
-/** nidlogin IP보안(#ip_on) — 모뎀·프록시 환경에서는 OFF(체크 해제) 필요. JS 폴백 없이 마우스만. */
+/** nidlogin IP보안(#ip_on) — 모뎀·프록시 환경에서는 OFF(슬라이드 클릭) 필요. JS 폴백 없이 마우스만. */
 export async function ensureNaverIpSecurityOff(page: Page): Promise<void> {
   if (!page.url().includes('nidlogin')) return;
   if (await isNaverAuthChallengePage(page)) return;
   await ensureNaverLoginIdPhoneTab(page);
 
-  const ipOn = page.locator('#ip_on');
-  if ((await ipOn.count().catch(() => 0)) === 0) return;
-  if (!(await ipOn.isVisible().catch(() => false))) return;
-  if (!(await ipOn.isChecked().catch(() => false))) return;
+  const ipState = await isNaverIpSecurityOn(page);
+  if (ipState === null) return;
+  if (ipState === false) return;
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     if (await isNaverAuthChallengePage(page)) return;
-    if (!(await ipOn.isChecked().catch(() => false))) return;
-    await clickIpSecurityOffWithMouse(page, ipOn);
+    if ((await isNaverIpSecurityOn(page)) === false) return;
+    await clickIpSecurityOffWithMouse(page);
   }
 
-  if (await ipOn.isChecked().catch(() => false)) {
+  if ((await isNaverIpSecurityOn(page)) === true) {
     await logOperation({
       level: 'warn',
-      message: '[login] IP보안 OFF 실패 — #ip_on 여전히 체크됨 (마우스 3회 시도)',
+      message: '[login] IP보안 OFF 실패 — 슬라이드(#label_ip_on) 여전히 ON (마우스 3회 시도)',
     }).catch(() => {});
   }
 }
