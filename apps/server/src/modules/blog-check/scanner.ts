@@ -3,6 +3,12 @@ import { createBrowser } from '../playwright/browser.js';
 import { isNaverCaptchaVisible } from '../../lib/naver-captcha-vision.js';
 import { blogTabAllSearchUrl } from '../../lib/naver-search-links.js';
 import { randomBetween, sleep } from '../../lib/utils.js';
+import {
+  BLOG_CHECK_FRAME_TIMEOUT_MS,
+  BLOG_CHECK_PAGE_SETTLE_MS,
+  BLOG_CHECK_SCAN_DELAY_MAX_MS,
+  BLOG_CHECK_SCAN_DELAY_MIN_MS,
+} from './constants.js';
 import { rankToExposureStatus, type PostRankResult } from './exposure-status.js';
 import { findPostRankInHrefs, BLOG_SEARCH_PAGE_SIZE } from './exposure-rank.js';
 import { extractBlogIdFromUrl, extractPostNoFromUrl } from './blog-url.js';
@@ -14,9 +20,9 @@ export class BlogCheckCaptchaError extends Error {
   }
 }
 
-/** 포스트 1건 스캔 간격 — 0.5~1.5초 랜덤 */
+/** 포스트 1건 스캔 간격 — 0.2~0.6초 랜덤 */
 export function randomScanDelayMs(): number {
-  return randomBetween(500, 1500);
+  return randomBetween(BLOG_CHECK_SCAN_DELAY_MIN_MS, BLOG_CHECK_SCAN_DELAY_MAX_MS);
 }
 
 export async function setupBlogCheckPage(page: Page): Promise<void> {
@@ -68,7 +74,8 @@ export async function checkPostIndexedBySite(
   const query = `site:blog.naver.com/${blogId}/${postNo}`;
   const url = `https://search.naver.com/search.naver?where=nexearch&sm=top_hty&query=${encodeURIComponent(query)}`;
   await page.goto(url, { waitUntil: 'domcontentloaded' });
-  await sleep(600);
+  await page.locator('#main_pack, body').first().waitFor({ state: 'attached', timeout: 6000 }).catch(() => {});
+  await sleep(BLOG_CHECK_PAGE_SETTLE_MS);
 
   if (await detectBlogCheckCaptcha(page)) {
     throw new BlogCheckCaptchaError(blogId);
@@ -203,7 +210,7 @@ export async function checkPostExposure(
     .first()
     .waitFor({ state: 'attached', timeout: 8000 })
     .catch(() => {});
-  await sleep(1000);
+  await sleep(BLOG_CHECK_PAGE_SETTLE_MS);
 
   if (await detectBlogCheckCaptcha(page)) {
     throw new BlogCheckCaptchaError(blogId);

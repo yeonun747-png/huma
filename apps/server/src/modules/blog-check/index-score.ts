@@ -1,5 +1,6 @@
 import type { Page } from 'playwright';
 import { sleep } from '../../lib/utils.js';
+import { BLOG_CHECK_PAGE_SETTLE_MS } from './constants.js';
 
 export interface BlogStats {
   visitorCount: number;
@@ -80,7 +81,7 @@ function extractFromStatsRegion(text: string): BlogStats | null {
 export async function scrapeBlogStats(page: Page, blogId: string): Promise<ScrapeBlogStatsResult | null> {
   const url = `https://m.blog.naver.com/${blogId}`;
   await page.goto(url, { waitUntil: 'domcontentloaded' });
-  await sleep(600);
+  await sleep(BLOG_CHECK_PAGE_SETTLE_MS);
 
   const text = await page.locator('body').innerText().catch(() => '');
   if (!text.trim()) return null;

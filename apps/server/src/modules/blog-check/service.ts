@@ -12,7 +12,7 @@ import {
 } from './blog-url.js';
 import { getCachedBlogPostList, loadBlogPostList, refreshBlogPostListCache } from './blog-post-list.js';
 import { emptyPostContentStats, mergePostContentStats, parsePostContentStats, type PostContentStats } from './content-stats.js';
-import { BLOG_CHECK_POST_LIMIT } from './constants.js';
+import { BLOG_CHECK_ACCOUNT_GAP_MS, BLOG_CHECK_POST_LIMIT } from './constants.js';
 import { computeBlogIndexScore, scrapeBlogStats } from './index-score.js';
 import { scrapePostContentStats } from './post-content-scraper.js';
 import type { PostExposureStatus } from './exposure-status.js';
@@ -105,12 +105,6 @@ function statsFromDbRow(row: Record<string, unknown>, workspace?: string | null)
     ext_link_count: Number(row.ext_link_count ?? 0),
   };
   if (row.ext_link_cleared) merged.ext_link_count = 0;
-  else {
-    merged.ext_link_count = Math.max(
-      merged.ext_link_count,
-      resolveExtLinkCount(null, null, workspace),
-    );
-  }
   return mergePostContentStats(base, merged);
 }
 
@@ -340,7 +334,7 @@ function mergePublishedAt(a: string, b: string): string {
   return tb > ta ? b : a;
 }
 
-/** published_at 내림차순 최근 15건 — 블로그 공개 목록 + huma_jobs/posts 병합 */
+/** published_at 내림차순 최근 N건 — 블로그 공개 목록 + huma_jobs/posts 병합 */
 async function fetchRecentPosts(
   accountId: string,
   opts?: { page?: Page; blogId?: string | null; refreshIfMissing?: boolean },
@@ -387,7 +381,6 @@ async function fetchRecentPosts(
   const merged = new Map<string, PostRow>();
 
   for (const bp of blogPosts) {
-    const stats = parsePostContentStats(null, { workspace });
     merged.set(`no:${bp.postNo}`, {
       id: bp.postUrl,
       account_id: accountId,
@@ -396,7 +389,7 @@ async function fetchRecentPosts(
       title: bp.title,
       published_at: bp.publishedAt ?? new Date(0).toISOString(),
       ext_link_cleared: false,
-      ...stats,
+      ...emptyPostContentStats(),
     });
   }
 
@@ -498,6 +491,154 @@ interface ScanWorkItem {
   posts: PostRow[];
 }
 
+function countScannablePosts(posts: PostRow[]): number {
+  return posts.filter((p) => p.post_no ?? extractPostNoFromUrl(p.post_url)).length;
+}
+
+async function prepareAccountWorkItem(acc: AccountRow, page: Page): Promise<ScanWorkItem | null> {
+  const blogId = resolveBlogId(acc.blog_url, acc.naver_id);
+  if (!blogId) {
+    await logOperation({
+      level: 'warn',
+      message: `[blog-check] blogId 없음 — ${acc.name}`,
+      account_id: acc.id,
+    });
+    return null;
+  }
+
+  const label = acc.name || acc.slot_label || acc.naver_id;
+  await refreshBlogPostListCache(acc.id, blogId, page);
+  const posts = await fetchRecentPosts(acc.id, { page, blogId });
+  return { acc, blogId, label, posts };
+}
+
+async function estimateTotalSteps(accounts: AccountRow[]): Promise<number> {
+  let total = 0;
+  for (const acc of accounts) {
+    const blogId = resolveBlogId(acc.blog_url, acc.naver_id);
+    if (!blogId) continue;
+    const posts = await fetchRecentPosts(acc.id, { blogId, refreshIfMissing: false });
+    total += countScannablePosts(posts) + 1;
+  }
+  return total;
+}
+
+async function scanAccountWorkItem(
+  page: Page,
+  item: ScanWorkItem,
+  scanDate: string,
+  onStep: (accountId: string, label: string) => Promise<void>,
+): Promise<{ scannedPosts: number; aborted: boolean }> {
+  const { acc, blogId, label, posts } = item;
+  let accountAborted = false;
+  let scannedPosts = 0;
+
+  const parsed = await scrapeBlogStats(page, blogId);
+  if (parsed) {
+    const idxScore = computeBlogIndexScore(parsed.stats);
+    const { error: idxErr } = await supabase.from('blog_index_history').insert({
+      account_id: acc.id,
+      scanned_at: scanDate,
+      idx_score: idxScore,
+      visitor_count: parsed.stats.visitorCount,
+      buddy_count: parsed.stats.buddyCount,
+      post_count: parsed.stats.postCount,
+    });
+    if (idxErr) {
+      await logOperation({
+        level: 'warn',
+        message: `[blog-check] blog_index_history insert: ${idxErr.message}`,
+        account_id: acc.id,
+      });
+    }
+  } else {
+    await supabase.from('blog_index_history').insert({
+      account_id: acc.id,
+      scanned_at: scanDate,
+      idx_score: null,
+      visitor_count: 0,
+      buddy_count: 0,
+      post_count: 0,
+    });
+    await notifyBlogCheckIndexParseFailed(blogId, acc.workspace);
+    await logOperation({
+      level: 'warn',
+      message: `[blog-check] 지수 파싱 실패 (${blogId}) — idx_score=null`,
+      account_id: acc.id,
+    });
+  }
+
+  if (await detectBlogCheckCaptcha(page)) {
+    await notifyBlogCheckCaptcha(blogId, label, acc.workspace);
+    accountAborted = true;
+  }
+
+  await onStep(acc.id, label);
+
+  for (let i = 0; i < posts.length && !accountAborted; i++) {
+    const post = posts[i];
+    const postNo = post.post_no ?? extractPostNoFromUrl(post.post_url);
+    if (!postNo) continue;
+
+    const title = post.title?.trim() || '—';
+
+    try {
+      const crawled = await scrapePostContentStats(page, blogId, postNo);
+      const fromPost: PostContentStats = {
+        char_count: post.char_count,
+        img_count: post.img_count,
+        video_count: post.video_count,
+        quote_count: post.quote_count,
+        comment_count: post.comment_count,
+        like_count: post.like_count,
+        gif_count: post.gif_count,
+        map_count: post.map_count,
+        hidden_count: post.hidden_count,
+        int_link_count: post.int_link_count,
+        ext_link_count: post.ext_link_cleared ? 0 : post.ext_link_count,
+      };
+          const contentStats = mergePostContentStats(fromPost, crawled);
+      const rankResult = await checkPostExposure(page, blogId, postNo, title);
+
+      const { error: insErr } = await supabase.from('blog_post_status').insert({
+        account_id: acc.id,
+        post_url: post.post_url,
+        post_no: postNo,
+        title: post.title,
+        scanned_at: scanDate,
+        ...statusInsertPayload(contentStats, rankResult, post.ext_link_cleared),
+      });
+
+      if (insErr) throw new Error(`blog_post_status insert 실패: ${insErr.message}`);
+      await persistCrawledPostStats(acc.id, post, contentStats);
+      scannedPosts += 1;
+    } catch (err) {
+      if (err instanceof BlogCheckCaptchaError) {
+        await notifyBlogCheckCaptcha(blogId, label, acc.workspace);
+        await logOperation({
+          level: 'warn',
+          message: `[blog-check] 캡차 감지 — ${label} 스캔 중단`,
+          account_id: acc.id,
+        });
+        break;
+      }
+      throw err;
+    }
+
+    await onStep(acc.id, label);
+
+    if (i < posts.length - 1) await sleep(randomScanDelayMs());
+  }
+
+  await logOperation({
+    level: 'info',
+    message: `[blog-check] ${label} — 포스트 ${posts.length}건 · 지수 ${parsed ? computeBlogIndexScore(parsed.stats) : 'null'}`,
+    account_id: acc.id,
+  });
+
+  return { scannedPosts, aborted: accountAborted };
+}
+
 async function reportScanProgress(params: {
   accountId?: string | null;
   accountLabel?: string | null;
@@ -528,184 +669,54 @@ export async function runBlogCheckScan(accountId?: string): Promise<{
   const accounts = await listActivePostingAccounts(accountId);
   if (!accounts.length) return { scannedAccounts: 0, scannedPosts: 0 };
 
+  const totalSteps = await estimateTotalSteps(accounts);
+  let completedSteps = 0;
+  const isolateByAccount = !accountId;
+
   await reportScanProgress({
     accountId: accountId ?? null,
     completed: 0,
-    total: 1,
+    total: Math.max(totalSteps, 1),
     phase: 'preparing',
   });
 
-  let totalSteps = 0;
-
-  await withBlogCheckBrowser(async (page) => {
-    const workItems: ScanWorkItem[] = [];
-
-    for (const acc of accounts) {
-      const blogId = resolveBlogId(acc.blog_url, acc.naver_id);
-      if (!blogId) {
-        await logOperation({
-          level: 'warn',
-          message: `[blog-check] blogId 없음 — ${acc.name}`,
-          account_id: acc.id,
-        });
-        continue;
-      }
-
-      const label = acc.name || acc.slot_label || acc.naver_id;
-      await reportScanProgress({
-        accountId: acc.id,
-        accountLabel: label,
-        completed: workItems.length,
-        total: Math.max(workItems.length + 1, 1),
-        phase: 'preparing',
-      });
-
-      await refreshBlogPostListCache(acc.id, blogId, page);
-      const posts = await fetchRecentPosts(acc.id, { page, blogId });
-      workItems.push({ acc, blogId, label, posts });
-    }
-
-    totalSteps =
-      workItems.reduce(
-        (sum, item) =>
-          sum +
-          item.posts.filter((p) => p.post_no ?? extractPostNoFromUrl(p.post_url)).length,
-        0,
-      ) + workItems.length;
-
-    let completedSteps = 0;
+  const onStep = async (accId: string, label: string) => {
+    completedSteps += 1;
     await reportScanProgress({
-      accountId: accountId ?? workItems[0]?.acc.id ?? null,
-      accountLabel: workItems[0]?.label ?? null,
-      completed: 0,
-      total: totalSteps,
+      accountId: accId,
+      accountLabel: label,
+      completed: completedSteps,
+      total: Math.max(totalSteps, 1),
       phase: 'scanning',
     });
+  };
 
-    for (const item of workItems) {
-      const { acc, blogId, label, posts } = item;
-      let accountAborted = false;
+  const runAccountScan = async (acc: AccountRow) => {
+    await withBlogCheckBrowser(async (page) => {
+      const item = await prepareAccountWorkItem(acc, page);
+      if (!item) return;
+      const result = await scanAccountWorkItem(page, item, scanDate, onStep);
+      scannedPosts += result.scannedPosts;
+      if (!result.aborted) scannedAccounts += 1;
+    });
+  };
 
-      const parsed = await scrapeBlogStats(page, blogId);
-      if (parsed) {
-        const idxScore = computeBlogIndexScore(parsed.stats);
-        const { error: idxErr } = await supabase.from('blog_index_history').insert({
-          account_id: acc.id,
-          scanned_at: scanDate,
-          idx_score: idxScore,
-          visitor_count: parsed.stats.visitorCount,
-          buddy_count: parsed.stats.buddyCount,
-          post_count: parsed.stats.postCount,
-        });
-        if (idxErr) {
-          await logOperation({
-            level: 'warn',
-            message: `[blog-check] blog_index_history insert: ${idxErr.message}`,
-            account_id: acc.id,
-          });
-        }
-      } else {
-        await supabase.from('blog_index_history').insert({
-          account_id: acc.id,
-          scanned_at: scanDate,
-          idx_score: null,
-          visitor_count: 0,
-          buddy_count: 0,
-          post_count: 0,
-        });
-        await notifyBlogCheckIndexParseFailed(blogId, acc.workspace);
-        await logOperation({
-          level: 'warn',
-          message: `[blog-check] 지수 파싱 실패 (${blogId}) — idx_score=null`,
-          account_id: acc.id,
-        });
-      }
-
-      if (await detectBlogCheckCaptcha(page)) {
-        await notifyBlogCheckCaptcha(blogId, label, acc.workspace);
-        accountAborted = true;
-      }
-
-      completedSteps += 1;
-      await reportScanProgress({
-        accountId: acc.id,
-        accountLabel: label,
-        completed: completedSteps,
-        total: totalSteps,
-        phase: 'scanning',
-      });
-
-      for (let i = 0; i < posts.length && !accountAborted; i++) {
-        const post = posts[i];
-        const postNo = post.post_no ?? extractPostNoFromUrl(post.post_url);
-        if (!postNo) continue;
-
-        const title = post.title?.trim() || '—';
-
-        try {
-          const crawled = await scrapePostContentStats(page, blogId, postNo);
-          const fromPost: PostContentStats = {
-            char_count: post.char_count,
-            img_count: post.img_count,
-            video_count: post.video_count,
-            quote_count: post.quote_count,
-            comment_count: post.comment_count,
-            like_count: post.like_count,
-            gif_count: post.gif_count,
-            map_count: post.map_count,
-            hidden_count: post.hidden_count,
-            int_link_count: post.int_link_count,
-            ext_link_count: post.ext_link_cleared ? 0 : post.ext_link_count,
-          };
-          const contentStats =
-            crawled.char_count > 0 ? crawled : mergePostContentStats(fromPost, crawled);
-          const rankResult = await checkPostExposure(page, blogId, postNo, title);
-
-          const { error: insErr } = await supabase.from('blog_post_status').insert({
-            account_id: acc.id,
-            post_url: post.post_url,
-            post_no: postNo,
-            title: post.title,
-            scanned_at: scanDate,
-            ...statusInsertPayload(contentStats, rankResult, post.ext_link_cleared),
-          });
-
-          if (insErr) throw new Error(`blog_post_status insert 실패: ${insErr.message}`);
-          await persistCrawledPostStats(acc.id, post, contentStats);
-          scannedPosts += 1;
-        } catch (err) {
-          if (err instanceof BlogCheckCaptchaError) {
-            await notifyBlogCheckCaptcha(blogId, label, acc.workspace);
-            await logOperation({
-              level: 'warn',
-              message: `[blog-check] 캡차 감지 — ${label} 스캔 중단`,
-              account_id: acc.id,
-            });
-            break;
-          }
-          throw err;
-        }
-
-        completedSteps += 1;
-        await reportScanProgress({
-          accountId: acc.id,
-          accountLabel: label,
-          completed: completedSteps,
-          total: totalSteps,
-          phase: 'scanning',
-        });
-
-        if (i < posts.length - 1) await sleep(randomScanDelayMs());
-      }
-
-      scannedAccounts += 1;
-      await logOperation({
-        level: 'info',
-        message: `[blog-check] ${label} — 포스트 ${posts.length}건 · 지수 ${parsed ? computeBlogIndexScore(parsed.stats) : 'null'}`,
-        account_id: acc.id,
-      });
+  if (isolateByAccount) {
+    for (let i = 0; i < accounts.length; i++) {
+      await runAccountScan(accounts[i]);
+      if (i < accounts.length - 1) await sleep(BLOG_CHECK_ACCOUNT_GAP_MS);
     }
-  });
+  } else {
+    await withBlogCheckBrowser(async (page) => {
+      for (const acc of accounts) {
+        const item = await prepareAccountWorkItem(acc, page);
+        if (!item) continue;
+        const result = await scanAccountWorkItem(page, item, scanDate, onStep);
+        scannedPosts += result.scannedPosts;
+        if (!result.aborted) scannedAccounts += 1;
+      }
+    });
+  }
 
   if (totalSteps > 0) {
     await reportScanProgress({

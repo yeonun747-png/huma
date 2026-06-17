@@ -389,8 +389,8 @@ export function BlogCheckView() {
         <div className="bcp-header">
           <div className="bcp-title">
             {selectedAcc
-              ? `${selectedAcc.label}  —  최근 ${posts.length}건 (최대 15건) · 누락 ${posts.filter((p) => p.status === 'miss').length}건`
-              : '← 계정 카드를 선택하면 최근 발행 15건이 표시됩니다'}
+              ? `${selectedAcc.label}  —  최근 ${posts.length}건 (최대 10건) · 누락 ${posts.filter((p) => p.status === 'miss').length}건`
+              : '← 계정 카드를 선택하면 최근 발행 10건이 표시됩니다'}
           </div>
           <div className="bcp-filter">
             {(

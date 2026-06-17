@@ -37,7 +37,22 @@ export function normalizeBlogPostUrl(blogId: string, postNo: string): string {
   return `https://blog.naver.com/${blogId}/${postNo}`;
 }
 
-/** 본문·link_url 기준 외부 링크 개수 (네이버 블로그 내부 제외) */
+/** naver.com·*.naver.com·naver.me — 외부링크에서 제외(네이버 생태계) */
+export function isNaverOwnedUrl(raw: string): boolean {
+  try {
+    const host = new URL(ensureHttpsUrl(raw.trim())).hostname.toLowerCase();
+    return (
+      host === 'naver.com' ||
+      host.endsWith('.naver.com') ||
+      host === 'naver.me' ||
+      host.endsWith('.naver.me')
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** 본문·link_url 기준 외부 링크 개수 (네이버 생태계 제외) */
 export function countExternalLinks(content: string | null | undefined, linkUrl?: string | null): number {
   let count = 0;
   const seen = new Set<string>();
@@ -46,7 +61,7 @@ export function countExternalLinks(content: string | null | undefined, linkUrl?:
     const url = ensureHttpsUrl(raw);
     if (!url || seen.has(url)) return;
     if (!/^https?:\/\//i.test(url)) return;
-    if (/blog\.naver\.com|naver\.me|naver\.com\/blog/i.test(url)) return;
+    if (isNaverOwnedUrl(url)) return;
     seen.add(url);
     count += 1;
   };

@@ -1,5 +1,5 @@
 import type { Page } from 'playwright';
-import { BLOG_CHECK_POST_LIMIT } from './constants.js';
+import { BLOG_CHECK_POST_LIMIT, BLOG_CHECK_PAGE_SETTLE_MS } from './constants.js';
 import { sleep } from '../../lib/utils.js';
 import { redisConnection } from '../queue/producer.js';
 import { normalizeBlogPostUrl } from './blog-url.js';
@@ -64,7 +64,7 @@ async function scrapeBlogPostListFromDom(page: Page, blogId: string, limit: numb
   const listUrl = `https://m.blog.naver.com/PostList.naver?blogId=${blogId}&categoryNo=0&listStyle=ons`;
   if (!page.url().includes('PostList')) {
     await page.goto(listUrl, { waitUntil: 'domcontentloaded' });
-    await sleep(500);
+    await sleep(BLOG_CHECK_PAGE_SETTLE_MS);
   }
 
   const items = await page.evaluate(
@@ -114,7 +114,7 @@ export async function scrapeBlogPostListFromMobileApi(
   limit = POST_LIST_LIMIT,
 ): Promise<ScrapedBlogPost[]> {
   await page.goto(`https://m.blog.naver.com/${blogId}`, { waitUntil: 'domcontentloaded' });
-  await sleep(500);
+  await sleep(BLOG_CHECK_PAGE_SETTLE_MS);
 
   const apiResult = await page.evaluate(
     async ({ blogId, limit }) => {
