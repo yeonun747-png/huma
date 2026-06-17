@@ -3,7 +3,8 @@ import type { Page } from 'playwright';
 import { supabase } from '../middleware/auth.js';
 import { decrypt } from './crypto.js';
 import { humanSleep } from '../modules/human-engine/typing.js';
-import { humanClickLocator } from '../modules/human-engine/mouse.js';
+import { humanClickLocator, humanMouseMove } from '../modules/human-engine/mouse.js';
+import { logOperation } from './log-emitter.js';
 import { randomBetween, sleep } from './utils.js';
 import {
   ensureNaverLoginIdPhoneTab,
@@ -20,7 +21,29 @@ const NAVER_LOGIN_BTN_SELECTORS = [
   'button[type="submit"]',
 ];
 
-/** nidlogin IP보안(#ip_on) — 모뎀·프록시 환경에서는 OFF(체크 해제) 필요 */
+async function clickIpSecurityOffWithMouse(page: Page, ipOn: ReturnType<Page['locator']>): Promise<void> {
+  const label = page.locator('#label_ip_on, label[for="ip_on"]').first();
+  const targets = [label, ipOn];
+  for (const target of targets) {
+    if ((await target.count().catch(() => 0)) === 0) continue;
+    if (!(await target.isVisible().catch(() => false))) continue;
+    await humanClickLocator(page, target);
+    await sleep(randomBetween(150, 350));
+    if (!(await ipOn.isChecked().catch(() => false))) return;
+  }
+
+  const box = await ipOn.boundingBox().catch(() => null);
+  if (box && box.width > 0 && box.height > 0) {
+    const cx = box.x + box.width / 2 + randomBetween(-2, 2);
+    const cy = box.y + box.height / 2 + randomBetween(-2, 2);
+    await humanMouseMove(page, cx, cy);
+    await sleep(randomBetween(100, 250));
+    await page.mouse.click(cx, cy);
+    await sleep(randomBetween(150, 350));
+  }
+}
+
+/** nidlogin IP보안(#ip_on) — 모뎀·프록시 환경에서는 OFF(체크 해제) 필요. JS 폴백 없이 마우스만. */
 export async function ensureNaverIpSecurityOff(page: Page): Promise<void> {
   if (!page.url().includes('nidlogin')) return;
   await ensureNaverLoginIdPhoneTab(page);
@@ -28,27 +51,18 @@ export async function ensureNaverIpSecurityOff(page: Page): Promise<void> {
   const ipOn = page.locator('#ip_on');
   if ((await ipOn.count().catch(() => 0)) === 0) return;
   if (!(await ipOn.isVisible().catch(() => false))) return;
+  if (!(await ipOn.isChecked().catch(() => false))) return;
 
-  const checked = await ipOn.isChecked().catch(() => true);
-  if (!checked) return;
-
-  const label = page.locator('#label_ip_on, label[for="ip_on"]').first();
-  if (await label.isVisible().catch(() => false)) {
-    await humanClickLocator(page, label);
-  } else {
-    await humanClickLocator(page, ipOn);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (!(await ipOn.isChecked().catch(() => false))) return;
+    await clickIpSecurityOffWithMouse(page, ipOn);
   }
-  await sleep(randomBetween(150, 350));
 
   if (await ipOn.isChecked().catch(() => false)) {
-    await page
-      .evaluate(() => {
-        const el = document.querySelector('#ip_on') as HTMLInputElement | null;
-        if (!el?.checked) return;
-        el.checked = false;
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-      })
-      .catch(() => {});
+    await logOperation({
+      level: 'warn',
+      message: '[login] IP보안 OFF 실패 — #ip_on 여전히 체크됨 (마우스 3회 시도)',
+    }).catch(() => {});
   }
 }
 
@@ -101,6 +115,7 @@ export async function ensureNaverLoginCredentialsForCaptcha(
   if (!page.url().includes('nidlogin')) return;
 
   await ensureNaverLoginIdPhoneTab(page);
+  await ensureNaverIpSecurityOff(page);
 
   const { data: account } = await supabase
     .from('huma_accounts')
@@ -138,6 +153,7 @@ export async function submitNaverLoginAfterCaptcha(
   if (!page.url().includes('nidlogin')) return false;
 
   await ensureNaverLoginIdPhoneTab(page);
+  await ensureNaverIpSecurityOff(page);
   if (accountId) {
     await ensureNaverLoginCredentialsForCaptcha(page, accountId, { fast: true }).catch(() => {});
   }
@@ -152,6 +168,7 @@ export async function submitNaverLoginAfterCaptcha(
 /** 로그인 버튼 — humanClickLocator만 사용 (force click 금지). */
 export async function clickNaverLoginButton(page: Page): Promise<void> {
   await ensureNaverLoginIdPhoneTab(page);
+  await ensureNaverIpSecurityOff(page);
 
   for (const sel of NAVER_LOGIN_BTN_SELECTORS) {
     const btn = page.locator(sel).first();

@@ -4,6 +4,7 @@ import { askClaudeVision } from './anthropic-client.js';
 import { shouldAutoSolveCaptchaVision } from './human-engine-policy.js';
 import {
   clickNaverLoginButton,
+  ensureNaverIpSecurityOff,
   ensureNaverLoginCredentialsForCaptcha,
   submitNaverLoginAfterCaptcha,
 } from './naver-login-fields.js';
@@ -639,6 +640,10 @@ async function submitCaptcha(
   ctx: NaverCaptchaVisionContext,
   options?: { refillPassword?: boolean },
 ): Promise<void> {
+  if (page.url().includes('nidlogin')) {
+    await ensureNaverIpSecurityOff(page);
+  }
+
   if (options?.refillPassword === true && ctx.accountId && page.url().includes('nidlogin')) {
     await ensureNaverLoginCredentialsForCaptcha(page, ctx.accountId, { fast: true });
     await humanSleep(150, 350);
@@ -674,6 +679,10 @@ export async function applyManualCaptchaAnswer(
   answer: string,
   ctx: NaverCaptchaVisionContext = {},
 ): Promise<{ filled: boolean; submitted: boolean; cleared: boolean; pending_login: boolean }> {
+  if (page.url().includes('nidlogin')) {
+    await ensureNaverIpSecurityOff(page);
+  }
+
   // ① 정답칸 마우스 이동·클릭 후 정답 입력
   const filled = await fillCaptchaAnswer(page, answer);
   if (!filled) return { filled: false, submitted: false, cleared: false, pending_login: false };
@@ -748,6 +757,10 @@ export async function tryAutoSolveNaverCaptcha(
 ): Promise<CaptchaVisionResult> {
   if (!(await shouldAutoSolveCaptchaVision())) return 'disabled';
   if (!(await isNaverCaptchaVisible(page))) return 'not_visible';
+
+  if (page.url().includes('nidlogin')) {
+    await ensureNaverIpSecurityOff(page);
+  }
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     try {
