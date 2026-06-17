@@ -34,8 +34,8 @@ export function randomScanDelayMs(): number {
 }
 
 export async function setupBlogCheckPage(page: Page): Promise<void> {
-  page.setDefaultTimeout(12_000);
-  page.setDefaultNavigationTimeout(12_000);
+  page.setDefaultTimeout(8_000);
+  page.setDefaultNavigationTimeout(8_000);
   await page.route('**/*', (route) => {
     const type = route.request().resourceType();
     if (type === 'image' || type === 'media' || type === 'font') {
@@ -224,18 +224,22 @@ async function collectTitleSearchHrefs(
   for (let pageIdx = 0; pageIdx < BLOG_SEARCH_RANK_PAGES; pageIdx++) {
     const start = pageIdx * BLOG_SEARCH_PAGE_SIZE + 1;
     await page.goto(blogTabAllSearchUrl(query, start), { waitUntil: 'domcontentloaded' });
-    await page
-      .locator('#main_pack, .view_wrap, .total_wrap, .api_subject_bx')
-      .first()
-      .waitFor({ state: 'attached', timeout: BLOG_CHECK_SEARCH_WAIT_MS })
-      .catch(() => {});
     await sleep(BLOG_CHECK_SEARCH_SETTLE_MS);
 
     if (await detectBlogCheckCaptcha(page)) {
       throw new BlogCheckCaptchaError('');
     }
 
-    const pageHrefs = await collectBlogSearchResultHrefs(page);
+    let pageHrefs = await collectBlogSearchResultHrefs(page);
+    if (pageHrefs.length === 0) {
+      await page
+        .locator('#main_pack, .view_wrap, .total_wrap, .api_subject_bx')
+        .first()
+        .waitFor({ state: 'attached', timeout: BLOG_CHECK_SEARCH_WAIT_MS })
+        .catch(() => {});
+      await sleep(BLOG_CHECK_SEARCH_SETTLE_MS);
+      pageHrefs = await collectBlogSearchResultHrefs(page);
+    }
     if (pageHrefs.length === 0) break;
 
     for (const href of pageHrefs) {

@@ -1,8 +1,10 @@
-import type { Frame, Page } from 'playwright';
+import type { Frame, Page, Response } from 'playwright';
 import { sleep } from '../../lib/utils.js';
 import { mobilePostViewUrl } from './blog-url.js';
 import {
+  BLOG_CHECK_ENGAGEMENT_WAIT_MS,
   BLOG_CHECK_FRAME_TIMEOUT_MS,
+  BLOG_CHECK_LIKE_API_TIMEOUT_MS,
   BLOG_CHECK_PAGE_SETTLE_MS,
 } from './constants.js';
 import { type PostContentStats, mergePostContentStats } from './content-stats.js';
@@ -354,31 +356,7 @@ const SCRAPE_STATS_FN = ({
 
 async function waitForPostContent(frame: Frame): Promise<void> {
   await frame.waitForLoadState('domcontentloaded', { timeout: BLOG_CHECK_FRAME_TIMEOUT_MS }).catch(() => {});
-  await frame.waitForSelector(CONTENT_SELECTOR, { timeout: BLOG_CHECK_FRAME_TIMEOUT_MS }).catch(() => {});
-  await frame
-    .waitForSelector('.se-component.se-image, .se-module-image, .se-module-text', {
-      timeout: 4_000,
-    })
-    .catch(() => {});
-  await frame
-    .waitForFunction(
-      ({ rootSelectors, minChars }: { rootSelectors: string[]; minChars: number }) => {
-        const postNoEl = document.querySelector('[id^="post-view"]');
-        const scopes = postNoEl ? [postNoEl, document.body] : [document.body];
-        for (const scope of scopes) {
-          for (const sel of rootSelectors) {
-            for (const el of scope.querySelectorAll(sel)) {
-              const len = (el.textContent ?? '').replace(/\s+/g, ' ').trim().length;
-              if (len >= minChars) return true;
-            }
-          }
-        }
-        return false;
-      },
-      { rootSelectors: [...CONTENT_ROOT_SELECTORS], minChars: CONTENT_MIN_CHARS },
-      { timeout: 4_000 },
-    )
-    .catch(() => {});
+  await frame.waitForSelector(CONTENT_SELECTOR, { timeout: 3_000 }).catch(() => {});
   await sleep(BLOG_CHECK_PAGE_SETTLE_MS);
 }
 
@@ -423,33 +401,67 @@ function parseLikeFromLikeApiPayload(json: unknown): number {
   return 0;
 }
 
-/** reaction 모듈 JS 로드·data-loaded 대기 (공감 0이어도 모듈 attach 시 종료) */
-async function waitForEngagementWidgets(page: Page): Promise<void> {
-  const frame = page.mainFrame();
-  await frame
-    .waitForSelector('.u_likeit_list_module._reactionModule, .u_likeit_list_module._postSympathyView, [id^="Sympathy"]', {
-      timeout: 5_000,
-    })
-    .catch(() => {});
-  await frame
-    .waitForFunction(
-      () => {
-        const mod = document.querySelector(
-          '.u_likeit_list_module._reactionModule, .u_likeit_list_module._postSympathyView',
-        );
-        if (mod?.getAttribute('data-loaded') === '1') return true;
-        if (mod?.querySelector('.u_likeit_list_count._count, .u_likeit_text._count.num')) return true;
+/** page.evaluate — 공감·댓글 (포스트 chrome만) */
+const READ_ENGAGEMENT_FN = (logNo: string) => {
+  const parseNum = (raw: unknown): number => {
+    if (raw == null) return 0;
+    const n = Number(String(raw).replace(/,/g, '').trim());
+    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+  };
 
-        const symBtn = document.querySelector('[id^="Sympathy"]');
-        if (symBtn?.textContent?.match(/공감\s*\d+/)) return true;
+  const scopes: Element[] = [];
+  const postView = document.querySelector(`#post-view${logNo}`);
+  if (postView) scopes.push(postView);
+  document
+    .querySelectorAll('.wrap_postcomment, .post-btn, #spiButton, .post_recommend, .floating_bottom')
+    .forEach((el) => scopes.push(el));
 
-        return false;
-      },
-      { timeout: 5_000 },
-    )
-    .catch(() => {});
-  await sleep(BLOG_CHECK_PAGE_SETTLE_MS);
-}
+  const pickFirst = (selectors: string[]): number => {
+    for (const scope of scopes.length > 0 ? scopes : [document.body]) {
+      for (const sel of selectors) {
+        const t = scope.querySelector(sel)?.textContent ?? '';
+        const n = parseNum(t.replace(/[^\d]/g, ''));
+        if (n > 0) return n;
+      }
+    }
+    return 0;
+  };
+
+  let likeCount = 0;
+  for (const scope of scopes.length > 0 ? scopes : [document.body]) {
+    const likeEl = scope.querySelector(
+      '.u_likeit_list.like .u_likeit_list_count._count, .u_likeit_list_button[data-type="like"] .u_likeit_list_count._count',
+    );
+    if (likeEl?.textContent?.trim()) {
+      likeCount = parseNum(likeEl.textContent);
+      break;
+    }
+    const faceCount = scope.querySelector('.u_likeit_button._face .u_likeit_text._count.num');
+    if (faceCount?.textContent?.trim()) {
+      likeCount = parseNum(faceCount.textContent);
+      break;
+    }
+    const symBtn = scope.querySelector(`#Sympathy${logNo}`);
+    const symMatch = symBtn?.textContent?.match(/공감\s*(\d+)/);
+    if (symMatch?.[1]) {
+      likeCount = parseNum(symMatch[1]);
+      break;
+    }
+  }
+
+  if (likeCount === 0) {
+    likeCount = pickFirst([
+      '.u_likeit_list_module._reactionModule .u_likeit_list.like .u_likeit_list_count._count',
+      '.u_likeit_list_module._postSympathyView .u_cnt._count',
+      '.u_likeit_list_btn .u_cnt._count',
+    ]);
+  }
+
+  return {
+    comment_count: pickFirst(['#commentCount', '.comment_count', '.u_cbox_count', '.area_comment .num']),
+    like_count: likeCount,
+  };
+};
 
 async function fetchSympathyViaLikeApi(page: Page, blogId: string, postNo: string): Promise<number> {
   const cid = `${blogId}_${postNo}`;
@@ -475,71 +487,51 @@ async function fetchSympathyViaLikeApi(page: Page, blogId: string, postNo: strin
   }
 }
 
-async function scrapeEngagementFromPage(page: Page, postNo: string): Promise<Pick<PostContentStats, 'comment_count' | 'like_count'>> {
-  await waitForEngagementWidgets(page);
-  return page.mainFrame().evaluate(
-    (logNo) => {
-      const parseNum = (raw: unknown): number => {
-        if (raw == null) return 0;
-        const n = Number(String(raw).replace(/,/g, '').trim());
-        return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
-      };
-
-      const scopes: Element[] = [];
-      const postView = document.querySelector(`#post-view${logNo}`);
-      if (postView) scopes.push(postView);
-      document
-        .querySelectorAll('.wrap_postcomment, .post-btn, #spiButton, .post_recommend, .floating_bottom')
-        .forEach((el) => scopes.push(el));
-
-      const pickFirst = (selectors: string[]): number => {
-        for (const scope of scopes.length > 0 ? scopes : [document.body]) {
-          for (const sel of selectors) {
-            const t = scope.querySelector(sel)?.textContent ?? '';
-            const n = parseNum(t.replace(/[^\d]/g, ''));
-            if (n > 0) return n;
-          }
+async function fetchEngagementFast(
+  page: Page,
+  blogId: string,
+  postNo: string,
+  likeNetwork: Promise<Response | null>,
+): Promise<Pick<PostContentStats, 'comment_count' | 'like_count'>> {
+  const [likeResp, likeApi] = await Promise.all([
+    likeNetwork
+      .then(async (resp) => {
+        if (!resp) return 0;
+        try {
+          return parseLikeFromLikeApiPayload(parseJsonpPayload(await resp.text()));
+        } catch {
+          return 0;
         }
-        return 0;
-      };
+      })
+      .catch(() => 0),
+    fetchSympathyViaLikeApi(page, blogId, postNo),
+  ]);
 
-      let likeCount = 0;
-      for (const scope of scopes.length > 0 ? scopes : [document.body]) {
-        const likeEl = scope.querySelector(
-          '.u_likeit_list.like .u_likeit_list_count._count, .u_likeit_list_button[data-type="like"] .u_likeit_list_count._count',
-        );
-        if (likeEl?.textContent?.trim()) {
-          likeCount = parseNum(likeEl.textContent);
-          break;
-        }
-        const faceCount = scope.querySelector('.u_likeit_button._face .u_likeit_text._count.num');
-        if (faceCount?.textContent?.trim()) {
-          likeCount = parseNum(faceCount.textContent);
-          break;
-        }
-        const symBtn = scope.querySelector(`#Sympathy${logNo}`);
-        const symMatch = symBtn?.textContent?.match(/공감\s*(\d+)/);
-        if (symMatch?.[1]) {
-          likeCount = parseNum(symMatch[1]);
-          break;
-        }
-      }
+  let likeCount = Math.max(likeApi, likeResp);
 
-      if (likeCount === 0) {
-        likeCount = pickFirst([
-          '.u_likeit_list_module._reactionModule .u_likeit_list.like .u_likeit_list_count._count',
-          '.u_likeit_list_module._postSympathyView .u_cnt._count',
-          '.u_likeit_list_btn .u_cnt._count',
-        ]);
-      }
+  if (likeCount === 0) {
+    await page
+      .mainFrame()
+      .waitForFunction(
+        () => {
+          const mod = document.querySelector(
+            '.u_likeit_list_module._reactionModule, .u_likeit_list_module._postSympathyView',
+          );
+          return (
+            mod?.getAttribute('data-loaded') === '1' ||
+            !!mod?.querySelector('.u_likeit_list_count._count, .u_likeit_text._count.num')
+          );
+        },
+        { timeout: BLOG_CHECK_ENGAGEMENT_WAIT_MS },
+      )
+      .catch(() => {});
+  }
 
-      return {
-        comment_count: pickFirst(['#commentCount', '.comment_count', '.u_cbox_count', '.area_comment .num']),
-        like_count: likeCount,
-      };
-    },
-    postNo,
-  );
+  const dom = await page.mainFrame().evaluate(READ_ENGAGEMENT_FN, postNo);
+  return {
+    like_count: Math.max(likeCount, dom.like_count),
+    comment_count: dom.comment_count,
+  };
 }
 
 async function scrapeStatsFromFrame(frame: Frame, postNo: string): Promise<PostContentStats> {
@@ -558,11 +550,6 @@ async function resolveMainFrame(page: Page): Promise<Frame | null> {
 
   await waitForPostContent(frame);
   return frame;
-}
-
-async function scrapeFromPage(page: Page, postNo: string): Promise<PostContentStats> {
-  await waitForPostContent(page.mainFrame());
-  return scrapeStatsFromFrame(page.mainFrame(), postNo);
 }
 
 const EMPTY_STATS: PostContentStats = {
@@ -585,13 +572,13 @@ async function navigateAndScrape(
   blogId: string,
   postNo: string,
 ): Promise<PostContentStats> {
-  const likeApiResponse = page
+  const likeNetwork = page
     .waitForResponse(
       (resp) =>
         resp.url().includes('route-like.naver.com/v1/search/contents') &&
-        resp.url().includes(encodeURIComponent(blogId)) &&
+        resp.url().includes(blogId) &&
         resp.status() === 200,
-      { timeout: 10_000 },
+      { timeout: BLOG_CHECK_LIKE_API_TIMEOUT_MS },
     )
     .catch(() => null);
 
@@ -601,37 +588,18 @@ async function navigateAndScrape(
     throw new BlogCheckCaptchaError(blogId);
   }
 
-  let likeFromNetwork = 0;
-  const likeResp = await likeApiResponse;
-  if (likeResp) {
-    try {
-      likeFromNetwork = parseLikeFromLikeApiPayload(parseJsonpPayload(await likeResp.text()));
-    } catch {
-      likeFromNetwork = 0;
-    }
-  }
-
-  const [engagement, likeFromApi] = await Promise.all([
-    scrapeEngagementFromPage(page, postNo),
-    fetchSympathyViaLikeApi(page, blogId, postNo),
-  ]);
-
-  let stats = await scrapeFromPage(page, postNo);
+  let stats = EMPTY_STATS;
 
   if (await page.$('iframe#mainFrame')) {
     const frame = await resolveMainFrame(page);
-    if (frame) {
-      const frameStats = await scrapeStatsFromFrame(frame, postNo);
-      stats = mergePostContentStats(stats, frameStats);
-    }
+    if (frame) stats = await scrapeStatsFromFrame(frame, postNo);
+  } else {
+    await waitForPostContent(page.mainFrame());
+    stats = await scrapeStatsFromFrame(page.mainFrame(), postNo);
   }
 
-  stats = mergePostContentStats(stats, {
-    comment_count: engagement.comment_count,
-    like_count: Math.max(engagement.like_count, likeFromNetwork, likeFromApi),
-  });
-
-  return stats;
+  const engagement = await fetchEngagementFast(page, blogId, postNo, likeNetwork);
+  return mergePostContentStats(stats, engagement);
 }
 
 export async function scrapePostContentStats(
@@ -639,17 +607,15 @@ export async function scrapePostContentStats(
   blogId: string,
   postNo: string,
 ): Promise<PostContentStats> {
-  const strategies = [
-    mobilePostViewUrl(blogId, postNo),
-    `https://blog.naver.com/PostView.naver?blogId=${encodeURIComponent(blogId)}&logNo=${encodeURIComponent(postNo)}`,
-  ];
+  const desktopUrl = `https://blog.naver.com/PostView.naver?blogId=${encodeURIComponent(blogId)}&logNo=${encodeURIComponent(postNo)}`;
+  let stats = await navigateAndScrape(page, desktopUrl, blogId, postNo);
 
-  let best = EMPTY_STATS;
-
-  for (const url of strategies) {
-    const stats = await navigateAndScrape(page, url, blogId, postNo);
-    best = mergePostContentStats(best, stats);
+  if (stats.char_count < CONTENT_MIN_CHARS) {
+    stats = mergePostContentStats(
+      stats,
+      await navigateAndScrape(page, mobilePostViewUrl(blogId, postNo), blogId, postNo),
+    );
   }
 
-  return best;
+  return stats;
 }
