@@ -124,6 +124,9 @@ export async function pollUntilNaverLoginRedirect(
     if (await isNaverCaptchaVisible(page)) {
       throw new Error('CAPTCHA_DETECTED');
     }
+    if (await isNaverAuthChallengePage(page)) {
+      throw new Error('NAVER_LOGIN_2FA');
+    }
     await sleep(POSTING_LOGIN_POLL_MS);
   }
   await page.waitForLoadState('domcontentloaded').catch(() => {});

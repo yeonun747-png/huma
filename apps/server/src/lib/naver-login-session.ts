@@ -2,6 +2,7 @@ import type { BrowserContext, Page } from 'playwright';
 
 import { humanClickLocator } from '../modules/human-engine/mouse.js';
 import { acquireWorkflowPage } from '../modules/playwright/browser.js';
+import { isNaverAuthChallengePage } from './naver-auth-challenge.js';
 import { sleep } from './utils.js';
 
 /** ID/전화번호 탭 — QR·일회용 mode 금지 */
@@ -41,9 +42,10 @@ async function hasVisibleCaptchaOnPage(page: Page): Promise<boolean> {
   return false;
 }
 
-/** QR코드·일회용 번호 탭 클릭 금지 — ID/전화번호만 유지 */
+/** QR코드·일회용 번호 탭 클릭 금지 — ID/전화번호만 유지. 2단계 인증 화면에서는 아무 것도 하지 않음. */
 export async function ensureNaverLoginIdPhoneTab(page: Page): Promise<void> {
   if (!isNidLoginUrl(page.url())) return;
+  if (await isNaverAuthChallengePage(page)) return;
 
   if (await isNaverLoginIdTabActive(page)) return;
 
@@ -56,15 +58,18 @@ export async function ensureNaverLoginIdPhoneTab(page: Page): Promise<void> {
   ];
 
   for (const sel of idTabSelectors) {
+    if (await isNaverAuthChallengePage(page)) return;
     const tab = page.locator(sel).first();
     if (!(await tab.isVisible({ timeout: 400 }).catch(() => false))) continue;
     const href = (await tab.getAttribute('href').catch(() => null)) ?? '';
     if (/qrcode|otp|onetime|mode=number/i.test(href)) continue;
     await humanClickLocator(page, tab);
     await sleep(450);
+    if (await isNaverAuthChallengePage(page)) return;
     if (await isNaverLoginIdTabActive(page)) return;
   }
 
+  if (await isNaverAuthChallengePage(page)) return;
   await page.goto(NAVER_LOGIN_ID_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 });
   await page.waitForSelector('#id', { timeout: 20_000 }).catch(() => {});
   await sleep(300);
@@ -106,7 +111,9 @@ export async function consolidateNaverLoginTabs(
   }
 
   await best.bringToFront().catch(() => {});
-  await ensureNaverLoginIdPhoneTab(best);
+  if (!(await isNaverAuthChallengePage(best))) {
+    await ensureNaverLoginIdPhoneTab(best);
+  }
   return best;
 }
 
@@ -140,6 +147,8 @@ export async function pickNaverLoginCaptchaPage(context: BrowserContext): Promis
   }
 
   await best.bringToFront().catch(() => {});
-  await ensureNaverLoginIdPhoneTab(best);
+  if (!(await isNaverAuthChallengePage(best))) {
+    await ensureNaverLoginIdPhoneTab(best);
+  }
   return best;
 }

@@ -23,6 +23,7 @@ const NAVER_LOGIN_BTN_SELECTORS = [
 ];
 
 async function clickIpSecurityOffWithMouse(page: Page, ipOn: ReturnType<Page['locator']>): Promise<void> {
+  if (await isNaverAuthChallengePage(page)) return;
   const label = page.locator('#label_ip_on, label[for="ip_on"]').first();
   const targets = [label, ipOn];
   for (const target of targets) {
@@ -33,12 +34,15 @@ async function clickIpSecurityOffWithMouse(page: Page, ipOn: ReturnType<Page['lo
     if (!(await ipOn.isChecked().catch(() => false))) return;
   }
 
+  if (await isNaverAuthChallengePage(page)) return;
+
   const box = await ipOn.boundingBox().catch(() => null);
   if (box && box.width > 0 && box.height > 0) {
     const cx = box.x + box.width / 2 + randomBetween(-2, 2);
     const cy = box.y + box.height / 2 + randomBetween(-2, 2);
     await humanMouseMove(page, cx, cy);
     await sleep(randomBetween(100, 250));
+    if (await isNaverAuthChallengePage(page)) return;
     await page.mouse.click(cx, cy);
     await sleep(randomBetween(150, 350));
   }
@@ -56,6 +60,7 @@ export async function ensureNaverIpSecurityOff(page: Page): Promise<void> {
   if (!(await ipOn.isChecked().catch(() => false))) return;
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (await isNaverAuthChallengePage(page)) return;
     if (!(await ipOn.isChecked().catch(() => false))) return;
     await clickIpSecurityOffWithMouse(page, ipOn);
   }
@@ -75,6 +80,7 @@ export async function typeIntoNaverLoginField(
   value: string,
   options?: { fast?: boolean; clear?: boolean },
 ): Promise<void> {
+  if (await isNaverAuthChallengePage(page)) return;
   await ensureNaverLoginIdPhoneTab(page);
   await ensureNaverIpSecurityOff(page);
 
@@ -116,8 +122,8 @@ export async function ensureNaverLoginCredentialsForCaptcha(
 ): Promise<void> {
   if (!page.url().includes('nidlogin')) return;
 
-  await ensureNaverLoginIdPhoneTab(page);
   if (await isNaverAuthChallengePage(page)) return;
+  await ensureNaverLoginIdPhoneTab(page);
   await ensureNaverIpSecurityOff(page);
 
   const { data: account } = await supabase
@@ -157,11 +163,13 @@ export async function submitNaverLoginAfterCaptcha(
   if (await isNaverAuthChallengePage(page)) return false;
 
   await ensureNaverLoginIdPhoneTab(page);
+  if (await isNaverAuthChallengePage(page)) return false;
   await ensureNaverIpSecurityOff(page);
   if (accountId) {
     await ensureNaverLoginCredentialsForCaptcha(page, accountId, { fast: true }).catch(() => {});
   }
   await humanSleep(250, 500);
+  if (await isNaverAuthChallengePage(page)) return false;
   await clickNaverLoginButton(page);
   await page
     .waitForURL((u) => !u.href.includes('nidlogin'), { timeout: 25_000 })
@@ -169,11 +177,13 @@ export async function submitNaverLoginAfterCaptcha(
   return !page.url().includes('nidlogin');
 }
 
-/** 로그인 버튼 — humanClickLocator만 사용 (force click 금지). */
+/** 로그인 버튼 — humanClickLocator만 사용 (force click 금지). 2단계 인증 화면에서는 클릭 금지. */
 export async function clickNaverLoginButton(page: Page): Promise<void> {
+  if (await isNaverAuthChallengePage(page)) return;
   await ensureNaverLoginIdPhoneTab(page);
   if (await isNaverAuthChallengePage(page)) return;
   await ensureNaverIpSecurityOff(page);
+  if (await isNaverAuthChallengePage(page)) return;
 
   for (const sel of NAVER_LOGIN_BTN_SELECTORS) {
     const btn = page.locator(sel).first();

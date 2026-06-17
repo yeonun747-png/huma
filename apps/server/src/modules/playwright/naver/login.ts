@@ -126,7 +126,18 @@ async function performNaverLoginOnPage(
     }
   }
 
+  if (await isNaverAuthChallengePage(page)) {
+    const url = page.url().toLowerCase();
+    if (url.includes('device') || url.includes('new_env')) {
+      throw new Error('NAVER_LOGIN_DEVICE_VERIFY');
+    }
+    throw new Error('NAVER_LOGIN_2FA');
+  }
+
   await consolidateNaverLoginTabs(page.context(), page);
+  if (await isNaverAuthChallengePage(page)) {
+    throw new Error('NAVER_LOGIN_2FA');
+  }
   await ensureNaverLoginIdPhoneTab(page);
 
   try {

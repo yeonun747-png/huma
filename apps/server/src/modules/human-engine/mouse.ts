@@ -1,7 +1,29 @@
 import type { Locator, Page } from 'playwright';
+import { isNaverAuthChallengePage } from '../../lib/naver-auth-challenge.js';
 import { randomBetween, sleep } from '../../lib/utils.js';
 import { getSetting } from '../../lib/settings.js';
 import { showVncAutomationPointer } from '../../lib/vnc-pointer.js';
+
+function isNaverLoginOrChallengeUrl(url: string): boolean {
+  const u = url.toLowerCase();
+  if (!u.includes('naver.com')) return false;
+  return (
+    u.includes('nidlogin') ||
+    u.includes('/login/ext/') ||
+    u.includes('authkey') ||
+    u.includes('otp') ||
+    u.includes('device') ||
+    u.includes('new_env') ||
+    u.includes('2step') ||
+    u.includes('certify') ||
+    u.includes('loginpolicy')
+  );
+}
+
+async function skipClickIfNaverAuthChallenge(page: Page): Promise<boolean> {
+  if (!isNaverLoginOrChallengeUrl(page.url())) return false;
+  return isNaverAuthChallengePage(page);
+}
 
 interface Point {
   x: number;
@@ -94,6 +116,8 @@ export async function humanClickLocator(
   jitterPx?: number,
   preClickDelayMs: [number, number] = [100, 400],
 ) {
+  if (await skipClickIfNaverAuthChallenge(page)) return;
+
   let lastBox: Awaited<ReturnType<Locator['boundingBox']>> = null;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     await locator.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
@@ -128,6 +152,8 @@ export async function humanDrag(
   toX: number,
   toY: number,
 ): Promise<void> {
+  if (await skipClickIfNaverAuthChallenge(page)) return;
+
   const endY = toY + randomBetween(-4, 4);
   await humanMouseMove(page, fromX, fromY);
   await sleep(randomBetween(100, 280));

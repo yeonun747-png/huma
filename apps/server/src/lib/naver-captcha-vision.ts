@@ -331,6 +331,7 @@ async function readCaptchaQuestion(page: Page): Promise<string> {
 }
 
 async function safeHumanClick(page: Page, locator: Locator): Promise<void> {
+  if (await isNaverAuthChallengePage(page)) return;
   await locator.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
   const box = await locator.boundingBox().catch(() => null);
   if (box && box.width > 0 && box.height > 0) {
@@ -512,6 +513,7 @@ function splitAnswerForInputs(answer: string, inputCount: number): string[] {
 }
 
 async function humanTypeCaptchaAnswer(page: Page, input: Locator, text: string): Promise<void> {
+  if (await isNaverAuthChallengePage(page)) return;
   await input.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
   const box = await input.boundingBox().catch(() => null);
   if (box && box.width > 0 && box.height > 0) {
@@ -577,6 +579,7 @@ async function getVisibleCaptchaInputs(page: Page): Promise<Locator[]> {
 }
 
 async function fillCaptchaAnswer(page: Page, answer: string): Promise<boolean> {
+  if (await isNaverAuthChallengePage(page)) return false;
   const inputs = await getVisibleCaptchaInputs(page);
   if (inputs.length === 0) return false;
 
@@ -591,6 +594,7 @@ async function fillCaptchaAnswer(page: Page, answer: string): Promise<boolean> {
 }
 
 async function applyGridClicks(page: Page, cells: Locator[], indices: number[]): Promise<boolean> {
+  if (await isNaverAuthChallengePage(page)) return false;
   if (!indices.length) return false;
   for (const idx of indices) {
     const cell = cells[idx - 1];
@@ -606,6 +610,7 @@ async function applySliderDrag(
   root: Locator,
   result: VisionSolveResult,
 ): Promise<boolean> {
+  if (await isNaverAuthChallengePage(page)) return false;
   const handle = await findSliderHandle(page, root);
   if (!handle) return false;
 
@@ -642,13 +647,13 @@ async function submitCaptcha(
   ctx: NaverCaptchaVisionContext,
   options?: { refillPassword?: boolean },
 ): Promise<void> {
+  if (await isNaverAuthChallengePage(page)) return;
+
   if (page.url().includes('nidlogin')) {
     await ensureNaverIpSecurityOff(page);
   }
 
-  if (await isNaverAuthChallengePage(page)) {
-    return;
-  }
+  if (await isNaverAuthChallengePage(page)) return;
 
   if (options?.refillPassword === true && ctx.accountId && page.url().includes('nidlogin')) {
     await ensureNaverLoginCredentialsForCaptcha(page, ctx.accountId, { fast: true });
@@ -685,6 +690,15 @@ export async function applyManualCaptchaAnswer(
   answer: string,
   ctx: NaverCaptchaVisionContext = {},
 ): Promise<{ filled: boolean; submitted: boolean; cleared: boolean; pending_login: boolean }> {
+  if (await isNaverAuthChallengePage(page)) {
+    return {
+      filled: false,
+      submitted: false,
+      cleared: !(await isNaverCaptchaVisible(page)),
+      pending_login: true,
+    };
+  }
+
   if (page.url().includes('nidlogin')) {
     await ensureNaverIpSecurityOff(page);
   }
@@ -780,13 +794,17 @@ export async function tryAutoSolveNaverCaptcha(
 ): Promise<CaptchaVisionResult> {
   if (!(await shouldAutoSolveCaptchaVision())) return 'disabled';
   if (!(await isNaverCaptchaVisible(page))) return 'not_visible';
+  if (await isNaverAuthChallengePage(page)) return 'failed';
 
   if (page.url().includes('nidlogin')) {
     await ensureNaverIpSecurityOff(page);
   }
+  if (await isNaverAuthChallengePage(page)) return 'failed';
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     try {
+      if (await isNaverAuthChallengePage(page)) return 'failed';
+
       const captchaType = await detectCaptchaType(page);
       const question = await readCaptchaQuestion(page);
 
