@@ -1,4 +1,4 @@
-import { ensureHttpsUrl, workspaceBlogHomeUrl } from '../../lib/blog-link.js';
+import { ensureHttpsUrl } from '../../lib/blog-link.js';
 
 const BLOG_ID_RE = /blog\.naver\.com\/([^/?#]+)/i;
 const POST_NO_RE = /(?:logNo=|\/)(\d{6,})(?:[/?#]|$)/;
@@ -92,22 +92,12 @@ export function countExternalLinks(content: string | null | undefined, linkUrl?:
   return count;
 }
 
-/** post_blog — link_url·본문·워크스페이스 기준 외부링크 수 (최소 1: HUMA 발행 OG 링크) */
+/** post_blog — link_url·본문에 있는 실제 외부 링크만 집계 (네이버 생태계 제외) */
 export function resolveExtLinkCount(
   content: string | null | undefined,
   linkUrl: string | null | undefined,
-  workspace?: string | null,
 ): number {
-  const fromText = countExternalLinks(content, linkUrl);
-  if (fromText > 0) return fromText;
-  if (linkUrl?.trim()) return 1;
-  if (workspace && ['yeonun', 'quizoasis', 'panana'].includes(workspace)) return 1;
-  try {
-    if (workspace && countExternalLinks(content, workspaceBlogHomeUrl(workspace)) > 0) return 1;
-  } catch {
-    /* ignore */
-  }
-  return 0;
+  return countExternalLinks(content, linkUrl);
 }
 
 export function plainTextLength(content: string | null | undefined): number {

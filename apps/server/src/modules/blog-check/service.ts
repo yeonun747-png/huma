@@ -272,12 +272,11 @@ interface JobPostSource {
   created_at: string;
 }
 
-/** posts.ext_link_count 보정 — huma_jobs·워크스페이스 기준 */
+/** posts.ext_link_count 보정 — huma_jobs 본문·link_url 기준 */
 async function reconcileExtLinkCountsFromJobs(
   accountId: string,
   posts: Map<string, PostRow>,
   jobs: JobPostSource[] | null,
-  workspace?: string | null,
 ): Promise<void> {
   if (!jobs?.length) return;
 
@@ -293,13 +292,16 @@ async function reconcileExtLinkCountsFromJobs(
     const job =
       jobByKey.get(postRowMergeKey(row.post_url, row.post_no)) ??
       jobByKey.get(postRowMergeKey(row.post_url, extractPostNoFromUrl(row.post_url)));
+    if (!job) continue;
 
-    const fromJob = job
-      ? resolveExtLinkCount(job.content, job.link_url, workspace)
-      : resolveExtLinkCount(null, null, workspace);
-
-    const next = Math.max(row.ext_link_count, fromJob);
-    if (next <= row.ext_link_count) continue;
+    const fromJob = resolveExtLinkCount(job.content, job.link_url);
+    let next = row.ext_link_count;
+    if (fromJob > row.ext_link_count) {
+      next = fromJob;
+    } else if (row.ext_link_count === 1 && fromJob === 0) {
+      next = 0;
+    }
+    if (next === row.ext_link_count) continue;
 
     row.ext_link_count = next;
     let q = supabase
@@ -439,7 +441,7 @@ async function fetchRecentPosts(
     }
   }
 
-  await reconcileExtLinkCountsFromJobs(accountId, merged, (jobs ?? []) as JobPostSource[], workspace);
+  await reconcileExtLinkCountsFromJobs(accountId, merged, (jobs ?? []) as JobPostSource[]);
 
   return Array.from(merged.values())
     .sort((a, b) => new Date(b.published_at).getTime() - new Date(a.published_at).getTime())

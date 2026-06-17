@@ -49,7 +49,7 @@ export function parsePostContentStats(
     countMatches(text, /spoiler|스포일러/gi);
 
   const intLinkCount = countInternalBlogLinks(text);
-  const extLinkCount = resolveExtLinkCount(text, options?.linkUrl, options?.workspace);
+  const extLinkCount = resolveExtLinkCount(text, options?.linkUrl);
 
   return {
     char_count: plainTextLength(text),

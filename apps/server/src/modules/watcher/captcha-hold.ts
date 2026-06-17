@@ -731,16 +731,18 @@ export async function completeCaptchaHold(
     return { ok: false, error: resumeError ?? 'CAPTCHA_RESUME_FAILED' };
   }
 
-  await notifyCaptchaTelegram({
-    jobId,
-    workspace: holdMeta.workspace,
-    accountLabel: holdMeta.accountLabel,
-    jobTitle: holdMeta.jobTitle,
-    jobType: holdMeta.jobType,
-    completed: true,
-    drill: holdMeta.isDrill,
-    force: holdMeta.isDrill,
-  });
+  if (holdMeta.isDrill) {
+    await notifyCaptchaTelegram({
+      jobId,
+      workspace: holdMeta.workspace,
+      accountLabel: holdMeta.accountLabel,
+      jobTitle: holdMeta.jobTitle,
+      jobType: holdMeta.jobType,
+      completed: true,
+      drill: true,
+      force: true,
+    }).catch(() => {});
+  }
 
   await logOperation({
     level: 'info',
