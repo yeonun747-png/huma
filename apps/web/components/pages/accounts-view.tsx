@@ -641,7 +641,7 @@ export function AccountsView() {
                         { label: '편집', primary: true, onClick: () => handleStartEditPosting(ac) },
                         { label: '▶ 모니터', onClick: () => router.push('/monitor') },
                         { label: '페르소나', onClick: () => handleOpenPersona(ac) },
-                        { label: ac.is_active ? '정지' : '재개', onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(load) },
+                        { label: ac.is_active ? '정지' : '재개', onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(() => load({ force: true })) },
                       ]}
                     />
                   ))
@@ -686,7 +686,7 @@ export function AccountsView() {
                       { label: '오늘', value: ac.crank_count_today ?? 0 },
                     ]}
                     actions={[
-                      { label: ac.is_active ? '정지' : '재개', primary: true, onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(load) },
+                      { label: ac.is_active ? '정지' : '재개', primary: true, onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(() => load({ force: true })) },
                       { label: '삭제', danger: true, onClick: () => handleDeleteNaver(ac) },
                     ]}
                   />
@@ -721,7 +721,7 @@ export function AccountsView() {
                     { label: '오늘', value: ac.crank_count_today ?? 0 },
                   ]}
                   actions={[
-                    { label: ac.is_active ? '정지' : '재개', primary: true, onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(load) },
+                    { label: ac.is_active ? '정지' : '재개', primary: true, onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(() => load({ force: true })) },
                     { label: '삭제', danger: true, onClick: () => handleDeleteNaver(ac) },
                   ]}
                 />
@@ -760,7 +760,7 @@ export function AccountsView() {
                         { label: 'API', value: active ? '✓' : '✗', tone: active ? 'text-huma-ok' : 'text-huma-err' },
                       ]}
                       actions={[
-                        { label: active ? '정지' : '재연결', primary: !active, danger: !active, onClick: () => api.updatePlatformAccount(String(p.id), { is_active: !active }).then(load) },
+                        { label: active ? '정지' : '재연결', primary: !active, danger: !active, onClick: () => api.updatePlatformAccount(String(p.id), { is_active: !active }).then(() => load({ force: true })) },
                         { label: '삭제', danger: true, onClick: () => handleDeletePlatform(p) },
                       ]}
                     />
