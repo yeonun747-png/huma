@@ -276,7 +276,7 @@ function mergePublishedAt(a: string, b: string): string {
   return tb > ta ? b : a;
 }
 
-/** published_at 내림차순 최근 30건 — 블로그 공개 목록 + huma_jobs/posts 병합 */
+/** published_at 내림차순 최근 10건 — 블로그 공개 목록 + huma_jobs/posts 병합 */
 async function fetchRecentPosts(
   accountId: string,
   opts?: { page?: Page; blogId?: string | null; refreshIfMissing?: boolean },

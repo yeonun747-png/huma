@@ -12,9 +12,9 @@ export class BlogCheckCaptchaError extends Error {
   }
 }
 
-/** 포스트 1건 스캔 간격 — 1~3초 랜덤 (봇 감지 완화) */
+/** 포스트 1건 스캔 간격 — 0.5~1.5초 랜덤 */
 export function randomScanDelayMs(): number {
-  return randomBetween(1000, 3000);
+  return randomBetween(500, 1500);
 }
 
 export async function setupBlogCheckPage(page: Page): Promise<void> {

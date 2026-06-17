@@ -1438,8 +1438,28 @@
   font-weight: 700;
   white-space: nowrap;
 }
-.blog-check-view .bc-exposure.strong { background: #8b2252; color: #fff; }
-.blog-check-view .bc-exposure.good { background: rgba(192, 80, 110, 0.25); color: var(--acc); }
+.blog-check-view .bc-exposure.strong { background: var(--ok); color: #fff; }
+.blog-check-view .bc-exposure.good { background: rgba(120, 210, 100, 0.35); color: #7fd97a; }
 .blog-check-view .bc-exposure.weak { background: var(--warn-bg); color: var(--warn); }
 .blog-check-view .bc-exposure.miss { background: #111; color: #fff; }
 .blog-check-view .bc-exposure.none { background: var(--bg3); color: var(--t4); }
+.blog-check-view .bc-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--bdr);
+  background: var(--bg2);
+  font-size: 11px;
+}
+.blog-check-view .bc-legend-label {
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--t3);
+  letter-spacing: 0.04em;
+  margin-right: 2px;
+}

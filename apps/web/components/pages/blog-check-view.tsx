@@ -375,12 +375,20 @@ export function BlogCheckView() {
         })}
       </div>
 
+      <div className="bc-legend" aria-label="노출 등급 범례">
+        <span className="bc-legend-label">등급</span>
+        <span className="bc-exposure strong">강함 · 1~3위</span>
+        <span className="bc-exposure good">양호 · 4~10위</span>
+        <span className="bc-exposure weak">약함 · 11위~</span>
+        <span className="bc-exposure miss">누락 · 미등장</span>
+      </div>
+
       <div className="bcp-wrap">
         <div className="bcp-header">
           <div className="bcp-title">
             {selectedAcc
-              ? `${selectedAcc.label}  —  최근 ${posts.length}건 (최대 30건) · 누락 ${posts.filter((p) => p.status === 'miss').length}건`
-              : '← 계정 카드를 선택하면 최근 발행 30건이 표시됩니다'}
+              ? `${selectedAcc.label}  —  최근 ${posts.length}건 (최대 10건) · 누락 ${posts.filter((p) => p.status === 'miss').length}건`
+              : '← 계정 카드를 선택하면 최근 발행 10건이 표시됩니다'}
           </div>
           <div className="bcp-filter">
             {(
