@@ -86,6 +86,28 @@ export function isSameKstDay(iso: string | null | undefined, ref: Date = new Dat
   return key !== null && key === kstDateKey(ref);
 }
 
+/** 블로그 지수 포스트 — 24h 이내 N시간 전 / KST 어제 / YYYY.MM.DD */
+export function formatBlogCheckPublishedAt(iso: string | null | undefined): string {
+  const d = parseLogTimestamp(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+
+  const elapsedMs = Date.now() - d.getTime();
+  if (elapsedMs >= 0) {
+    const hours = elapsedMs / 3_600_000;
+    if (hours < 24) {
+      const h = Math.max(1, Math.floor(hours));
+      return `${h}시간 전`;
+    }
+  }
+
+  const dayKey = logKstDateKey(iso);
+  if (!dayKey) return '—';
+  if (kstCalendarDayDiff(dayKey, kstDateKey()) === -1) return '어제';
+
+  const parts = kstParts(d, { year: 'numeric', month: '2-digit', day: '2-digit' });
+  return `${pick(parts, 'year')}.${pick(parts, 'month')}.${pick(parts, 'day')}`;
+}
+
 /** Operation Log · Watcher — KST YYYY-MM-DD HH:mm:ss */
 export function formatLogKst(iso: string | null | undefined): string {
   const d = parseLogTimestamp(iso);

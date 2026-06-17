@@ -3,12 +3,38 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/constants';
+import { formatBlogCheckPublishedAt } from '@/lib/format-kst';
 import { EmptyPanel } from '@/components/ui/empty-panel';
 
 type BcAccount = Awaited<ReturnType<typeof api.blogCheckAccounts>>['accounts'][number];
 type BcPost = Awaited<ReturnType<typeof api.blogCheckPosts>>['posts'][number];
+type BcScanProgress = NonNullable<Awaited<ReturnType<typeof api.blogCheckAccounts>>['scanProgress']>;
 
 const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
+
+function scanPercent(progress: BcScanProgress | null, scanning: boolean): number {
+  if (!scanning) return 0;
+  if (!progress) return 2;
+  if (progress.phase === 'preparing' && progress.percent === 0) return 2;
+  return progress.percent;
+}
+
+function ScanProgressBar({
+  percent,
+  compact,
+}: {
+  percent: number;
+  compact?: boolean;
+}) {
+  return (
+    <div className={cn('bc-scan-progress', compact && 'compact')}>
+      <div className="bc-scan-progress-track">
+        <div className="bc-scan-progress-fill" style={{ width: `${percent}%` }} />
+      </div>
+      <span className="bc-scan-progress-pct">{percent}%</span>
+    </div>
+  );
+}
 
 function svcColor(svc: string): string {
   if (svc === '연운') return 'var(--acc)';
@@ -24,6 +50,19 @@ function formatLastScan(iso: string | null): string {
   return `마지막 스캔: ${hh}:${mm}`;
 }
 
+function exposureBadge(status: BcPost['status']): { cls: string; text: string } {
+  if (!status) return { cls: 'none', text: '미스캔' };
+  if (status === 'strong') return { cls: 'strong', text: '강함' };
+  if (status === 'good') return { cls: 'good', text: '양호' };
+  if (status === 'weak') return { cls: 'weak', text: '약함' };
+  return { cls: 'miss', text: '누락' };
+}
+
+function openTitleSearch(title: string) {
+  const url = `https://search.naver.com/search.naver?ssc=tab.blog.all&sm=tab_jum&query=${encodeURIComponent(title)}`;
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+
 function trendLabel(dir: BcAccount['trend_direction']): { text: string; color: string } {
   if (dir === '데이터 부족') return { text: '— 데이터 부족', color: 'var(--t3)' };
   if (dir === '안정') return { text: '✓ 안정', color: 'var(--ok)' };
@@ -36,12 +75,13 @@ export function BlogCheckView() {
   const [lastScanAt, setLastScanAt] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [scanningAccountId, setScanningAccountId] = useState<string | null>(null);
+  const [scanProgress, setScanProgress] = useState<BcScanProgress | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [curAcc, setCurAcc] = useState<string | null>(null);
   const [posts, setPosts] = useState<BcPost[]>([]);
-  const [filter, setFilter] = useState<'all' | 'miss' | 'ok'>('all');
+  const [filter, setFilter] = useState<'all' | 'strong' | 'good' | 'weak' | 'miss'>('all');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -57,6 +97,7 @@ export function BlogCheckView() {
       setAccounts(data.accounts);
       setLastScanAt(data.lastScanAt);
       setScanning(data.scanning);
+      setScanProgress(data.scanProgress);
       setError(null);
       return data;
     } catch (e) {
@@ -95,10 +136,11 @@ export function BlogCheckView() {
         if (data && !data.scanning) {
           setScanning(false);
           setScanningAccountId(null);
+          setScanProgress(null);
           if (curAcc) void loadPosts(curAcc);
         }
       });
-    }, 2500);
+    }, 1000);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
@@ -117,23 +159,42 @@ export function BlogCheckView() {
   );
 
   const filteredPosts = useMemo(() => {
-    if (filter === 'miss') return posts.filter((p) => p.status === 'miss');
-    if (filter === 'ok') return posts.filter((p) => p.status === 'ok');
-    return posts;
+    if (filter === 'all') return posts;
+    return posts.filter((p) => p.status === filter);
   }, [posts, filter]);
 
   const totalMiss = useMemo(() => accounts.reduce((s, a) => s + a.miss_count, 0), [accounts]);
+  const globalScanPercent = scanPercent(scanProgress, scanning);
+
+  const cardShowsProgress = useCallback(
+    (accountId: string) => {
+      if (!scanning) return false;
+      if (scanningAccountId === accountId) return true;
+      if (!scanningAccountId && scanProgress?.accountId === accountId) return true;
+      return false;
+    },
+    [scanning, scanningAccountId, scanProgress?.accountId],
+  );
 
   const startScan = async (accountId?: string) => {
     if (scanning) return;
     try {
       setScanning(true);
       setScanningAccountId(accountId ?? null);
+      setScanProgress({
+        accountId: accountId ?? null,
+        accountLabel: null,
+        completed: 0,
+        total: 1,
+        percent: 2,
+        phase: 'preparing',
+      });
       await api.blogCheckScan(accountId);
       await loadAccounts();
     } catch (e) {
       setScanning(false);
       setScanningAccountId(null);
+      setScanProgress(null);
       const msg = (e as Error).message;
       if (msg.includes('스캔이 이미')) {
         showToast('스캔이 이미 진행 중입니다');
@@ -176,7 +237,11 @@ export function BlogCheckView() {
             onClick={() => void startScan()}
             disabled={scanning}
           >
-            {scanning ? '⏳ 스캔 중…' : '⟳ 전체 스캔'}
+            {scanning ? (
+              <ScanProgressBar percent={globalScanPercent} />
+            ) : (
+              '⟳ 전체 스캔'
+            )}
           </button>
         </div>
       </div>
@@ -212,7 +277,7 @@ export function BlogCheckView() {
                   type="button"
                   className={cn(
                     'bci-scan-btn',
-                    scanning && scanningAccountId === a.account_id && 'scanning',
+                    scanning && cardShowsProgress(a.account_id) && 'scanning',
                   )}
                   title={`${a.label} 스캔`}
                   disabled={scanning}
@@ -221,7 +286,11 @@ export function BlogCheckView() {
                     void startScan(a.account_id);
                   }}
                 >
-                  {scanning && scanningAccountId === a.account_id ? '⏳ 스캔 중' : '⟳ 스캔'}
+                  {scanning && cardShowsProgress(a.account_id) ? (
+                    <ScanProgressBar percent={globalScanPercent} compact />
+                  ) : (
+                    '⟳ 스캔'
+                  )}
                 </button>
               </div>
               <div className="bci-name">{a.label}</div>
@@ -314,74 +383,103 @@ export function BlogCheckView() {
               : '← 계정 카드를 선택하면 최근 발행 30건이 표시됩니다'}
           </div>
           <div className="bcp-filter">
-            {(['all', 'miss', 'ok'] as const).map((f) => (
+            {(
+              [
+                ['all', '전체'],
+                ['strong', '강함'],
+                ['good', '양호'],
+                ['weak', '약함'],
+                ['miss', '누락'],
+              ] as const
+            ).map(([f, label]) => (
               <button
                 key={f}
                 type="button"
                 className={cn('bcp-f', filter === f && 'on')}
                 onClick={() => setFilter(f)}
               >
-                {f === 'all' ? '전체' : f === 'miss' ? '누락만' : '수집됨'}
+                {label}
               </button>
             ))}
           </div>
         </div>
+        <div className="bcp-scroll">
         <table className="bcp-tbl">
           <thead>
             <tr>
-              <th>발행일</th>
+              <th>노출</th>
               <th>제목</th>
-              <th>글자수</th>
+              <th>발행일</th>
+              <th>글자</th>
               <th>이미지</th>
+              <th>동영상</th>
+              <th>인용</th>
+              <th>댓글</th>
+              <th>공감</th>
+              <th>gif</th>
+              <th>지도</th>
+              <th>히든</th>
+              <th>내부링크</th>
               <th>외부링크</th>
-              <th>수집 여부</th>
             </tr>
           </thead>
           <tbody>
             {!curAcc ? (
               <tr>
-                <td colSpan={6} className="py-8 text-center text-[12.5px] text-huma-t3">
+                <td colSpan={14} className="py-8 text-center text-[12.5px] text-huma-t3">
                   위 계정 카드를 클릭하세요
                 </td>
               </tr>
             ) : filteredPosts.length === 0 ? (
               <tr>
-                <td colSpan={6} className="py-6 text-center text-[12.5px] text-huma-t3">
+                <td colSpan={14} className="py-6 text-center text-[12.5px] text-huma-t3">
                   {posts.length === 0
-                    ? '발행 이력 없음 — posts 테이블 확인 후 ⟳ 전체 스캔'
+                    ? '발행 이력 없음 — ⟳ 스캔으로 노출 등급 갱신'
                     : '해당 조건의 포스트 없음'}
                 </td>
               </tr>
             ) : (
-              filteredPosts.map((p) => (
+              filteredPosts.map((p) => {
+                const badge = exposureBadge(p.status);
+                return (
                   <tr key={p.post_url}>
-                    <td className="whitespace-nowrap font-mono text-[11px] text-huma-t3">{p.date}</td>
-                    <td className="max-w-[200px] overflow-hidden text-ellipsis whitespace-nowrap" title={p.title}>
-                      {p.title}
-                    </td>
-                    <td className="text-center font-mono text-[12px]">{p.chars}</td>
-                    <td className="text-center font-mono text-[12px]">{p.img_count}</td>
-                    <td className="text-center">
-                      {p.ext_link_count > 0 ? (
-                        <span className="font-mono text-[12px] font-bold text-huma-err">⚠ {p.ext_link_count}개</span>
-                      ) : (
-                        <span className="font-mono text-huma-t4">—</span>
-                      )}
-                    </td>
                     <td>
-                      {p.status === 'ok' ? (
-                        <span className="bc-badge ok">✓ 수집됨</span>
-                      ) : p.status === 'miss' ? (
-                        <span className="bc-badge miss">✕ 누락</span>
-                      ) : (
-                        <span className="font-mono text-[11px] text-huma-t4">미스캔</span>
-                      )}
+                      <span className={cn('bc-exposure', badge.cls)} title={p.rank ? `${p.rank}위` : undefined}>
+                        {badge.text}
+                        {p.rank ? ` · ${p.rank}위` : ''}
+                      </span>
                     </td>
+                    <td className="max-w-[220px]">
+                      <button
+                        type="button"
+                        className="bcp-title-link"
+                        title={p.title}
+                        onClick={() => openTitleSearch(p.title)}
+                      >
+                        {p.title}
+                      </button>
+                    </td>
+                    <td className="whitespace-nowrap font-mono text-[11px] text-huma-t3">
+                      {formatBlogCheckPublishedAt(p.published_at)}
+                    </td>
+                    <td className="num">{p.chars}</td>
+                    <td className="num">{p.img_count}</td>
+                    <td className="num">{p.video_count}</td>
+                    <td className="num">{p.quote_count}</td>
+                    <td className="num">{p.comment_count}</td>
+                    <td className="num">{p.like_count}</td>
+                    <td className="num">{p.gif_count}</td>
+                    <td className="num">{p.map_count}</td>
+                    <td className="num">{p.hidden_count}</td>
+                    <td className="num">{p.int_link_count}</td>
+                    <td className="num">{p.ext_link_count}</td>
                   </tr>
-                ))
+                );
+              })
             )}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

@@ -7,21 +7,24 @@ import { enqueueJob } from '../queue/producer.js';
 import {
   extractBlogIdFromUrl,
   extractPostNoFromUrl,
-  plainTextLength,
   postRowMergeKey,
   resolveExtLinkCount,
 } from './blog-url.js';
 import { getCachedBlogPostList, loadBlogPostList, refreshBlogPostListCache } from './blog-post-list.js';
+import { emptyPostContentStats, mergePostContentStats, parsePostContentStats, type PostContentStats } from './content-stats.js';
+import { BLOG_CHECK_POST_LIMIT } from './constants.js';
 import { computeBlogIndexScore, scrapeBlogStats } from './index-score.js';
+import type { PostExposureStatus } from './exposure-status.js';
 import { notifyBlogCheckCaptcha, notifyBlogCheckIndexParseFailed } from './notify.js';
 import {
   acquireBlogCheckScanLock,
   isBlogCheckScanLocked,
   releaseBlogCheckScanLock,
 } from './scan-lock.js';
+import { clearScanProgress, getScanProgress, setScanProgress, type BlogCheckScanProgress } from './scan-progress.js';
 import {
   BlogCheckCaptchaError,
-  checkPostIndexed,
+  checkPostRankByTitle,
   detectBlogCheckCaptcha,
   randomScanDelayMs,
   resolveBlogId,
@@ -40,7 +43,7 @@ const WORKSPACE_SORT: Record<string, number> = {
   quizoasis: 2,
 };
 
-const POST_LIMIT = 30;
+const POST_LIMIT = BLOG_CHECK_POST_LIMIT;
 const JOB_FETCH_LIMIT = 200;
 
 export type TrendDirection = '안정' | '악화' | '개선' | '데이터 부족';
@@ -57,23 +60,64 @@ interface AccountRow {
   is_active?: boolean;
 }
 
-interface PostRow {
+interface PostRow extends PostContentStats {
   id: string;
   account_id: string;
   post_url: string;
   post_no: string | null;
   title: string | null;
   published_at: string;
-  char_count: number;
-  img_count: number;
-  ext_link_count: number;
   ext_link_cleared: boolean;
 }
 
 interface StatusRow {
   post_no: string;
-  status: 'ok' | 'miss';
+  status: PostExposureStatus;
+  rank: number | null;
   scanned_at: string;
+}
+
+function statsFromDbRow(row: Record<string, unknown>, workspace?: string | null): PostContentStats {
+  const base = emptyPostContentStats();
+  const merged: PostContentStats = {
+    char_count: Number(row.char_count ?? 0),
+    img_count: Number(row.img_count ?? 0),
+    video_count: Number(row.video_count ?? 0),
+    quote_count: Number(row.quote_count ?? 0),
+    comment_count: Number(row.comment_count ?? 0),
+    like_count: Number(row.like_count ?? 0),
+    gif_count: Number(row.gif_count ?? 0),
+    map_count: Number(row.map_count ?? 0),
+    hidden_count: Number(row.hidden_count ?? 0),
+    int_link_count: Number(row.int_link_count ?? 0),
+    ext_link_count: Number(row.ext_link_count ?? 0),
+  };
+  if (row.ext_link_cleared) merged.ext_link_count = 0;
+  else {
+    merged.ext_link_count = Math.max(
+      merged.ext_link_count,
+      resolveExtLinkCount(null, null, workspace),
+    );
+  }
+  return mergePostContentStats(base, merged);
+}
+
+function statusInsertPayload(post: PostRow, rankResult: { status: PostExposureStatus; rank: number | null }) {
+  return {
+    chars: post.char_count,
+    img_count: post.img_count,
+    video_count: post.video_count,
+    quote_count: post.quote_count,
+    comment_count: post.comment_count,
+    like_count: post.like_count,
+    gif_count: post.gif_count,
+    map_count: post.map_count,
+    hidden_count: post.hidden_count,
+    int_link_count: post.int_link_count,
+    ext_link_count: post.ext_link_cleared ? 0 : post.ext_link_count,
+    status: rankResult.status,
+    rank: rankResult.rank,
+  };
 }
 
 function sortAccounts(accounts: AccountRow[]): AccountRow[] {
@@ -86,13 +130,6 @@ function sortAccounts(accounts: AccountRow[]): AccountRow[] {
 
 function todayKstDate(): string {
   return formatKstDateKey();
-}
-
-function formatPostDate(iso: string): string {
-  const d = new Date(iso);
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${mm}.${dd}`;
 }
 
 function mapSessionStatus(raw: string | null | undefined, isActive?: boolean): '정상' | '오류' {
@@ -151,6 +188,7 @@ interface JobPostSource {
   content: string | null;
   link_url: string | null;
   image_urls: string[] | null;
+  content_type?: string | null;
   completed_at: string | null;
   scheduled_at: string | null;
   created_at: string;
@@ -203,6 +241,12 @@ async function reconcileExtLinkCountsFromJobs(
 function jobToPostRow(accountId: string, job: JobPostSource, workspace?: string | null): PostRow {
   const postUrl = String(job.result_url ?? '').trim();
   const postNo = extractPostNoFromUrl(postUrl);
+  const stats = parsePostContentStats(job.content, {
+    linkUrl: job.link_url,
+    workspace,
+    imageUrls: job.image_urls,
+    hasVideo: job.content_type === 'B',
+  });
   return {
     id: postUrl,
     account_id: accountId,
@@ -211,11 +255,25 @@ function jobToPostRow(accountId: string, job: JobPostSource, workspace?: string 
     title: job.title ?? null,
     published_at:
       job.completed_at ?? job.scheduled_at ?? job.created_at ?? new Date().toISOString(),
-    char_count: plainTextLength(job.content),
-    img_count: job.image_urls?.length ?? 0,
-    ext_link_count: resolveExtLinkCount(job.content, job.link_url, workspace),
     ext_link_cleared: false,
+    ...stats,
   };
+}
+
+function mergePublishedAt(a: string, b: string): string {
+  const ta = Date.parse(a);
+  const tb = Date.parse(b);
+  if (!Number.isFinite(ta)) return b;
+  if (!Number.isFinite(tb)) return a;
+
+  const hasExplicitTime = (iso: string) =>
+    /T\d{2}:\d{2}:\d{2}/.test(iso) && !/T00:00:00/.test(iso);
+
+  const aHas = hasExplicitTime(a);
+  const bHas = hasExplicitTime(b);
+  if (aHas && !bHas) return a;
+  if (bHas && !aHas) return b;
+  return tb > ta ? b : a;
 }
 
 /** published_at 내림차순 최근 30건 — 블로그 공개 목록 + huma_jobs/posts 병합 */
@@ -250,7 +308,7 @@ async function fetchRecentPosts(
     supabase.from('posts').select('*').eq('account_id', accountId).order('published_at', { ascending: false }).limit(JOB_FETCH_LIMIT),
     supabase
       .from('huma_jobs')
-      .select('result_url, title, content, link_url, image_urls, completed_at, scheduled_at, created_at')
+      .select('result_url, title, content, link_url, image_urls, content_type, completed_at, scheduled_at, created_at')
       .eq('account_id', accountId)
       .eq('job_type', 'post_blog')
       .eq('status', 'completed')
@@ -265,6 +323,7 @@ async function fetchRecentPosts(
   const merged = new Map<string, PostRow>();
 
   for (const bp of blogPosts) {
+    const stats = parsePostContentStats(null, { workspace });
     merged.set(`no:${bp.postNo}`, {
       id: bp.postUrl,
       account_id: accountId,
@@ -272,10 +331,8 @@ async function fetchRecentPosts(
       post_no: bp.postNo,
       title: bp.title,
       published_at: bp.publishedAt ?? new Date(0).toISOString(),
-      char_count: 0,
-      img_count: 0,
-      ext_link_count: resolveExtLinkCount(null, null, workspace),
       ext_link_cleared: false,
+      ...stats,
     });
   }
 
@@ -293,18 +350,14 @@ async function fetchRecentPosts(
       merged.set(key, {
         ...existing,
         ...row,
-        char_count: row.char_count || existing.char_count,
-        ext_link_count: Math.max(
-          row.ext_link_cleared ? 0 : row.ext_link_count,
-          existing.ext_link_count,
-        ),
+        published_at: mergePublishedAt(existing.published_at, row.published_at),
+        ...mergePostContentStats(existing, statsFromDbRow(row as unknown as Record<string, unknown>, workspace)),
+        ext_link_cleared: row.ext_link_cleared,
       });
     } else {
       merged.set(key, {
-        ...row,
-        ext_link_count: row.ext_link_cleared
-          ? 0
-          : Math.max(row.ext_link_count, resolveExtLinkCount(null, null, workspace)),
+        ...(row as PostRow),
+        ...statsFromDbRow(row as unknown as Record<string, unknown>, workspace),
       });
     }
   }
@@ -319,7 +372,7 @@ async function fetchRecentPosts(
 async function fetchLatestStatusByPostNo(accountId: string): Promise<Map<string, StatusRow>> {
   const { data, error } = await supabase
     .from('blog_post_status')
-    .select('post_no, status, scanned_at')
+    .select('post_no, status, rank, scanned_at')
     .eq('account_id', accountId)
     .order('scanned_at', { ascending: false });
 
@@ -328,7 +381,12 @@ async function fetchLatestStatusByPostNo(accountId: string): Promise<Map<string,
   const map = new Map<string, StatusRow>();
   for (const row of data ?? []) {
     const postNo = String(row.post_no);
-    if (!map.has(postNo)) map.set(postNo, row as StatusRow);
+    if (!map.has(postNo)) {
+      const raw = String(row.status);
+      const status: PostExposureStatus =
+        raw === 'ok' ? 'good' : (raw as PostExposureStatus);
+      map.set(postNo, { ...(row as StatusRow), status });
+    }
   }
   return map;
 }
@@ -367,6 +425,32 @@ async function buildSevenDayMissTrend(accountId: string): Promise<(number | null
   });
 }
 
+interface ScanWorkItem {
+  acc: AccountRow;
+  blogId: string;
+  label: string;
+  posts: PostRow[];
+}
+
+async function reportScanProgress(params: {
+  accountId?: string | null;
+  accountLabel?: string | null;
+  completed: number;
+  total: number;
+  phase: BlogCheckScanProgress['phase'];
+}): Promise<void> {
+  const total = Math.max(params.total, 1);
+  const percent = Math.min(100, Math.round((params.completed / total) * 100));
+  await setScanProgress({
+    accountId: params.accountId ?? null,
+    accountLabel: params.accountLabel ?? null,
+    completed: params.completed,
+    total: params.total,
+    percent,
+    phase: params.phase,
+  });
+}
+
 export async function runBlogCheckScan(accountId?: string): Promise<{
   scannedAccounts: number;
   scannedPosts: number;
@@ -378,7 +462,18 @@ export async function runBlogCheckScan(accountId?: string): Promise<{
   const accounts = await listActivePostingAccounts(accountId);
   if (!accounts.length) return { scannedAccounts: 0, scannedPosts: 0 };
 
+  await reportScanProgress({
+    accountId: accountId ?? null,
+    completed: 0,
+    total: 1,
+    phase: 'preparing',
+  });
+
+  let totalSteps = 0;
+
   await withBlogCheckBrowser(async (page) => {
+    const workItems: ScanWorkItem[] = [];
+
     for (const acc of accounts) {
       const blogId = resolveBlogId(acc.blog_url, acc.naver_id);
       if (!blogId) {
@@ -390,10 +485,39 @@ export async function runBlogCheckScan(accountId?: string): Promise<{
         continue;
       }
 
-      await refreshBlogPostListCache(acc.id, blogId, page);
-
-      const posts = await fetchRecentPosts(acc.id, { page, blogId });
       const label = acc.name || acc.slot_label || acc.naver_id;
+      await reportScanProgress({
+        accountId: acc.id,
+        accountLabel: label,
+        completed: workItems.length,
+        total: Math.max(workItems.length + 1, 1),
+        phase: 'preparing',
+      });
+
+      await refreshBlogPostListCache(acc.id, blogId, page);
+      const posts = await fetchRecentPosts(acc.id, { page, blogId });
+      workItems.push({ acc, blogId, label, posts });
+    }
+
+    totalSteps =
+      workItems.reduce(
+        (sum, item) =>
+          sum +
+          item.posts.filter((p) => p.post_no ?? extractPostNoFromUrl(p.post_url)).length,
+        0,
+      ) + workItems.length;
+
+    let completedSteps = 0;
+    await reportScanProgress({
+      accountId: accountId ?? workItems[0]?.acc.id ?? null,
+      accountLabel: workItems[0]?.label ?? null,
+      completed: 0,
+      total: totalSteps,
+      phase: 'scanning',
+    });
+
+    for (const item of workItems) {
+      const { acc, blogId, label, posts } = item;
       let accountAborted = false;
 
       const parsed = await scrapeBlogStats(page, blogId);
@@ -436,15 +560,24 @@ export async function runBlogCheckScan(accountId?: string): Promise<{
         accountAborted = true;
       }
 
+      completedSteps += 1;
+      await reportScanProgress({
+        accountId: acc.id,
+        accountLabel: label,
+        completed: completedSteps,
+        total: totalSteps,
+        phase: 'scanning',
+      });
+
       for (let i = 0; i < posts.length && !accountAborted; i++) {
         const post = posts[i];
         const postNo = post.post_no ?? extractPostNoFromUrl(post.post_url);
         if (!postNo) continue;
 
+        const title = post.title?.trim() || '—';
+
         try {
-          const indexed = await checkPostIndexed(page, blogId, postNo);
-          const status = indexed ? 'ok' : 'miss';
-          const extCount = post.ext_link_cleared ? 0 : post.ext_link_count;
+          const rankResult = await checkPostRankByTitle(page, blogId, title);
 
           const { error: insErr } = await supabase.from('blog_post_status').insert({
             account_id: acc.id,
@@ -452,10 +585,7 @@ export async function runBlogCheckScan(accountId?: string): Promise<{
             post_no: postNo,
             title: post.title,
             scanned_at: scanDate,
-            status,
-            chars: post.char_count,
-            img_count: post.img_count,
-            ext_link_count: extCount,
+            ...statusInsertPayload(post, rankResult),
           });
 
           if (insErr) throw new Error(`blog_post_status insert 실패: ${insErr.message}`);
@@ -473,6 +603,15 @@ export async function runBlogCheckScan(accountId?: string): Promise<{
           throw err;
         }
 
+        completedSteps += 1;
+        await reportScanProgress({
+          accountId: acc.id,
+          accountLabel: label,
+          completed: completedSteps,
+          total: totalSteps,
+          phase: 'scanning',
+        });
+
         if (i < posts.length - 1) await sleep(randomScanDelayMs());
       }
 
@@ -484,6 +623,15 @@ export async function runBlogCheckScan(accountId?: string): Promise<{
       });
     }
   });
+
+  if (totalSteps > 0) {
+    await reportScanProgress({
+      accountId: accountId ?? null,
+      completed: totalSteps,
+      total: totalSteps,
+      phase: 'done',
+    });
+  }
 
   return { scannedAccounts, scannedPosts };
 }
@@ -510,13 +658,16 @@ export async function executeBlogCheckJob(payload: { accountId?: string | null }
     return await runBlogCheckScan(payload.accountId ?? undefined);
   } finally {
     await releaseBlogCheckScanLock();
+    await clearScanProgress();
   }
 }
 
 export async function getBlogCheckScanState() {
+  const scanning = await isBlogCheckScanLocked();
   return {
-    scanning: await isBlogCheckScanLocked(),
+    scanning,
     lastScanAt: null as string | null,
+    scanProgress: scanning ? await getScanProgress() : null,
   };
 }
 
@@ -531,14 +682,18 @@ export async function buildBlogCheckAccountsResponse(allowedWorkspaces: string[]
     const recentPosts = await fetchRecentPosts(acc.id, { blogId });
     const statusMap = await fetchLatestStatusByPostNo(acc.id);
 
-    let okCount = 0;
+    let strongCount = 0;
+    let goodCount = 0;
+    let weakCount = 0;
     let missCount = 0;
     for (const post of recentPosts) {
       const postNo = post.post_no ?? extractPostNoFromUrl(post.post_url);
       if (!postNo) continue;
       const st = statusMap.get(postNo);
       if (!st) continue;
-      if (st.status === 'ok') okCount += 1;
+      if (st.status === 'strong') strongCount += 1;
+      else if (st.status === 'good') goodCount += 1;
+      else if (st.status === 'weak') weakCount += 1;
       else missCount += 1;
     }
 
@@ -561,7 +716,9 @@ export async function buildBlogCheckAccountsResponse(allowedWorkspaces: string[]
       blog_url: blogId,
       idx_score: idxRow?.idx_score != null ? Number(idxRow.idx_score) : null,
       total_posts: totalPosts,
-      ok_count: okCount,
+      strong_count: strongCount,
+      good_count: goodCount,
+      weak_count: weakCount,
       miss_count: missCount,
       miss_rate: missRate,
       trend,
@@ -580,10 +737,13 @@ export async function buildBlogCheckAccountsResponse(allowedWorkspaces: string[]
         .maybeSingle()
     ).data?.created_at ?? null;
 
+  const scanning = await isBlogCheckScanLocked();
+
   return {
     accounts: result,
     lastScanAt,
-    scanning: await isBlogCheckScanLocked(),
+    scanning,
+    scanProgress: scanning ? await getScanProgress() : null,
   };
 }
 
@@ -603,20 +763,26 @@ export async function buildBlogCheckPostsResponse(accountId: string) {
     posts: posts.map((post) => {
       const postNo = post.post_no ?? extractPostNoFromUrl(post.post_url) ?? '';
       const st = postNo ? statusMap.get(postNo) : undefined;
-      const extCount = post.ext_link_cleared
-        ? 0
-        : Math.max(post.ext_link_count, resolveExtLinkCount(null, null, workspace));
-      const status = st?.status ?? null;
+      const stats = statsFromDbRow(post as unknown as Record<string, unknown>, workspace);
 
       return {
         post_url: post.post_url,
+        post_no: postNo || null,
         title: post.title ?? '—',
         published_at: post.published_at,
-        date: formatPostDate(post.published_at),
-        chars: post.char_count,
-        img_count: post.img_count,
-        ext_link_count: extCount,
-        status,
+        status: st?.status ?? null,
+        rank: st?.rank ?? null,
+        chars: stats.char_count,
+        img_count: stats.img_count,
+        video_count: stats.video_count,
+        quote_count: stats.quote_count,
+        comment_count: stats.comment_count,
+        like_count: stats.like_count,
+        gif_count: stats.gif_count,
+        map_count: stats.map_count,
+        hidden_count: stats.hidden_count,
+        int_link_count: stats.int_link_count,
+        ext_link_count: stats.ext_link_count,
       };
     }),
   };

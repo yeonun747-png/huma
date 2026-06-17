@@ -1314,6 +1314,54 @@
 }
 .blog-check-view .bc-scan-btn.scanning { background: var(--warn); animation: pulse 1s infinite; }
 .blog-check-view .bc-scan-btn:disabled { opacity: 0.85; cursor: wait; }
+.blog-check-view .bc-scan-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 140px;
+}
+.blog-check-view .bc-scan-progress.compact {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  min-width: 72px;
+}
+.blog-check-view .bc-scan-progress-track {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.15);
+  overflow: hidden;
+}
+.blog-check-view .bc-scan-progress.compact .bc-scan-progress-track {
+  height: 4px;
+}
+.blog-check-view .bc-scan-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: #fff;
+  transition: width 0.25s ease;
+}
+.blog-check-view .bc-scan-progress-pct {
+  font-size: 11px;
+  font-family: var(--font-ui);
+  font-weight: 700;
+  color: #fff;
+  min-width: 32px;
+  text-align: right;
+}
+.blog-check-view .bci-scan-btn .bc-scan-progress-pct {
+  color: var(--warn);
+  font-size: 10px;
+  min-width: 28px;
+  text-align: center;
+}
+.blog-check-view .bci-scan-btn .bc-scan-progress-track {
+  background: var(--bg2);
+}
+.blog-check-view .bci-scan-btn .bc-scan-progress-fill {
+  background: var(--warn);
+}
 .blog-check-view .bcp-wrap { background: var(--bg2); border: 1px solid var(--bdr); border-radius: 10px; overflow: hidden; }
 .blog-check-view .bcp-header {
   padding: 11px 14px;
@@ -1364,3 +1412,34 @@
 }
 .blog-check-view .bc-badge.ok { background: var(--ok-bg); color: var(--ok); }
 .blog-check-view .bc-badge.miss { background: var(--err-bg); color: var(--err); }
+.blog-check-view .bcp-scroll { overflow-x: auto; }
+.blog-check-view .bcp-tbl .num {
+  text-align: center;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.blog-check-view .bcp-title-link {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  color: var(--t);
+  cursor: pointer;
+  font-size: 12.5px;
+}
+.blog-check-view .bcp-title-link:hover { color: var(--acc); }
+.blog-check-view .bc-exposure {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.blog-check-view .bc-exposure.strong { background: #8b2252; color: #fff; }
+.blog-check-view .bc-exposure.good { background: rgba(192, 80, 110, 0.25); color: var(--acc); }
+.blog-check-view .bc-exposure.weak { background: var(--warn-bg); color: var(--warn); }
+.blog-check-view .bc-exposure.miss { background: #111; color: #fff; }
+.blog-check-view .bc-exposure.none { background: var(--bg3); color: var(--t4); }

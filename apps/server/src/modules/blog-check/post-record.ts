@@ -1,5 +1,6 @@
 import { supabase } from '../../middleware/auth.js';
-import { extractPostNoFromUrl, plainTextLength, resolveExtLinkCount } from './blog-url.js';
+import { extractPostNoFromUrl } from './blog-url.js';
+import { parsePostContentStats } from './content-stats.js';
 
 export interface RecordPublishedPostInput {
   accountId: string;
@@ -10,6 +11,7 @@ export interface RecordPublishedPostInput {
   imageUrls?: string[] | null;
   publishedAt?: string | null;
   workspace?: string | null;
+  hasVideo?: boolean;
 }
 
 /** post_blog 발행 완료 시 posts 테이블에 기록 */
@@ -19,6 +21,12 @@ export async function recordPublishedPost(input: RecordPublishedPostInput): Prom
 
   const postNo = extractPostNoFromUrl(postUrl);
   const publishedAt = input.publishedAt ?? new Date().toISOString();
+  const stats = parsePostContentStats(input.content, {
+    linkUrl: input.linkUrl,
+    workspace: input.workspace,
+    imageUrls: input.imageUrls,
+    hasVideo: input.hasVideo,
+  });
 
   const { error } = await supabase.from('posts').upsert(
     {
@@ -27,9 +35,17 @@ export async function recordPublishedPost(input: RecordPublishedPostInput): Prom
       post_no: postNo,
       title: input.title ?? null,
       published_at: publishedAt,
-      char_count: plainTextLength(input.content),
-      img_count: input.imageUrls?.length ?? 0,
-      ext_link_count: resolveExtLinkCount(input.content, input.linkUrl, input.workspace),
+      char_count: stats.char_count,
+      img_count: stats.img_count,
+      video_count: stats.video_count,
+      quote_count: stats.quote_count,
+      comment_count: stats.comment_count,
+      like_count: stats.like_count,
+      gif_count: stats.gif_count,
+      map_count: stats.map_count,
+      hidden_count: stats.hidden_count,
+      int_link_count: stats.int_link_count,
+      ext_link_count: stats.ext_link_count,
       ext_link_cleared: false,
     },
     { onConflict: 'account_id,post_url' },

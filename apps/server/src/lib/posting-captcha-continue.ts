@@ -160,6 +160,8 @@ export async function continuePostBlogFromCaptchaHold(params: {
         linkUrl: job?.link_url as string | null,
         imageUrls: job?.image_urls as string[] | null,
         publishedAt: new Date().toISOString(),
+        workspace: job?.workspace as string | null,
+        hasVideo: job?.content_type === 'B',
       });
     }
 

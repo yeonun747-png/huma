@@ -696,7 +696,9 @@ export const api = {
         blog_url: string;
         idx_score: number | null;
         total_posts: number;
-        ok_count: number;
+        strong_count: number;
+        good_count: number;
+        weak_count: number;
         miss_count: number;
         miss_rate: number;
         trend: (number | null)[];
@@ -705,18 +707,35 @@ export const api = {
       }>;
       lastScanAt: string | null;
       scanning: boolean;
+      scanProgress: {
+        accountId: string | null;
+        accountLabel: string | null;
+        completed: number;
+        total: number;
+        percent: number;
+        phase: 'preparing' | 'scanning' | 'done';
+      } | null;
     }>('/api/blog-check/accounts'),
   blogCheckPosts: (accountId: string) =>
     request<{
       posts: Array<{
         post_url: string;
+        post_no: string | null;
         title: string;
         published_at: string;
-        date: string;
+        status: 'strong' | 'good' | 'weak' | 'miss' | null;
+        rank: number | null;
         chars: number;
         img_count: number;
+        video_count: number;
+        quote_count: number;
+        comment_count: number;
+        like_count: number;
+        gif_count: number;
+        map_count: number;
+        hidden_count: number;
+        int_link_count: number;
         ext_link_count: number;
-        status: 'ok' | 'miss' | null;
       }>;
     }>(`/api/blog-check/posts/${accountId}`),
   blogCheckScan: (accountId?: string) =>

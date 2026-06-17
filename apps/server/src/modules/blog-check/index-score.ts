@@ -80,7 +80,7 @@ function extractFromStatsRegion(text: string): BlogStats | null {
 export async function scrapeBlogStats(page: Page, blogId: string): Promise<ScrapeBlogStatsResult | null> {
   const url = `https://m.blog.naver.com/${blogId}`;
   await page.goto(url, { waitUntil: 'domcontentloaded' });
-  await sleep(1800);
+  await sleep(600);
 
   const text = await page.locator('body').innerText().catch(() => '');
   if (!text.trim()) return null;
