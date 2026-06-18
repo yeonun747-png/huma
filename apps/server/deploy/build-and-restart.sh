@@ -16,7 +16,7 @@ echo "[deploy] build @huma/server (esbuild — i7 저메모리 대응)..."
 npm run build --workspace=@huma/server
 
 echo "[deploy] pm2 restart..."
-pm2 restart huma-server huma-vnc-hud --update-env
+pm2 restart huma-server --update-env
 
 echo "[deploy] done"
-pm2 status huma-server huma-vnc-hud
+pm2 status huma-server

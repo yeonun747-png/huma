@@ -764,7 +764,7 @@ Claude SEO 글 생성
 ```bash
 cd ~/huma && git pull
 cd apps/server && npm run build
-pm2 restart huma-server huma-vnc-hud --update-env
+pm2 restart huma-server --update-env
 ```
 
 웹 UI 변경은 Vercel 별도 배포.

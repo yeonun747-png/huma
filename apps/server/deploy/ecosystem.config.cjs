@@ -20,27 +20,6 @@ module.exports = {
     // x11vnc → systemd (huma-x11vnc.service). pm2 stdout 파이프 데드락 방지 + 재부팅 자동 기동.
     // 등록: sudo HUMA_USER=$USER bash apps/server/deploy/setup-x11vnc-systemd.sh
     {
-      name: 'huma-vnc-hud',
-      cwd: serverRoot,
-      script: path.join(deployRoot, 'scripts/start-vnc-hud.sh'),
-      interpreter: 'bash',
-      autorestart: true,
-      max_restarts: 50,
-      restart_delay: 5000,
-      min_uptime: 3000,
-      env: {
-        DISPLAY: ':99',
-        PORT: '3100',
-        HUMA_VNC_WIDTH: '2560',
-        HUMA_VNC_HEIGHT: '1080',
-        HUMA_VNC_HUD_HEIGHT: '56',
-        HUMA_VNC_HUD_WIDTH: '1180',
-        HUMA_VNC_HUD_RESERVE_Y: '72',
-        HUMA_VNC_HUD_DISPLAY_WAIT_SEC: '60',
-        HUMA_VNC_HUD_WAIT_SEC: '120',
-      },
-    },
-    {
       name: 'huma-server',
       cwd: serverRoot,
       script: 'dist/index.js',
@@ -56,8 +35,6 @@ module.exports = {
         XVFB_AVAILABLE: 'true',
         HUMA_VNC_WIDTH: '2560',
         HUMA_VNC_HEIGHT: '1080',
-        HUMA_VNC_HUD_HEIGHT: '56',
-        HUMA_VNC_HUD_RESERVE_Y: '72',
         NODE_OPTIONS: '--dns-result-order=ipv4first',
       },
     },

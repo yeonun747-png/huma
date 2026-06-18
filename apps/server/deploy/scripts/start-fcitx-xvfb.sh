@@ -43,7 +43,7 @@ else
   DISPLAY="${DISPLAY}" fcitx-remote -s hangul 2>/dev/null || true
 fi
 
-# VNC 단축키·한/영 — xbindkeys (RealVNC가 Ctrl+Alt·한/영을 클라이언트에서 먹을 수 있음 → HUD 클릭 대체)
+# VNC 단축키·한/영 — xbindkeys (RealVNC가 Ctrl+Alt·한/영을 클라이언트에서 먹을 수 있음)
 if command -v xbindkeys >/dev/null 2>&1; then
   PORT="${PORT:-3100}"
   BASE="http://127.0.0.1:${PORT}/api/vnc"

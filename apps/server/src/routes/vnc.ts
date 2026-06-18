@@ -1,7 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { join } from 'path';
-import { readFileSync } from 'fs';
-import { buildVncHudState, clearVncFocus, focusVncByHotkey } from '../lib/vnc-focus.js';
+import { clearVncFocus, focusVncByHotkey } from '../lib/vnc-focus.js';
 import { refreshAllVncWindowLayouts } from '../lib/vnc-window-guard.js';
 import {
   getVncImeStatus,
@@ -9,8 +7,6 @@ import {
   setVncImeHangul,
   toggleVncIme,
 } from '../lib/vnc-ime.js';
-
-const PORT = Number(process.env.PORT) || 3100;
 
 function isVncLocalRequest(request: FastifyRequest): boolean {
   const ip = request.ip;
@@ -24,13 +20,6 @@ function assertVncLocal(request: FastifyRequest) {
 }
 
 export async function registerVncRoutes(app: FastifyInstance) {
-  app.get('/api/vnc/hud', async (request, reply) => {
-    assertVncLocal(request);
-    const hud = await buildVncHudState();
-    const ime = await getVncImeStatus();
-    return { ...hud, ime };
-  });
-
   app.get('/api/vnc/ime', async (request) => {
     assertVncLocal(request);
     return getVncImeStatus();
@@ -58,20 +47,13 @@ export async function registerVncRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'unknown slot', slot: request.params.slot });
     }
     const windows = await refreshAllVncWindowLayouts();
-    return { ok: true, ...result, windows, hud: await buildVncHudState() };
+    return { ok: true, ...result, windows };
   });
 
   app.post('/api/vnc/layout/tile', async (request, reply) => {
     assertVncLocal(request);
     await clearVncFocus();
     const windows = await refreshAllVncWindowLayouts();
-    return { ok: true, windows, hud: await buildVncHudState() };
-  });
-
-  app.get('/vnc-hud', async (request, reply) => {
-    assertVncLocal(request);
-    const htmlPath = join(process.cwd(), 'deploy', 'vnc-hud.html');
-    const html = readFileSync(htmlPath, 'utf8').replace('__HUMA_PORT__', String(PORT));
-    return reply.type('text/html; charset=utf-8').send(html);
+    return { ok: true, windows };
   });
 }

@@ -90,8 +90,8 @@ export async function getVncImeStatus(): Promise<VncImeStatus> {
       mode,
       hint:
         mode === 'hangul'
-          ? '한글 — VNC HUD 「한/영」 클릭으로 전환'
-          : '영문 — VNC HUD 「한/영」 클릭으로 전환',
+          ? '한글 — Ctrl+Space / Hangul / Right Alt 로 전환'
+          : '영문 — Ctrl+Space / Hangul / Right Alt 로 전환',
     };
   } catch {
     return {

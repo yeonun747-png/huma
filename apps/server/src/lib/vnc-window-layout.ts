@@ -16,12 +16,11 @@ export function resolveVncCanvas(): { w: number; h: number } {
   };
 }
 
-/** VNC HUD 오버레이 높이 — 워크플로우 Chromium은 이 아래부터 배치 */
-export function resolveVncHudReserveY(): number {
-  const explicit = Number(process.env.HUMA_VNC_HUD_RESERVE_Y);
-  if (Number.isFinite(explicit) && explicit > 0) return Math.round(explicit);
-  const hudH = Number(process.env.HUMA_VNC_HUD_HEIGHT) || 56;
-  return hudH + 16;
+/** VNC 워크플로우 Chromium 상단 여백 */
+export function resolveVncLayoutTopY(): number {
+  const explicit = Number(process.env.HUMA_VNC_LAYOUT_TOP_Y);
+  if (Number.isFinite(explicit) && explicit >= 0) return Math.round(explicit);
+  return 0;
 }
 
 export function isVncTilingEnabled(headless: boolean): boolean {
@@ -66,7 +65,7 @@ export async function resolveVncChromeForProxyPort(
   if (!isVncManagedProxyPort(proxyPort)) return null;
 
   const { w, h } = resolveVncCanvas();
-  const top = resolveVncHudReserveY();
+  const top = resolveVncLayoutTopY();
   const workH = Math.max(h - top, 200);
   const focusPort = await getVncFocusPort();
 
