@@ -344,6 +344,10 @@ export async function registerAccountRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: mapAccountDbError(msg) });
     }
     if (!data) return reply.code(404).send({ error: '계정 업데이트 실패' });
+    if (patch.blog_url !== undefined) {
+      const { clearBlogPostListCacheForAccount } = await import('../modules/blog-check/blog-post-list.js');
+      await clearBlogPostListCacheForAccount(accountId);
+    }
     return stripAccountSecret(data);
     } catch (err) {
       request.log.error(err, 'account patch failed');

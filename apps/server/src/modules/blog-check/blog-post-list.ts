@@ -15,11 +15,15 @@ export interface ScrapedBlogPost {
 const CACHE_TTL_SEC = 3600;
 const POST_LIST_LIMIT = BLOG_CHECK_POST_LIMIT;
 
-const cacheKey = (accountId: string) => `blog_check:postlist:${accountId}`;
+const cacheKey = (accountId: string, blogId: string) =>
+  `blog_check:postlist:${accountId}:${blogId.toLowerCase()}`;
 
-export async function getCachedBlogPostList(accountId: string): Promise<ScrapedBlogPost[] | null> {
+export async function getCachedBlogPostList(
+  accountId: string,
+  blogId: string,
+): Promise<ScrapedBlogPost[] | null> {
   try {
-    const raw = await redisConnection.get(cacheKey(accountId));
+    const raw = await redisConnection.get(cacheKey(accountId, blogId));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as ScrapedBlogPost[];
     return Array.isArray(parsed) && parsed.length > 0 ? parsed : null;
@@ -28,11 +32,26 @@ export async function getCachedBlogPostList(accountId: string): Promise<ScrapedB
   }
 }
 
-export async function setCachedBlogPostList(accountId: string, posts: ScrapedBlogPost[]): Promise<void> {
+export async function setCachedBlogPostList(
+  accountId: string,
+  blogId: string,
+  posts: ScrapedBlogPost[],
+): Promise<void> {
   try {
-    await redisConnection.set(cacheKey(accountId), JSON.stringify(posts), 'EX', CACHE_TTL_SEC);
+    await redisConnection.set(cacheKey(accountId, blogId), JSON.stringify(posts), 'EX', CACHE_TTL_SEC);
   } catch (err) {
     console.error('[blog-check] postlist cache set failed:', err);
+  }
+}
+
+/** 계정 blog_url 변경 시 — accountId 단위 구 캐시 키 포함 전체 삭제 */
+export async function clearBlogPostListCacheForAccount(accountId: string): Promise<void> {
+  try {
+    const pattern = `blog_check:postlist:${accountId}*`;
+    const keys = await redisConnection.keys(pattern);
+    if (keys.length) await redisConnection.del(...keys);
+  } catch (err) {
+    console.error('[blog-check] postlist cache clear failed:', err);
   }
 }
 
@@ -168,7 +187,7 @@ export async function refreshBlogPostListCache(
 ): Promise<ScrapedBlogPost[]> {
   const run = async (p: Page) => scrapeBlogPostListFromMobileApi(p, blogId, POST_LIST_LIMIT);
   const posts = page ? await run(page) : await withBlogCheckBrowser(run);
-  if (posts.length) await setCachedBlogPostList(accountId, posts);
+  if (posts.length) await setCachedBlogPostList(accountId, blogId, posts);
   return posts;
 }
 
@@ -178,7 +197,7 @@ export async function loadBlogPostList(
   blogId: string,
   page?: Page,
 ): Promise<ScrapedBlogPost[]> {
-  const cached = await getCachedBlogPostList(accountId);
+  const cached = await getCachedBlogPostList(accountId, blogId);
   if (cached?.length) return cached;
   return refreshBlogPostListCache(accountId, blogId, page);
 }

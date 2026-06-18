@@ -3,7 +3,7 @@ import { supabase } from '../../middleware/auth.js';
 import { formatKstDateKey, getKstClock } from '../../lib/crank-schedule-config.js';
 import { logOperation } from '../../lib/log-emitter.js';
 import { sleep } from '../../lib/utils.js';
-import { enqueueJob } from '../queue/producer.js';
+import { tryEnqueueJob } from '../queue/producer.js';
 import {
   type AdHocBlogCheckPost,
   getAdHocBlogCheckCache,
@@ -13,6 +13,7 @@ import {
   extractBlogIdFromUrl,
   extractPostNoFromUrl,
   parseBlogCheckSearchQuery,
+  postBelongsToBlog,
   postRowMergeKey,
   resolveExtLinkCount,
 } from './blog-url.js';
@@ -38,6 +39,7 @@ import { rankToExposureStatus } from './exposure-status.js';
 import { notifyBlogCheckCaptcha, notifyBlogCheckIndexParseFailed } from './notify.js';
 import {
   acquireBlogCheckScanLock,
+  BLOG_CHECK_QUEUE_JOB_ID,
   isBlogCheckScanLocked,
   releaseBlogCheckScanLock,
 } from './scan-lock.js';
@@ -377,7 +379,7 @@ async function fetchRecentPosts(
       } else if (opts?.refreshIfMissing) {
         blogPosts = await loadBlogPostList(accountId, blogId);
       } else {
-        blogPosts = (await getCachedBlogPostList(accountId)) ?? [];
+        blogPosts = (await getCachedBlogPostList(accountId, blogId)) ?? [];
       }
     } catch (err) {
       console.error('[blog-check] blog post list load failed:', err);
@@ -443,7 +445,10 @@ async function fetchRecentPosts(
 
   await reconcileExtLinkCountsFromJobs(accountId, merged, (jobs ?? []) as JobPostSource[]);
 
-  return Array.from(merged.values())
+  const rows = Array.from(merged.values());
+  const filtered = blogId ? rows.filter((p) => postBelongsToBlog(p.post_url, blogId)) : rows;
+
+  return filtered
     .sort((a, b) => new Date(b.published_at).getTime() - new Date(a.published_at).getTime())
     .slice(0, POST_LIMIT);
 }
@@ -461,7 +466,10 @@ function resolveExposureStatusFromRow(row: StatusRow): PostExposureStatus {
   return 'miss';
 }
 
-async function fetchLatestStatusByPostNo(accountId: string): Promise<Map<string, StatusRow>> {
+async function fetchLatestStatusByPostNo(
+  accountId: string,
+  blogId?: string | null,
+): Promise<Map<string, StatusRow>> {
   const { data, error } = await supabase
     .from('blog_post_status')
     .select(
@@ -472,9 +480,24 @@ async function fetchLatestStatusByPostNo(accountId: string): Promise<Map<string,
 
   if (error) throw new Error(error.message);
 
+  let validPostNos: Set<string> | null = null;
+  if (blogId) {
+    const { data: posts } = await supabase
+      .from('posts')
+      .select('post_no, post_url')
+      .eq('account_id', accountId);
+    validPostNos = new Set(
+      (posts ?? [])
+        .filter((p) => postBelongsToBlog(String(p.post_url ?? ''), blogId))
+        .map((p) => String(p.post_no ?? '').trim())
+        .filter(Boolean),
+    );
+  }
+
   const map = new Map<string, StatusRow>();
   for (const row of data ?? []) {
     const postNo = String(row.post_no);
+    if (validPostNos && !validPostNos.has(postNo)) continue;
     if (!map.has(postNo)) {
       const status = resolveExposureStatusFromRow(row as StatusRow);
       map.set(postNo, { ...(row as StatusRow), status });
@@ -563,8 +586,8 @@ async function hasTodayBlogIndex(accountId: string, scanDate: string): Promise<b
   return data != null;
 }
 
-/** 7일 추이 — 스캔 안 한 날은 null */
-async function buildSevenDayMissTrend(accountId: string): Promise<(number | null)[]> {
+/** 7일 추이 — 스캔 안 한 날은 null (현재 blogId 글만) */
+async function buildSevenDayMissTrend(accountId: string, blogId?: string | null): Promise<(number | null)[]> {
   const dayKeys: string[] = [];
   for (let i = 0; i < 7; i++) {
     const d = new Date();
@@ -572,9 +595,23 @@ async function buildSevenDayMissTrend(accountId: string): Promise<(number | null
     dayKeys.push(formatKstDateKey(d));
   }
 
+  let validPostNos: Set<string> | null = null;
+  if (blogId) {
+    const { data: posts } = await supabase
+      .from('posts')
+      .select('post_no, post_url')
+      .eq('account_id', accountId);
+    validPostNos = new Set(
+      (posts ?? [])
+        .filter((p) => postBelongsToBlog(String(p.post_url ?? ''), blogId))
+        .map((p) => String(p.post_no ?? '').trim())
+        .filter(Boolean),
+    );
+  }
+
   const { data, error } = await supabase
     .from('blog_post_status')
-    .select('scanned_at, status')
+    .select('post_no, scanned_at, status')
     .eq('account_id', accountId)
     .gte('scanned_at', dayKeys[0]);
 
@@ -584,6 +621,8 @@ async function buildSevenDayMissTrend(accountId: string): Promise<(number | null
   const missByDay = new Map<string, number>();
 
   for (const row of data ?? []) {
+    const postNo = String(row.post_no ?? '');
+    if (validPostNos && !validPostNos.has(postNo)) continue;
     const day = String(row.scanned_at).slice(0, 10);
     scannedDays.add(day);
     if (row.status === 'miss') {
@@ -636,7 +675,7 @@ async function estimateTotalSteps(
     const blogId = resolveBlogId(acc.blog_url, acc.naver_id);
     if (!blogId) continue;
     const posts = await fetchRecentPosts(acc.id, { blogId, refreshIfMissing: false });
-    const statusMap = await fetchLatestStatusByPostNo(acc.id);
+    const statusMap = await fetchLatestStatusByPostNo(acc.id, blogId);
     const selected = selectPostsForScan(posts, options, statusMap, scanDate);
     total += countScannablePosts(selected);
     const skipIndex = mode !== 'full' && (await hasTodayBlogIndex(acc.id, scanDate));
@@ -833,7 +872,7 @@ async function scanAccountWorkItem(
   let accountAborted = false;
   let scannedPosts = 0;
 
-  const statusMap = await fetchLatestStatusByPostNo(acc.id);
+  const statusMap = await fetchLatestStatusByPostNo(acc.id, blogId);
   const scannablePosts = selectPostsForScan(posts, options, statusMap, scanDate);
   const skipIndex = mode !== 'full' && (await hasTodayBlogIndex(acc.id, scanDate));
 
@@ -1299,13 +1338,13 @@ export async function requestBlogCheckScan(
   options: BlogCheckScanOptions = { mode: 'full' },
   adHocBlogId?: string,
 ): Promise<{ queued: true; accountId?: string; blogId?: string; mode: BlogCheckScanMode; registered?: boolean }> {
-  if (!(await acquireBlogCheckScanLock())) {
+  if (await isBlogCheckScanLocked()) {
     throw new Error('SCAN_ALREADY_RUNNING');
   }
 
   const mode = normalizeBlogCheckScanMode(options.mode);
-  try {
-    await enqueueJob({
+  const queued = await tryEnqueueJob(
+    {
       type: 'blog_check',
       payload: {
         accountId: accountId ?? null,
@@ -1313,12 +1352,13 @@ export async function requestBlogCheckScan(
         mode,
         postNos: options.postNos ?? null,
       },
-    });
-    return { queued: true, accountId, blogId: adHocBlogId, mode, registered: Boolean(accountId) };
-  } catch (err) {
-    await releaseBlogCheckScanLock();
-    throw err;
+    },
+    { jobId: BLOG_CHECK_QUEUE_JOB_ID },
+  );
+  if (!queued) {
+    throw new Error('SCAN_ALREADY_RUNNING');
   }
+  return { queued: true, accountId, blogId: adHocBlogId, mode, registered: Boolean(accountId) };
 }
 
 export async function requestBlogCheckSearchScan(
@@ -1357,6 +1397,9 @@ export async function requestBlogCheckSearchScan(
 }
 
 export async function executeBlogCheckJob(payload: BlogCheckJobPayload) {
+  if (!(await acquireBlogCheckScanLock())) {
+    throw new Error('SCAN_ALREADY_RUNNING');
+  }
   const options: BlogCheckScanOptions = {
     mode: normalizeBlogCheckScanMode(payload.mode),
     postNos: payload.postNos?.filter(Boolean) ?? undefined,
@@ -1391,7 +1434,7 @@ export async function buildBlogCheckAccountsResponse(allowedWorkspaces: string[]
   for (const acc of accounts) {
     const blogId = extractBlogIdFromUrl(acc.blog_url, acc.naver_id) ?? acc.naver_id;
     const recentPosts = await fetchRecentPosts(acc.id, { blogId });
-    const statusMap = await fetchLatestStatusByPostNo(acc.id);
+    const statusMap = await fetchLatestStatusByPostNo(acc.id, blogId);
 
     let strongCount = 0;
     let goodCount = 0;
@@ -1412,7 +1455,7 @@ export async function buildBlogCheckAccountsResponse(allowedWorkspaces: string[]
 
     const totalPosts = recentPosts.length;
     const missRate = totalPosts > 0 ? Math.round((missCount / totalPosts) * 100) : 0;
-    const trend = await buildSevenDayMissTrend(acc.id);
+    const trend = await buildSevenDayMissTrend(acc.id, blogId);
 
     const { data: idxRow } = await supabase
       .from('blog_index_history')
@@ -1471,12 +1514,13 @@ export async function buildBlogCheckPostsResponse(accountId: string) {
   const blogId = extractBlogIdFromUrl(acc?.blog_url, acc?.naver_id);
 
   const posts = await fetchRecentPosts(accountId, { blogId, refreshIfMissing: false });
-  const statusMap = await fetchLatestStatusByPostNo(accountId);
+  const statusMap = await fetchLatestStatusByPostNo(accountId, blogId);
 
   return {
     posts: posts.map((post) => {
       const postNo = post.post_no ?? extractPostNoFromUrl(post.post_url) ?? '';
-      const st = postNo ? statusMap.get(postNo) : undefined;
+      const belongs = !blogId || postBelongsToBlog(post.post_url, blogId);
+      const st = postNo && belongs ? statusMap.get(postNo) : undefined;
       const stats = st
         ? statsFromStatusRow(st, post.ext_link_cleared)
         : statsFromDbRow(post as unknown as Record<string, unknown>, workspace);

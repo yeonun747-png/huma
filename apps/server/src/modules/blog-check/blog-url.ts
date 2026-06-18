@@ -3,6 +3,12 @@ import { ensureHttpsUrl } from '../../lib/blog-link.js';
 const BLOG_ID_RE = /blog\.naver\.com\/([^/?#]+)/i;
 const POST_NO_RE = /(?:logNo=|\/)(\d{6,})(?:[/?#]|$)/;
 
+export function postBelongsToBlog(postUrl: string, blogId: string | null | undefined): boolean {
+  if (!blogId?.trim()) return true;
+  const bid = extractBlogIdFromUrl(postUrl);
+  return bid?.toLowerCase() === blogId.trim().toLowerCase();
+}
+
 export function extractBlogIdFromUrl(blogUrl: string | null | undefined, naverId?: string | null): string | null {
   if (blogUrl) {
     const m = blogUrl.match(BLOG_ID_RE);

@@ -20,4 +20,19 @@ export async function enqueueJob(
   });
 }
 
+/** BullMQ jobId 중복 — 이미 대기·실행 중이면 false */
+export async function tryEnqueueJob(
+  data: Record<string, unknown>,
+  opts?: { delay?: number; jobId?: string; priority?: number },
+): Promise<boolean> {
+  try {
+    await enqueueJob(data, opts);
+    return true;
+  } catch (err) {
+    const msg = (err as Error).message ?? '';
+    if (/job.*already exists|JobId.*exist/i.test(msg)) return false;
+    throw err;
+  }
+}
+
 export { connection as redisConnection };
