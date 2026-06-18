@@ -120,13 +120,15 @@ export function BlogCheckView() {
     toastTimer.current = setTimeout(() => setToast(null), 4000);
   }, []);
 
-  const loadAccounts = useCallback(async () => {
+  const loadAccounts = useCallback(async (opts?: { keepScanning?: boolean }) => {
     try {
       const data = await api.blogCheckAccounts();
       setAccounts(data.accounts);
       setLastScanAt(data.lastScanAt);
-      setScanning(data.scanning);
-      setScanProgress(data.scanProgress);
+      if (!opts?.keepScanning) {
+        setScanning(data.scanning);
+        setScanProgress(data.scanProgress);
+      }
       setError(null);
       return data;
     } catch (e) {
@@ -134,6 +136,17 @@ export function BlogCheckView() {
       return null;
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const syncScanStatus = useCallback(async () => {
+    try {
+      const status = await api.blogCheckStatus();
+      setScanning(status.scanning);
+      setScanProgress(status.scanProgress);
+      return status;
+    } catch {
+      return null;
     }
   }, []);
 
@@ -298,7 +311,9 @@ export function BlogCheckView() {
         phase: 'preparing',
       });
       await api.blogCheckScan(accountId, opts ?? { mode: accountId ? 'full' : 'full' });
-      await loadAccounts();
+      await syncScanStatus();
+      await loadAccounts({ keepScanning: true });
+      refreshActivePosts();
     } catch (e) {
       setScanning(false);
       setScanningAccountId(null);
@@ -349,10 +364,8 @@ export function BlogCheckView() {
         lastScannedAccountRef.current = null;
         showToast(`${result.blogId} — 외부 블로그 스캔 시작`);
       }
-      void api.blogCheckStatus().then((status) => {
-        setScanning(status.scanning);
-        setScanProgress(status.scanProgress);
-      });
+      await syncScanStatus();
+      await loadAccounts({ keepScanning: true });
       refreshActivePosts();
     } catch (e) {
       setScanning(false);
@@ -452,8 +465,8 @@ export function BlogCheckView() {
         {visibleAccounts.map((a) => {
           const rate = a.miss_rate;
           const rateColor = rate >= 20 ? 'var(--err)' : rate >= 10 ? 'var(--warn)' : 'var(--ok)';
-          const idx = a.idx_score ?? 0;
-          const idxPct = Math.round((idx / 10) * 100);
+          const idx = a.idx_score;
+          const idxPct = idx != null ? Math.round((idx / 10) * 100) : 0;
           const sessColor = a.session_status === '오류' ? 'var(--err)' : 'var(--ok)';
           const numericTrend = a.trend.filter((v): v is number => v !== null);
           const maxT = Math.max(...numericTrend, 1);

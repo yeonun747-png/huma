@@ -40,7 +40,9 @@ import { notifyBlogCheckCaptcha, notifyBlogCheckIndexParseFailed } from './notif
 import {
   acquireBlogCheckScanLock,
   BLOG_CHECK_QUEUE_JOB_ID,
+  clearFinishedBlogCheckQueueJob,
   isBlogCheckScanLocked,
+  recoverStaleBlogCheckScanLock,
   releaseBlogCheckScanLock,
 } from './scan-lock.js';
 import { clearScanProgress, getScanProgress, setScanProgress, type BlogCheckScanProgress } from './scan-progress.js';
@@ -586,6 +588,47 @@ async function hasTodayBlogIndex(accountId: string, scanDate: string): Promise<b
   return data != null;
 }
 
+/** 현재 blogId 기준 최신 HUMA 지수 — 글 0건·다른 블로그 이력은 null */
+async function fetchLatestIdxScoreForBlog(
+  accountId: string,
+  blogId: string | null | undefined,
+  totalPosts: number,
+): Promise<number | null> {
+  if (totalPosts === 0 || !blogId?.trim()) return null;
+
+  const { data, error } = await supabase
+    .from('blog_index_history')
+    .select('idx_score, blog_id')
+    .eq('account_id', accountId)
+    .order('scanned_at', { ascending: false })
+    .limit(20);
+
+  if (error || !data?.length) return null;
+
+  const normalized = blogId.trim().toLowerCase();
+  const match = data.find((row) => String(row.blog_id ?? '').toLowerCase() === normalized);
+  if (!match || match.idx_score == null) return null;
+  return Number(match.idx_score);
+}
+
+async function insertBlogIndexHistory(
+  row: {
+    account_id: string;
+    scanned_at: string;
+    idx_score: number | null;
+    visitor_count: number;
+    buddy_count: number;
+    post_count: number;
+    blog_id: string;
+  },
+): Promise<void> {
+  const { error } = await supabase.from('blog_index_history').insert(row);
+  if (error && /blog_id|column|schema cache/i.test(error.message)) {
+    const { blog_id: _omit, ...legacy } = row;
+    await supabase.from('blog_index_history').insert(legacy);
+  }
+}
+
 /** 7일 추이 — 스캔 안 한 날은 null (현재 blogId 글만) */
 async function buildSevenDayMissTrend(accountId: string, blogId?: string | null): Promise<(number | null)[]> {
   const dayKeys: string[] = [];
@@ -881,29 +924,24 @@ async function scanAccountWorkItem(
     parsed = await scrapeBlogStats(page, blogId);
     if (parsed) {
       const idxScore = computeBlogIndexScore(parsed.stats);
-      const { error: idxErr } = await supabase.from('blog_index_history').insert({
+      await insertBlogIndexHistory({
         account_id: acc.id,
         scanned_at: scanDate,
         idx_score: idxScore,
         visitor_count: parsed.stats.visitorCount,
         buddy_count: parsed.stats.buddyCount,
         post_count: parsed.stats.postCount,
+        blog_id: blogId,
       });
-      if (idxErr) {
-        await logOperation({
-          level: 'warn',
-          message: `[blog-check] blog_index_history insert: ${idxErr.message}`,
-          account_id: acc.id,
-        });
-      }
     } else {
-      await supabase.from('blog_index_history').insert({
+      await insertBlogIndexHistory({
         account_id: acc.id,
         scanned_at: scanDate,
         idx_score: null,
         visitor_count: 0,
         buddy_count: 0,
         post_count: 0,
+        blog_id: blogId,
       });
       await notifyBlogCheckIndexParseFailed(blogId, acc.workspace);
       await logOperation({
@@ -1338,6 +1376,7 @@ export async function requestBlogCheckScan(
   options: BlogCheckScanOptions = { mode: 'full' },
   adHocBlogId?: string,
 ): Promise<{ queued: true; accountId?: string; blogId?: string; mode: BlogCheckScanMode; registered?: boolean }> {
+  await clearFinishedBlogCheckQueueJob();
   if (await isBlogCheckScanLocked()) {
     throw new Error('SCAN_ALREADY_RUNNING');
   }
@@ -1398,7 +1437,10 @@ export async function requestBlogCheckSearchScan(
 
 export async function executeBlogCheckJob(payload: BlogCheckJobPayload) {
   if (!(await acquireBlogCheckScanLock())) {
-    throw new Error('SCAN_ALREADY_RUNNING');
+    await recoverStaleBlogCheckScanLock();
+    if (!(await acquireBlogCheckScanLock())) {
+      throw new Error('SCAN_ALREADY_RUNNING');
+    }
   }
   const options: BlogCheckScanOptions = {
     mode: normalizeBlogCheckScanMode(payload.mode),
@@ -1456,21 +1498,14 @@ export async function buildBlogCheckAccountsResponse(allowedWorkspaces: string[]
     const totalPosts = recentPosts.length;
     const missRate = totalPosts > 0 ? Math.round((missCount / totalPosts) * 100) : 0;
     const trend = await buildSevenDayMissTrend(acc.id, blogId);
-
-    const { data: idxRow } = await supabase
-      .from('blog_index_history')
-      .select('idx_score')
-      .eq('account_id', acc.id)
-      .order('scanned_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const idxScore = await fetchLatestIdxScoreForBlog(acc.id, blogId, totalPosts);
 
     result.push({
       account_id: acc.id,
       label: acc.name || acc.slot_label || acc.naver_id,
       svc: WS_LABEL[acc.workspace] ?? acc.workspace,
       blog_url: blogId,
-      idx_score: idxRow?.idx_score != null ? Number(idxRow.idx_score) : null,
+      idx_score: idxScore,
       total_posts: totalPosts,
       strong_count: strongCount,
       good_count: goodCount,

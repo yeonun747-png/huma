@@ -169,7 +169,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         advanceRequested: advanceFlag,
       });
 
-      if (getSystemPaused()) {
+      if (getSystemPaused() && type !== 'blog_check') {
         await deferHumaJob(job, humaJobId, CRANK_PAUSE_DEFER_MS, {
           reason: 'SYSTEM_PAUSED',
           accountId,

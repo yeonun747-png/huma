@@ -6,6 +6,20 @@ export const BLOG_CHECK_QUEUE_JOB_ID = 'blog-check-scan';
 
 const ACTIVE_QUEUE_STATES = new Set(['active', 'waiting', 'delayed', 'prioritized']);
 
+/** 완료·실패 job이 jobId를 점유하면 재스캔 enqueue가 거절됨 — 선제 제거 */
+export async function clearFinishedBlogCheckQueueJob(): Promise<void> {
+  try {
+    const job = await humaQueue.getJob(BLOG_CHECK_QUEUE_JOB_ID);
+    if (!job) return;
+    const state = await job.getState();
+    if (!ACTIVE_QUEUE_STATES.has(state)) {
+      await job.remove();
+    }
+  } catch (err) {
+    console.error('[blog-check] clear finished queue job failed:', err);
+  }
+}
+
 export async function acquireBlogCheckScanLock(): Promise<boolean> {
   const ok = await redisConnection.set(SCAN_LOCK_KEY, String(Date.now()), 'EX', SCAN_LOCK_TTL_SEC, 'NX');
   return ok === 'OK';
