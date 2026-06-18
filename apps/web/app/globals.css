@@ -1235,17 +1235,13 @@
   line-height: 1.2;
   white-space: nowrap;
   cursor: pointer;
+  width: auto;
   transition: background 0.15s, border-color 0.15s;
 }
 .blog-check-view .bci-scan-btn:hover:not(:disabled) {
   border-color: var(--acc);
   color: var(--acc);
   background: var(--glow);
-}
-.blog-check-view .bci-scan-btn.scanning {
-  border-color: var(--warn);
-  color: var(--warn);
-  animation: pulse 1s infinite;
 }
 .blog-check-view .bci-scan-btn:disabled {
   opacity: 0.5;
@@ -1278,6 +1274,10 @@
   border-color: var(--acc);
   background: var(--glow);
 }
+.blog-check-view .bci-card.bci-card-scanning {
+  border-color: var(--warn);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--warn) 35%, transparent);
+}
 .blog-check-view .bci-name { font-size: 13.5px; font-weight: 700; color: var(--t); margin-bottom: 3px; }
 .blog-check-view .bci-url { font-size: 10.5px; font-family: var(--font-ui); color: var(--t4); margin-bottom: 9px; }
 .blog-check-view .bci-idx-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
@@ -1299,7 +1299,8 @@
   justify-content: space-between;
 }
 .blog-check-view .spark-bars { display: flex; align-items: flex-end; gap: 2px; height: 28px; }
-.blog-check-view .spark-bar { flex: 1; border-radius: 2px 2px 0 0; min-height: 2px; transition: height 0.3s; }
+.blog-check-view .spark-bar { flex: 1; border-radius: 2px 2px 0 0; min-height: 2px; }
+.blog-check-view.scanning-active .spark-bar { transition: none; }
 .blog-check-view .spark-bar-null { height: 8px; background: var(--t4); opacity: 0.45; align-self: flex-end; }
 .blog-check-view .bc-toast {
   position: fixed;
@@ -1326,9 +1327,19 @@
   font-size: 12.5px;
   font-weight: 700;
   cursor: pointer;
+  white-space: nowrap;
+  width: auto;
 }
-.blog-check-view .bc-scan-btn.scanning { background: var(--warn); animation: pulse 1s infinite; }
-.blog-check-view .bc-scan-btn:disabled { opacity: 0.85; cursor: wait; }
+.blog-check-view .bc-scan-btn:disabled { opacity: 0.85; cursor: not-allowed; }
+.blog-check-view.scanning-active .bc-scan-btn:disabled,
+.blog-check-view.scanning-active .bci-scan-btn:disabled,
+.blog-check-view.scanning-active .bc-search-scan-btn:disabled,
+.blog-check-view.scanning-active button.bc-exposure.scan-btn:disabled {
+  opacity: 0.32;
+  cursor: not-allowed;
+  pointer-events: none;
+  transition: none;
+}
 .blog-check-view .bc-scan-btn-delta-header {
   border: 1px solid rgba(255, 255, 255, 0.35);
   background: transparent;
@@ -1339,11 +1350,54 @@
   color: #fff;
   background: rgba(255, 255, 255, 0.08);
 }
+.blog-check-view .bc-scan-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  min-height: 40px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  background: var(--bg2);
+  border: 1px solid var(--bdr2);
+}
+.blog-check-view .bc-scan-status-active {
+  border-color: var(--warn);
+  background: color-mix(in srgb, var(--warn-bg) 40%, var(--bg2));
+}
+.blog-check-view .bc-scan-status-label {
+  flex-shrink: 0;
+  width: 88px;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--t3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.blog-check-view .bc-scan-status-active .bc-scan-status-label {
+  color: var(--warn);
+}
 .blog-check-view .bc-scan-progress {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 140px;
+  min-width: 0;
+}
+.blog-check-view .bc-scan-progress.full-width {
+  flex: 1;
+  min-width: 0;
+}
+.blog-check-view .bc-scan-progress.idle .bc-scan-progress-track {
+  background: var(--bg4);
+}
+.blog-check-view .bc-scan-progress.idle .bc-scan-progress-fill {
+  background: var(--t4);
+}
+.blog-check-view .bc-scan-progress.idle .bc-scan-progress-pct {
+  color: var(--t3);
 }
 .blog-check-view .bc-scan-progress.compact {
   flex-direction: column;
@@ -1358,6 +1412,9 @@
   background: rgba(255, 255, 255, 0.15);
   overflow: hidden;
 }
+.blog-check-view .bc-scan-status-active .bc-scan-progress-track {
+  background: rgba(255, 255, 255, 0.2);
+}
 .blog-check-view .bc-scan-progress.compact .bc-scan-progress-track {
   height: 4px;
 }
@@ -1365,7 +1422,6 @@
   height: 100%;
   border-radius: 3px;
   background: #fff;
-  transition: width 0.25s ease;
 }
 .blog-check-view .bc-scan-progress-pct {
   font-size: 11px;
@@ -1374,6 +1430,10 @@
   color: #fff;
   min-width: 32px;
   text-align: right;
+  flex-shrink: 0;
+}
+.blog-check-view .bc-scan-status-active .bc-scan-progress-pct {
+  color: #fff;
 }
 .blog-check-view .bci-scan-btn .bc-scan-progress-pct {
   color: var(--warn);
@@ -1484,12 +1544,13 @@
 }
 .blog-check-view button.bc-exposure.scan-btn:disabled {
   opacity: 0.65;
-  cursor: wait;
+  cursor: not-allowed;
 }
-.blog-check-view button.bc-exposure.scan-btn.scanning {
+.blog-check-view.scanning-active button.bc-exposure.scan-btn.scanning {
   border-color: var(--warn);
   color: var(--warn);
-  animation: pulse 1s infinite;
+  animation: none;
+  opacity: 1;
 }
 .blog-check-view .bc-legend {
   display: flex;
@@ -1557,12 +1618,6 @@
 .blog-check-view .bc-search-scan-btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
-}
-.blog-check-view .bc-search-scan-btn.scanning {
-  min-width: 120px;
-  background: var(--warn-bg);
-  border-color: var(--warn);
-  color: var(--warn);
 }
 .blog-check-view .bc-search-empty {
   margin: -4px 0 10px;

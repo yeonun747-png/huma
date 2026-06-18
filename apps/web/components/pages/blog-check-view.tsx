@@ -13,10 +13,11 @@ type BcScanProgress = NonNullable<Awaited<ReturnType<typeof api.blogCheckAccount
 
 const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
 const DELTA_SCAN_LABEL = '🆕 새글만 스캔';
+const GLOBAL_DELTA_SCAN_LABEL = '🆕 전체 새글 스캔';
 const ACCOUNT_FULL_SCAN_LABEL = '⟳ 이 계정만 스캔';
 const GLOBAL_FULL_SCAN_LABEL = '⟳ 전체 다시 스캔';
 const SEARCH_SCAN_LABEL = '🔍 검색 스캔';
-const SCAN_POLL_MS = 400;
+const SCAN_POLL_MS = 1500;
 
 function matchesAccountSearch(a: BcAccount, query: string): boolean {
   const q = query.trim();
@@ -38,16 +39,20 @@ function scanPercent(progress: BcScanProgress | null, scanning: boolean): number
 function ScanProgressBar({
   percent,
   compact,
+  fullWidth,
+  idle,
 }: {
   percent: number;
   compact?: boolean;
+  fullWidth?: boolean;
+  idle?: boolean;
 }) {
   return (
-    <div className={cn('bc-scan-progress', compact && 'compact')}>
+    <div className={cn('bc-scan-progress', compact && 'compact', fullWidth && 'full-width', idle && 'idle')}>
       <div className="bc-scan-progress-track">
-        <div className="bc-scan-progress-fill" style={{ width: `${percent}%` }} />
+        <div className="bc-scan-progress-fill" style={{ width: idle ? '0%' : `${percent}%` }} />
       </div>
-      <span className="bc-scan-progress-pct">{percent}%</span>
+      <span className="bc-scan-progress-pct">{idle ? '—' : `${percent}%`}</span>
     </div>
   );
 }
@@ -109,6 +114,10 @@ export function BlogCheckView() {
   const postsLoadGenRef = useRef(0);
   const curAccRef = useRef<string | null>(null);
   const adhocBlogIdRef = useRef<string | null>(null);
+  const lastProgressKeyRef = useRef('');
+  const lastScanningRef = useRef(false);
+  const scanInitiatedAtRef = useRef<number | null>(null);
+  const serverScanningConfirmedRef = useRef(false);
 
   useEffect(() => {
     scanningAccountIdRef.current = scanningAccountId;
@@ -136,17 +145,6 @@ export function BlogCheckView() {
       return null;
     } finally {
       setLoading(false);
-    }
-  }, []);
-
-  const syncScanStatus = useCallback(async () => {
-    try {
-      const status = await api.blogCheckStatus();
-      setScanning(status.scanning);
-      setScanProgress(status.scanProgress);
-      return status;
-    } catch {
-      return null;
     }
   }, []);
 
@@ -217,21 +215,65 @@ export function BlogCheckView() {
     const tick = async () => {
       try {
         const status = await api.blogCheckStatus();
-        setScanning(status.scanning);
-        setScanProgress(status.scanProgress);
+        const nextProgress = status.scanProgress;
+        const progressKey = nextProgress
+          ? [
+              nextProgress.accountId,
+              nextProgress.completed,
+              nextProgress.total,
+              nextProgress.percent,
+              nextProgress.phase,
+            ].join('|')
+          : '';
+
+        if (status.scanning) {
+          serverScanningConfirmedRef.current = true;
+        }
+
+        if (status.scanning !== lastScanningRef.current) {
+          if (!status.scanning) {
+            const initiatedAt = scanInitiatedAtRef.current;
+            const withinGrace =
+              initiatedAt != null &&
+              Date.now() - initiatedAt < 8000 &&
+              !serverScanningConfirmedRef.current;
+            if (!withinGrace) {
+              lastScanningRef.current = status.scanning;
+              setScanning(status.scanning);
+            }
+          } else {
+            lastScanningRef.current = status.scanning;
+            setScanning(status.scanning);
+          }
+        }
+        if (progressKey !== lastProgressKeyRef.current) {
+          lastProgressKeyRef.current = progressKey;
+          setScanProgress(nextProgress);
+        }
+
         if (status.scanning) {
           if (status.scanProgress?.accountId) {
             lastScannedAccountRef.current = status.scanProgress.accountId;
           }
-          refreshActivePosts();
           return;
         }
 
+        {
+          const initiatedAt = scanInitiatedAtRef.current;
+          const withinGrace =
+            initiatedAt != null && Date.now() - initiatedAt < 8000 && !serverScanningConfirmedRef.current;
+          if (withinGrace) return;
+        }
+
+        lastProgressKeyRef.current = '';
+        lastScanningRef.current = false;
         setScanning(false);
         setScanProgress(null);
         setScanningPostNo(null);
         setScanningAccountId(null);
         scanningAccountIdRef.current = null;
+        scanInitiatedAtRef.current = null;
+        serverScanningConfirmedRef.current = false;
         refreshActivePosts();
         void loadAccounts();
       } catch {
@@ -275,6 +317,16 @@ export function BlogCheckView() {
   const totalMiss = useMemo(() => accounts.reduce((s, a) => s + a.miss_count, 0), [accounts]);
   const globalScanPercent = scanPercent(scanProgress, scanning);
 
+  const scanStatusLabel = useMemo(() => {
+    if (!scanning) return null;
+    if (scanProgress?.accountLabel?.trim()) return scanProgress.accountLabel.trim();
+    if (scanProgress?.accountId) {
+      return accounts.find((a) => a.account_id === scanProgress.accountId)?.label ?? null;
+    }
+    if (adhocBlogId) return adhocLabel ?? adhocBlogId;
+    return '전체 스캔';
+  }, [scanning, scanProgress, accounts, adhocBlogId, adhocLabel]);
+
   const cardShowsProgress = useCallback(
     (accountId: string) => {
       if (!scanning) return false;
@@ -297,6 +349,8 @@ export function BlogCheckView() {
       scanningAccountIdRef.current = accountId ?? null;
       lastScannedAccountRef.current = accountId ?? null;
       setScanningPostNo(focusPostNo ?? null);
+      scanInitiatedAtRef.current = Date.now();
+      serverScanningConfirmedRef.current = false;
       if (accountId) {
         setCurAcc(accountId);
         setAdhocBlogId(null);
@@ -311,15 +365,14 @@ export function BlogCheckView() {
         phase: 'preparing',
       });
       await api.blogCheckScan(accountId, opts ?? { mode: accountId ? 'full' : 'full' });
-      await syncScanStatus();
-      await loadAccounts({ keepScanning: true });
-      refreshActivePosts();
     } catch (e) {
       setScanning(false);
       setScanningAccountId(null);
       scanningAccountIdRef.current = null;
       setScanningPostNo(null);
       setScanProgress(null);
+      scanInitiatedAtRef.current = null;
+      serverScanningConfirmedRef.current = false;
       const msg = (e as Error).message;
       if (msg.includes('스캔이 이미')) {
         showToast('스캔이 이미 진행 중입니다');
@@ -335,6 +388,8 @@ export function BlogCheckView() {
     try {
       setScanning(true);
       setScanningPostNo(null);
+      scanInitiatedAtRef.current = Date.now();
+      serverScanningConfirmedRef.current = false;
       setScanProgress({
         accountId: null,
         accountLabel: q,
@@ -364,14 +419,13 @@ export function BlogCheckView() {
         lastScannedAccountRef.current = null;
         showToast(`${result.blogId} — 외부 블로그 스캔 시작`);
       }
-      await syncScanStatus();
-      await loadAccounts({ keepScanning: true });
-      refreshActivePosts();
     } catch (e) {
       setScanning(false);
       setScanningAccountId(null);
       scanningAccountIdRef.current = null;
       setScanProgress(null);
+      scanInitiatedAtRef.current = null;
+      serverScanningConfirmedRef.current = false;
       const msg = (e as Error).message;
       if (msg.includes('스캔이 이미')) {
         showToast('스캔이 이미 진행 중입니다');
@@ -391,8 +445,10 @@ export function BlogCheckView() {
     return <EmptyPanel message={`블로그 지수 API 오류: ${error}`} />;
   }
 
+  const scanningActive = scanning || scanProgress != null;
+
   return (
-    <div className="blog-check-view animate-fadeIn">
+    <div className={cn('blog-check-view animate-fadeIn', scanningActive && 'scanning-active')}>
       {toast && (
         <div className="bc-toast" role="status">
           {toast}
@@ -417,21 +473,29 @@ export function BlogCheckView() {
             disabled={scanning}
             title="모든 계정 · 24h 이내 미스캔 글만"
           >
-            {DELTA_SCAN_LABEL}
+            {GLOBAL_DELTA_SCAN_LABEL}
           </button>
           <button
             type="button"
-            className={cn('bc-scan-btn', scanning && 'scanning')}
+            className="bc-scan-btn"
             onClick={() => void startScan(undefined, { mode: 'full' })}
             disabled={scanning}
           >
-            {scanning ? (
-              <ScanProgressBar percent={globalScanPercent} />
-            ) : (
-              GLOBAL_FULL_SCAN_LABEL
-            )}
+            {GLOBAL_FULL_SCAN_LABEL}
           </button>
         </div>
+      </div>
+
+      <div
+        className={cn('bc-scan-status', scanning && 'bc-scan-status-active')}
+        role="status"
+        aria-live="polite"
+        aria-busy={scanning}
+      >
+        <span className="bc-scan-status-label">
+          {scanning ? (scanStatusLabel ?? '스캔 중…') : '스캔 대기'}
+        </span>
+        <ScanProgressBar percent={globalScanPercent} fullWidth idle={!scanning} />
       </div>
 
       <div className="bc-search-row">
@@ -448,16 +512,12 @@ export function BlogCheckView() {
         />
         <button
           type="button"
-          className={cn('bc-search-scan-btn', scanning && 'scanning')}
+          className="bc-search-scan-btn"
           onClick={() => void searchAndScan()}
           disabled={scanning || !searchQuery.trim()}
           title="입력한 블로그 최근 10건 스캔"
         >
-          {scanning && adhocBlogId ? (
-            <ScanProgressBar percent={globalScanPercent} compact />
-          ) : (
-            SEARCH_SCAN_LABEL
-          )}
+          {SEARCH_SCAN_LABEL}
         </button>
       </div>
 
@@ -478,7 +538,11 @@ export function BlogCheckView() {
               key={a.account_id}
               role="button"
               tabIndex={0}
-              className={cn('bci-card', curAcc === a.account_id && 'selected')}
+              className={cn(
+                'bci-card',
+                curAcc === a.account_id && 'selected',
+                scanning && cardShowsProgress(a.account_id) && 'bci-card-scanning',
+              )}
               onClick={() => selectAccount(a.account_id)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') selectAccount(a.account_id);
@@ -491,10 +555,7 @@ export function BlogCheckView() {
                 <div className="bci-scan-actions">
                   <button
                     type="button"
-                    className={cn(
-                      'bci-scan-btn',
-                      scanning && cardShowsProgress(a.account_id) && 'scanning',
-                    )}
+                    className="bci-scan-btn"
                     title={`${a.label} — 최근 10건 전체 스캔`}
                     disabled={scanning}
                     onClick={(e) => {
@@ -503,18 +564,11 @@ export function BlogCheckView() {
                       void startScan(a.account_id, { mode: 'full' });
                     }}
                   >
-                    {scanning && cardShowsProgress(a.account_id) ? (
-                      <ScanProgressBar percent={globalScanPercent} compact />
-                    ) : (
-                      ACCOUNT_FULL_SCAN_LABEL
-                    )}
+                    {ACCOUNT_FULL_SCAN_LABEL}
                   </button>
                   <button
                     type="button"
-                    className={cn(
-                      'bci-scan-btn bci-scan-btn-delta',
-                      scanning && cardShowsProgress(a.account_id) && 'scanning',
-                    )}
+                    className="bci-scan-btn bci-scan-btn-delta"
                     title={`${a.label} · 24h 이내 미스캔 글만`}
                     disabled={scanning}
                     onClick={(e) => {

@@ -18,7 +18,12 @@ import {
   type BlogPostLengthRange,
   type BlogPostLengthTier,
 } from '../../lib/blog-post-length.js';
-import { YEONUN_BODY_LINK_LABEL } from '../../lib/blog-writing-persona.js';
+import {
+  normalizeServiceMentionsInPost,
+  resolveWorkspaceServiceMention,
+  workspaceServiceMentionPromptGuide,
+  workspaceServiceMentionRuleLine,
+} from '../../lib/workspace-service-mention.js';
 
 export interface ContentGenerationInput {
   title: string;
@@ -57,23 +62,17 @@ const SYSTEM_PROMPTS: Record<string, string> = {
 톤: ~요체, 가볍고 친근, 친구에게 카톡하듯. 경험담·솔직한 감정·짧은 추임새(ㅎㅎ, ㅠㅠ)를 적절히.
 금지: AI/마케팅 문체 — 「정리했습니다」「안내합니다」「살펴보겠습니다」「흐름과 실천 포인트를 정리」 같은 표현.
 필수: 입력에 [말투]·[캐릭터 포스팅 톤 지침]·character_mode_prompts가 있으면 그 말투를 본문에 그대로 반영.
-서비스 언급은 본문에 「 연운 (yeonun . com) 」 형식만 1~2회 (앞뒤 공백·yeonun . com 점 앞뒤 공백 그대로, yeonun.com/https·전체 URL 금지).`,
+${workspaceServiceMentionRuleLine('yeonun')}`,
   quizoasis: `당신은 퀴즈오아시스 글로벌 심리테스트 플랫폼의 콘텐츠 마케터입니다.
-톤: 재미있고 공유 욕구를 자극하는 가벼운 문체. 테스트 링크 포함.`,
+톤: 재미있고 공유 욕구를 자극하는 가벼운 문체.
+${workspaceServiceMentionRuleLine('quizoasis')}`,
   panana: `당신은 파나나(PANANA) AI 캐릭터 콘텐츠 플랫폼의 콘텐츠 마케터입니다.
-톤: 시네마틱하고 감성적인 짧은 문체. 서비스 링크 포함.`,
+톤: 시네마틱하고 감성적인 짧은 문체.
+${workspaceServiceMentionRuleLine('panana')}`,
 };
 
-function finalizeBlogPost(text: string): string {
-  return sanitizeBlogLinksInPost(text.trim());
-}
-
-/** Claude가 yeonun.com 단독을 쓴 경우만 생성 직후 라벨 형식으로 정규화 (발행 strip 회피) */
-function sanitizeBlogLinksInPost(text: string): string {
-  return text
-    .replace(/https?:\/\/(www\.)?yeonun\.com[^\s\n]*/gi, YEONUN_BODY_LINK_LABEL)
-    .replace(/\bwww\.yeonun\.com\b/gi, YEONUN_BODY_LINK_LABEL)
-    .replace(/\byeonun\.com\b/gi, YEONUN_BODY_LINK_LABEL);
+function finalizeBlogPost(text: string, workspace: string): string {
+  return normalizeServiceMentionsInPost(text.trim(), workspace);
 }
 
 const SEO_TITLE_MAX = 32;
@@ -262,8 +261,9 @@ function fallbackContent(
       '',
       urlSummary.slice(0, summaryLen),
       '',
-      `${YEONUN_BODY_LINK_LABEL}에서 확인`,
+      `${resolveWorkspaceServiceMention(input.workspace).withDomain.trim()}에서 확인`,
     ].join('\n'),
+    input.workspace,
   );
   const short = `${input.title}. ${(input.synopsis ?? urlSummary).slice(0, 80).trim()}`;
   const wsTag = input.workspace === 'quizoasis' ? '#심리테스트' : input.workspace === 'panana' ? '#AI캐릭터' : '#사주';
@@ -311,6 +311,8 @@ ${writingNow}
       ? '\n[블로그 문체] ~요체·경험담·AI 티 금지. speech_style·캐릭터 톤 지침을 본문 말투에 반영.'
       : '';
 
+  const serviceMentionGuide = workspaceServiceMentionPromptGuide(input.workspace);
+
   const userParts: Array<Record<string, unknown>> = [
     {
       type: 'text',
@@ -322,10 +324,13 @@ ${datetimeGuide}
 제목: ${input.title}${synopsisGuide}${personaGuide}${typeGuide}
 ${lengthGuide}
 
+[서비스 언급 규칙]
+${serviceMentionGuide}
+
 순수 JSON만 (코드블록 없이):
 {
   "seo_title": "네이버 검색 최적화 제목 32자 이내. 핵심 키워드를 앞쪽에 배치, 클릭 유도. 과장·특수문자 남발 금지",
-  "blog_post": "네이버 블로그 글 ${min}~${max}자 (필수·중간 끊김 금지·완결된 글, ~요체·경험담·사람 말투). 서비스 언급은 「 연운 (yeonun . com) 」 형식만 (앞뒤 공백·점 앞뒤 공백 유지)",
+  "blog_post": "네이버 블로그 글 ${min}~${max}자 (필수·중간 끊김 금지·완결된 글). ${serviceMentionGuide.replace(/\n/g, ' ')}",
   "tiktok_caption": "TikTok 캡션 150자 이내",
   "instagram_caption": "Instagram 캡션 300자 이내",
   "threads_text": "Threads 텍스트 500자 이내, 링크 포함",
@@ -348,7 +353,7 @@ ${lengthGuide}
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     const out = JSON.parse(jsonMatch?.[0] ?? raw) as Omit<ContentGenerationOutput, 'hashtags'>;
     if (!out.blog_post) throw new Error('블로그 본문 생성 실패');
-    out.blog_post = finalizeBlogPost(out.blog_post);
+    out.blog_post = finalizeBlogPost(out.blog_post, input.workspace);
     return out;
   };
 
@@ -498,6 +503,9 @@ ${input.synopsis?.trim() ? `[운영자 시놉시스 - 반드시 참고]\n"${inpu
 URL 요약: ${urlSummary.slice(0, 500)}
 ${blogPostLengthPromptGuide(lengthRange)}
 
+[서비스 언급 규칙]
+${workspaceServiceMentionPromptGuide(input.workspace)}
+
 네이버 블로그용 ${lengthRange.min}~${lengthRange.max}자 완결 본문과 SEO 제목·SNS 캡션을 JSON으로 (tts_script 생략, Kling 내장 오디오):
 {"seo_title":"네이버 검색 최적화 제목 32자 이내. 핵심 키워드 앞배치, 운영자 제목과 다르게","blog_post":"...","tiktok_caption":"...","instagram_caption":"...","threads_text":"...","x_text":"...","image_prompt":"...","video_prompt":"..."}`,
         ),
@@ -513,7 +521,7 @@ ${blogPostLengthPromptGuide(lengthRange)}
           urlSummary,
         });
         if (parsed.blog_post) {
-          parsed.blog_post = finalizeBlogPost(parsed.blog_post);
+          parsed.blog_post = finalizeBlogPost(parsed.blog_post, input.workspace);
           parsed.blog_post_target_chars = lengthRange.tier;
           parsed.blog_post_target_min_chars = lengthRange.min;
           parsed.blog_post_target_max_chars = lengthRange.max;
