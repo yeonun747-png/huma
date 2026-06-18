@@ -1931,7 +1931,7 @@ export async function pasteBlogBodyContent(
     if (i < paragraphs.length - 1) {
       await page.keyboard.press('Enter');
       await page.keyboard.press('Enter');
-      await sleep(150);
+      await humanSleep(3000, 8000);
     }
   }
 

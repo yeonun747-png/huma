@@ -463,12 +463,12 @@ export async function postNaverBlog(params: {
       humanConfig: config,
       scale,
     });
-    await humanSleep(2000, 5000);
+    await humanSleep(5000, 10_000);
     return { resultUrl };
   }
 
   await humanSleep(1000, 2000);
   const resultUrl = await waitForNaverPublishSuccess(page);
-  await humanSleep(2000, 5000);
+  await humanSleep(5000, 10_000);
   return { resultUrl };
 }
