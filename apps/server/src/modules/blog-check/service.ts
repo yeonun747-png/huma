@@ -10,6 +10,7 @@ import {
   setAdHocBlogCheckCache,
 } from './adhoc-scan.js';
 import {
+  canonicalBlogPostUrl,
   extractBlogIdFromUrl,
   extractPostNoFromUrl,
   parseBlogCheckSearchQuery,
@@ -322,8 +323,13 @@ async function reconcileExtLinkCountsFromJobs(
   }
 }
 
-function jobToPostRow(accountId: string, job: JobPostSource, workspace?: string | null): PostRow {
-  const postUrl = String(job.result_url ?? '').trim();
+function jobToPostRow(
+  accountId: string,
+  job: JobPostSource,
+  workspace?: string | null,
+  postUrlOverride?: string,
+): PostRow {
+  const postUrl = canonicalBlogPostUrl(postUrlOverride ?? String(job.result_url ?? '').trim());
   const postNo = extractPostNoFromUrl(postUrl);
   const stats = parsePostContentStats(job.content, {
     linkUrl: job.link_url,
@@ -420,19 +426,22 @@ async function fetchRecentPosts(
   }
 
   for (const job of jobs ?? []) {
-    const postUrl = String(job.result_url ?? '').trim();
+    const postUrl = canonicalBlogPostUrl(String(job.result_url ?? '').trim());
     if (!postUrl) continue;
     const key = postRowMergeKey(postUrl, extractPostNoFromUrl(postUrl));
-    merged.set(key, jobToPostRow(accountId, job as JobPostSource, workspace));
+    merged.set(key, jobToPostRow(accountId, job as JobPostSource, workspace, postUrl));
   }
 
   for (const row of (fromPosts ?? []) as PostRow[]) {
-    const key = postRowMergeKey(row.post_url, row.post_no);
+    const normalizedUrl = canonicalBlogPostUrl(row.post_url);
+    const key = postRowMergeKey(normalizedUrl, row.post_no ?? extractPostNoFromUrl(normalizedUrl));
     const existing = merged.get(key);
     if (existing) {
       merged.set(key, {
         ...existing,
         ...row,
+        post_url: normalizedUrl,
+        post_no: row.post_no ?? extractPostNoFromUrl(normalizedUrl),
         published_at: mergePublishedAt(existing.published_at, row.published_at),
         ...mergePostContentStats(existing, statsFromDbRow(row as unknown as Record<string, unknown>, workspace)),
         ext_link_cleared: row.ext_link_cleared,
@@ -440,6 +449,8 @@ async function fetchRecentPosts(
     } else {
       merged.set(key, {
         ...(row as PostRow),
+        post_url: normalizedUrl,
+        post_no: row.post_no ?? extractPostNoFromUrl(normalizedUrl),
         ...statsFromDbRow(row as unknown as Record<string, unknown>, workspace),
       });
     }

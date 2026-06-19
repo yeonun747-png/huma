@@ -1,12 +1,28 @@
 import { ensureHttpsUrl } from '../../lib/blog-link.js';
+import { blogIdFromBlogHref, postNoFromBlogHref } from './exposure-rank.js';
 
 const BLOG_ID_RE = /blog\.naver\.com\/([^/?#]+)/i;
 const POST_NO_RE = /(?:logNo=|\/)(\d{6,})(?:[/?#]|$)/;
 
+/** 포스트 URL에서 blogId 추출 — PostView?blogId= · m.blog 경로 포함 */
+export function extractBlogIdFromPostUrl(postUrl: string): string | null {
+  return blogIdFromBlogHref(postUrl) ?? extractBlogIdFromUrl(postUrl);
+}
+
 export function postBelongsToBlog(postUrl: string, blogId: string | null | undefined): boolean {
   if (!blogId?.trim()) return true;
-  const bid = extractBlogIdFromUrl(postUrl);
+  const bid = extractBlogIdFromPostUrl(postUrl);
   return bid?.toLowerCase() === blogId.trim().toLowerCase();
+}
+
+/** 발행 result_url → blog.naver.com/{blogId}/{postNo} (필터·병합 일관성) */
+export function canonicalBlogPostUrl(postUrl: string): string {
+  const trimmed = postUrl.trim();
+  if (!trimmed) return trimmed;
+  const blogId = extractBlogIdFromPostUrl(trimmed);
+  const postNo = postNoFromBlogHref(trimmed) ?? extractPostNoFromUrl(trimmed);
+  if (blogId && postNo) return normalizeBlogPostUrl(blogId, postNo);
+  return ensureHttpsUrl(trimmed);
 }
 
 export function extractBlogIdFromUrl(blogUrl: string | null | undefined, naverId?: string | null): string | null {

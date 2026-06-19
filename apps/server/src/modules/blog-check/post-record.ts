@@ -1,5 +1,6 @@
 import { supabase } from '../../middleware/auth.js';
-import { extractPostNoFromUrl } from './blog-url.js';
+import { clearBlogPostListCacheForAccount } from './blog-post-list.js';
+import { canonicalBlogPostUrl, extractPostNoFromUrl } from './blog-url.js';
 import { parsePostContentStats } from './content-stats.js';
 
 export interface RecordPublishedPostInput {
@@ -16,7 +17,7 @@ export interface RecordPublishedPostInput {
 
 /** post_blog 발행 완료 시 posts 테이블에 기록 */
 export async function recordPublishedPost(input: RecordPublishedPostInput): Promise<void> {
-  const postUrl = input.resultUrl.trim();
+  const postUrl = canonicalBlogPostUrl(input.resultUrl.trim());
   if (!postUrl || !input.accountId) return;
 
   const postNo = extractPostNoFromUrl(postUrl);
@@ -53,5 +54,8 @@ export async function recordPublishedPost(input: RecordPublishedPostInput): Prom
 
   if (error) {
     console.error('[posts] recordPublishedPost failed:', error.message);
+    return;
   }
+
+  await clearBlogPostListCacheForAccount(input.accountId);
 }
