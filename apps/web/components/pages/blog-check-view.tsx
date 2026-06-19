@@ -4,7 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/constants';
 import { formatBlogCheckPublishedAt } from '@/lib/format-kst';
-import { blogCheckQueryMatchesBlogId, parseBlogCheckSearchQuery } from '@/lib/blog-check-search';
+import {
+  blogCheckQueryMatchesBlogId,
+  buildNexearchSearchUrl,
+  parseBlogCheckSearchQuery,
+} from '@/lib/blog-check-search';
 import { EmptyPanel } from '@/components/ui/empty-panel';
 
 type BcAccount = Awaited<ReturnType<typeof api.blogCheckAccounts>>['accounts'][number];
@@ -80,8 +84,7 @@ function exposureBadge(status: BcPost['status']): { cls: string; text: string } 
 }
 
 function openTitleSearch(title: string) {
-  const url = `https://search.naver.com/search.naver?ssc=tab.blog.all&sm=tab_jum&query=${encodeURIComponent(title)}`;
-  window.open(url, '_blank', 'noopener,noreferrer');
+  window.open(buildNexearchSearchUrl(title), '_blank', 'noopener,noreferrer');
 }
 
 function trendLabel(dir: BcAccount['trend_direction']): { text: string; color: string } {

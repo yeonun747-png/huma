@@ -1,4 +1,5 @@
 import type { Page } from 'playwright';
+import { buildNexearchSearchUrl } from '@huma/shared';
 import { humanSleep } from '../modules/human-engine/typing.js';
 
 /** 레거시 + 2026 FDS 통합검색 */
@@ -183,16 +184,16 @@ export async function collectNaverSearchUrls(
   return urls;
 }
 
-export function integratedSearchUrl(keyword: string): string {
-  return `https://search.naver.com/search.naver?query=${encodeURIComponent(keyword)}`;
+export function integratedSearchUrl(keyword: string, start = 1): string {
+  return buildNexearchSearchUrl(keyword, start);
+}
+
+/** @deprecated 블로그 지수 노출은 integratedSearchUrl(nexearch) 사용 */
+export function blogTabAllSearchUrl(keyword: string, start = 1): string {
+  const base = `https://search.naver.com/search.naver?ssc=tab.blog.all&sm=tab_jum&query=${encodeURIComponent(keyword)}`;
+  return start > 1 ? `${base}&start=${start}` : base;
 }
 
 export function blogSearchUrl(keyword: string): string {
   return `https://search.naver.com/search.naver?where=blog&query=${encodeURIComponent(keyword)}&sm=tab_jum`;
-}
-
-/** 블로그 탭 통합검색 — 관련도순 (ssc=tab.blog.all). start=11·21 → 2·3페이지 */
-export function blogTabAllSearchUrl(keyword: string, start = 1): string {
-  const base = `https://search.naver.com/search.naver?ssc=tab.blog.all&sm=tab_jum&query=${encodeURIComponent(keyword)}`;
-  return start > 1 ? `${base}&start=${start}` : base;
 }

@@ -1,7 +1,7 @@
 import type { Page } from 'playwright';
 import { createBrowser } from '../playwright/browser.js';
 import { isNaverCaptchaVisible } from '../../lib/naver-captcha-vision.js';
-import { blogTabAllSearchUrl } from '../../lib/naver-search-links.js';
+import { integratedSearchUrl } from '../../lib/naver-search-links.js';
 import { randomBetween, sleep } from '../../lib/utils.js';
 import {
   BLOG_CHECK_FRAME_TIMEOUT_MS,
@@ -95,7 +95,7 @@ export async function checkPostIndexedBySite(
   postNo: string,
 ): Promise<boolean> {
   const query = `site:blog.naver.com/${blogId}/${postNo}`;
-  const url = `https://search.naver.com/search.naver?where=nexearch&sm=top_hty&query=${encodeURIComponent(query)}`;
+  const url = integratedSearchUrl(query);
   await page.goto(url, { waitUntil: 'domcontentloaded' });
   await sleep(BLOG_CHECK_SEARCH_SETTLE_MS);
 
@@ -120,12 +120,12 @@ export async function checkPostIndexedBySite(
 }
 
 /**
- * ssc=tab.blog.all 관련도순 — 결과 블록당 포스트 1건, DOM 순서 유지 (페이지당 최대 10건)
+ * nexearch 통합검색 — 결과 블록당 대표 링크 1건, DOM 순서 유지 (페이지당 최대 10건)
  */
-async function collectBlogSearchResultHrefs(page: Page): Promise<string[]> {
+async function collectIntegratedSearchResultHrefs(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const hrefs: string[] = [];
-    const seenPost = new Set<string>();
+    const seenBlock = new Set<Element>();
 
     const decodeHref = (raw: string | null | undefined): string => {
       const trimmed = (raw ?? '').trim();
@@ -139,27 +139,34 @@ async function collectBlogSearchResultHrefs(page: Page): Promise<string[]> {
       return trimmed;
     };
 
-    const postNoFrom = (raw: string | null | undefined): string | null => {
-      const href = decodeHref(raw);
-      if (!href) return null;
-      const logNo = href.match(/[?&]logNo=(\d+)/i);
-      if (logNo?.[1]) return logNo[1];
-      const path = href.match(/blog\.naver\.com\/[^/?#]+\/(\d+)/i);
-      if (path?.[1]) return path[1];
-      const mobile = href.match(/m\.blog\.naver\.com\/[^/?#]+\/(\d+)/i);
-      if (mobile?.[1]) return mobile[1];
+    const isBlockedHref = (href: string): boolean =>
+      !href ||
+      href.startsWith('javascript:') ||
+      href.includes('ader.naver.com') ||
+      href.includes('help.naver.com') ||
+      href.includes('policy.naver.com');
+
+    const pickPrimaryLink = (block: Element): string | null => {
+      const selectors = [
+        'a.api_txt_lines.total_tit',
+        'a.title_link',
+        'a.link_tit',
+        '.title_area a[href^="http"]',
+        'a[href^="http"]',
+      ];
+      for (const sel of selectors) {
+        const el = block.querySelector(sel);
+        const href = decodeHref(el?.getAttribute('href'));
+        if (href && !isBlockedHref(href)) return href;
+      }
       return null;
     };
 
-    const pushPost = (raw: string | null | undefined) => {
-      const href = decodeHref(raw);
-      if (!href.includes('blog.naver.com') && !href.includes('m.blog.naver.com')) return;
-      const postNo = postNoFrom(href);
-      if (!postNo) return;
-      if (/PostList|buddylist|commentlist|profile|prologue|mapview/i.test(href)) return;
-      if (seenPost.has(postNo)) return;
-      seenPost.add(postNo);
-      hrefs.push(href);
+    const pushBlock = (block: Element) => {
+      if (seenBlock.has(block)) return;
+      seenBlock.add(block);
+      const href = pickPrimaryLink(block);
+      if (href) hrefs.push(href);
     };
 
     const blockSelectors = [
@@ -170,40 +177,19 @@ async function collectBlogSearchResultHrefs(page: Page): Promise<string[]> {
       '#main_pack ul.lst_total > li',
       '#main_pack ul.lst_view > li',
       '#main_pack section[class*="sc_new"] > div',
+      '#main_pack [class*="fds-"]',
     ];
 
     for (const sel of blockSelectors) {
       for (const block of document.querySelectorAll(sel)) {
-        const titleLink =
-          block.querySelector('a.api_txt_lines.total_tit') ??
-          block.querySelector('a.title_link[href*="blog.naver.com"]') ??
-          block.querySelector('.title_area a[href*="blog.naver.com"]') ??
-          block.querySelector('a[href*="blog.naver.com/"]');
-
-        if (titleLink) {
-          pushPost(titleLink.getAttribute('href'));
-          continue;
-        }
-
-        for (const a of block.querySelectorAll('a[href*="blog.naver.com"]')) {
-          const h = a.getAttribute('href') ?? '';
-          if (postNoFrom(h)) {
-            pushPost(h);
-            break;
-          }
-        }
+        pushBlock(block);
       }
     }
 
     if (hrefs.length === 0) {
-      document
-        .querySelectorAll('#main_pack a.api_txt_lines.total_tit, #main_pack a.total_tit[href*="blog.naver.com"]')
-        .forEach((el) => pushPost(el.getAttribute('href')));
-    }
-
-    if (hrefs.length === 0) {
-      document.querySelectorAll('#main_pack a[href*="blog.naver.com"]').forEach((el) => {
-        pushPost(el.getAttribute('href'));
+      document.querySelectorAll('#main_pack a.api_txt_lines.total_tit, #main_pack a.link_tit').forEach((el) => {
+        const block = el.closest('.view_wrap, .total_wrap, .api_subject_bx, li, section') ?? el;
+        pushBlock(block);
       });
     }
 
@@ -223,14 +209,14 @@ async function collectTitleSearchHrefs(
 
   for (let pageIdx = 0; pageIdx < BLOG_SEARCH_RANK_PAGES; pageIdx++) {
     const start = pageIdx * BLOG_SEARCH_PAGE_SIZE + 1;
-    await page.goto(blogTabAllSearchUrl(query, start), { waitUntil: 'domcontentloaded' });
+    await page.goto(integratedSearchUrl(query, start), { waitUntil: 'domcontentloaded' });
     await sleep(BLOG_CHECK_SEARCH_SETTLE_MS);
 
     if (await detectBlogCheckCaptcha(page)) {
       throw new BlogCheckCaptchaError('');
     }
 
-    let pageHrefs = await collectBlogSearchResultHrefs(page);
+    let pageHrefs = await collectIntegratedSearchResultHrefs(page);
     if (pageHrefs.length === 0) {
       await page
         .locator('#main_pack, .view_wrap, .total_wrap, .api_subject_bx')
@@ -238,14 +224,14 @@ async function collectTitleSearchHrefs(
         .waitFor({ state: 'attached', timeout: BLOG_CHECK_SEARCH_WAIT_MS })
         .catch(() => {});
       await sleep(BLOG_CHECK_SEARCH_SETTLE_MS);
-      pageHrefs = await collectBlogSearchResultHrefs(page);
+      pageHrefs = await collectIntegratedSearchResultHrefs(page);
     }
     if (pageHrefs.length === 0) break;
 
     for (const href of pageHrefs) {
       const hrefPostNo = postNoFromBlogHref(href);
-      if (!hrefPostNo || seenPost.has(hrefPostNo)) continue;
-      seenPost.add(hrefPostNo);
+      if (hrefPostNo && seenPost.has(hrefPostNo)) continue;
+      if (hrefPostNo) seenPost.add(hrefPostNo);
       merged.push(href);
     }
 
@@ -260,8 +246,8 @@ async function collectTitleSearchHrefs(
 }
 
 /**
- * 제목 · ssc=tab.blog.all 관련도순 3페이지(30건) 순위(포스트번호) → 미등장 시 site: 폴백
- * method: 'blog-tab-all-title-search' + 'site-url-fallback'
+ * 제목 · nexearch 통합검색 3페이지(30건) 순위 → 미등장 시 site: 폴백
+ * method: 'nexearch-title-search' + 'site-url-fallback'
  */
 export async function checkPostExposure(
   page: Page,

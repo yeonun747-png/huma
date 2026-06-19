@@ -33,3 +33,11 @@ export function blogCheckQueryMatchesBlogId(query: string, blogId: string): bool
   if (parsed) return parsed.toLowerCase() === blogId.toLowerCase();
   return query.trim().toLowerCase() === blogId.toLowerCase();
 }
+
+/** 블로그 지수 노출 뱃지·제목 검색 — 네이버 통합검색(nexearch) URL. start=11·21 → 2·3페이지 */
+export function buildNexearchSearchUrl(keyword: string, start = 1): string {
+  const base =
+    'https://search.naver.com/search.naver?where=nexearch&sm=top_hty&fbm=0&ie=utf8' +
+    `&query=${encodeURIComponent(keyword)}`;
+  return start > 1 ? `${base}&start=${start}` : base;
+}
