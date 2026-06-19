@@ -4,19 +4,12 @@ import { supabase } from '../../middleware/auth.js';
 import { getDailyLimit } from '../../lib/limits.js';
 import { logOperation } from '../../lib/log-emitter.js';
 
-const WORKSPACE_ENV_KEYS: Record<string, string> = {
-  yeonun: 'YEONUN',
-  quizoasis: 'QUIZOASIS',
-  panana: 'PANANA',
-};
+import { workspaceEnv } from './workspace-credentials.js';
 
 function getYouTubeClient(workspace: string) {
-  const envKey = WORKSPACE_ENV_KEYS[workspace];
-  if (!envKey) return null;
-
-  const clientId = process.env[`YOUTUBE_CLIENT_ID_${envKey}`]?.trim();
-  const clientSecret = process.env[`YOUTUBE_CLIENT_SECRET_${envKey}`]?.trim();
-  const refreshToken = process.env[`YOUTUBE_REFRESH_TOKEN_${envKey}`]?.trim();
+  const clientId = workspaceEnv(workspace, 'YOUTUBE_CLIENT_ID');
+  const clientSecret = workspaceEnv(workspace, 'YOUTUBE_CLIENT_SECRET');
+  const refreshToken = workspaceEnv(workspace, 'YOUTUBE_REFRESH_TOKEN');
   if (!clientId || !clientSecret || !refreshToken) return null;
 
   const oauth2 = new google.auth.OAuth2(clientId, clientSecret);

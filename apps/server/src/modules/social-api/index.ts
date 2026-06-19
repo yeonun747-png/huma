@@ -4,46 +4,63 @@ import { supabase } from '../../middleware/auth.js';
 import { sleep } from '../../lib/utils.js';
 import { uploadYouTubeShorts } from './youtube.js';
 import { uploadPinterestVideoPin } from './pinterest.js';
+import {
+  resolveMetaCredentials,
+  resolveTikTokCredentials,
+  resolveTwitterCredentials,
+} from './workspace-credentials.js';
 
-async function getPlatformAccount(workspace: string, platform: string) {
+type PlatformAccountRow = {
+  id: string;
+  platform: string;
+  username: string;
+  access_token: string;
+  refresh_token?: string | null;
+  platform_user_id?: string | null;
+  token_expires_at?: string | null;
+};
+
+async function getPlatformAccountOptional(
+  workspace: string,
+  platform: string,
+): Promise<PlatformAccountRow | null> {
   const { data } = await supabase
     .from('huma_platform_accounts')
     .select('*')
     .eq('workspace', workspace)
     .eq('platform', platform)
     .eq('is_active', true)
-    .single();
-  if (!data) throw new Error(`${platform} 계정 없음: ${workspace}`);
-  return data;
+    .maybeSingle();
+  return (data as PlatformAccountRow | null) ?? null;
 }
 
-async function refreshTokenIfNeeded(account: {
-  id: string;
-  platform: string;
-  access_token: string;
-  refresh_token?: string;
-  token_expires_at?: string;
-}) {
-  if (!account.token_expires_at) return account.access_token;
-  if (new Date(account.token_expires_at) > new Date(Date.now() + 7 * 24 * 3600 * 1000)) {
-    return account.access_token;
-  }
-  if (!account.refresh_token) return account.access_token;
+async function getPlatformAccount(workspace: string, platform: string): Promise<PlatformAccountRow> {
+  const row = await getPlatformAccountOptional(workspace, platform);
+  if (!row) throw new Error(`${platform} 계정 없음: ${workspace} (계정관리에 채널 등록 필요)`);
+  return row;
+}
 
-  if (account.platform === 'tiktok') {
-    const { data } = await axios.post(
-      'https://open.tiktokapis.com/v2/oauth/token/',
-      new URLSearchParams({
-        client_key: process.env.TIKTOK_CLIENT_KEY ?? '',
-        client_secret: process.env.TIKTOK_CLIENT_SECRET ?? '',
-        grant_type: 'refresh_token',
-        refresh_token: account.refresh_token,
-      }),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-    );
-    const token = data.data?.access_token ?? data.access_token;
-    const refresh = data.data?.refresh_token ?? data.refresh_token ?? account.refresh_token;
-    const expiresIn = data.data?.expires_in ?? data.expires_in ?? 86400;
+async function refreshTikTokAccessToken(
+  workspace: string,
+  account: PlatformAccountRow,
+): Promise<string> {
+  const creds = resolveTikTokCredentials(workspace, account);
+  if (!creds?.refreshToken) return creds?.accessToken ?? account.access_token;
+
+  const { data } = await axios.post(
+    'https://open.tiktokapis.com/v2/oauth/token/',
+    new URLSearchParams({
+      client_key: creds.clientKey,
+      client_secret: creds.clientSecret,
+      grant_type: 'refresh_token',
+      refresh_token: creds.refreshToken,
+    }),
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
+  );
+  const token = data.data?.access_token ?? data.access_token;
+  const refresh = data.data?.refresh_token ?? data.refresh_token ?? creds.refreshToken;
+  const expiresIn = data.data?.expires_in ?? data.expires_in ?? 86400;
+  if (account.id && !account.access_token.startsWith('env-managed')) {
     await supabase
       .from('huma_platform_accounts')
       .update({
@@ -52,18 +69,23 @@ async function refreshTokenIfNeeded(account: {
         token_expires_at: new Date(Date.now() + expiresIn * 1000).toISOString(),
       })
       .eq('id', account.id);
-    return token;
   }
+  return token;
+}
 
-  if (['instagram', 'threads'].includes(account.platform)) {
-    const { data } = await axios.get('https://graph.facebook.com/v19.0/oauth/access_token', {
-      params: {
-        grant_type: 'fb_exchange_token',
-        client_id: process.env.META_APP_ID,
-        client_secret: process.env.META_APP_SECRET,
-        fb_exchange_token: account.access_token,
-      },
-    });
+async function refreshMetaAccessToken(workspace: string, account: PlatformAccountRow): Promise<string> {
+  const creds = resolveMetaCredentials(workspace, account.platform, account);
+  if (!creds) return account.access_token;
+
+  const { data } = await axios.get('https://graph.facebook.com/v19.0/oauth/access_token', {
+    params: {
+      grant_type: 'fb_exchange_token',
+      client_id: creds.appId,
+      client_secret: creds.appSecret,
+      fb_exchange_token: creds.accessToken,
+    },
+  });
+  if (account.id && !account.access_token.startsWith('env-managed')) {
     await supabase
       .from('huma_platform_accounts')
       .update({
@@ -71,10 +93,57 @@ async function refreshTokenIfNeeded(account: {
         token_expires_at: new Date(Date.now() + (data.expires_in ?? 5184000) * 1000).toISOString(),
       })
       .eq('id', account.id);
-    return data.access_token;
+  }
+  return data.access_token as string;
+}
+
+async function resolveAccessToken(
+  workspace: string,
+  account: PlatformAccountRow,
+): Promise<string> {
+  const envTikTok = resolveTikTokCredentials(workspace, account);
+  if (account.platform === 'tiktok' && envTikTok) {
+    if (!account.token_expires_at || new Date(account.token_expires_at) <= new Date(Date.now() + 7 * 24 * 3600 * 1000)) {
+      if (envTikTok.refreshToken) return refreshTikTokAccessToken(workspace, account);
+    }
+    return envTikTok.accessToken;
   }
 
+  const metaPlatforms = ['instagram', 'instagram_en', 'instagram_kr', 'threads'];
+  if (metaPlatforms.includes(account.platform)) {
+    const meta = resolveMetaCredentials(workspace, account.platform, account);
+    if (meta) {
+      if (
+        account.token_expires_at &&
+        new Date(account.token_expires_at) <= new Date(Date.now() + 7 * 24 * 3600 * 1000)
+      ) {
+        return refreshMetaAccessToken(workspace, account);
+      }
+      return meta.accessToken;
+    }
+  }
+
+  if (!account.token_expires_at) return account.access_token;
+  if (new Date(account.token_expires_at) > new Date(Date.now() + 7 * 24 * 3600 * 1000)) {
+    return account.access_token;
+  }
+  if (!account.refresh_token) return account.access_token;
+
+  if (account.platform === 'tiktok') return refreshTikTokAccessToken(workspace, account);
+  if (metaPlatforms.includes(account.platform)) return refreshMetaAccessToken(workspace, account);
   return account.access_token;
+}
+
+/** @deprecated 내부용 — resolveAccessToken 사용 */
+export async function refreshTokenIfNeeded(account: {
+  id: string;
+  platform: string;
+  access_token: string;
+  refresh_token?: string;
+  token_expires_at?: string;
+} & { workspace?: string }): Promise<string> {
+  const workspace = account.workspace ?? '';
+  return resolveAccessToken(workspace, account as PlatformAccountRow);
 }
 
 export async function uploadTikTokVideo(params: {
@@ -84,7 +153,11 @@ export async function uploadTikTokVideo(params: {
   hashtags: string[];
 }): Promise<string | undefined> {
   const account = await getPlatformAccount(params.workspace, 'tiktok');
-  const token = await refreshTokenIfNeeded(account);
+  const creds = resolveTikTokCredentials(params.workspace, account);
+  if (!creds) {
+    throw new Error(`TikTok .env 자격증명 없음: ${params.workspace} (TIKTOK_CLIENT_KEY/SECRET/ACCESS_TOKEN_${params.workspace.toUpperCase()})`);
+  }
+  const token = await resolveAccessToken(params.workspace, account);
   const videoStat = fs.statSync(params.videoPath);
   let tags = params.hashtags;
   if (params.workspace === 'quizoasis') {
@@ -99,7 +172,7 @@ export async function uploadTikTokVideo(params: {
       post_info: { title: fullCaption.slice(0, 2200), privacy_level: 'PUBLIC_TO_EVERYONE', video_cover_timestamp_ms: 1000 },
       source_info: { source: 'FILE_UPLOAD', video_size: videoStat.size, chunk_size: videoStat.size, total_chunk_count: 1 },
     },
-    { headers: { Authorization: `Bearer ${token}` } }
+    { headers: { Authorization: `Bearer ${token}` } },
   );
 
   await axios.put(init.data.upload_url, fs.readFileSync(params.videoPath), {
@@ -111,7 +184,7 @@ export async function uploadTikTokVideo(params: {
     const { data: s } = await axios.post(
       'https://open.tiktokapis.com/v2/post/publish/status/fetch/',
       { publish_id: init.data.publish_id },
-      { headers: { Authorization: `Bearer ${token}` } }
+      { headers: { Authorization: `Bearer ${token}` } },
     );
     if (s.data.status === 'PUBLISH_COMPLETE') {
       return s.data.publicaly_available_post_id
@@ -132,33 +205,40 @@ export async function uploadInstagramReel(params: {
 }): Promise<string | undefined> {
   const platformKey = params.platform ?? 'instagram';
   const account = await getPlatformAccount(params.workspace, platformKey);
+  const meta = resolveMetaCredentials(params.workspace, platformKey, account);
+  if (!meta) {
+    throw new Error(
+      `Instagram .env 자격증명 없음: ${params.workspace} (META_APP_ID/SECRET/ACCESS_TOKEN/META_IG_USER_ID)`,
+    );
+  }
+  const token = await resolveAccessToken(params.workspace, account);
   const fullCaption = `${params.caption}\n.\n.\n${params.hashtags.map((h) => `#${h}`).join(' ')}`;
   const videoUrl = await uploadToSupabaseStorage(params.videoPath);
 
   const { data: c } = await axios.post(
-    `https://graph.facebook.com/v19.0/${account.platform_user_id}/media`,
+    `https://graph.facebook.com/v19.0/${meta.platformUserId}/media`,
     { media_type: 'REELS', video_url: videoUrl, caption: fullCaption, share_to_feed: true },
-    { params: { access_token: account.access_token } }
+    { params: { access_token: token } },
   );
 
   for (let i = 0; i < 20; i++) {
     await sleep(5000);
     const { data: s } = await axios.get(`https://graph.facebook.com/v19.0/${c.id}`, {
-      params: { fields: 'status_code', access_token: account.access_token },
+      params: { fields: 'status_code', access_token: token },
     });
     if (s.status_code === 'FINISHED') break;
     if (s.status_code === 'ERROR') throw new Error('Instagram 컨테이너 오류');
   }
 
   const { data: published } = await axios.post(
-    `https://graph.facebook.com/v19.0/${account.platform_user_id}/media_publish`,
+    `https://graph.facebook.com/v19.0/${meta.platformUserId}/media_publish`,
     { creation_id: c.id },
-    { params: { access_token: account.access_token } },
+    { params: { access_token: token } },
   );
 
   try {
     const { data: media } = await axios.get(`https://graph.facebook.com/v19.0/${published.id}`, {
-      params: { fields: 'permalink', access_token: account.access_token },
+      params: { fields: 'permalink', access_token: token },
     });
     return media.permalink as string | undefined;
   } catch {
@@ -173,16 +253,19 @@ export async function uploadInstagramImage(params: {
   hashtags: string[];
 }) {
   const account = await getPlatformAccount(params.workspace, 'instagram');
+  const meta = resolveMetaCredentials(params.workspace, 'instagram', account);
+  if (!meta) throw new Error(`Instagram .env 자격증명 없음: ${params.workspace}`);
+  const token = await resolveAccessToken(params.workspace, account);
   const fullCaption = `${params.caption}\n${params.hashtags.map((h) => `#${h}`).join(' ')}`;
   const { data: c } = await axios.post(
-    `https://graph.facebook.com/v19.0/${account.platform_user_id}/media`,
+    `https://graph.facebook.com/v19.0/${meta.platformUserId}/media`,
     { image_url: params.imageUrl, caption: fullCaption },
-    { params: { access_token: account.access_token } }
+    { params: { access_token: token } },
   );
   await axios.post(
-    `https://graph.facebook.com/v19.0/${account.platform_user_id}/media_publish`,
+    `https://graph.facebook.com/v19.0/${meta.platformUserId}/media_publish`,
     { creation_id: c.id },
-    { params: { access_token: account.access_token } }
+    { params: { access_token: token } },
   );
 }
 
@@ -194,6 +277,13 @@ export async function postToThreads(params: {
   linkUrl?: string;
 }): Promise<string> {
   const account = await getPlatformAccount(params.workspace, 'threads');
+  const meta = resolveMetaCredentials(params.workspace, 'threads', account);
+  if (!meta) {
+    throw new Error(
+      `Threads .env 자격증명 없음: ${params.workspace} (META_ACCESS_TOKEN/META_THREADS_USER_ID)`,
+    );
+  }
+  const token = await resolveAccessToken(params.workspace, account);
   const containerParams: Record<string, string> = {
     media_type: params.imageUrl ? 'IMAGE' : 'TEXT',
     text: params.text,
@@ -201,15 +291,15 @@ export async function postToThreads(params: {
   if (params.imageUrl) containerParams.image_url = params.imageUrl;
 
   const { data: c } = await axios.post(
-    `https://graph.threads.net/v1.0/${account.platform_user_id}/threads`,
+    `https://graph.threads.net/v1.0/${meta.platformUserId}/threads`,
     containerParams,
-    { params: { access_token: account.access_token } }
+    { params: { access_token: token } },
   );
   await sleep(1000);
   const { data: published } = await axios.post(
-    `https://graph.threads.net/v1.0/${account.platform_user_id}/threads_publish`,
+    `https://graph.threads.net/v1.0/${meta.platformUserId}/threads_publish`,
     { creation_id: c.id },
-    { params: { access_token: account.access_token } }
+    { params: { access_token: token } },
   );
   return String(published.id);
 }
@@ -221,20 +311,23 @@ export async function replyToThreads(params: {
   text: string;
 }): Promise<string> {
   const account = await getPlatformAccount(params.workspace, 'threads');
+  const meta = resolveMetaCredentials(params.workspace, 'threads', account);
+  if (!meta) throw new Error(`Threads .env 자격증명 없음: ${params.workspace}`);
+  const token = await resolveAccessToken(params.workspace, account);
   const { data: c } = await axios.post(
-    `https://graph.threads.net/v1.0/${account.platform_user_id}/threads`,
+    `https://graph.threads.net/v1.0/${meta.platformUserId}/threads`,
     {
       media_type: 'TEXT',
       text: params.text,
       reply_to_id: params.parentPostId,
     },
-    { params: { access_token: account.access_token } }
+    { params: { access_token: token } },
   );
   await sleep(1000);
   const { data: published } = await axios.post(
-    `https://graph.threads.net/v1.0/${account.platform_user_id}/threads_publish`,
+    `https://graph.threads.net/v1.0/${meta.platformUserId}/threads_publish`,
     { creation_id: c.id },
-    { params: { access_token: account.access_token } }
+    { params: { access_token: token } },
   );
   return String(published.id);
 }
@@ -246,13 +339,19 @@ export async function postToTwitter(params: {
   imageUrls?: string[];
   linkUrl?: string;
 }): Promise<string> {
-  const creds = await getPlatformAccount(params.workspace, 'twitter');
+  const account = await getPlatformAccount(params.workspace, 'twitter');
+  const creds = resolveTwitterCredentials(params.workspace, account);
+  if (!creds) {
+    throw new Error(
+      `X .env 자격증명 없음: ${params.workspace} (TWITTER_API_KEY/SECRET/ACCESS_TOKEN/ACCESS_SECRET)`,
+    );
+  }
   const { TwitterApi } = await import('twitter-api-v2');
   const client = new TwitterApi({
-    appKey: process.env.TWITTER_API_KEY!,
-    appSecret: process.env.TWITTER_API_SECRET!,
-    accessToken: creds.access_token,
-    accessSecret: creds.refresh_token!,
+    appKey: creds.apiKey,
+    appSecret: creds.apiSecret,
+    accessToken: creds.accessToken,
+    accessSecret: creds.accessSecret,
   });
   const { data } = await client.v2.tweet({ text: params.text.slice(0, 280) });
   return data.id;
@@ -264,13 +363,15 @@ export async function replyToTwitter(params: {
   parentTweetId: string;
   text: string;
 }): Promise<string> {
-  const creds = await getPlatformAccount(params.workspace, 'twitter');
+  const account = await getPlatformAccount(params.workspace, 'twitter');
+  const creds = resolveTwitterCredentials(params.workspace, account);
+  if (!creds) throw new Error(`X .env 자격증명 없음: ${params.workspace}`);
   const { TwitterApi } = await import('twitter-api-v2');
   const client = new TwitterApi({
-    appKey: process.env.TWITTER_API_KEY!,
-    appSecret: process.env.TWITTER_API_SECRET!,
-    accessToken: creds.access_token,
-    accessSecret: creds.refresh_token!,
+    appKey: creds.apiKey,
+    appSecret: creds.apiSecret,
+    accessToken: creds.accessToken,
+    accessSecret: creds.accessSecret,
   });
   const { data } = await client.v2.tweet({
     text: params.text.slice(0, 280),
@@ -299,7 +400,7 @@ export async function uploadToPlatform(
     title?: string;
     description?: string;
     linkUrl?: string;
-  }
+  },
 ) {
   switch (platform) {
     case 'tiktok':
@@ -335,4 +436,4 @@ export async function uploadToPlatform(
 export { uploadPinterestVideoPin } from './pinterest.js';
 export { uploadYouTubeShorts } from './youtube.js';
 
-export { getPlatformAccount, refreshTokenIfNeeded };
+export { getPlatformAccount, getPlatformAccountOptional, refreshTokenIfNeeded };

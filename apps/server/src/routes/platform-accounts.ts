@@ -30,7 +30,7 @@ export async function registerPlatformAccountRoutes(app: FastifyInstance) {
     const allowed = getWorkspaceFilter(request);
     const { data } = await supabase
       .from('huma_platform_accounts')
-      .select('id, workspace, platform, username, is_active, last_posted_at, post_count_today, token_expires_at, created_at')
+      .select('id, workspace, platform, username, platform_user_id, is_active, last_posted_at, post_count_today, token_expires_at, created_at')
       .in('workspace', allowed)
       .order('platform');
     return data ?? [];
@@ -54,7 +54,12 @@ export async function registerPlatformAccountRoutes(app: FastifyInstance) {
     if (!access.ok) return reply.code(access.status).send({ error: access.error });
 
     const body = request.body as Record<string, unknown>;
-    delete body.access_token;
+    const token = typeof body.access_token === 'string' ? body.access_token.trim() : '';
+    if (token && token !== 'env-managed') {
+      body.access_token = token;
+    } else {
+      delete body.access_token;
+    }
     delete body.refresh_token;
     // workspace 이동은 허용 범위 내에서만
     if (body.workspace && !allowed.includes(body.workspace as string)) {

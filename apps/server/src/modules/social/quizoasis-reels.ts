@@ -161,14 +161,14 @@ export async function uploadQuizOasisInstagramVariants(params: {
   const [en, kr] = await Promise.allSettled([
     uploadInstagramReel({
       workspace: params.workspace,
-      platform: 'instagram_en',
+      platform: 'instagram',
       videoPath: enVariant.videoPath,
       caption: enVariant.caption || params.caption,
       hashtags: enHashtags,
     }),
     uploadInstagramReel({
       workspace: params.workspace,
-      platform: 'instagram_kr',
+      platform: 'instagram',
       videoPath: krVariant.videoPath,
       caption: krVariant.caption || params.caption,
       hashtags: krHashtags,

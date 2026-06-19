@@ -39,30 +39,58 @@ type AccountCategory = 'posting' | 'crank' | 'social';
 const CATEGORY_OPTIONS: { value: AccountCategory; label: string; sub: string }[] = [
   { value: 'posting', label: '포스팅', sub: '네이버 블로그 발행 (지수5)' },
   { value: 'crank', label: 'C-Rank+Cafe', sub: '초기 10~최대 150 · 소통·카페·바이럴' },
-  { value: 'social', label: '소셜미디어', sub: 'TikTok·IG·Threads·X·Pinterest API' },
+  { value: 'social', label: '소셜미디어', sub: 'YouTube Shorts·TikTok·IG·Threads·X·Pinterest API' },
 ];
 
 const SOCIAL_PLATFORMS_BASE = [
+  { value: 'youtube', label: 'YouTube Shorts' },
   { value: 'tiktok', label: 'TikTok' },
   { value: 'threads', label: 'Threads' },
   { value: 'twitter', label: 'X (Twitter)' },
 ];
 
-/** 연운 — Instagram 단일 */
-const SOCIAL_PLATFORMS_YEONUN = [
+/** 연운·파나나 — 채널 1개씩 */
+const SOCIAL_PLATFORMS_STANDARD = [
   ...SOCIAL_PLATFORMS_BASE,
   { value: 'instagram', label: 'Instagram' },
 ];
 
-/** 퀴즈오아시스·파나나 — Instagram (EN/KR)만 (중복 Instagram 제거) */
+const SOCIAL_PLATFORMS_YEONUN = SOCIAL_PLATFORMS_STANDARD;
+
+/** 퀴즈오아시스 — Pinterest 추가 (릴스·핀) */
 const SOCIAL_PLATFORMS_QUIZOASIS = [
-  ...SOCIAL_PLATFORMS_BASE,
-  { value: 'instagram_en', label: 'Instagram (EN)' },
-  { value: 'instagram_kr', label: 'Instagram (KR)' },
-  { value: 'twitter_en', label: 'X (EN)' },
-  { value: 'twitter_ja', label: 'X (JA)' },
+  ...SOCIAL_PLATFORMS_STANDARD,
   { value: 'pinterest', label: 'Pinterest' },
 ];
+
+const SOCIAL_PLATFORMS_PANANA = SOCIAL_PLATFORMS_STANDARD;
+
+const ALL_SOCIAL_PLATFORMS = [
+  ...SOCIAL_PLATFORMS_QUIZOASIS,
+  ...SOCIAL_PLATFORMS_PANANA.filter(
+    (p) => !SOCIAL_PLATFORMS_QUIZOASIS.some((q) => q.value === p.value),
+  ),
+];
+
+function socialPlatformLabel(platform: string): string {
+  return ALL_SOCIAL_PLATFORMS.find((p) => p.value === platform)?.label ?? platform;
+}
+
+/** 모든 소셜 — 서버 .env(워크스페이스별) 인증. UI는 채널명(@handle)만 등록 */
+function isEnvManagedSocialPlatform(_platform: string): boolean {
+  return true;
+}
+
+function socialEnvHint(platform: string): string {
+  const ws = 'YEONUN|QUIZOASIS|PANANA';
+  if (platform === 'youtube') return `서버 .env — YOUTUBE_CLIENT_ID/SECRET/REFRESH_TOKEN_{${ws}}`;
+  if (platform === 'tiktok') return `서버 .env — TIKTOK_CLIENT_KEY/SECRET/ACCESS_TOKEN_{${ws}}`;
+  if (platform === 'threads') return `서버 .env — META_ACCESS_TOKEN + META_THREADS_USER_ID_{${ws}}`;
+  if (platform.startsWith('instagram')) return `서버 .env — META_ACCESS_TOKEN + META_IG_USER_ID_{${ws}}`;
+  if (platform.startsWith('twitter')) return `서버 .env — TWITTER_API_KEY/SECRET/ACCESS_TOKEN/ACCESS_SECRET_{${ws}}`;
+  if (platform === 'pinterest') return '서버 .env — PINTEREST_ACCESS_TOKEN, PINTEREST_BOARD_ID';
+  return `서버 .env — 워크스페이스별 API 키`;
+}
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -133,10 +161,15 @@ export function AccountsView() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [editingAccount, setEditingAccount] = useState<HumaAccount | null>(null);
+  const [editName, setEditName] = useState('');
   const [editBlogUrl, setEditBlogUrl] = useState('');
   const [editNaverId, setEditNaverId] = useState('');
   const [editNaverPw, setEditNaverPw] = useState('');
   const [editSaving, setEditSaving] = useState(false);
+  const [editingPlatform, setEditingPlatform] = useState<Record<string, unknown> | null>(null);
+  const [editPlatformUsername, setEditPlatformUsername] = useState('');
+  const [editPlatformUserId, setEditPlatformUserId] = useState('');
+  const [editPlatformSaving, setEditPlatformSaving] = useState(false);
   const [personaAccount, setPersonaAccount] = useState<HumaAccount | null>(null);
   const [personaSaving, setPersonaSaving] = useState(false);
   const [personaError, setPersonaError] = useState('');
@@ -207,7 +240,11 @@ export function AccountsView() {
   const crankCafe = crankPoolAccounts.length;
   const isSocial = form.category === 'social';
   const socialPlatforms =
-    form.registerUnit === 'yeonun' ? SOCIAL_PLATFORMS_YEONUN : SOCIAL_PLATFORMS_QUIZOASIS;
+    form.registerUnit === 'quizoasis'
+      ? SOCIAL_PLATFORMS_QUIZOASIS
+      : form.registerUnit === 'panana'
+        ? SOCIAL_PLATFORMS_PANANA
+        : SOCIAL_PLATFORMS_YEONUN;
 
   const registerUnitLabel =
     BUSINESS_UNITS.find((u) => u.id === form.registerUnit)?.label ?? form.registerUnit;
@@ -217,15 +254,21 @@ export function AccountsView() {
     setSaving(true);
     try {
       if (isSocial) {
-        if (!form.username.trim() || !form.access_token.trim()) {
-          setError('소셜 계정은 사용자명과 API 토큰이 필요합니다.');
+        if (!form.username.trim()) {
+          setError('소셜 계정은 채널명 / @handle이 필요합니다.');
+          return;
+        }
+        if (!isEnvManagedSocialPlatform(form.platform) && !form.access_token.trim()) {
+          setError('API Access Token을 입력하세요.');
           return;
         }
         await api.createPlatformAccount({
           workspace: form.registerUnit,
           platform: form.platform,
           username: form.username.trim(),
-          access_token: form.access_token.trim(),
+          access_token: isEnvManagedSocialPlatform(form.platform)
+            ? 'env-managed'
+            : form.access_token.trim(),
           is_active: true,
         });
       } else {
@@ -260,18 +303,35 @@ export function AccountsView() {
   };
 
   const handleStartEditPosting = (ac: HumaAccount) => {
+    setEditingPlatform(null);
     setEditingAccount(ac);
+    setEditName(ac.name ?? '');
     setEditBlogUrl(ac.blog_url ?? '');
     setEditNaverId(ac.naver_id ?? '');
     setEditNaverPw('');
     setError('');
   };
 
+  const handleStartEditPlatform = (p: Record<string, unknown>) => {
+    setEditingAccount(null);
+    setEditingPlatform(p);
+    setEditPlatformUsername(String(p.username ?? ''));
+    setEditPlatformUserId(String(p.platform_user_id ?? ''));
+    setError('');
+  };
+
   const handleCancelEdit = () => {
     setEditingAccount(null);
+    setEditName('');
     setEditBlogUrl('');
     setEditNaverId('');
     setEditNaverPw('');
+  };
+
+  const handleCancelPlatformEdit = () => {
+    setEditingPlatform(null);
+    setEditPlatformUsername('');
+    setEditPlatformUserId('');
   };
 
   const handleSaveEdit = async () => {
@@ -280,7 +340,8 @@ export function AccountsView() {
       setError('네이버 ID는 필수입니다.');
       return;
     }
-    if (!editBlogUrl.trim()) {
+    const isPosting = editingAccount.account_type === 'posting';
+    if (isPosting && !editBlogUrl.trim()) {
       setError('포스팅 계정은 블로그 URL이 필수입니다.');
       return;
     }
@@ -288,12 +349,11 @@ export function AccountsView() {
     setError('');
     try {
       const body: Record<string, unknown> = {
-        blog_url: editBlogUrl.trim(),
         naver_id: editNaverId.trim(),
       };
-      if (editNaverPw.trim()) {
-        body.naver_pw = editNaverPw;
-      }
+      if (editName.trim()) body.name = editName.trim();
+      if (editBlogUrl.trim()) body.blog_url = editBlogUrl.trim();
+      if (editNaverPw.trim()) body.naver_pw = editNaverPw;
       await api.updateAccount(editingAccount.id, body);
       handleCancelEdit();
       load({ force: true });
@@ -302,6 +362,33 @@ export function AccountsView() {
       setError(e instanceof Error ? e.message : '수정 실패');
     } finally {
       setEditSaving(false);
+    }
+  };
+
+  const handleSavePlatformEdit = async () => {
+    if (!editingPlatform) return;
+    if (!editPlatformUsername.trim()) {
+      setError('채널명 / @handle은 필수입니다.');
+      return;
+    }
+    const platform = String(editingPlatform.platform ?? '');
+    const needsUserId = platform === 'instagram' || platform === 'threads' || platform.startsWith('instagram_');
+    setEditPlatformSaving(true);
+    setError('');
+    try {
+      const body: Record<string, unknown> = {
+        username: editPlatformUsername.trim(),
+      };
+      if (needsUserId) {
+        body.platform_user_id = editPlatformUserId.trim() || null;
+      }
+      await api.updatePlatformAccount(String(editingPlatform.id), body);
+      handleCancelPlatformEdit();
+      load({ force: true });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '수정 실패');
+    } finally {
+      setEditPlatformSaving(false);
     }
   };
 
@@ -383,6 +470,7 @@ export function AccountsView() {
     if (!(await confirmDelete(label))) return;
     try {
       await api.deletePlatformAccount(String(p.id));
+      if (editingPlatform?.id === p.id) handleCancelPlatformEdit();
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : '삭제 실패');
@@ -395,6 +483,7 @@ export function AccountsView() {
     if (platform === 'threads') return '@';
     if (platform === 'twitter' || platform.startsWith('twitter_')) return 'X';
     if (platform === 'pinterest') return 'P';
+    if (platform === 'youtube') return 'Y';
     return 'S';
   };
 
@@ -497,10 +586,11 @@ export function AccountsView() {
                 />
                 <input
                   type="password"
-                  placeholder="API Access Token"
+                  placeholder={socialEnvHint(form.platform)}
                   value={form.access_token}
                   onChange={(e) => setForm((f) => ({ ...f, access_token: e.target.value }))}
-                  className="m-model-select w-full"
+                  disabled={isEnvManagedSocialPlatform(form.platform)}
+                  className="m-model-select w-full disabled:opacity-50"
                 />
               </>
             ) : (
@@ -587,9 +677,22 @@ export function AccountsView() {
       {editingAccount && (
         <div className="m-panel mb-3 space-y-2">
           <div className="text-[12px] font-semibold text-huma-t">
-            포스팅 계정 수정 · {editingAccount.name}
+            {editingAccount.account_type === 'posting'
+              ? '포스팅'
+              : editingAccount.account_type === 'cafe'
+                ? '카페'
+                : 'C-Rank'}{' '}
+            계정 수정 · {editingAccount.name || crankLabelOf(editingAccount)}
           </div>
           <div className="accounts-form-row">
+            {editingAccount.account_type !== 'posting' && (
+              <input
+                placeholder="표시 이름"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="m-model-select w-full"
+              />
+            )}
             <input
               placeholder="네이버 ID"
               value={editNaverId}
@@ -606,7 +709,11 @@ export function AccountsView() {
               autoComplete="new-password"
             />
             <input
-              placeholder="https://blog.naver.com/..."
+              placeholder={
+                editingAccount.account_type === 'posting'
+                  ? 'https://blog.naver.com/...'
+                  : '블로그 URL (선택)'
+              }
               value={editBlogUrl}
               onChange={(e) => setEditBlogUrl(e.target.value)}
               className="m-model-select w-full sm:col-span-2"
@@ -621,10 +728,51 @@ export function AccountsView() {
           <p className="font-mono text-[10.5px] text-huma-t3">
             비밀번호를 비우면 기존 비밀번호가 유지됩니다.
           </p>
-          {!editingAccount.blog_url && (
+          {editingAccount.account_type === 'posting' && !editingAccount.blog_url && (
             <p className="font-mono text-[10.5px] text-huma-warn">블로그 URL 미등록 — 발행 job에 필요합니다.</p>
           )}
           {error && editingAccount && <p className="text-xs text-huma-err">{error}</p>}
+        </div>
+      )}
+
+      {editingPlatform && (
+        <div className="m-panel mb-3 space-y-2">
+          <div className="text-[12px] font-semibold text-huma-t">
+            소셜미디어 계정 수정 · {socialPlatformLabel(String(editingPlatform.platform ?? ''))}
+          </div>
+          <div className="accounts-form-row">
+            <input
+              placeholder="채널명 / @handle"
+              value={editPlatformUsername}
+              onChange={(e) => setEditPlatformUsername(e.target.value)}
+              className="m-model-select w-full"
+            />
+            {(String(editingPlatform.platform ?? '') === 'instagram' ||
+              String(editingPlatform.platform ?? '') === 'threads' ||
+              String(editingPlatform.platform ?? '').startsWith('instagram_')) && (
+              <input
+                placeholder="Meta platform_user_id (IG·Threads 숫자 ID, 선택)"
+                value={editPlatformUserId}
+                onChange={(e) => setEditPlatformUserId(e.target.value)}
+                className="m-model-select w-full sm:col-span-2"
+              />
+            )}
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={handleSavePlatformEdit}
+              disabled={editPlatformSaving}
+            >
+              {editPlatformSaving ? '저장 중…' : '저장'}
+            </button>
+            <button type="button" className="btn-ghost" onClick={handleCancelPlatformEdit}>
+              취소
+            </button>
+          </div>
+          <p className="font-mono text-[10.5px] text-huma-t3">
+            API 토큰·앱 키는 서버 .env에서 관리합니다. ({socialEnvHint(String(editingPlatform.platform ?? ''))})
+          </p>
+          {error && editingPlatform && <p className="text-xs text-huma-err">{error}</p>}
         </div>
       )}
 
@@ -712,7 +860,8 @@ export function AccountsView() {
                       { label: '오늘', value: ac.crank_count_today ?? 0 },
                     ]}
                     actions={[
-                      { label: ac.is_active ? '정지' : '재개', primary: true, onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(() => load({ force: true })) },
+                      { label: '편집', primary: true, onClick: () => handleStartEditPosting(ac) },
+                      { label: ac.is_active ? '정지' : '재개', onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(() => load({ force: true })) },
                       { label: '삭제', danger: true, onClick: () => handleDeleteNaver(ac) },
                     ]}
                   />
@@ -747,7 +896,8 @@ export function AccountsView() {
                     { label: '오늘', value: ac.crank_count_today ?? 0 },
                   ]}
                   actions={[
-                    { label: ac.is_active ? '정지' : '재개', primary: true, onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(() => load({ force: true })) },
+                    { label: '편집', primary: true, onClick: () => handleStartEditPosting(ac) },
+                    { label: ac.is_active ? '정지' : '재개', onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(() => load({ force: true })) },
                     { label: '삭제', danger: true, onClick: () => handleDeleteNaver(ac) },
                   ]}
                 />
@@ -777,7 +927,7 @@ export function AccountsView() {
                       icon={platformIcon(platform)}
                       iconBg={platform === 'tiktok' ? 'rgba(255,0,80,.1)' : 'var(--blue-bg)'}
                       name={String(p.username ?? platform)}
-                      url={`${SOCIAL_PLATFORMS_QUIZOASIS.find((sp) => sp.value === platform)?.label ?? platform} · ${col.title}`}
+                      url={`${socialPlatformLabel(platform)} · ${col.title}`}
                       status={active ? '활성' : '세션오류'}
                       statusTone={active ? 'ok' : 'err'}
                       stats={[
@@ -786,7 +936,8 @@ export function AccountsView() {
                         { label: 'API', value: active ? '✓' : '✗', tone: active ? 'text-huma-ok' : 'text-huma-err' },
                       ]}
                       actions={[
-                        { label: active ? '정지' : '재연결', primary: !active, danger: !active, onClick: () => api.updatePlatformAccount(String(p.id), { is_active: !active }).then(() => load({ force: true })) },
+                        { label: '편집', primary: true, onClick: () => handleStartEditPlatform(p) },
+                        { label: active ? '정지' : '재연결', onClick: () => api.updatePlatformAccount(String(p.id), { is_active: !active }).then(() => load({ force: true })) },
                         { label: '삭제', danger: true, onClick: () => handleDeletePlatform(p) },
                       ]}
                     />
