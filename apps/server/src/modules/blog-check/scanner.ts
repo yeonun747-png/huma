@@ -120,12 +120,12 @@ export async function checkPostIndexedBySite(
 }
 
 /**
- * nexearch 통합검색 — 결과 블록당 대표 링크 1건, DOM 순서 유지 (페이지당 최대 10건)
+ * nexearch 통합검색 — 유기적 SERP(ul.lst_total/view)만 순위에 반영.
+ * AI 브리핑·관련질문·파워링크 광고는 제외 (중간 광고 섹션이 순위를 밀어 올리던 원인).
  */
 async function collectIntegratedSearchResultHrefs(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const hrefs: string[] = [];
-    const seenBlock = new Set<Element>();
 
     const decodeHref = (raw: string | null | undefined): string => {
       const trimmed = (raw ?? '').trim();
@@ -146,6 +146,19 @@ async function collectIntegratedSearchResultHrefs(page: Page): Promise<string[]>
       href.includes('help.naver.com') ||
       href.includes('policy.naver.com');
 
+    const isNonOrganicBlock = (block: Element): boolean => {
+      if (
+        block.closest(
+          '[class*="sp_ad"], [class*="power_link"], [class*="ad_area"], [class*="ad_wrap"], [id*="power_link"], [class*="sp_ai"], [class*="api_ai"], [class*="ai_area"], [class*="related_question"], [class*="sp_nquiz"], [class*="brand_search"]',
+        )
+      ) {
+        return true;
+      }
+      return Boolean(
+        block.querySelector('[class*="power_link"], [class*="ad_area"], [class*="sp_ad"], [class*="ad_wrap"]'),
+      );
+    };
+
     const pickPrimaryLink = (block: Element): string | null => {
       const selectors = [
         'a.api_txt_lines.total_tit',
@@ -163,32 +176,25 @@ async function collectIntegratedSearchResultHrefs(page: Page): Promise<string[]>
     };
 
     const pushBlock = (block: Element) => {
-      if (seenBlock.has(block)) return;
-      seenBlock.add(block);
+      if (isNonOrganicBlock(block)) return;
       const href = pickPrimaryLink(block);
       if (href) hrefs.push(href);
     };
 
-    const blockSelectors = [
-      '#main_pack .view_wrap',
-      '#main_pack .total_wrap',
-      '#main_pack .api_subject_bx',
-      '#main_pack .detail_box',
-      '#main_pack ul.lst_total > li',
-      '#main_pack ul.lst_view > li',
-      '#main_pack section[class*="sc_new"] > div',
-      '#main_pack [class*="fds-"]',
-    ];
+    for (const li of document.querySelectorAll('#main_pack ul.lst_total > li, #main_pack ul.lst_view > li')) {
+      pushBlock(li);
+    }
 
-    for (const sel of blockSelectors) {
-      for (const block of document.querySelectorAll(sel)) {
+    if (hrefs.length === 0) {
+      for (const block of document.querySelectorAll('#main_pack .view_wrap, #main_pack .total_wrap')) {
+        if (block.closest('ul.lst_total, ul.lst_view')) continue;
         pushBlock(block);
       }
     }
 
     if (hrefs.length === 0) {
       document.querySelectorAll('#main_pack a.api_txt_lines.total_tit, #main_pack a.link_tit').forEach((el) => {
-        const block = el.closest('.view_wrap, .total_wrap, .api_subject_bx, li, section') ?? el;
+        const block = el.closest('li, .view_wrap, .total_wrap') ?? el;
         pushBlock(block);
       });
     }
