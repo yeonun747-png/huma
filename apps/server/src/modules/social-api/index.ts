@@ -436,4 +436,4 @@ export async function uploadToPlatform(
 export { uploadPinterestVideoPin } from './pinterest.js';
 export { uploadYouTubeShorts } from './youtube.js';
 
-export { getPlatformAccount, getPlatformAccountOptional, refreshTokenIfNeeded };
+export { getPlatformAccount, getPlatformAccountOptional };
