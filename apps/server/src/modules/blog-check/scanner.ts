@@ -120,12 +120,15 @@ export async function checkPostIndexedBySite(
 }
 
 /**
- * nexearch 통합검색 — 유기적 SERP(ul.lst_total/view)만 순위에 반영.
- * AI 브리핑·관련질문·파워링크 광고는 제외 (중간 광고 섹션이 순위를 밀어 올리던 원인).
+ * nexearch 통합검색 — 유기적 SERP만 순위 반영.
+ * 2026 FDS(m.search): .fds-web-normal-doc-root + data-meta-area (AI abL_rtX·관련질문 kwX_ndT 제외)
+ * 레거시 데스크톱: ul.lst_total/view · view_wrap
  */
 async function collectIntegratedSearchResultHrefs(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const hrefs: string[] = [];
+    const seenUrl = new Set<string>();
+    const excludedMetaAreas = new Set(['abL_rtX', 'kwX_ndT']);
 
     const decodeHref = (raw: string | null | undefined): string => {
       const trimmed = (raw ?? '').trim();
@@ -159,11 +162,33 @@ async function collectIntegratedSearchResultHrefs(page: Page): Promise<string[]>
       );
     };
 
+    const fenderRoot = (block: Element): Element | null => block.closest('[data-fender-root="true"]');
+
+    const isExcludedFenderBlock = (block: Element): boolean => {
+      const root = block.matches('[data-fender-root="true"]') ? block : fenderRoot(block);
+      if (!root) return false;
+      const area = root.getAttribute('data-meta-area');
+      if (area && excludedMetaAreas.has(area)) return true;
+      const ssuid = root.getAttribute('data-meta-ssuid');
+      if (ssuid === 'ex_csa') return true;
+      return isNonOrganicBlock(root);
+    };
+
     const pickPrimaryLink = (block: Element): string | null => {
+      const heatmap = block.querySelector('a[data-heatmap-target=".link"][href*="blog.naver.com"]');
+      if (heatmap) {
+        const href = decodeHref(heatmap.getAttribute('href'));
+        if (href && !isBlockedHref(href)) return href;
+      }
+      const heatmapAny = block.querySelector('a[data-heatmap-target=".link"]');
+      if (heatmapAny) {
+        const href = decodeHref(heatmapAny.getAttribute('href'));
+        if (href && !isBlockedHref(href)) return href;
+      }
       const selectors = [
         'a.api_txt_lines.total_tit',
-        'a.title_link',
         'a.link_tit',
+        'a.title_link',
         '.title_area a[href^="http"]',
         'a[href^="http"]',
       ];
@@ -175,26 +200,48 @@ async function collectIntegratedSearchResultHrefs(page: Page): Promise<string[]>
       return null;
     };
 
-    const pushBlock = (block: Element) => {
-      if (isNonOrganicBlock(block)) return;
-      const href = pickPrimaryLink(block);
-      if (href) hrefs.push(href);
+    const pushHref = (href: string) => {
+      const normalized = href.replace(/\/$/, '');
+      if (seenUrl.has(normalized)) return;
+      seenUrl.add(normalized);
+      hrefs.push(href);
     };
 
-    for (const li of document.querySelectorAll('#main_pack ul.lst_total > li, #main_pack ul.lst_view > li')) {
-      pushBlock(li);
+    const pushBlock = (block: Element, opts?: { skipFenderExclude?: boolean }) => {
+      if (isNonOrganicBlock(block)) return;
+      if (!opts?.skipFenderExclude && isExcludedFenderBlock(block)) return;
+      const href = pickPrimaryLink(block);
+      if (href) pushHref(href);
+    };
+
+    for (const root of document.querySelectorAll('[data-fender-root="true"]')) {
+      if (isExcludedFenderBlock(root)) continue;
+      const href = pickPrimaryLink(root);
+      if (href) pushHref(href);
     }
 
     if (hrefs.length === 0) {
-      for (const block of document.querySelectorAll('#main_pack .view_wrap, #main_pack .total_wrap')) {
+      for (const block of document.querySelectorAll('.fds-web-normal-doc-root')) {
+        pushBlock(block, { skipFenderExclude: true });
+      }
+    }
+
+    if (hrefs.length === 0) {
+      for (const li of document.querySelectorAll('ul.lst_total > li, ul.lst_view > li')) {
+        pushBlock(li);
+      }
+    }
+
+    if (hrefs.length === 0) {
+      for (const block of document.querySelectorAll('#main_pack .view_wrap, #main_pack .total_wrap, .view_wrap, .total_wrap')) {
         if (block.closest('ul.lst_total, ul.lst_view')) continue;
         pushBlock(block);
       }
     }
 
     if (hrefs.length === 0) {
-      document.querySelectorAll('#main_pack a.api_txt_lines.total_tit, #main_pack a.link_tit').forEach((el) => {
-        const block = el.closest('li, .view_wrap, .total_wrap') ?? el;
+      document.querySelectorAll('a.api_txt_lines.total_tit, a.link_tit, a[data-heatmap-target=".link"]').forEach((el) => {
+        const block = el.closest('.fds-web-normal-doc-root, li, .view_wrap, .total_wrap, [data-fender-root="true"]') ?? el;
         pushBlock(block);
       });
     }
