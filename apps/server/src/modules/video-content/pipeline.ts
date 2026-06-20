@@ -7,7 +7,7 @@ import { getPipelineModelSettings } from '../../lib/pipeline-settings.js';
 import { notifyTelegram } from '../watcher/telegram.js';
 import { generatePlatformCaptions } from './captions.js';
 import { generateConti } from './conti-generator.js';
-import { ContiValidationError, formatContiTokenSettingsLog } from './conti-validation.js';
+import { ContiValidationError, extractCharacterNamesForStorage, formatContiTokenSettingsLog } from './conti-validation.js';
 import {
   buildEvoLinkPrompt,
   createEvoLinkVideoTask,
@@ -48,6 +48,34 @@ async function loadPastSummaries(accountId: string): Promise<string[]> {
     .order('created_at', { ascending: false })
     .limit(10);
   return (data ?? []).map((r) => String(r.scenario_summary ?? '')).filter(Boolean);
+}
+
+async function loadRecentCharacterNames(
+  accountId: string,
+  excludeHistoryId?: string,
+  limit = 10,
+): Promise<string[]> {
+  let query = supabase
+    .from('huma_video_content_history')
+    .select('character_names')
+    .eq('account_id', accountId)
+    .not('character_names', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (excludeHistoryId) query = query.neq('id', excludeHistoryId);
+
+  const { data } = await query;
+  const out: string[] = [];
+  for (const row of data ?? []) {
+    const names = row.character_names as string[] | null;
+    if (Array.isArray(names)) {
+      for (const name of names) {
+        if (typeof name === 'string' && name.trim()) out.push(name.trim());
+      }
+    }
+  }
+  return out;
 }
 
 async function loadPastEmbeddings(accountId: string, excludeHistoryId?: string): Promise<number[][]> {
@@ -486,6 +514,8 @@ export async function runContiGeneration(accountId: string): Promise<string> {
       });
     }
 
+    const storedCharacterNames = extractCharacterNamesForStorage(conti!, baseConditions.characterName);
+
     await supabase
       .from('huma_video_content_history')
       .update({
@@ -496,9 +526,24 @@ export async function runContiGeneration(accountId: string): Promise<string> {
         conti_json: { ...conti, evolinkPrompt: evoPrompt },
         embedding_vector: embedding,
         similarity_score: similarityScore,
+        character_names: storedCharacterNames.length ? storedCharacterNames : null,
         error_message: null,
       })
       .eq('id', historyId);
+
+    if (storedCharacterNames.length) {
+      const recentNames = await loadRecentCharacterNames(accountId, historyId);
+      const reused = storedCharacterNames.filter((name) => recentNames.includes(name));
+      if (reused.length) {
+        await logOperation({
+          level: 'warn',
+          message:
+            `[video-content] 등장인물 이름 재사용 — ${reused.join(', ')} (최근 ${recentNames.length}건 이력과 겹침)`,
+          workspace,
+          account_id: accountId,
+        });
+      }
+    }
 
     await notifyTelegram(
       `📝 콘티 검토 대기\n계정: ${accountName}\n${WEB_BASE}/video-content?id=${historyId}`,

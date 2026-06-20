@@ -36,6 +36,8 @@ export interface VideoContiShot {
 export interface VideoConti {
   characters: Array<{
     label: string;
+    /** 등장인물 설정에 명시된 이름 — 본문에서 A/B 대신 사용 시 필수 */
+    name?: string;
     age: string;
     gender: string;
     hair: string;

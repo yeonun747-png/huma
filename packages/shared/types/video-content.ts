@@ -24,6 +24,8 @@ export interface HumaVideoContentHistory {
   cut_type?: string | null;
   duration?: number | null;
   character_used?: string | null;
+  /** v3.55 — 콘티에 부여된 등장인물 이름 (A/B 라벨 제외) */
+  character_names?: string[] | null;
   caption_youtube?: string | null;
   caption_tiktok?: string | null;
   caption_instagram?: string | null;

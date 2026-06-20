@@ -135,6 +135,21 @@ export function buildMinShotDurationRule(duration: number): string {
   );
 }
 
+export function buildCharacterNamingRule(): string {
+  return (
+    '등장인물은 A, B(또는 인물1, 인물2)로 지칭하거나, 혹은 시나리오 시작 시점에 이름을 부여하려면 등장인물 설정 섹션에 그 이름을 함께 기재해야 한다. ' +
+    '등장인물 설정 섹션에 없는 이름이 샷 본문에서 갑자기 등장해서는 안 된다. ' +
+    '한번 이름을 정했다면 첫 등장 샷부터 마지막 샷까지 동일한 이름을 일관되게 사용해야 한다.'
+  );
+}
+
+export function buildCameraActionNoRepeatRule(): string {
+  return (
+    '각 샷의 카메라 디렉션은 camera 라벨 부분에 한 번만 명시하고, action 본문에서 카메라 종류(와이드샷, 클로즈업 등)를 다시 반복해서 쓰지 않는다. ' +
+    'action 본문은 인물의 행동, 표정, 대사 중심으로 작성한다.'
+  );
+}
+
 function trimField(text: string | undefined | null): string {
   return (text ?? '').trim();
 }
@@ -297,16 +312,16 @@ export function formatContiTokenSettingsLog(): string {
 export function buildSentenceCompleteRule(): string {
   return (
     '각 샷 action/dialogue는 마침표·느낌표·물음표 또는 자연스러운 한글 종결어미로 끝나는 완결된 문장이어야 한다. ' +
-    '단어 중간에서 끊기거나 조사만 남은 채 끝나면 안 된다. camera 라벨과 action 첫 문장의 샷 종류(와이드/미디엄/클로즈업)는 일치해야 한다.'
+    '단어 중간에서 끊기거나 조사만 남은 채 끝나면 안 된다.'
   );
 }
 
 export function buildShotContentRule(): string {
   return (
-    `모든 샷 action 필드는 ${SHOT_CONTENT_MIN_CHARS}자 이상의 구체적 카메라·행동 묘사 필수. ` +
+    `모든 샷 action 필드는 ${SHOT_CONTENT_MIN_CHARS}자 이상의 구체적 행동·표정 묘사 필수. ` +
     `대사가 있는 샷은 dialogue도 ${SHOT_CONTENT_MIN_CHARS}자 이상. ` +
     `"장면 전개", "내용 없음", "TBD" 등 자리표시자 금지. ` +
-    `${buildAdjacentShotDistinctRule()} ${buildSentenceCompleteRule()}`
+    `${buildAdjacentShotDistinctRule()} ${buildSentenceCompleteRule()} ${buildCameraActionNoRepeatRule()} ${buildCharacterNamingRule()}`
   );
 }
 
@@ -362,22 +377,30 @@ function detectCameraKind(text: string): CameraKind | null {
   return null;
 }
 
-export function cameraLabelMatchesAction(shot: VideoContiShot): boolean {
+export function actionMentionsCameraKind(shot: VideoContiShot): boolean {
   const cameraKind = detectCameraKind(shot.camera ?? '');
-  const firstSentence = trimField(shot.action).split(/[.。!?\n]/)[0] ?? '';
-  const actionKind = detectCameraKind(firstSentence);
-  if (!cameraKind || !actionKind) return true;
-  return cameraKind === actionKind;
+  if (!cameraKind) return false;
+  return detectCameraKind(trimField(shot.action)) != null;
 }
 
-export function buildCameraMismatchFeedback(shotNumber: number): string {
+export function buildCameraInActionFeedback(shotNumber: number): string {
   return (
-    `샷 ${shotNumber}의 camera 라벨과 action 본문 첫 문장의 샷 종류가 일치하지 않는다, ` +
-    'camera와 action을 같은 샷 타입으로 맞춰 완결된 문장으로 다시 작성하라.'
+    `샷 ${shotNumber} action 본문에 카메라 종류(와이드/클로즈업 등)를 반복하지 말고, ` +
+    'camera 라벨에만 명시하고 본문은 인물 행동·표정 중심으로 완결된 문장으로 다시 작성하라.'
   );
 }
 
-export type RawShotQualityKind = 'empty' | 'incomplete' | 'camera_mismatch';
+/** @deprecated actionMentionsCameraKind 사용 */
+export function cameraLabelMatchesAction(shot: VideoContiShot): boolean {
+  return !actionMentionsCameraKind(shot);
+}
+
+/** @deprecated buildCameraInActionFeedback 사용 */
+export function buildCameraMismatchFeedback(shotNumber: number): string {
+  return buildCameraInActionFeedback(shotNumber);
+}
+
+export type RawShotQualityKind = 'empty' | 'incomplete' | 'camera_in_action';
 
 export interface RawShotQualityIssue {
   index: number;
@@ -408,8 +431,8 @@ export function findRawShotQualityIssues(conti: VideoConti): RawShotQualityIssue
       continue;
     }
 
-    if (!cameraLabelMatchesAction(shot)) {
-      issues.push({ index: i, kind: 'camera_mismatch', feedback: buildCameraMismatchFeedback(shotNumber) });
+    if (actionMentionsCameraKind(shot)) {
+      issues.push({ index: i, kind: 'camera_in_action', feedback: buildCameraInActionFeedback(shotNumber) });
     }
   }
   return issues;
@@ -422,6 +445,145 @@ export function findIncompleteLastShotIndex(conti: VideoConti): number | null {
     (issue) => issue.index === lastIdx && issue.kind === 'incomplete',
   );
   return issues.length ? lastIdx : null;
+}
+
+const GENERIC_CHARACTER_LABEL = /^(?:[A-Z]|인물?\d+)$/i;
+
+function isGenericCharacterLabel(label: string): boolean {
+  return GENERIC_CHARACTER_LABEL.test(label.trim());
+}
+
+const PERSON_NAME_STOPWORDS = new Set([
+  '남자',
+  '여자',
+  '사람',
+  '표정',
+  '고개',
+  '눈빛',
+  '카메라',
+  '와이드',
+  '미디엄',
+  '클로즈',
+  '롱샷',
+  '배경',
+  '화면',
+  '장면',
+  '대사',
+  '행동',
+  '손가',
+  '손을',
+  '눈을',
+  '입을',
+  '목소',
+  '한숨',
+  '미소',
+  '웃음',
+  '시선',
+  '거리',
+  '카페',
+  '공원',
+  '집안',
+  '창가',
+  '벤치',
+  '테이블',
+  '의자',
+  '문을',
+  '바닥',
+  '하늘',
+  '거울',
+  '전화',
+  '휴대',
+  '폰을',
+]);
+
+const PERSON_REFERENCE_PATTERNS = [
+  /([가-힣]{2,3})(?:이|가|은|는|을|를|와|과|의|에게|한테|께서)/g,
+  /([가-힣]{2,3})(?:야|아|씨|님)(?=[,.!?\s]|$)/g,
+];
+
+export const CHARACTER_NAME_MISMATCH_FEEDBACK =
+  '본문에서 사용한 인물 이름이 등장인물 설정 섹션에 반영되지 않았다. 등장인물 설정 섹션에 사용할 이름을 명시하고, 모든 샷에서 동일한 이름을 일관되게 사용해서 다시 작성하라.';
+
+export function extractAllowedCharacterIdentifiers(
+  conti: VideoConti,
+  extraAllowed: string[] = [],
+): Set<string> {
+  const allowed = new Set<string>();
+  for (const extra of extraAllowed) {
+    const t = trimField(extra);
+    if (t) allowed.add(t);
+  }
+  for (const ch of conti.characters) {
+    const label = trimField(ch.label);
+    if (label) allowed.add(label);
+    const name = trimField(ch.name);
+    if (name) allowed.add(name);
+    if (label && !isGenericCharacterLabel(label) && /^[가-힣]{2,4}$/.test(label)) {
+      allowed.add(label);
+    }
+  }
+  return allowed;
+}
+
+export function extractPersonReferenceNames(text: string): string[] {
+  const found = new Set<string>();
+  for (const pattern of PERSON_REFERENCE_PATTERNS) {
+    for (const match of text.matchAll(pattern)) {
+      const name = match[1];
+      if (name && !PERSON_NAME_STOPWORDS.has(name)) found.add(name);
+    }
+  }
+  return [...found];
+}
+
+export function findUnregisteredCharacterNames(
+  conti: VideoConti,
+  extraAllowed: string[] = [],
+): string[] {
+  const allowed = extractAllowedCharacterIdentifiers(conti, extraAllowed);
+  const unregistered = new Set<string>();
+  for (const shot of conti.shots) {
+    for (const field of [shot.action, shot.dialogue]) {
+      const text = trimField(field);
+      if (!text) continue;
+      for (const name of extractPersonReferenceNames(text)) {
+        if (!allowed.has(name)) unregistered.add(name);
+      }
+    }
+  }
+  return [...unregistered];
+}
+
+export function validateCharacterNameConsistency(
+  conti: VideoConti,
+  extraAllowed: string[] = [],
+): { ok: true } | { ok: false; feedback: string; unregisteredNames: string[] } {
+  const unregistered = findUnregisteredCharacterNames(conti, extraAllowed);
+  if (!unregistered.length) return { ok: true };
+  return {
+    ok: false,
+    feedback: `${CHARACTER_NAME_MISMATCH_FEEDBACK} (미등록 이름: ${unregistered.join(', ')})`,
+    unregisteredNames: unregistered,
+  };
+}
+
+/** A/B 라벨이 아닌 실제 부여 이름 — character_names 저장용 */
+export function extractCharacterNamesForStorage(
+  conti: VideoConti,
+  pananaCharacterName?: string,
+): string[] {
+  const names = new Set<string>();
+  const panana = trimField(pananaCharacterName);
+  if (panana) names.add(panana);
+  for (const ch of conti.characters) {
+    const name = trimField(ch.name);
+    if (name) names.add(name);
+    const label = trimField(ch.label);
+    if (label && !isGenericCharacterLabel(label) && /^[가-힣]{2,4}$/.test(label)) {
+      names.add(label);
+    }
+  }
+  return [...names];
 }
 
 export function validateCutTypeMatchesRawShots(

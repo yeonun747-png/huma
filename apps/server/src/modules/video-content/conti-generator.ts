@@ -9,9 +9,13 @@ import {
   findAdjacentDuplicateShotIndices,
   findRawShotQualityIssues,
   findIncompleteLastShotIndex,
+  validateCharacterNameConsistency,
+  extractCharacterNamesForStorage,
   buildMinShotDurationRule,
   buildShotContentRule,
   buildSentenceCompleteRule,
+  buildCharacterNamingRule,
+  buildCameraActionNoRepeatRule,
   buildNoDuplicateFillRule,
   buildEmptyShotContentFeedback,
   buildAdjacentDuplicateFeedback,
@@ -39,6 +43,8 @@ export interface ContiGenerationResult extends VideoConti {
   contentWarnings?: string[];
   /** 마지막 샷 문장 미완결 — max_tokens 부족 신호 */
   lastShotIncompleteDetected?: boolean;
+  /** A/B 라벨 제외 실제 부여 이름 — history.character_names 저장용 */
+  characterNames?: string[];
 }
 
 interface ContiFoundation {
@@ -162,11 +168,14 @@ ${cutRuleBlock}${pastBlock}${feedbackBlock}
 [${conditions.hookType}] 방식의 펀치라인이 터지도록 이야기를 설계.
 location_keyword와 time_of_day도 새로 창작."
 
+등장인물 이름 규칙:
+${buildCharacterNamingRule()}
+
 JSON 스키마:
 {
   "locationKeyword": "string",
   "timeOfDay": "string",
-  "characters": [{"label":"A","age":"30대","gender":"여","hair":"...","outfit":"...","shoes":"..."}],
+  "characters": [{"label":"A","name":"민수(선택)","age":"30대","gender":"여","hair":"...","outfit":"...","shoes":"..."}],
   "location": "구체적 장소 묘사",
   "lighting": "조명",
   "timeOfDayVisual": "시각적 시간대",
@@ -248,6 +257,8 @@ ${existing.join('\n')}
 
 ${buildShotFillPrompt(shotNumbers)}
 ${buildSentenceCompleteRule()}
+${buildCameraActionNoRepeatRule()}
+${buildCharacterNamingRule()}
 
 JSON:
 {
@@ -514,12 +525,21 @@ export async function generateConti(params: PromptContext): Promise<ContiGenerat
   lastShotIncompleteDetected =
     lastShotIncompleteDetected || findIncompleteLastShotIndex(conti) != null;
 
+  const extraAllowedNames = params.conditions.characterName ? [params.conditions.characterName] : [];
+  const nameCheck = validateCharacterNameConsistency(conti, extraAllowedNames);
+  if (!nameCheck.ok) {
+    throw new ContiValidationError(nameCheck.feedback);
+  }
+
+  const characterNames = extractCharacterNamesForStorage(conti, params.conditions.characterName);
+
   return {
     ...conti,
     locationKeyword: foundation.locationKeyword,
     timeOfDay: conti.timeOfDay,
     contentWarnings: contentWarnings.length ? contentWarnings : undefined,
     lastShotIncompleteDetected: lastShotIncompleteDetected || undefined,
+    characterNames: characterNames.length ? characterNames : undefined,
   };
 }
 
