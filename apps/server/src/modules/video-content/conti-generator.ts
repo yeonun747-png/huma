@@ -15,6 +15,7 @@ import {
   buildMultiShotCompositionGuide,
   buildShotContentRule,
   buildScreenTextRenderingRule,
+  buildDialogueLengthRule,
   buildPunchlineClarityRule,
   buildSingleShotFoundationCutRule,
   buildMultiShotFoundationCutRule,
@@ -280,6 +281,7 @@ ${existing.join('\n')}
 
 ${buildShotFillPrompt(shotNumbers)}
 ${buildScreenTextRenderingRule()}
+${buildDialogueLengthRule()}
 ${buildPunchlineClarityRule()}
 ${buildSentenceCompleteRule()}
 ${buildCameraActionNoRepeatRule()}

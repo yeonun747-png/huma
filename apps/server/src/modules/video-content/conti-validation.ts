@@ -1,5 +1,10 @@
 import type { VideoConti, VideoContiShot } from './types.js';
 import {
+  buildDialogueLengthRule,
+  findDialogueTooLongIssue,
+  minShotDurationForDialogue,
+} from './dialogue-timing.js';
+import {
   actionDescribesOnScreenText,
   buildOnScreenTextFeedback,
   buildScreenTextRenderingRule,
@@ -19,6 +24,17 @@ export {
   actionDescribesOnScreenText,
   buildOnScreenTextFeedback,
 } from './screen-text-constraint.js';
+
+export {
+  DIALOGUE_MAX_CHARS_PER_SEC,
+  countDialogueQuotedChars,
+  dialogueCharsPerSec,
+  isDialogueTooLongForShot,
+  buildDialogueLengthRule,
+  buildDialogueTooLongFeedback,
+  findDialogueTooLongIssue,
+  minShotDurationForDialogue,
+} from './dialogue-timing.js';
 
 export class ContiValidationError extends Error {
   readonly maxAttempts: number;
@@ -388,6 +404,7 @@ export function buildShotContentRule(): string {
     `대사가 있는 샷은 dialogue도 ${SHOT_CONTENT_MIN_CHARS}자 이상. ` +
     `"장면 전개", "내용 없음", "TBD" 등 자리표시자 금지. ` +
     `${buildScreenTextRenderingRule()} ` +
+    `${buildDialogueLengthRule()} ` +
     `${buildPunchlineClarityRule()} ` +
     `${buildAdjacentShotDistinctRule()} ${buildSentenceCompleteRule()} ${buildCameraActionNoRepeatRule()} ${buildCharacterNamingRule()}`
   );
@@ -478,6 +495,7 @@ export type RawShotQualityKind =
   | 'incomplete'
   | 'camera_in_action'
   | 'on_screen_text'
+  | 'dialogue_too_long'
   | 'punchline_clarity';
 
 export interface RawShotQualityIssue {
@@ -588,6 +606,11 @@ export function findRawShotQualityIssues(conti: VideoConti): RawShotQualityIssue
         kind: 'on_screen_text',
         feedback: buildOnScreenTextFeedback(shotNumber),
       });
+    }
+
+    const dialogueIssue = findDialogueTooLongIssue(shot, i);
+    if (dialogueIssue) {
+      issues.push(dialogueIssue);
     }
   }
 
@@ -821,6 +844,14 @@ export function findPunchlineShotIndex(shots: VideoContiShot[]): number {
   return last;
 }
 
+function resolvePunchlineMinDurationSec(conti: VideoConti, fallbackSec = PUNCHLINE_MIN_DURATION_SEC): number {
+  const idx = findPunchlineShotIndex(conti.shots);
+  if (idx < 0) return fallbackSec;
+  const dialogue = trimField(conti.shots[idx]!.dialogue);
+  if (!dialogue) return fallbackSec;
+  return minShotDurationForDialogue(dialogue, fallbackSec);
+}
+
 export function validatePunchlineShotMinDuration(
   conti: VideoConti,
   minSec = PUNCHLINE_MIN_DURATION_SEC,
@@ -828,32 +859,34 @@ export function validatePunchlineShotMinDuration(
   const idx = findPunchlineShotIndex(conti.shots);
   if (idx < 0) return { ok: true };
 
+  const requiredSec = resolvePunchlineMinDurationSec(conti, minSec);
   const dur = shotDurationSec(conti.shots[idx]!);
-  if (dur >= minSec) return { ok: true };
+  if (dur >= requiredSec) return { ok: true };
 
   return {
     ok: false,
     feedback:
-      `펀치라인이 들어가는 샷(샷${idx + 1})은 대사를 끝까지 전달할 수 있도록 최소 ${minSec}초를 확보하라. ` +
-      `현재 ${dur}초로 부족하다. 다른 샷 시간을 줄여 펀치라인 샷에 ${minSec}초 이상 배분하라.`,
+      `펀치라인이 들어가는 샷(샷${idx + 1})은 대사를 끝까지 전달할 수 있도록 최소 ${requiredSec}초를 확보하라. ` +
+      `현재 ${dur}초로 부족하다. 다른 샷 시간을 줄여 펀치라인 샷에 ${requiredSec}초 이상 배분하라.`,
   };
 }
 
-/** 총 길이 유지 — 펀치라인 샷에 최소 minSec 확보 (다른 샷에서 차감) */
+/** 총 길이 유지 — 펀치라인 샷에 대사 길이에 맞는 최소 시간 확보 (다른 샷에서 차감) */
 export function enforcePunchlineShotMinDuration(conti: VideoConti, minSec = PUNCHLINE_MIN_DURATION_SEC): VideoConti {
   if (!conti.shots.length) return conti;
 
   const idx = findPunchlineShotIndex(conti.shots);
   if (idx < 0) return conti;
 
+  const requiredSec = resolvePunchlineMinDurationSec(conti, minSec);
   const durations = conti.shots.map((s) => shotDurationSec(s));
   const total = normalizeVideoDurationSec(conti.duration);
 
-  if (durations[idx]! >= minSec) {
+  if (durations[idx]! >= requiredSec) {
     return rebuildShotsFromDurations(conti, durations, total);
   }
 
-  let need = minSec - durations[idx]!;
+  let need = requiredSec - durations[idx]!;
   const donors = durations
     .map((d, i) => ({ i, d }))
     .filter((x) => x.i !== idx && x.d > 0)
