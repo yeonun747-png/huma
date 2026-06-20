@@ -374,12 +374,21 @@ export function buildSentenceCompleteRule(): string {
   );
 }
 
+export function buildPunchlineClarityRule(): string {
+  return (
+    '펀치라인(마지막 1~2샷)은 반전·놀람·웃음의 이유가 시청자에게 명확히 전달되어야 한다. ' +
+    '마지막 샷이 표정·동작만으로 끝나고 직전 샷들의 시각적 단서만으로는 "그래서 뭐가 반전이었지?"가 헷갈린다면, ' +
+    '마지막 또는 직전 샷에 짧은 대사를 넣어 반전 의미를 명확히 설명하라 (예: "어? 이 슬리퍼 내 거 아닌데?").'
+  );
+}
+
 export function buildShotContentRule(): string {
   return (
     `모든 샷 action 필드는 ${SHOT_CONTENT_MIN_CHARS}자 이상의 구체적 행동·표정 묘사 필수. ` +
     `대사가 있는 샷은 dialogue도 ${SHOT_CONTENT_MIN_CHARS}자 이상. ` +
     `"장면 전개", "내용 없음", "TBD" 등 자리표시자 금지. ` +
     `${buildScreenTextRenderingRule()} ` +
+    `${buildPunchlineClarityRule()} ` +
     `${buildAdjacentShotDistinctRule()} ${buildSentenceCompleteRule()} ${buildCameraActionNoRepeatRule()} ${buildCharacterNamingRule()}`
   );
 }
@@ -464,12 +473,85 @@ export function buildCameraMismatchFeedback(shotNumber: number): string {
   return buildCameraInActionFeedback(shotNumber);
 }
 
-export type RawShotQualityKind = 'empty' | 'incomplete' | 'camera_in_action' | 'on_screen_text';
+export type RawShotQualityKind =
+  | 'empty'
+  | 'incomplete'
+  | 'camera_in_action'
+  | 'on_screen_text'
+  | 'punchline_clarity';
 
 export interface RawShotQualityIssue {
   index: number;
   kind: RawShotQualityKind;
   feedback: string;
+}
+
+function normalizeDialogueBody(dialogue: string): string {
+  return trimField(dialogue)
+    .replace(/^[AB]:\s*/, '')
+    .replace(/^["「『]|["」』]$/g, '')
+    .trim();
+}
+
+function isSubstantiveTwistDialogue(dialogue: string): boolean {
+  const body = normalizeDialogueBody(dialogue);
+  if (body.length < 6) return false;
+  if (/^(?:\.{2,}|…+|그래서\.?|응\.?|네\.?|음\.?)$/u.test(body)) return false;
+  return /(?:어\?|헐|뭐|이거|내\s|네\s|잖아|아니|진짜|슬리퍼|명찰|스티커|내\s*거|네\s*거|누구|남의|다른\s)/u.test(
+    body,
+  );
+}
+
+function isSilentPunchlineAction(action: string): boolean {
+  const text = trimField(action);
+  if (!text) return false;
+  const hasReaction = /(?:내려다보|굳|멍|정지|깜빡|벌린|입을|시선|무표정|멈춰)/u.test(text);
+  const hasVerbalInAction = /(?:말(?:하|을|함)|외침|중얼|속삭|(?:「|"|'|A:|B:))/u.test(text);
+  return hasReaction && !hasVerbalInAction;
+}
+
+export function buildPunchlineClarityFeedback(lastShotNumber: number, prevShotNumber?: number): string {
+  const prevHint =
+    prevShotNumber != null
+      ? `직전 샷 ${prevShotNumber}의 시각적 단서만으로는 반전 의미가 불분명하다. `
+      : '';
+  return (
+    `${prevHint}샷 ${lastShotNumber}(펀치라인)이 표정·동작만으로 끝나 반전 의미가 명확하지 않다. ` +
+    '시청자가 "그래서 뭐가 반전이었지?"라고 헷갈리지 않도록, 마지막 또는 직전 샷에 짧은 대사를 추가해 반전을 직접 설명하라. ' +
+    '예: "어? 이 슬리퍼 내 거 아닌데, ○○ 거잖아."'
+  );
+}
+
+export function findPunchlineClarityIssue(conti: VideoConti): RawShotQualityIssue | null {
+  const shots = conti.shots;
+  if (shots.length < 2) return null;
+
+  const lastIdx = shots.length - 1;
+  const prevIdx = lastIdx - 1;
+  const last = shots[lastIdx]!;
+  const prev = shots[prevIdx]!;
+
+  const lastDialogue = trimField(last.dialogue);
+  const prevDialogue = trimField(prev.dialogue);
+
+  if (lastDialogue && isSubstantiveTwistDialogue(lastDialogue)) return null;
+  if (prevDialogue && isSubstantiveTwistDialogue(prevDialogue)) return null;
+
+  const setupViaReadableVisual =
+    actionDescribesOnScreenText(prev.action) || actionDescribesOnScreenText(last.action);
+  const lastIsSilentPunchline = !lastDialogue && isSilentPunchlineAction(last.action);
+  const punchlineRegionLacksExplainingDialogue =
+    !isSubstantiveTwistDialogue(lastDialogue) && !isSubstantiveTwistDialogue(prevDialogue);
+
+  if (punchlineRegionLacksExplainingDialogue && (setupViaReadableVisual || lastIsSilentPunchline)) {
+    return {
+      index: lastIdx,
+      kind: 'punchline_clarity',
+      feedback: buildPunchlineClarityFeedback(lastIdx + 1, prevIdx + 1),
+    };
+  }
+
+  return null;
 }
 
 export function findRawShotQualityIssues(conti: VideoConti): RawShotQualityIssue[] {
@@ -508,6 +590,12 @@ export function findRawShotQualityIssues(conti: VideoConti): RawShotQualityIssue
       });
     }
   }
+
+  const punchlineIssue = findPunchlineClarityIssue(conti);
+  if (punchlineIssue && !issues.some((issue) => issue.kind === 'punchline_clarity')) {
+    issues.push(punchlineIssue);
+  }
+
   return issues;
 }
 
