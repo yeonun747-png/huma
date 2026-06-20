@@ -10,6 +10,9 @@ import {
   EVOLINK_MAX_SHOTS,
   resolveMultiShotCount,
   buildMultiShotTimeline,
+  snapShotDurationsToTotal,
+  normalizeVideoDurationSec,
+  SHOT_TIMING_MIN_SEC,
 } from './shot-timing.js';
 import { isInvalidShotContentField, findPunchlineShotIndex } from './conti-validation.js';
 import {
@@ -70,12 +73,18 @@ function shotDurationSec(shot: VideoContiShot): number {
  * `镜头 n, m, words;` — n=샷번호, m=해당 샷 길이(초), 합계=duration
  */
 export function buildEvoLinkMultiShotPrompt(conti: VideoConti, duration: number): string {
+  const totalSec = normalizeVideoDurationSec(duration);
   const nameToLabel = buildCharacterNameToLabelMap(conti);
   const scene = `세로 9:16, ${conti.location}, ${conti.lighting}, ${conti.timeOfDay}. 등장인물(고정): ${formatEvoLinkCharacterBlock(conti, nameToLabel)}. 한국어 대사·자연스러운 오디오.`;
   const shots = conti.shots.slice(0, EVOLINK_MAX_SHOTS);
+  const segmentSecs = snapShotDurationsToTotal(
+    shots.map((shot) => shotDurationSec(shot)),
+    totalSec,
+    SHOT_TIMING_MIN_SEC,
+  );
 
   const segments = shots.map((shot, i) => {
-    const sec = Math.max(1, Math.round(shotDurationSec(shot) || duration / Math.max(shots.length, 1)));
+    const sec = segmentSecs[i] ?? SHOT_TIMING_MIN_SEC;
     const words = shotWords(shot, nameToLabel);
     return `镜头 ${i + 1}, ${sec}, ${words}`;
   });
@@ -124,7 +133,7 @@ export async function createEvoLinkVideoTask(params: {
   const body: Record<string, unknown> = {
     model: MODEL,
     prompt: params.prompt,
-    duration: params.duration,
+    duration: normalizeVideoDurationSec(params.duration),
     aspect_ratio: '9:16',
     quality: params.quality ?? '720p',
   };
@@ -272,8 +281,9 @@ function countSubstantiveShots(src: VideoContiShot[]): number {
 /** LLM 샷 수(4~6)를 유지하며 타임라인·최소 길이만 정규화 — 6슬롯 강제 없음 */
 export function normalizeMultiShotConti(conti: VideoConti, duration: number): VideoConti {
   const src = conti.shots.length > 0 ? conti.shots : [];
-  const shotCount = resolveMultiShotCount(countSubstantiveShots(src), duration);
-  const timeline = buildMultiShotTimeline(duration, shotCount);
+  const totalSec = normalizeVideoDurationSec(duration);
+  const shotCount = resolveMultiShotCount(countSubstantiveShots(src), totalSec);
+  const timeline = buildMultiShotTimeline(totalSec, shotCount);
 
   const shots = timeline.map((t, i) => {
     const mapped = src[mapSourceShotIndex(i, shotCount, src.length)];
@@ -288,7 +298,7 @@ export function normalizeMultiShotConti(conti: VideoConti, duration: number): Vi
     };
   });
 
-  return { ...conti, duration, cutType: 'multi_shot', shots };
+  return { ...conti, duration: totalSec, cutType: 'multi_shot', shots };
 }
 
 function mergeSingleShotAction(src: VideoContiShot[], duration: number): string {

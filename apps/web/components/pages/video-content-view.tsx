@@ -1,22 +1,29 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { HumaAccount, HumaVideoContentHistory } from '@huma/shared';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { getAccessibleBusinessUnits } from '@/lib/admin-scope';
 import { WORKSPACES } from '@/lib/constants';
+import { getLogSocket } from '@/lib/socket';
 import {
   VIDEO_CONTENT_STATUS_LABEL,
   VIDEO_CONTENT_TAB_LABEL,
   countByVideoContentTab,
   filterByVideoContentTab,
   isDeletableVideoContent,
+  isVideoProgressStatus,
   parseContiPreview,
   videoContentTabOf,
   type VideoContentTab,
 } from '@/lib/video-content-status';
+import {
+  buildContiTargetOptions,
+  resolveContiGenerationAccountId,
+  videoContentDisplayName,
+} from '@/lib/video-content-targets';
 import { ShortformVideoModelSettings } from '@/components/settings/shortform-video-model-settings';
 import { ContiPreview } from '@/components/video/conti-preview';
 import { MGrid, MPanel, MTag } from '@/components/mockup/primitives';
@@ -272,8 +279,8 @@ export function VideoContentView() {
   const units = useMemo(() => getAccessibleBusinessUnits(admin), [admin]);
   const [accounts, setAccounts] = useState<HumaAccount[]>([]);
   const [items, setItems] = useState<HumaVideoContentHistory[]>([]);
-  const [filterAccount, setFilterAccount] = useState('');
   const [filterWorkspace, setFilterWorkspace] = useState('');
+  const [contiTarget, setContiTarget] = useState('');
   const [activeTab, setActiveTab] = useState<VideoContentTab>('review');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<HumaVideoContentHistory | null>(null);
@@ -281,23 +288,50 @@ export function VideoContentView() {
   const [creatingConti, setCreatingConti] = useState(false);
   const [rendering, setRendering] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const selectedStatusRef = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     const [accs, list] = await Promise.all([
       api.accounts(),
       api.videoContentList({
-        account_id: filterAccount || undefined,
         workspace: filterWorkspace || undefined,
       }),
     ]);
     setAccounts(accs.filter((a) => a.account_type === 'posting'));
     setItems(list);
-  }, [filterAccount, filterWorkspace]);
+    return list;
+  }, [filterWorkspace]);
+
+  const hasProgressItems = useMemo(
+    () => items.some((i) => isVideoProgressStatus(i.status)),
+    [items],
+  );
 
   useEffect(() => {
     void load().catch(() => {});
-    const t = setInterval(() => void load().catch(() => {}), 15_000);
+    const pollMs = hasProgressItems ? 2_000 : 10_000;
+    const t = setInterval(() => void load().catch(() => {}), pollMs);
     return () => clearInterval(t);
+  }, [load, hasProgressItems]);
+
+  useEffect(() => {
+    const socket = getLogSocket();
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+    const onLog = (payload: { message?: string }) => {
+      const msg = payload?.message ?? '';
+      if (!msg.includes('[video-content]')) return;
+      if (debounce) clearTimeout(debounce);
+      debounce = setTimeout(() => {
+        void load().catch(() => {});
+      }, 250);
+    };
+    socket.connect();
+    socket.on('log', onLog);
+    socket.on('connect', () => void load().catch(() => {}));
+    return () => {
+      if (debounce) clearTimeout(debounce);
+      socket.off('log', onLog);
+    };
   }, [load]);
 
   useEffect(() => {
@@ -313,46 +347,83 @@ export function VideoContentView() {
 
   useEffect(() => {
     if (!selectedId) {
-      setDetail(null);
+      selectedStatusRef.current = null;
       return;
     }
     setLoadingDetail(true);
     void api
       .videoContentGet(selectedId)
-      .then(setDetail)
+      .then((row) => {
+        setDetail(row);
+        selectedStatusRef.current = row.status;
+      })
       .catch(() => setDetail(null))
       .finally(() => setLoadingDetail(false));
   }, [selectedId]);
 
-  const accountMap = useMemo(() => new Map(accounts.map((a) => [a.id, a.name])), [accounts]);
+  useEffect(() => {
+    if (!selectedId) return;
+    const item = items.find((i) => i.id === selectedId);
+    if (!item) return;
+
+    const prev = selectedStatusRef.current;
+    if (prev && prev !== item.status) {
+      setActiveTab(videoContentTabOf(item.status));
+      void api
+        .videoContentGet(selectedId)
+        .then((row) => {
+          setDetail(row);
+          selectedStatusRef.current = row.status;
+        })
+        .catch(() => {});
+    } else if (!prev) {
+      selectedStatusRef.current = item.status;
+    }
+  }, [items, selectedId]);
+
+  const contiTargetOptions = useMemo(
+    () => buildContiTargetOptions(accounts, filterWorkspace),
+    [accounts, filterWorkspace],
+  );
+
+  useEffect(() => {
+    if (contiTarget && contiTargetOptions.some((o) => o.value === contiTarget)) return;
+    setContiTarget(contiTargetOptions[0]?.value ?? '');
+  }, [contiTargetOptions, contiTarget]);
+
   const tabCounts = useMemo(() => countByVideoContentTab(items), [items]);
   const filteredItems = useMemo(() => filterByVideoContentTab(items, activeTab), [items, activeTab]);
 
   useEffect(() => {
+    if (selectedId && items.some((i) => i.id === selectedId)) return;
     if (!filteredItems.length) {
       setSelectedId(null);
       return;
     }
-    if (!selectedId || !filteredItems.some((i) => i.id === selectedId)) {
-      setSelectedId(filteredItems[0]!.id);
-    }
-  }, [filteredItems, selectedId]);
+    setSelectedId(filteredItems[0]!.id);
+  }, [filteredItems, selectedId, items]);
 
-  const selectedItem = filteredItems.find((i) => i.id === selectedId) ?? items.find((i) => i.id === selectedId);
+  const selectedItem = selectedId ? items.find((i) => i.id === selectedId) ?? null : null;
 
   const handleCreateConti = async () => {
-    if (!filterAccount) {
-      window.alert('콘티를 생성할 계정을 선택하세요.');
+    const accountId = resolveContiGenerationAccountId(contiTarget, accounts);
+    if (!accountId) {
+      window.alert('콘티를 생성할 대상을 선택하세요.');
       return;
     }
-    const name = accountMap.get(filterAccount) ?? filterAccount.slice(0, 8);
-    if (!window.confirm(`${name} 계정으로 콘티 1건을 생성합니다.`)) return;
+    const label =
+      contiTargetOptions.find((o) => o.value === contiTarget)?.label ??
+      videoContentDisplayName(accountId, accounts);
+    if (!window.confirm(`${label}(으)로 콘티 1건을 생성합니다.`)) return;
     setCreatingConti(true);
     try {
-      await api.generateConti(filterAccount);
-      window.alert('콘티 생성이 시작되었습니다. 완료되면 「검토 대기」 탭에서 확인하세요.');
+      await api.generateConti(accountId);
+      const list = await load();
+      const newest = [...list]
+        .filter((i) => i.status === 'conti_generating')
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+      if (newest) setSelectedId(newest.id);
       setActiveTab('progress');
-      await load();
     } catch (e) {
       window.alert(e instanceof Error ? e.message : '콘티 생성 실패');
     } finally {
@@ -363,7 +434,7 @@ export function VideoContentView() {
   const handleDelete = async () => {
     if (!selectedId || !selectedItem) return;
     if (!isDeletableVideoContent(selectedItem.status)) return;
-    const name = accountMap.get(selectedItem.account_id) ?? selectedItem.account_id.slice(0, 8);
+    const name = videoContentDisplayName(selectedItem.account_id, accounts);
     const label = VIDEO_CONTENT_STATUS_LABEL[selectedItem.status] ?? selectedItem.status;
     if (
       !window.confirm(
@@ -391,9 +462,10 @@ export function VideoContentView() {
     setRendering(true);
     try {
       await api.renderVideoContent(selectedId);
-      window.alert('숏폼 영상 제작이 시작되었습니다.');
       setActiveTab('progress');
-      await load();
+      const list = await load();
+      const row = list.find((i) => i.id === selectedId);
+      if (row) selectedStatusRef.current = row.status;
     } catch (e) {
       window.alert(e instanceof Error ? e.message : '영상 제작 실패');
     } finally {
@@ -404,7 +476,7 @@ export function VideoContentView() {
   return (
     <div className="space-y-4 p-1">
       <p className="text-[12px] leading-relaxed text-huma-t3">
-        ① 계정 선택 → <strong className="text-huma-t2">콘티 생성</strong> (Sonnet) → ② 콘티 검토 →{' '}
+        ① 생성 대상 선택 → <strong className="text-huma-t2">콘티 생성</strong> (Sonnet) → ② 콘티 검토 →{' '}
         <strong className="text-huma-t2">숏폼 생성</strong> (EvoLink). 네이버 포스팅은{' '}
         <Link href="/queue" className="text-huma-acc hover:underline">
           포스팅 큐 관리
@@ -454,23 +526,21 @@ export function VideoContentView() {
             </select>
             <select
               className="m-model-select w-full"
-              value={filterAccount}
-              onChange={(e) => setFilterAccount(e.target.value)}
+              value={contiTarget}
+              onChange={(e) => setContiTarget(e.target.value)}
             >
-              <option value="">계정 선택 (콘티 생성용)</option>
-              {accounts
-                .filter((a) => !filterWorkspace || a.workspace === filterWorkspace)
-                .map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
+              <option value="">콘티 생성 대상</option>
+              {contiTargetOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
             </select>
             <div className="flex gap-2">
               <button
                 type="button"
                 className="btn-primary btn-sm flex-1"
-                disabled={!filterAccount || creatingConti}
+                disabled={!contiTarget || creatingConti}
                 onClick={() => void handleCreateConti()}
               >
                 {creatingConti ? '요청 중…' : '콘티 생성'}
@@ -511,7 +581,7 @@ export function VideoContentView() {
                     >
                       <div className="flex items-center justify-between gap-1">
                         <span className="truncate text-[11px] font-semibold text-huma-t">
-                          {accountMap.get(item.account_id) ?? item.account_id.slice(0, 6)}
+                          {videoContentDisplayName(item.account_id, accounts)}
                         </span>
                         <MTag tone={statusTone(item.status)} className="shrink-0 text-[9px]">
                           {VIDEO_CONTENT_STATUS_LABEL[item.status] ?? item.status}
@@ -547,7 +617,7 @@ export function VideoContentView() {
               <DetailPanel
                 item={selectedItem}
                 detail={detail}
-                accountName={accountMap.get(selectedItem.account_id)}
+                accountName={videoContentDisplayName(selectedItem.account_id, accounts)}
                 loadingDetail={loadingDetail}
                 rendering={rendering}
                 deleting={deleting}
@@ -559,7 +629,7 @@ export function VideoContentView() {
               <div className="py-16 text-center text-[12px] text-huma-t3">
                 왼쪽에서 작업을 선택하거나
                 <br />
-                계정을 고른 뒤 「콘티 생성」을 누르세요.
+                생성 대상을 고른 뒤 「콘티 생성」을 누르세요.
               </div>
             )}
           </div>

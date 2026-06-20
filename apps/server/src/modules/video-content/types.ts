@@ -1,8 +1,12 @@
 import type { Workspace } from '@huma/shared';
 import { EVOLINK_PROMPT_LENGTH_GUIDANCE } from './prompt-length.js';
-import { DEFAULT_MULTI_SHOT_COMPOSITION } from './shot-timing.js';
+import {
+  DEFAULT_MULTI_SHOT_COMPOSITION,
+  VIDEO_DURATION_MAX_SEC,
+  VIDEO_DURATION_MIN_SEC,
+} from './shot-timing.js';
 
-const DEFAULT_CUT_TYPE_RULE = `항상 multi_shot. 여러 컷(샷)으로 구성하고, 샷 개수는 ## 샷 구조 원칙에 맞게 4~6개 중 선택.`;
+const DEFAULT_CUT_TYPE_RULE = `항상 multi_shot. 여러 컷(샷)으로 구성하고, 샷 개수는 ## 샷 구조 원칙(11~12초 4~5개, 13~15초 5~6개)에 맞게 선택.`;
 
 const DEFAULT_SHOT_STRUCTURE = `${DEFAULT_MULTI_SHOT_COMPOSITION}
 
@@ -89,7 +93,12 @@ export interface PlatformCaptions {
   firstCommentX: string | null;
 }
 
-export const DURATION_OPTIONS = [9, 11, 13, 15] as const;
+export { VIDEO_DURATION_MIN_SEC, VIDEO_DURATION_MAX_SEC };
+
+export const DURATION_OPTIONS = Array.from(
+  { length: VIDEO_DURATION_MAX_SEC - VIDEO_DURATION_MIN_SEC + 1 },
+  (_, i) => VIDEO_DURATION_MIN_SEC + i,
+) as readonly number[];
 
 export const SUBTITLE_FONTS = ['Noto Sans KR Bold', 'Nanum Gothic Bold', 'Pretendard SemiBold', 'Apple SD Gothic Neo Bold'];
 export const SUBTITLE_POSITIONS = ['bottom_center', 'bottom_left', 'lower_third', 'center_lower'];

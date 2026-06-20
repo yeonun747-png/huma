@@ -17,7 +17,7 @@ export function ContiPreview({ conti }: { conti: ContiPreviewData }) {
         {conti.lighting ? <div>조명: {conti.lighting}</div> : null}
         {conti.timeOfDay ? <div>시간: {conti.timeOfDay}</div> : null}
         {conti.cutType ? <div>컷: {conti.cutType}</div> : null}
-        {conti.duration ? <div>길이: {conti.duration}s</div> : null}
+        {conti.duration ? <div>길이: {Math.round(conti.duration)}s</div> : null}
       </div>
 
       {conti.characters?.length ? (

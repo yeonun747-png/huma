@@ -11,6 +11,7 @@ import {
   EVOLINK_VIDEO_MODEL_ID,
   IMAGEN_PIPELINE_OPTIONS,
   PIPELINE_VIDEO_DURATION_OPTIONS,
+  normalizePipelineVideoDuration,
   PIPELINE_VIDEO_HINT,
   PIPELINE_VIDEO_QUALITY_OPTIONS,
   DEFAULT_PIPELINE_VIDEO_QUALITY,
@@ -115,11 +116,7 @@ export function VideoPipelineView() {
         const savedVid = normalizePipelineVideoSelect(String(settings.default_video_model ?? DEFAULT_VIDEO_MODEL));
         setVidSelect(savedVid);
         const savedDur = Number(settings.video_duration_sec);
-        setVideoDurationSec(
-          PIPELINE_VIDEO_DURATION_OPTIONS.includes(savedDur as (typeof PIPELINE_VIDEO_DURATION_OPTIONS)[number])
-            ? savedDur
-            : 15,
-        );
+        setVideoDurationSec(normalizePipelineVideoDuration(savedDur));
         const savedQ = String(settings.video_quality ?? settings.default_video_resolution ?? '720p');
         setVideoQuality(normalizePipelineVideoQuality(savedQ));
         const savedImg = String(settings.default_image_model ?? 'auto');

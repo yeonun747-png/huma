@@ -3,6 +3,7 @@ import { askClaudeWithModel } from '../../lib/anthropic-client.js';
 import { getMainClaudeModel } from '../../lib/ai-engine.js';
 import {
   enforcePunchlineShotMinDuration,
+  finalizeContiTimeline,
   validateCutTypeMatchesRawShots,
   validatePunchlineShotMinDuration,
   validateAllShotsMinDuration,
@@ -588,6 +589,7 @@ export async function generateConti(params: PromptContext): Promise<ContiGenerat
   contentWarnings.push(...cutEnsured.warnings);
 
   conti = enforcePunchlineShotMinDuration(conti);
+  conti = finalizeContiTimeline(conti, params.conditions.duration);
   const punchCheck = validatePunchlineShotMinDuration(conti);
   if (!punchCheck.ok) {
     contentWarnings.push(`펀치라인 샷 길이 부족(통과): ${punchCheck.feedback}`);

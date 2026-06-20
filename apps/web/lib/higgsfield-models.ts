@@ -19,7 +19,11 @@ export const IMAGE_MODELS = [
 export const EVOLINK_VIDEO_MODEL_ID = 'kling-v3-turbo-text-to-video' as const;
 export const EVOLINK_VIDEO_PRICE_PER_SEC_USD = 0.106;
 export const EVOLINK_VIDEO_1080P_MULTIPLIER = 1.25;
-export const PIPELINE_VIDEO_DURATION_OPTIONS = [9, 11, 13, 15] as const;
+export const PIPELINE_VIDEO_DURATION_MIN_SEC = 11;
+export const PIPELINE_VIDEO_DURATION_MAX_SEC = 15;
+export const PIPELINE_VIDEO_DURATION_OPTIONS = [
+  11, 12, 13, 14, 15,
+] as const;
 export type PipelineVideoDuration = (typeof PIPELINE_VIDEO_DURATION_OPTIONS)[number];
 export type PipelineVideoQuality = '720p' | '1080p';
 
@@ -90,6 +94,13 @@ export const PIPELINE_VIDEO_HINT =
 
 export function normalizePipelineVideoQuality(raw?: string | null): PipelineVideoQuality {
   return raw === '1080p' ? '1080p' : '720p';
+}
+
+export function normalizePipelineVideoDuration(raw?: number | null): PipelineVideoDuration {
+  const n = Math.round(Number(raw) || PIPELINE_VIDEO_DURATION_MAX_SEC);
+  if (n <= PIPELINE_VIDEO_DURATION_MIN_SEC) return PIPELINE_VIDEO_DURATION_MIN_SEC;
+  if (n >= PIPELINE_VIDEO_DURATION_MAX_SEC) return PIPELINE_VIDEO_DURATION_MAX_SEC;
+  return n as PipelineVideoDuration;
 }
 
 export function pipelineVideoPricePerSec(quality: PipelineVideoQuality): number {

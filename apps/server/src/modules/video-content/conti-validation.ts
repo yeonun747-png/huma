@@ -3,6 +3,8 @@ import {
   EVOLINK_MAX_SHOTS,
   getShotCountBounds,
   DEFAULT_MULTI_SHOT_COMPOSITION,
+  snapShotDurationsToTotal,
+  normalizeVideoDurationSec,
 } from './shot-timing.js';
 
 export class ContiValidationError extends Error {
@@ -94,27 +96,15 @@ export function validateAllShotsMinDuration(
 }
 
 export function buildDurationShotCountGuide(duration: number): string {
-  const guides: Record<number, string> = {
-    9: '9초 영상: 샷 개수 4~5개 권장 (샷당 평균 약 2초 확보)',
-    11: '11초 영상: 샷 개수 4~6개',
-    13: '13초 영상: 샷 개수 5~6개',
-    15: '15초 영상: 샷 개수 5~6개',
-  };
-  return guides[duration] ?? `${duration}초 영상: 샷 개수를 줄여 샷당 최소 ${SHOT_MIN_DURATION_SEC}초 이상 확보`;
+  const bounds = getShotCountBounds(duration);
+  const avg = (duration / bounds.max).toFixed(1);
+  return `${duration}초 영상: 샷 개수 ${bounds.min}~${bounds.max}개 권장 (샷당 평균 약 ${avg}초 확보)`;
 }
-
-const SHOT_COUNT_LOWER_BOUNDS: Record<number, number> = {
-  9: 4,
-  11: 4,
-  13: 5,
-  15: 5,
-};
 
 /** 시나리오가 빈약할 때 권장 범위 하한 우선 */
 export function buildShotCountPreferLowerGuide(duration: number): string {
   const base = buildDurationShotCountGuide(duration);
-  const lower = SHOT_COUNT_LOWER_BOUNDS[duration];
-  if (!lower) return base;
+  const lower = getShotCountBounds(duration).min;
   return (
     `${base} 시나리오 내용이 충분히 풍부하지 않으면 권장 범위 하한(${lower}개)을 우선 사용하고, ` +
     '인접 샷 내용 복제로 시간을 채우지 말 것.'
@@ -746,7 +736,7 @@ export function enforcePunchlineShotMinDuration(conti: VideoConti, minSec = PUNC
   if (idx < 0) return conti;
 
   const durations = conti.shots.map((s) => shotDurationSec(s));
-  const total = durations.reduce((a, b) => a + b, 0) || conti.duration;
+  const total = normalizeVideoDurationSec(conti.duration);
 
   if (durations[idx]! >= minSec) {
     return rebuildShotsFromDurations(conti, durations, total);
@@ -771,14 +761,28 @@ export function enforcePunchlineShotMinDuration(conti: VideoConti, minSec = PUNC
   return rebuildShotsFromDurations(conti, durations, total);
 }
 
+/** endSec 합 = 정수 targetDuration — 펀치라인 보정·LLM 타임라인 후 호출 */
+export function finalizeContiTimeline(conti: VideoConti, targetDuration: number): VideoConti {
+  if (!conti.shots.length) {
+    return { ...conti, duration: normalizeVideoDurationSec(targetDuration) };
+  }
+  return rebuildShotsFromDurations(
+    conti,
+    conti.shots.map((s) => shotDurationSec(s)),
+    targetDuration,
+  );
+}
+
 function rebuildShotsFromDurations(
   conti: VideoConti,
   durations: number[],
   totalDuration: number,
 ): VideoConti {
+  const target = normalizeVideoDurationSec(totalDuration);
+  const snapped = snapShotDurationsToTotal(durations, target, SHOT_MIN_DURATION_SEC);
   let cursor = 0;
   const shots = conti.shots.map((s, i) => {
-    const durationSec = durations[i] ?? 0;
+    const durationSec = snapped[i] ?? SHOT_MIN_DURATION_SEC;
     const startSec = cursor;
     cursor += durationSec;
     return {
@@ -789,6 +793,5 @@ function rebuildShotsFromDurations(
     };
   });
 
-  const duration = totalDuration > 0 ? totalDuration : cursor;
-  return { ...conti, duration, shots };
+  return { ...conti, duration: target, shots };
 }

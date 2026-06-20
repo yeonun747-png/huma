@@ -42,6 +42,12 @@ export function countByVideoContentTab(items: HumaVideoContentHistory[]): Record
 
 const DELETABLE_STATUSES = ['conti_ready', 'completed', 'failed', 'on_hold'] as const;
 
+export const VIDEO_PROGRESS_STATUSES = ['conti_generating', 'rendering', 'generating'] as const;
+
+export function isVideoProgressStatus(status: string): boolean {
+  return (VIDEO_PROGRESS_STATUSES as readonly string[]).includes(status);
+}
+
 export function isDeletableVideoContent(status: string): boolean {
   return (DELETABLE_STATUSES as readonly string[]).includes(status);
 }

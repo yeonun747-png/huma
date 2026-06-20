@@ -5,10 +5,10 @@ import { api } from '@/lib/api';
 import {
   DEFAULT_PIPELINE_VIDEO_QUALITY,
   DEFAULT_VIDEO_MODEL,
-  PIPELINE_VIDEO_DURATION_OPTIONS,
   type ImagenPipelineChoice,
   type PipelineVideoQuality,
   normalizeImagenPipelineChoice,
+  normalizePipelineVideoDuration,
   normalizePipelineVideoQuality,
   normalizePipelineVideoSelect,
   pipelineVideoFromSelect,
@@ -34,11 +34,7 @@ export function usePipelineModelSettings() {
       .then((hg) => {
         const settings = hg as Record<string, unknown>;
         const savedDur = Number(settings.video_duration_sec);
-        setVideoDurationSec(
-          PIPELINE_VIDEO_DURATION_OPTIONS.includes(savedDur as (typeof PIPELINE_VIDEO_DURATION_OPTIONS)[number])
-            ? savedDur
-            : 15,
-        );
+        setVideoDurationSec(normalizePipelineVideoDuration(savedDur));
         const savedQ = String(settings.video_quality ?? settings.default_video_resolution ?? '720p');
         setVideoQuality(normalizePipelineVideoQuality(savedQ));
         normalizePipelineVideoSelect(String(settings.default_video_model ?? DEFAULT_VIDEO_MODEL));

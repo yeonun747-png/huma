@@ -591,6 +591,13 @@ export async function runContiGeneration(accountId: string): Promise<string> {
       workspace,
     );
 
+    await logOperation({
+      level: 'info',
+      message: `[video-content] 콘티 검토 대기 — history=${historyId}`,
+      workspace,
+      account_id: accountId,
+    });
+
     return historyId;
   } catch (err) {
     const msg = (err as Error).message;
