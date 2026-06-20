@@ -1,4 +1,9 @@
 import type { VideoConti, VideoContiShot } from './types.js';
+import {
+  EVOLINK_MAX_SHOTS,
+  getShotCountBounds,
+  DEFAULT_MULTI_SHOT_COMPOSITION,
+} from './shot-timing.js';
 
 export class ContiValidationError extends Error {
   readonly maxAttempts: number;
@@ -135,6 +140,18 @@ export function buildMinShotDurationRule(duration: number): string {
   return (
     `모든 개별 샷은 최소 ${SHOT_MIN_DURATION_SEC}초 이상이어야 한다. ` +
     `0초 또는 1초 미만의 샷 금지. ${buildShotCountPreferLowerGuide(duration)}`
+  );
+}
+
+/** multi_shot 2단계 프롬프트 — 고정 N샷 템플릿 대신 구성 원칙 */
+export function buildMultiShotCompositionGuide(duration: number): string {
+  const bounds = getShotCountBounds(duration);
+  return (
+    `${DEFAULT_MULTI_SHOT_COMPOSITION}\n` +
+    `이번 ${duration}초 영상: 샷 개수 ${bounds.min}~${bounds.max}개 중 시나리오에 맞게 선택 (API 상한 ${EVOLINK_MAX_SHOTS}개).\n` +
+    `${buildMinShotDurationRule(duration)}\n` +
+    `${buildNoDuplicateFillRule()}\n` +
+    `${buildAdjacentShotDistinctRule()}`
   );
 }
 
@@ -468,7 +485,7 @@ export function findRawShotQualityIssues(conti: VideoConti): RawShotQualityIssue
       continue;
     }
 
-    if (actionMentionsCameraKind(shot)) {
+    if (actionMentionsCameraKind(shot) && conti.cutType !== 'single_shot') {
       issues.push({ index: i, kind: 'camera_in_action', feedback: buildCameraInActionFeedback(shotNumber) });
     }
   }

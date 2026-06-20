@@ -5,6 +5,7 @@ import { join } from 'path';
 import { authMiddleware, getWorkspaceFilter, supabase } from '../middleware/auth.js';
 import { mapAccountDbError } from '../lib/account-errors.js';
 import { enqueueJob } from '../modules/queue/producer.js';
+import { failStaleVideoContentJobs } from '../modules/video-content/pipeline.js';
 import {
   getCharacterAppearanceCounts,
   getLastSyncTime,
@@ -188,6 +189,8 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
     const access = await assertAccountAccess(id, getWorkspaceFilter(request));
     if (!access.ok) return reply.code(access.status).send({ error: access.error });
 
+    await failStaleVideoContentJobs(id);
+
     const { data: busy } = await supabase
       .from('huma_video_content_history')
       .select('id')
@@ -243,6 +246,8 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
     const { id } = request.params as { id: string };
     const access = await assertAccountAccess(id, getWorkspaceFilter(request));
     if (!access.ok) return reply.code(access.status).send({ error: access.error });
+
+    await failStaleVideoContentJobs(id);
 
     const { data: busy } = await supabase
       .from('huma_video_content_history')

@@ -11,15 +11,14 @@ import {
   findIncompleteLastShotIndex,
   validateCharacterNameConsistency,
   extractCharacterNamesForStorage,
-  buildMinShotDurationRule,
-  buildSingleShotGuide,
+  buildMultiShotCompositionGuide,
+  buildShotContentRule,
   buildSingleShotFoundationCutRule,
   buildMultiShotFoundationCutRule,
-  buildShotContentRule,
-  buildSentenceCompleteRule,
+  buildSingleShotGuide,
   buildCharacterNamingRule,
   buildCameraActionNoRepeatRule,
-  buildNoDuplicateFillRule,
+  buildSentenceCompleteRule,
   buildEmptyShotContentFeedback,
   buildAdjacentDuplicateFeedback,
   buildShotFillPrompt,
@@ -39,7 +38,7 @@ import {
 } from './conti-validation.js';
 import { normalizeMultiShotConti, normalizeSingleShotConti, buildEvoLinkPrompt, getDefaultShotAction } from './evolink.js';
 import { EVOLINK_PROMPT_LENGTH_GUIDANCE } from './prompt-length.js';
-import { buildSixShotTimeline } from './shot-timing.js';
+import { getShotCountBounds } from './shot-timing.js';
 import type { GenerationConditions, VideoConti, VideoContiShot, VideoPersonaConfig } from './types.js';
 
 export interface ContiGenerationResult extends VideoConti {
@@ -70,6 +69,11 @@ interface PromptContext {
   conditions: GenerationConditions;
   feedback?: string;
   pastSummaries?: string[];
+  onStage?: (stage: string) => void | Promise<void>;
+}
+
+async function reportStage(ctx: PromptContext, stage: string): Promise<void> {
+  await ctx.onStage?.(stage);
 }
 
 function parseJsonBlock(raw: string): unknown {
@@ -108,11 +112,18 @@ async function callClaudeJson(params: {
   throw lastErr ?? new Error('JSON 파싱 실패');
 }
 
-function formatTimelineGuide(duration: number): string {
-  const timeline = buildSixShotTimeline(duration);
-  return timeline
-    .map((t) => `샷${t.shotNumber}(${t.startSec}~${t.endSec}초, ${t.durationSec}초)`)
-    .join(' → ');
+function buildMultiShotGuide(ctx: PromptContext): string {
+  const { conditions, config } = ctx;
+  const punchlineDurationRule = `펀치라인이 들어가는 샷(고정 번호 없음 — 시나리오 중후반 적절한 샷)은 대사를 끝까지 전달할 수 있도록 최소 ${PUNCHLINE_MIN_DURATION_SEC}초를 확보하라.`;
+
+  const personaGuide = config.shotStructure?.trim();
+  const baseGuide = personaGuide ?? buildMultiShotCompositionGuide(conditions.duration);
+
+  return `${baseGuide}
+${buildShotContentRule()}
+${punchlineDurationRule}
+shots 배열 길이는 ${getShotCountBounds(conditions.duration).min}~${getShotCountBounds(conditions.duration).max}개. startSec/endSec 합 = ${conditions.duration}. 각 action ${SHOT_CONTENT_MIN_CHARS}자 이상.
+${EVOLINK_PROMPT_LENGTH_GUIDANCE}`;
 }
 
 function buildSharedContext(ctx: PromptContext): {
@@ -193,27 +204,6 @@ JSON 스키마:
 }`;
 }
 
-function buildMultiShotGuide(ctx: PromptContext): string {
-  const { conditions, config } = ctx;
-  const minShotDurationRule = buildMinShotDurationRule(conditions.duration);
-  const shotContentRule = buildShotContentRule();
-  const noDuplicateFillRule = buildNoDuplicateFillRule();
-  const punchlineDurationRule = `펀치라인이 들어가는 샷(마지막 또는 마지막 직전)은 대사를 끝까지 전달할 수 있도록 최소 ${PUNCHLINE_MIN_DURATION_SEC}초를 확보하라.`;
-
-  return (
-    config.shotStructure?.trim() ??
-    `${minShotDurationRule}
-${noDuplicateFillRule}
-${shotContentRule}
-
-6샷 멀티샷 (${conditions.duration}초) — 타임라인: ${formatTimelineGuide(conditions.duration)}
-shots 배열은 정확히 6개. 각 샷 action ${SHOT_CONTENT_MIN_CHARS}자 이상, startSec/endSec 합 = ${conditions.duration}.
-펀치라인은 샷5 후반. 샷6은 와이드 여운 마무리.
-${punchlineDurationRule}
-${EVOLINK_PROMPT_LENGTH_GUIDANCE}`
-  );
-}
-
 function buildShotGuide(ctx: PromptContext): string {
   const { conditions, config } = ctx;
   if (conditions.cutType === 'single_shot') {
@@ -230,7 +220,7 @@ function buildShotsJsonSchema(conditions: GenerationConditions): string {
 }`;
   }
   return `{
-  "shots": [{"shotNumber":1,"startSec":0,"endSec":3,"camera":"와이드","action":"...","dialogue":"..."}],
+  "shots": [{"shotNumber":1,"startSec":0,"endSec":3,"camera":"와이드","action":"...","dialogue":"..."}, "... ${getShotCountBounds(conditions.duration).min}~${getShotCountBounds(conditions.duration).max}개"],
   "fullText": "1단계 fullText + 전체 대사를 합친 최종 텍스트 (선택)"
 }`;
 }
@@ -334,7 +324,7 @@ function applyDefaultToRawShots(conti: VideoConti, indices: number[]): VideoCont
       ...s,
       shotNumber: s.shotNumber || i + 1,
       camera: s.camera?.trim() || (i === 0 || i === conti.shots.length - 1 ? '와이드' : '미디엄'),
-      action: getDefaultShotAction(i),
+      action: getDefaultShotAction(i, conti.shots.length),
     };
   });
   return { ...conti, shots };
@@ -551,10 +541,8 @@ async function ensureCutTypeMatches(
 
       if (cutRetries < MAX_SINGLE_SHOT_CUT_REGENERATION_ATTEMPTS) {
         cutRetries += 1;
+        await reportStage(ctx, `single_shot cut 재생성 ${cutRetries}/${MAX_SINGLE_SHOT_CUT_REGENERATION_ATTEMPTS}`);
         current = await regenerateShotsOnly(ctx, foundation, model, SINGLE_SHOT_CUT_MISMATCH_FEEDBACK);
-        const recovered = await recoverRawShotContent(ctx, foundation, current, model);
-        current = recovered.conti;
-        warnings.push(...recovered.warnings);
         const normAgain = applyCutTypeNormalization(current, ctx.conditions);
         current = normAgain.conti;
         warnings.push(...normAgain.warnings);
@@ -568,13 +556,16 @@ async function ensureCutTypeMatches(
 
 export async function generateConti(params: PromptContext): Promise<ContiGenerationResult> {
   const model = (await getMainClaudeModel()) || 'claude-sonnet-4-6';
+  await reportStage(params, '1단계 foundation LLM');
   const foundation = await generateFoundation(params, model);
+  await reportStage(params, '2단계 shots LLM');
   const { shots, fullText } = await generateShots(params, foundation, model);
 
   let conti = assembleConti(foundation, shots, params.conditions, fullText);
   const contentWarnings: string[] = [];
   let lastShotIncompleteDetected = findIncompleteLastShotIndex(conti) != null;
 
+  await reportStage(params, '샷 품질 보완');
   const recovered = await recoverRawShotContent(params, foundation, conti, model);
   conti = recovered.conti;
   contentWarnings.push(...recovered.warnings);
@@ -590,6 +581,7 @@ export async function generateConti(params: PromptContext): Promise<ContiGenerat
     contentWarnings.push(...normalized.warnings);
   }
 
+  await reportStage(params, 'cutType 정규화·검증');
   const cutEnsured = await ensureCutTypeMatches(params, foundation, conti, model);
   conti = cutEnsured.conti;
   contentWarnings.push(...cutEnsured.warnings);

@@ -39,6 +39,24 @@ import { burnSubtitles } from './subtitle.js';
 import type { GenerationConditions, VideoConti } from './types.js';
 
 const WEB_BASE = process.env.HUMA_WEB_URL?.trim() || 'http://localhost:3000';
+const STALE_VIDEO_CONTENT_MS = 15 * 60 * 1000;
+
+/** 오래 conti_generating 등에 머문 row — 재시도 막힘 방지 */
+export async function failStaleVideoContentJobs(accountId: string): Promise<number> {
+  const cutoff = new Date(Date.now() - STALE_VIDEO_CONTENT_MS).toISOString();
+  const { data, error } = await supabase
+    .from('huma_video_content_history')
+    .update({
+      status: 'failed',
+      error_message: '콘티/영상 생성 시간 초과(15분) — worker 지연 또는 API 응답 없음',
+    })
+    .eq('account_id', accountId)
+    .in('status', ['conti_generating', 'rendering', 'generating'])
+    .lt('created_at', cutoff)
+    .select('id');
+  if (error) return 0;
+  return data?.length ?? 0;
+}
 
 async function loadPastSummaries(accountId: string): Promise<string[]> {
   const { data } = await supabase
@@ -307,6 +325,7 @@ async function finalizeVideoContent(params: {
 
 /** 1단계 — Sonnet 콘티 생성 (관리자 검토 후 영상 제작) */
 export async function runContiGeneration(accountId: string): Promise<string> {
+  await failStaleVideoContentJobs(accountId);
   const ctx = await loadVideoAccountContext(accountId);
   const { baseConditions, workspace, accountName } = ctx;
 
@@ -333,6 +352,13 @@ export async function runContiGeneration(accountId: string): Promise<string> {
   try {
     await logOperation({
       level: 'info',
+      message: `[video-content] 콘티 생성 시작 — history=${historyId}`,
+      workspace,
+      account_id: accountId,
+    });
+
+    await logOperation({
+      level: 'info',
       message: formatContiTokenSettingsLog(),
       workspace,
       account_id: accountId,
@@ -351,6 +377,13 @@ export async function runContiGeneration(accountId: string): Promise<string> {
         timeOfDay: '',
       };
 
+      await logOperation({
+        level: 'info',
+        message: `[video-content] 콘티 LLM 시도 ${attempt}/${MAX_REGENERATION_ATTEMPTS} — cut=${conditions.cutType} ${conditions.duration}초`,
+        workspace,
+        account_id: accountId,
+      });
+
       let generated: Awaited<ReturnType<typeof generateConti>>;
       try {
         generated = await generateConti({
@@ -359,6 +392,14 @@ export async function runContiGeneration(accountId: string): Promise<string> {
           conditions,
           feedback,
           pastSummaries,
+          onStage: async (stage) => {
+            await logOperation({
+              level: 'info',
+              message: `[video-content] ${stage}`,
+              workspace,
+              account_id: accountId,
+            });
+          },
         });
       } catch (err) {
         if (err instanceof ContiValidationError) {

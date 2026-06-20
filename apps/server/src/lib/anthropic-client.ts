@@ -4,18 +4,31 @@ interface ClaudeMessageResponse {
 
 type ClaudeContent = string | Array<Record<string, unknown>>;
 
+const DEFAULT_LLM_TIMEOUT_MS = 120_000;
+
+function llmTimeoutMs(override?: number): number {
+  if (override != null && override > 0) return override;
+  const env = Number(process.env.CONTI_LLM_TIMEOUT_MS);
+  return env > 0 ? env : DEFAULT_LLM_TIMEOUT_MS;
+}
+
 export async function askClaudeWithModel(params: {
   model?: string;
   max_tokens?: number;
   prompt?: string;
   system?: string;
   content?: ClaudeContent;
+  timeout_ms?: number;
 }): Promise<string | null> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return null;
 
   const userContent = params.content ?? params.prompt ?? '';
   if (!userContent) return null;
+
+  const timeoutMs = llmTimeoutMs(params.timeout_ms);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -31,14 +44,20 @@ export async function askClaudeWithModel(params: {
         ...(params.system ? { system: params.system } : {}),
         messages: [{ role: 'user', content: userContent }],
       }),
+      signal: controller.signal,
     });
     if (!res.ok) return null;
 
     const data = (await res.json()) as ClaudeMessageResponse;
     const block = data.content?.[0];
     return block?.type === 'text' ? block.text ?? null : null;
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error(`Claude API 시간 초과 (${Math.round(timeoutMs / 1000)}초)`);
+    }
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

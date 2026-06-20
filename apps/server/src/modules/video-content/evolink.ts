@@ -6,7 +6,11 @@ import { notifyTelegram } from '../watcher/telegram.js';
 import { logOperation } from '../../lib/log-emitter.js';
 import { enqueueJob } from '../queue/producer.js';
 import type { VideoConti, VideoContiShot, GenerationConditions } from './types.js';
-import { buildSixShotTimeline, scaleSixShotDurations, MULTI_SHOT_COUNT } from './shot-timing.js';
+import {
+  EVOLINK_MAX_SHOTS,
+  resolveMultiShotCount,
+  buildMultiShotTimeline,
+} from './shot-timing.js';
 import { isInvalidShotContentField, findPunchlineShotIndex } from './conti-validation.js';
 import { assertEvoLinkPromptLength } from './prompt-length.js';
 
@@ -52,28 +56,22 @@ function shotWords(shot: VideoConti['shots'][number], maxLen = 500): string {
   return parts.join('. ').slice(0, maxLen);
 }
 
+function shotDurationSec(shot: VideoContiShot): number {
+  const d = shot.endSec - shot.startSec;
+  return d > 0 ? d : 0;
+}
+
 /**
- * EvoLink Kling 3.0 Turbo 멀티샷 프롬프트 문법:
- * `镜头 n, m, words;` — n=샷번호(1~6), m=해당 샷 길이(초), 합계=duration
+ * EvoLink Kling 3.0 Turbo 멀티샷 프롬pt 문법:
+ * `镜头 n, m, words;` — n=샷번호, m=해당 샷 길이(초), 합계=duration
  */
 export function buildEvoLinkMultiShotPrompt(conti: VideoConti, duration: number): string {
   const scene = `세로 9:16, ${conti.location}, ${conti.lighting}, ${conti.timeOfDay}. 등장인물(고정): ${charBlock(conti)}. 한국어 대사·자연스러운 오디오.`;
-  const durations = scaleSixShotDurations(duration);
-  const shots = conti.shots.slice(0, 6);
+  const shots = conti.shots.slice(0, EVOLINK_MAX_SHOTS);
 
-  while (shots.length < MULTI_SHOT_COUNT) {
-    const i = shots.length;
-    shots.push({
-      shotNumber: i + 1,
-      startSec: 0,
-      endSec: 0,
-      camera: i === 0 || i === MULTI_SHOT_COUNT - 1 ? '와이드' : '미디엄',
-      action: defaultSlotAction(i, shots),
-    });
-  }
-
-  const segments = durations.map((sec, i) => {
-    const words = shotWords(shots[i]!);
+  const segments = shots.map((shot, i) => {
+    const sec = Math.max(1, Math.round(shotDurationSec(shot) || duration / Math.max(shots.length, 1)));
+    const words = shotWords(shot);
     return `镜头 ${i + 1}, ${sec}, ${words}`;
   });
 
@@ -199,16 +197,6 @@ export async function handleEvoLinkDownloadFailure(params: {
   });
 }
 
-/** 6슬롯 타임라인용 기본 action (자리표시자 대신) */
-const SLOT_DEFAULT_ACTIONS = [
-  '와이드 샷. 두 인물과 공간 관계가 드러나며 상황을 소개한다.',
-  '클로즈업. 인물 A의 미세한 표정 변화와 반응이 포착된다.',
-  '미디엄 샷. 인물 B의 행동과 주변 디테일이 함께 보인다.',
-  '미디엄 샷. 두 인물 사이 긴장감 있는 대치가 이어진다.',
-  '클로즈업. 감정이 고조되며 펀치라인 직전의 순간이 잡힌다.',
-  '와이드 샷. 여운을 남기며 장면이 서서히 멀어지고 자연스럽게 마무리된다.',
-] as const;
-
 function mapSourceShotIndex(slotIndex: number, slotCount: number, sourceCount: number): number {
   if (sourceCount <= 0) return 0;
   if (sourceCount >= slotCount) return slotIndex;
@@ -223,21 +211,34 @@ function findLastSubstantiveAction(src: VideoContiShot[]): string | null {
   return null;
 }
 
-function defaultSlotAction(slotIndex: number, src: VideoContiShot[] = []): string {
-  return SLOT_DEFAULT_ACTIONS[slotIndex] ?? SLOT_DEFAULT_ACTIONS[SLOT_DEFAULT_ACTIONS.length - 1]!;
+function defaultSlotAction(slotIndex: number, totalSlots: number): string {
+  if (slotIndex === 0) {
+    return '와이드 샷. 상황과 인물 관계가 드러나며 이야기를 시작한다.';
+  }
+  if (slotIndex === totalSlots - 1) {
+    return '와이드 샷. 여운을 남기며 장면이 자연스럽게 마무리된다.';
+  }
+  if (slotIndex === totalSlots - 2 && totalSlots >= 3) {
+    return '클로즈업. 감정이 고조되며 펀치라인 직전의 순간이 포착된다.';
+  }
+  return '미디엄/클로즈업. 행동과 반응이 이어지며 장면이 전개된다.';
+}
+
+function defaultCamera(slotIndex: number, totalSlots: number): string {
+  if (slotIndex === 0 || slotIndex === totalSlots - 1) return '와이드';
+  return '클로즈업';
 }
 
 /** 검증 실패 시 최후 폴백 action (conti-generator에서 사용) */
-export function getDefaultShotAction(slotIndex: number): string {
-  return defaultSlotAction(slotIndex);
+export function getDefaultShotAction(slotIndex: number, totalSlots = EVOLINK_MAX_SHOTS): string {
+  return defaultSlotAction(slotIndex, totalSlots);
 }
 
-/** LLM 샷 수 < 6이어도 비율 매핑 + 기본 action으로 6샷 채움 (장면 전개 금지) */
-function resolveSlotAction(slotIndex: number, src: VideoContiShot[]): string {
-  const mapped = src[mapSourceShotIndex(slotIndex, MULTI_SHOT_COUNT, src.length)];
+function resolveSlotAction(slotIndex: number, totalSlots: number, src: VideoContiShot[]): string {
+  const mapped = src[mapSourceShotIndex(slotIndex, totalSlots, src.length)];
   const action = mapped?.action?.trim() ?? '';
   if (action && !isInvalidShotContentField(action)) {
-    if (slotIndex === MULTI_SHOT_COUNT - 1 && src.length < MULTI_SHOT_COUNT) {
+    if (slotIndex === totalSlots - 1 && src.length < totalSlots) {
       return `와이드 샷. ${action.slice(0, 50)} 장면이 멀어지며 여운 있게 마무리된다.`;
     }
     return action;
@@ -245,30 +246,37 @@ function resolveSlotAction(slotIndex: number, src: VideoContiShot[]): string {
 
   const borrowed = findLastSubstantiveAction(src);
   if (borrowed) {
-    if (slotIndex === MULTI_SHOT_COUNT - 1) {
+    if (slotIndex === totalSlots - 1) {
       return `와이드 샷. ${borrowed.slice(0, 50)} 장면이 멀어지며 여운 있게 마무리된다.`;
     }
     return borrowed;
   }
 
-  return defaultSlotAction(slotIndex);
+  return defaultSlotAction(slotIndex, totalSlots);
 }
 
-/** LLM 콘티 shots를 6샷 타임라인에 맞게 정규화 */
+function countSubstantiveShots(src: VideoContiShot[]): number {
+  const substantive = src.filter(
+    (s) =>
+      (s.action?.trim() && !isInvalidShotContentField(s.action)) || Boolean(s.dialogue?.trim()),
+  ).length;
+  return Math.max(substantive, src.length);
+}
+
+/** LLM 샷 수(4~6)를 유지하며 타임라인·최소 길이만 정규화 — 6슬롯 강제 없음 */
 export function normalizeMultiShotConti(conti: VideoConti, duration: number): VideoConti {
-  const timeline = buildSixShotTimeline(duration);
   const src = conti.shots.length > 0 ? conti.shots : [];
+  const shotCount = resolveMultiShotCount(countSubstantiveShots(src), duration);
+  const timeline = buildMultiShotTimeline(duration, shotCount);
 
   const shots = timeline.map((t, i) => {
-    const mapped = src[mapSourceShotIndex(i, MULTI_SHOT_COUNT, src.length)];
-    const action = resolveSlotAction(i, src);
+    const mapped = src[mapSourceShotIndex(i, shotCount, src.length)];
+    const action = resolveSlotAction(i, shotCount, src);
     return {
       shotNumber: t.shotNumber,
       startSec: t.startSec,
       endSec: t.endSec,
-      camera:
-        mapped?.camera?.trim() ||
-        (i === 0 || i === MULTI_SHOT_COUNT - 1 ? '와이드' : '클로즈업'),
+      camera: mapped?.camera?.trim() || defaultCamera(i, shotCount),
       action,
       dialogue: mapped?.dialogue,
     };
@@ -279,7 +287,7 @@ export function normalizeMultiShotConti(conti: VideoConti, duration: number): Vi
 
 function mergeSingleShotAction(src: VideoContiShot[], duration: number): string {
   if (src.length <= 1) {
-    return src[0]?.action?.trim() || getDefaultShotAction(0);
+    return src[0]?.action?.trim() || getDefaultShotAction(0, 1);
   }
   return src
     .map((s, i) => {
@@ -317,7 +325,7 @@ export function normalizeSingleShotConti(
     const action =
       base?.action?.trim() && !isInvalidShotContentField(base.action)
         ? base.action.trim()
-        : getDefaultShotAction(0);
+        : getDefaultShotAction(0, 1);
     return {
       conti: {
         ...conti,
@@ -328,7 +336,7 @@ export function normalizeSingleShotConti(
             shotNumber: 1,
             startSec: 0,
             endSec: duration,
-            camera: base?.camera?.trim() || '고정 샷',
+            camera: '고정 샷',
             action,
             dialogue: base?.dialogue?.trim() || undefined,
           },
@@ -338,7 +346,6 @@ export function normalizeSingleShotConti(
     };
   }
 
-  const camera = src[0]?.camera?.trim() || '고정 샷';
   const action = mergeSingleShotAction(src, duration);
   const dialogue = pickSingleShotDialogue(src);
 
@@ -352,7 +359,7 @@ export function normalizeSingleShotConti(
           shotNumber: 1,
           startSec: 0,
           endSec: duration,
-          camera,
+          camera: '고정 샷',
           action,
           dialogue,
         },

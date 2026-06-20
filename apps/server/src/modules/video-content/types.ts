@@ -1,6 +1,6 @@
 import type { Workspace } from '@huma/shared';
 import { EVOLINK_PROMPT_LENGTH_GUIDANCE } from './prompt-length.js';
-import { MULTI_SHOT_TEMPLATE_15S } from './shot-timing.js';
+import { DEFAULT_MULTI_SHOT_COMPOSITION } from './shot-timing.js';
 
 const DEFAULT_CUT_TYPE_RULE = `multi_shot 70~80% / single_shot 20~30% 선택 비율 (생성 시 cut_type 필드 따름).
 직전 5건 cut_type 회피(0.85 확률 예외).`;
@@ -10,7 +10,7 @@ const DEFAULT_SINGLE_SHOT_STRUCTURE = `싱글샷 전용 (cut_type=single_shot일
 - 시간 전개(4~5비트)는 action 문장 속 [0~3초]… 형태로만 표현
 - camera 라벨 1개(예: 고정 미디엄)`;
 
-const DEFAULT_SHOT_STRUCTURE = `${MULTI_SHOT_TEMPLATE_15S}
+const DEFAULT_SHOT_STRUCTURE = `${DEFAULT_MULTI_SHOT_COMPOSITION}
 
 ${EVOLINK_PROMPT_LENGTH_GUIDANCE}`;
 
