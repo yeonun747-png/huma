@@ -213,15 +213,15 @@ function findLastSubstantiveAction(src: VideoContiShot[]): string | null {
 
 function defaultSlotAction(slotIndex: number, totalSlots: number): string {
   if (slotIndex === 0) {
-    return '와이드 샷. 상황과 인물 관계가 드러나며 이야기를 시작한다.';
+    return '두 인물과 공간 관계가 드러나며 상황을 소개한다.';
   }
   if (slotIndex === totalSlots - 1) {
-    return '와이드 샷. 여운을 남기며 장면이 자연스럽게 마무리된다.';
+    return '장면이 서서히 멀어지며 여운 있게 마무리된다.';
   }
   if (slotIndex === totalSlots - 2 && totalSlots >= 3) {
-    return '클로즈업. 감정이 고조되며 펀치라인 직전의 순간이 포착된다.';
+    return '감정이 고조되며 펀치라인 직전의 순간이 포착된다.';
   }
-  return '미디엄/클로즈업. 행동과 반응이 이어지며 장면이 전개된다.';
+  return '행동과 반응이 이어지며 장면이 전개된다.';
 }
 
 function defaultCamera(slotIndex: number, totalSlots: number): string {
@@ -239,7 +239,7 @@ function resolveSlotAction(slotIndex: number, totalSlots: number, src: VideoCont
   const action = mapped?.action?.trim() ?? '';
   if (action && !isInvalidShotContentField(action)) {
     if (slotIndex === totalSlots - 1 && src.length < totalSlots) {
-      return `와이드 샷. ${action.slice(0, 50)} 장면이 멀어지며 여운 있게 마무리된다.`;
+      return `${action.slice(0, 50)} 장면이 멀어지며 여운 있게 마무리된다.`;
     }
     return action;
   }
@@ -247,7 +247,7 @@ function resolveSlotAction(slotIndex: number, totalSlots: number, src: VideoCont
   const borrowed = findLastSubstantiveAction(src);
   if (borrowed) {
     if (slotIndex === totalSlots - 1) {
-      return `와이드 샷. ${borrowed.slice(0, 50)} 장면이 멀어지며 여운 있게 마무리된다.`;
+      return `${borrowed.slice(0, 50)} 장면이 멀어지며 여운 있게 마무리된다.`;
     }
     return borrowed;
   }

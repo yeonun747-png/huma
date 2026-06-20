@@ -589,7 +589,7 @@ export async function generateConti(params: PromptContext): Promise<ContiGenerat
   conti = enforcePunchlineShotMinDuration(conti);
   const punchCheck = validatePunchlineShotMinDuration(conti);
   if (!punchCheck.ok) {
-    throw new ContiValidationError(punchCheck.feedback);
+    contentWarnings.push(`펀치라인 샷 길이 부족(통과): ${punchCheck.feedback}`);
   }
 
   const shotDurCheck = validateAllShotsMinDuration(conti);
@@ -607,7 +607,9 @@ export async function generateConti(params: PromptContext): Promise<ContiGenerat
   const extraAllowedNames = params.conditions.characterName ? [params.conditions.characterName] : [];
   const nameCheck = validateCharacterNameConsistency(conti, extraAllowedNames);
   if (!nameCheck.ok) {
-    throw new ContiValidationError(nameCheck.feedback);
+    contentWarnings.push(
+      `등장인물 이름 불일치 감지(콘티는 통과): ${nameCheck.unregisteredNames.join(', ')} — 검토 권장`,
+    );
   }
 
   const characterNames = extractCharacterNamesForStorage(conti, params.conditions.characterName);

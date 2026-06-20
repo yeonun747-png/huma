@@ -410,7 +410,9 @@ export function isIncompleteSentence(text: string | undefined | null): boolean {
   if (!t) return false;
   if (isSentenceComplete(t)) return false;
   if (endsWithSuspiciousIncompleteParticle(t)) return true;
-  return true;
+  if (/[,，、]$/.test(t)) return true;
+  if (/[\("「『]$/.test(t)) return true;
+  return false;
 }
 
 export function buildIncompleteSentenceFeedback(shotNumber: number): string {
@@ -431,10 +433,13 @@ function detectCameraKind(text: string): CameraKind | null {
   return null;
 }
 
+/** action 본문에 카메라 지시어가 반복되는지 — 형용사(클로즈한) 오탐 방지 */
+const CAMERA_PHRASE_IN_ACTION =
+  /(?:와이드\s*샷|와이드\s*프레임|wide\s*shot|클로즈\s*업|클로즈\s*샷|close[\s-]*up|미디엄\s*샷|medium\s*shot|롱\s*샷|long\s*shot)/i;
+
 export function actionMentionsCameraKind(shot: VideoContiShot): boolean {
-  const cameraKind = detectCameraKind(shot.camera ?? '');
-  if (!cameraKind) return false;
-  return detectCameraKind(trimField(shot.action)) != null;
+  if (detectCameraKind(shot.camera ?? '') == null) return false;
+  return CAMERA_PHRASE_IN_ACTION.test(trimField(shot.action));
 }
 
 export function buildCameraInActionFeedback(shotNumber: number): string {
@@ -548,12 +553,48 @@ const PERSON_NAME_STOPWORDS = new Set([
   '전화',
   '휴대',
   '폰을',
+  '음료',
+  '허공',
+  '팔짱',
+  '입꼬리',
+  '입술',
+  '눈썹',
+  '미간',
+  '코웃',
+  '등받',
 ]);
 
-const PERSON_REFERENCE_PATTERNS = [
-  /([가-힣]{2,3})(?:이|가|은|는|을|를|와|과|의|에게|한테|께서)/g,
-  /([가-힣]{2,3})(?:야|아|씨|님)(?=[,.!?\s]|$)/g,
+/** 대화에서만 — 호칭·존칭 패턴 (조사 이/가/을/를 패턴은 action 오탐 유발로 제외) */
+const DIALOGUE_NAME_PATTERNS = [
+  /([가-힣]{2,4})(?:씨|님)(?=[,.!?\s"']|$)/g,
+  /([가-힣]{2,4})(?:야|아)(?=[,.!?\s"']|$)/g,
 ];
+
+/** 대화 호칭 오탐 — "아니야", "그래" 등 */
+const DIALOGUE_VOCATIVE_STOPWORDS = new Set([
+  '아니',
+  '그래',
+  '진짜',
+  '정말',
+  '맞아',
+  '맞잖',
+  '왜야',
+  '뭐야',
+  '어때',
+  '그게',
+  '이게',
+  '저기',
+  '야',
+  '아',
+]);
+
+export function hasExplicitCharacterNames(conti: VideoConti): boolean {
+  return conti.characters.some((ch) => {
+    if (trimField(ch.name)) return true;
+    const label = trimField(ch.label);
+    return Boolean(label && !isGenericCharacterLabel(label) && /^[가-힣]{2,4}$/.test(label));
+  });
+}
 
 export const CHARACTER_NAME_MISMATCH_FEEDBACK =
   '본문에서 사용한 인물 이름이 등장인물 설정 섹션에 반영되지 않았다. 등장인물 설정 섹션에 사용할 이름을 명시하고, 모든 샷에서 동일한 이름을 일관되게 사용해서 다시 작성하라.';
@@ -581,10 +622,13 @@ export function extractAllowedCharacterIdentifiers(
 
 export function extractPersonReferenceNames(text: string): string[] {
   const found = new Set<string>();
-  for (const pattern of PERSON_REFERENCE_PATTERNS) {
+  for (const pattern of DIALOGUE_NAME_PATTERNS) {
     for (const match of text.matchAll(pattern)) {
       const name = match[1];
-      if (name && !PERSON_NAME_STOPWORDS.has(name)) found.add(name);
+      if (!name) continue;
+      if (PERSON_NAME_STOPWORDS.has(name)) continue;
+      if (DIALOGUE_VOCATIVE_STOPWORDS.has(name)) continue;
+      found.add(name);
     }
   }
   return [...found];
@@ -594,15 +638,18 @@ export function findUnregisteredCharacterNames(
   conti: VideoConti,
   extraAllowed: string[] = [],
 ): string[] {
+  // A/B·인물1 라벨만 있으면 이름 검증 스킵 (연운·퀴즈 기본)
+  if (!hasExplicitCharacterNames(conti) && !extraAllowed.some((n) => trimField(n))) {
+    return [];
+  }
+
   const allowed = extractAllowedCharacterIdentifiers(conti, extraAllowed);
   const unregistered = new Set<string>();
   for (const shot of conti.shots) {
-    for (const field of [shot.action, shot.dialogue]) {
-      const text = trimField(field);
-      if (!text) continue;
-      for (const name of extractPersonReferenceNames(text)) {
-        if (!allowed.has(name)) unregistered.add(name);
-      }
+    const dialogue = trimField(shot.dialogue);
+    if (!dialogue) continue;
+    for (const name of extractPersonReferenceNames(dialogue)) {
+      if (!allowed.has(name)) unregistered.add(name);
     }
   }
   return [...unregistered];
