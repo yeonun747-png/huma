@@ -38,6 +38,13 @@ export const VIDEO_PERSONA_REQUIRED_PANANA: VideoPersonaKnownHeader[] = [
 
 const KNOWN_HEADER_SET = new Set<string>(VIDEO_PERSONA_KNOWN_HEADERS);
 
+/** 관계축·감정곡선 등 선택지 라벨 최대 길이 */
+export const MAX_PERSONA_AXIS_OPTION_LEN = 24;
+/** hook_type 라벨 최대 길이 */
+export const MAX_HOOK_TYPE_LABEL_LEN = 16;
+/** `반전 — 설명` 형식에서 인정하는 라벨 최대 길이 */
+const MAX_HOOK_EMDASH_LABEL_LEN = 10;
+
 export function isVideoPersonaKnownHeader(header: string): header is VideoPersonaKnownHeader {
   return KNOWN_HEADER_SET.has(header);
 }
@@ -61,62 +68,170 @@ function linesToArray(body: string): string[] {
     .filter(Boolean);
 }
 
-/** 서술형 가이드 — 펀치라인 선택 옵션이 아님 */
-function looksLikeHookTypeGuidanceLine(line: string): boolean {
-  if (line.length > 36) return true;
+function dedupeOptions(options: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const o of options) {
+    const key = o.trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+  }
+  return out;
+}
+
+function splitAtFirstBlankParagraph(body: string): { head: string; tail: string } {
+  const idx = body.search(/\n\s*\n/);
+  if (idx < 0) return { head: body.trim(), tail: '' };
+  return {
+    head: body.slice(0, idx).trim(),
+    tail: body.slice(idx).trim(),
+  };
+}
+
+function normalizeBulletOptionLine(line: string): string {
+  const letterBullet = line.match(/^(?:[A-Za-z]|[0-9]+)[.)]\s*(.+)$/);
+  if (letterBullet) return letterBullet[1]!.trim();
+  const dashBullet = line.match(/^[-*•]\s*(.+)$/);
+  if (dashBullet) return dashBullet[1]!.trim();
+  return line.trim();
+}
+
+/** 서술형·금지 예시 — 선택 옵션이 아님 */
+function looksLikePersonaGuidanceLine(line: string): boolean {
+  if (line.length > MAX_PERSONA_AXIS_OPTION_LEN) return true;
+  if (/["'「『""'']/.test(line)) return true;
   if (/[.?!…]/.test(line) && line.length > 14) return true;
   if (
-    /(?:한다|합니다|세요|금지|기본으로|원칙|절대|해야|하지\s*말|보며|직시|카메라|전달|간접|정곡)/u.test(line)
+    /(?:식의|금지|예시|원칙|한다|합니다|세요|절대|해야|하지\s*말|보며|직시|카메라|전달|간접|보인|적혀|캡처|확인서|나쁜|좋은)/u.test(
+      line,
+    )
   ) {
     return true;
   }
   return false;
 }
 
-function normalizeHookTypeOptionLine(line: string): string {
-  const letterBullet = line.match(/^(?:[A-Za-z]|[0-9]+)[.)]\s*(.+)$/);
-  if (letterBullet) return letterBullet[1]!.trim();
-  const dashBullet = line.match(/^[-*•]\s*(.+)$/);
-  if (dashBullet) return dashBullet[1]!.trim();
-  return line;
+export function isValidPersonaOptionLabel(label: string): boolean {
+  const t = label.trim();
+  if (!t || t.length > MAX_PERSONA_AXIS_OPTION_LEN) return false;
+  return !looksLikePersonaGuidanceLine(t);
 }
 
-/** 펀치라인 메커니즘 섹션 — 짧은 선택지 vs 서술형 원칙 분리 */
-export function parseHookTypeSection(body: string): {
-  hookTypes: string[];
-  hookTypeGuidance: string;
-} {
-  const hookTypes: string[] = [];
+export function isValidHookTypeLabel(label: string): boolean {
+  const t = label.trim();
+  if (!t || t.length > MAX_HOOK_TYPE_LABEL_LEN) return false;
+  return isValidPersonaOptionLabel(t);
+}
+
+export function filterValidPersonaOptions(options: string[] | undefined): string[] {
+  return dedupeOptions((options ?? []).map((o) => normalizeBulletOptionLine(o)).filter(isValidPersonaOptionLabel));
+}
+
+export function filterValidHookTypeOptions(options: string[] | undefined): string[] {
+  return dedupeOptions(
+    (options ?? []).map((o) => normalizeHookTypeOptionLine(o)).filter(isValidHookTypeLabel),
+  );
+}
+
+function isAxisOptionLine(line: string): boolean {
+  if (/^(?:[A-Za-z]|[0-9]+)[.)]\s*\S/.test(line)) return true;
+  if (/^[-*•]\s*\S/.test(line)) {
+    const inner = normalizeBulletOptionLine(line);
+    return inner.length <= MAX_PERSONA_AXIS_OPTION_LEN && !looksLikePersonaGuidanceLine(inner);
+  }
+  if (line.length > MAX_PERSONA_AXIS_OPTION_LEN) return false;
+  if (looksLikePersonaGuidanceLine(line)) return false;
+  const emDash = line.match(/^(.+?)\s*[—–\-]\s/);
+  if (emDash && emDash[1]!.trim().length > MAX_HOOK_EMDASH_LABEL_LEN) return false;
+  return true;
+}
+
+/** 관계축·감정곡선·상황축 — 선택지 vs 설명 분리 */
+export function parseAxisOptionSection(body: string): { options: string[]; guidance: string } {
+  const { head, tail } = splitAtFirstBlankParagraph(body);
+  const options: string[] = [];
   const guidanceLines: string[] = [];
 
-  for (const line of linesToArray(body)) {
-    const letterBullet = /^(?:[A-Za-z]|[0-9]+)[.)]\s*\S/.test(line);
-    const dashBullet = /^[-*•]\s*\S/.test(line) && line.length <= 48;
-    const plainOption = line.length <= 28 && !looksLikeHookTypeGuidanceLine(line);
-
-    if (letterBullet || (dashBullet && !looksLikeHookTypeGuidanceLine(line)) || plainOption) {
-      hookTypes.push(normalizeHookTypeOptionLine(line));
+  for (const line of linesToArray(head)) {
+    if (isAxisOptionLine(line)) {
+      const label = normalizeBulletOptionLine(line);
+      const emDash = label.match(/^(.+?)\s*[—–\-]\s*(.+)$/);
+      options.push(emDash ? emDash[1]!.trim() : label);
     } else {
       guidanceLines.push(line);
     }
   }
 
-  return { hookTypes, hookTypeGuidance: guidanceLines.join('\n') };
+  if (tail) guidanceLines.push(tail);
+  return {
+    options: filterValidPersonaOptions(options),
+    guidance: guidanceLines.join('\n').trim(),
+  };
+}
+
+function normalizeHookTypeOptionLine(line: string): string {
+  const normalized = normalizeBulletOptionLine(line);
+  const emDash = normalized.match(/^(.+?)\s*[—–\-]\s/);
+  if (emDash) return emDash[1]!.trim();
+  return normalized;
+}
+
+function extractHookTypeFromLine(line: string, letterBulletMode: boolean): string | null {
+  if (letterBulletMode) {
+    if (/^(?:[A-Za-z]|[0-9]+)[.)]\s*\S/.test(line)) {
+      return normalizeHookTypeOptionLine(line);
+    }
+    return null;
+  }
+
+  const emDash = line.match(/^(.{2,10})\s*[—–\-]\s/);
+  if (emDash) {
+    const label = emDash[1]!.trim();
+    if (label.length <= MAX_HOOK_EMDASH_LABEL_LEN && isValidHookTypeLabel(label)) return label;
+    return null;
+  }
+
+  if (/^(?:[A-Za-z]|[0-9]+)[.)]\s*\S/.test(line)) {
+    return normalizeHookTypeOptionLine(line);
+  }
+
+  if (line.length <= 12 && isValidHookTypeLabel(line)) {
+    return normalizeHookTypeOptionLine(line);
+  }
+
+  return null;
+}
+
+/** 펀치라인 메커니즘 — 선택지 vs 서술형 원칙 분리 */
+export function parseHookTypeSection(body: string): {
+  hookTypes: string[];
+  hookTypeGuidance: string;
+} {
+  const { head, tail } = splitAtFirstBlankParagraph(body);
+  const headLines = linesToArray(head);
+  const letterBulletMode = headLines.some((line) => /^[A-Za-z][.)]\s*\S/.test(line));
+
+  const hookTypes: string[] = [];
+  const guidanceLines: string[] = [];
+
+  for (const line of headLines) {
+    const option = extractHookTypeFromLine(line, letterBulletMode);
+    if (option) hookTypes.push(option);
+    else guidanceLines.push(line);
+  }
+
+  if (tail) guidanceLines.push(tail);
+
+  return {
+    hookTypes: filterValidHookTypeOptions(hookTypes),
+    hookTypeGuidance: guidanceLines.join('\n').trim(),
+  };
 }
 
 /** 저장된 hookTypes 배열에 섞인 가이드 문장 제거 (재저장 없이 런타임 방어) */
 export function sanitizeHookTypeOptions(hookTypes: string[] | undefined): string[] {
-  if (!hookTypes?.length) return [];
-  return hookTypes
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((line) => {
-      const letterBullet = /^(?:[A-Za-z]|[0-9]+)[.)]\s*\S/.test(line);
-      const dashBullet = /^[-*•]\s*\S/.test(line) && line.length <= 48;
-      const plainOption = line.length <= 28 && !looksLikeHookTypeGuidanceLine(line);
-      return letterBullet || (dashBullet && !looksLikeHookTypeGuidanceLine(line)) || plainOption;
-    })
-    .map(normalizeHookTypeOptionLine);
+  return filterValidHookTypeOptions(hookTypes);
 }
 
 export function splitHookTypeGuidanceFromOptions(
@@ -126,20 +241,18 @@ export function splitHookTypeGuidanceFromOptions(
   const guidanceParts: string[] = [];
   if (hookTypeGuidance?.trim()) guidanceParts.push(hookTypeGuidance.trim());
 
-  const options: string[] = [];
   for (const line of hookTypes ?? []) {
     const t = line.trim();
     if (!t) continue;
-    if (looksLikeHookTypeGuidanceLine(t) && !/^(?:[A-Za-z]|[0-9]+)[.)]\s*/.test(t)) {
-      guidanceParts.push(t);
-    } else {
-      options.push(normalizeHookTypeOptionLine(t));
+    if (isValidHookTypeLabel(normalizeHookTypeOptionLine(t))) {
+      continue;
     }
+    guidanceParts.push(t);
   }
 
-  const sanitized = sanitizeHookTypeOptions(options);
+  const validFromArray = filterValidHookTypeOptions(hookTypes);
   return {
-    hookTypes: sanitized.length ? sanitized : options.filter((l) => l.length <= 28),
+    hookTypes: validFromArray,
     hookTypeGuidance: guidanceParts.join('\n'),
   };
 }
@@ -187,15 +300,21 @@ export function splitVideoPersonaSections(text: string): {
 
 function applyKnownSection(config: VideoPersonaConfig, header: VideoPersonaKnownHeader, body: string): void {
   switch (header) {
-    case '관계축':
-      config.relationshipAxes = linesToArray(body);
+    case '관계축': {
+      const parsed = parseAxisOptionSection(body);
+      config.relationshipAxes = parsed.options;
       break;
-    case '상황축':
-      config.situationAxes = linesToArray(body);
+    }
+    case '상황축': {
+      const parsed = parseAxisOptionSection(body);
+      config.situationAxes = parsed.options;
       break;
-    case '감정곡선':
-      config.emotionCurves = linesToArray(body);
+    }
+    case '감정곡선': {
+      const parsed = parseAxisOptionSection(body);
+      config.emotionCurves = parsed.options;
       break;
+    }
     case '펀치라인 메커니즘': {
       const parsed = parseHookTypeSection(body);
       config.hookTypes = parsed.hookTypes;
@@ -244,7 +363,13 @@ export function parseVideoPersonaText(
         ? !body.trim()
         : header === '펀치라인 메커니즘'
           ? parseHookTypeSection(body).hookTypes.length === 0
-          : linesToArray(body).length === 0;
+          : header === '관계축'
+            ? parseAxisOptionSection(body).options.length === 0
+            : header === '감정곡선'
+              ? parseAxisOptionSection(body).options.length === 0
+              : header === '상황축'
+                ? parseAxisOptionSection(body).options.length === 0
+                : linesToArray(body).length === 0;
     if (isEmpty) missingSections.push(header);
   }
 

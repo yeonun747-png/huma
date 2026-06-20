@@ -145,8 +145,8 @@ export function VideoPersonaModal({ account, open, onClose }: VideoPersonaModalP
                 : '연운·퀴즈오아시스: 6개 섹션 필수. 상황축은 선택(입력 시 저장만).'}
               <br />
               <span className="text-huma-t4">
-                ## 펀치라인 메커니즘 — A./B. 같은 짧은 선택지만. 원칙 문장(정곡찌르기·카메라 금지 등)은 빈 줄 뒤에
-                작성(선택값으로 취급되지 않음).
+                ## 펀치라인 메커니즘 — A. 반전 형식 또는 `반전 — 설명` 4종만 옵션. 금지·예시 문장은 빈 줄 뒤(또는 긴
+                설명 줄)로 두면 선택값으로 잡히지 않음.
               </span>
             </p>
 

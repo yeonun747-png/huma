@@ -1,5 +1,6 @@
 import type { Workspace } from '@huma/shared';
 import { EVOLINK_PROMPT_LENGTH_GUIDANCE } from './prompt-length.js';
+import { VIDEO_SCREEN_TEXT_RENDERING_CONSTRAINT } from './screen-text-constraint.js';
 import {
   DEFAULT_MULTI_SHOT_COMPOSITION,
   VIDEO_DURATION_MAX_SEC,
@@ -137,7 +138,8 @@ export const DEFAULT_VIDEO_PERSONAS: Record<Workspace, VideoPersonaConfig> = {
 - "100%", "반드시", "확실히" 등 과장 확정 표현 금지
 - 서비스 캐릭터(연화/별하/여연/운서) 비주얼·음성 등장 절대 금지
 - 평서문 설명체로만 끝나는 대본 금지 — 펀치라인 필수
-- 캐릭터 비노출: 매번 새로운 일반인만 등장`,
+- 캐릭터 비노출: 매번 새로운 일반인만 등장
+${VIDEO_SCREEN_TEXT_RENDERING_CONSTRAINT}`,
     cutTypeRule: DEFAULT_CUT_TYPE_RULE,
     shotStructure: DEFAULT_SHOT_STRUCTURE,
   },
@@ -169,7 +171,8 @@ export const DEFAULT_VIDEO_PERSONAS: Record<Workspace, VideoPersonaConfig> = {
 - 특정 성격/심리 유형 단정·차별 표현 금지
 - 의학적 진단 표현 금지
 - 백과사전형 설명체 금지
-- 매번 새로운 일반인 등장인물만 사용`,
+- 매번 새로운 일반인 등장인물만 사용
+${VIDEO_SCREEN_TEXT_RENDERING_CONSTRAINT}`,
     cutTypeRule: DEFAULT_CUT_TYPE_RULE,
     shotStructure: DEFAULT_SHOT_STRUCTURE,
   },
@@ -207,7 +210,8 @@ export const DEFAULT_VIDEO_PERSONAS: Record<Workspace, VideoPersonaConfig> = {
 - 상담·치료 대체 인상 금지
 - 뻔한 위로 멘트만으로 끝나는 대본 금지
 - inactive 캐릭터 등장 금지
-- 실제 파나나 캐릭터가 영상에 직접 등장`,
+- 실제 파나나 캐릭터가 영상에 직접 등장
+${VIDEO_SCREEN_TEXT_RENDERING_CONSTRAINT}`,
     cutTypeRule: DEFAULT_CUT_TYPE_RULE,
     shotStructure: DEFAULT_SHOT_STRUCTURE,
   },

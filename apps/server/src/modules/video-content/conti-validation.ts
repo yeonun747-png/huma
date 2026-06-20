@@ -1,11 +1,24 @@
 import type { VideoConti, VideoContiShot } from './types.js';
 import {
+  actionDescribesOnScreenText,
+  buildOnScreenTextFeedback,
+  buildScreenTextRenderingRule,
+} from './screen-text-constraint.js';
+import {
   EVOLINK_MAX_SHOTS,
   getShotCountBounds,
   DEFAULT_MULTI_SHOT_COMPOSITION,
   snapShotDurationsToTotal,
   normalizeVideoDurationSec,
 } from './shot-timing.js';
+
+export {
+  VIDEO_SCREEN_TEXT_RENDERING_CONSTRAINT,
+  ensureScreenTextRenderingInConstraints,
+  buildScreenTextRenderingRule,
+  actionDescribesOnScreenText,
+  buildOnScreenTextFeedback,
+} from './screen-text-constraint.js';
 
 export class ContiValidationError extends Error {
   readonly maxAttempts: number;
@@ -35,7 +48,7 @@ export const SHOT_MIN_DURATION_SEC = 1.5;
 export const SHOT_CONTENT_MIN_CHARS = 10;
 export const ADJACENT_SHOT_SIMILARITY_THRESHOLD = 0.9;
 export const MAX_ADJACENT_DUPLICATE_PATCH_ATTEMPTS = 1;
-export const MAX_SHOT_QUALITY_PATCH_ATTEMPTS = 1;
+export const MAX_SHOT_QUALITY_PATCH_ATTEMPTS = 2;
 
 /** 1단계: 시나리오·인물·장소 / 2단계: 샷·대사 / 보완: 빈 샷만 */
 export const CONTI_FOUNDATION_MAX_TOKENS = 4096;
@@ -366,6 +379,7 @@ export function buildShotContentRule(): string {
     `모든 샷 action 필드는 ${SHOT_CONTENT_MIN_CHARS}자 이상의 구체적 행동·표정 묘사 필수. ` +
     `대사가 있는 샷은 dialogue도 ${SHOT_CONTENT_MIN_CHARS}자 이상. ` +
     `"장면 전개", "내용 없음", "TBD" 등 자리표시자 금지. ` +
+    `${buildScreenTextRenderingRule()} ` +
     `${buildAdjacentShotDistinctRule()} ${buildSentenceCompleteRule()} ${buildCameraActionNoRepeatRule()} ${buildCharacterNamingRule()}`
   );
 }
@@ -450,7 +464,7 @@ export function buildCameraMismatchFeedback(shotNumber: number): string {
   return buildCameraInActionFeedback(shotNumber);
 }
 
-export type RawShotQualityKind = 'empty' | 'incomplete' | 'camera_in_action';
+export type RawShotQualityKind = 'empty' | 'incomplete' | 'camera_in_action' | 'on_screen_text';
 
 export interface RawShotQualityIssue {
   index: number;
@@ -483,6 +497,15 @@ export function findRawShotQualityIssues(conti: VideoConti): RawShotQualityIssue
 
     if (actionMentionsCameraKind(shot) && conti.cutType !== 'single_shot') {
       issues.push({ index: i, kind: 'camera_in_action', feedback: buildCameraInActionFeedback(shotNumber) });
+      continue;
+    }
+
+    if (actionDescribesOnScreenText(shot.action)) {
+      issues.push({
+        index: i,
+        kind: 'on_screen_text',
+        feedback: buildOnScreenTextFeedback(shotNumber),
+      });
     }
   }
   return issues;

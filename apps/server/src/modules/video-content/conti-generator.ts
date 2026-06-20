@@ -14,6 +14,7 @@ import {
   extractCharacterNamesForStorage,
   buildMultiShotCompositionGuide,
   buildShotContentRule,
+  buildScreenTextRenderingRule,
   buildSingleShotFoundationCutRule,
   buildMultiShotFoundationCutRule,
   buildSingleShotGuide,
@@ -277,6 +278,7 @@ ${reasonBlock}
 ${existing.join('\n')}
 
 ${buildShotFillPrompt(shotNumbers)}
+${buildScreenTextRenderingRule()}
 ${buildSentenceCompleteRule()}
 ${buildCameraActionNoRepeatRule()}
 ${buildCharacterNamingRule()}

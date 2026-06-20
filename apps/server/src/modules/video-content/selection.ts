@@ -1,6 +1,12 @@
 import type { Workspace } from '@huma/shared';
-import { sanitizeHookTypeOptions, splitHookTypeGuidanceFromOptions } from '@huma/shared';
+import {
+  filterValidHookTypeOptions,
+  filterValidPersonaOptions,
+  sanitizeHookTypeOptions,
+  splitHookTypeGuidanceFromOptions,
+} from '@huma/shared';
 import { supabase } from '../../middleware/auth.js';
+import { ensureScreenTextRenderingInConstraints } from './screen-text-constraint.js';
 import {
   DEFAULT_VIDEO_PERSONAS,
   DURATION_OPTIONS,
@@ -28,33 +34,46 @@ function randomPick<T>(arr: T[]): T {
 
 /** 직전 N건 회피 + 0.85 난수 예외 */
 export function pickFromOptions(options: string[], recentValues: string[], forceRandom = false): string {
-  if (!options.length) return '';
-  if (forceRandom || Math.random() >= 0.85) return randomPick(options);
+  const pool = filterValidPersonaOptions(options);
+  if (!pool.length) return '';
+  if (forceRandom || Math.random() >= 0.85) return randomPick(pool);
 
   const recentSet = new Set(recentValues.filter(Boolean));
-  const candidates = options.filter((o) => !recentSet.has(o));
+  const candidates = pool.filter((o) => !recentSet.has(o));
   if (candidates.length) return randomPick(candidates);
 
-  // 전부 등장했으면 가장 오래된 것부터 재허용 — recentValues[0]이 가장 오래됨
   for (const v of recentValues) {
-    if (options.includes(v)) return v;
+    if (pool.includes(v)) return v;
   }
-  return randomPick(options);
+  return randomPick(pool);
+}
+
+function pickFromOptionsWithFallback(
+  options: string[],
+  recentValues: string[],
+  fallback: string[],
+): string {
+  const pool = filterValidPersonaOptions(options);
+  const allowed = pool.length ? pool : filterValidPersonaOptions(fallback);
+  if (!allowed.length) return '';
+  return pickFromOptions(allowed, recentValues);
 }
 
 export function pickHookType(
   config: VideoPersonaConfig,
   recentHooks: string[],
+  fallbackHookTypes: string[] = [],
 ): string {
-  const options = sanitizeHookTypeOptions(config.hookTypes);
-  if (!options.length) return '';
+  const options = filterValidHookTypeOptions(sanitizeHookTypeOptions(config.hookTypes));
+  const pool = options.length ? options : filterValidHookTypeOptions(fallbackHookTypes);
+  if (!pool.length) return '';
 
   const forceRandom = Math.random() >= 0.85;
-  if (forceRandom) return randomPick(options);
+  if (forceRandom) return randomPick(pool);
 
   const recentSet = new Set(recentHooks.filter(Boolean));
-  let candidates = options.filter((o) => !recentSet.has(o));
-  if (!candidates.length) candidates = [...options];
+  let candidates = pool.filter((o) => !recentSet.has(o));
+  if (!candidates.length) candidates = [...pool];
 
   // 제한 가중치 적용 (예: 클리프행어 20% 이하)
   const weights = candidates.map((hook) => {
@@ -115,18 +134,24 @@ export function resolveVideoPersona(
   return {
     ...defaults,
     ...custom,
-    relationshipAxes: custom.relationshipAxes?.length ? custom.relationshipAxes : defaults.relationshipAxes,
-    situationAxes: custom.situationAxes?.length ? custom.situationAxes : defaults.situationAxes,
-    emotionCurves: custom.emotionCurves?.length ? custom.emotionCurves : defaults.emotionCurves,
-    hookTypes: sanitizeHookTypeOptions(hookTypes),
+    relationshipAxes: filterValidPersonaOptions(
+      custom.relationshipAxes?.length ? custom.relationshipAxes : defaults.relationshipAxes,
+    ),
+    situationAxes: filterValidPersonaOptions(
+      custom.situationAxes?.length ? custom.situationAxes : defaults.situationAxes,
+    ),
+    emotionCurves: filterValidPersonaOptions(
+      custom.emotionCurves?.length ? custom.emotionCurves : defaults.emotionCurves,
+    ),
+    hookTypes: filterValidHookTypeOptions(hookTypes.length ? hookTypes : defaults.hookTypes),
     hookTypeGuidance: hookSplit.hookTypeGuidance || defaults.hookTypeGuidance,
     hookTypeMaxWeight: custom.hookTypeMaxWeight ?? defaults.hookTypeMaxWeight,
     cutTypeRule: custom.cutTypeRule?.trim() ? custom.cutTypeRule : defaults.cutTypeRule,
     shotStructure: custom.shotStructure?.trim() ? custom.shotStructure : defaults.shotStructure,
     singleShotStructure: custom.singleShotStructure?.trim() || undefined,
-    serviceConstraints: custom.serviceConstraints?.trim()
-      ? custom.serviceConstraints
-      : defaults.serviceConstraints,
+    serviceConstraints: ensureScreenTextRenderingInConstraints(
+      custom.serviceConstraints?.trim() ? custom.serviceConstraints : defaults.serviceConstraints,
+    ),
   };
 }
 
@@ -146,17 +171,27 @@ export async function buildGenerationConditions(params: {
   const recentCuts = recent.map((r) => r.cut_type ?? '');
   const recentDurations = recent.map((r) => Number(r.duration) || 0);
 
+  const defaults = DEFAULT_VIDEO_PERSONAS[params.workspace];
+
   const situationOptions = params.personaConfig.situationAxes ?? [];
   const situationAxis =
     params.workspace === 'panana' && situationOptions.length > 0
-      ? pickFromOptions(situationOptions, recentSituations)
+      ? pickFromOptionsWithFallback(situationOptions, recentSituations, defaults.situationAxes ?? [])
       : undefined;
 
   return {
-    relationshipAxis: pickFromOptions(params.personaConfig.relationshipAxes, recentAxes),
+    relationshipAxis: pickFromOptionsWithFallback(
+      params.personaConfig.relationshipAxes,
+      recentAxes,
+      defaults.relationshipAxes,
+    ),
     situationAxis,
-    emotionCurve: pickFromOptions(params.personaConfig.emotionCurves, recentEmotions),
-    hookType: pickHookType(params.personaConfig, recentHooks),
+    emotionCurve: pickFromOptionsWithFallback(
+      params.personaConfig.emotionCurves,
+      recentEmotions,
+      defaults.emotionCurves,
+    ),
+    hookType: pickHookType(params.personaConfig, recentHooks, defaults.hookTypes),
     cutType: pickCutType(recentCuts),
     duration: pickDuration(recentDurations),
     characterId: params.characterId,
