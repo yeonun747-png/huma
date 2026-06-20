@@ -8,8 +8,8 @@ import { enqueueJob } from '../modules/queue/producer.js';
 import {
   failStaleVideoContentJobs,
   recoverStuckVideoRender,
-  recoverStuckVideoRendersForWorkspaces,
   runSubtitleReburn,
+  syncActiveVideoRenderStatuses,
 } from '../modules/video-content/pipeline.js';
 import { hasEvoLinkApiKey } from '../modules/video-content/evolink.js';
 import { videoContentFinalPath, videoContentSourcePath } from '../modules/video-content/paths.js';
@@ -90,7 +90,7 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
     const allowed = getWorkspaceFilter(request);
     const { account_id, workspace } = request.query as { account_id?: string; workspace?: string };
 
-    await recoverStuckVideoRendersForWorkspaces(allowed);
+    await syncActiveVideoRenderStatuses(allowed);
     let query = supabase
       .from('huma_video_content_history')
       .select(
@@ -117,6 +117,15 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
       .maybeSingle();
     if (!data) return reply.code(404).send({ error: '없음' });
     if (!allowed.includes(data.workspace)) return reply.code(403).send({ error: '권한 없음' });
+    const taskId = (data.conti_json as Record<string, unknown> | null)?.evolinkTaskId;
+    if (data.status === 'conti_ready' && taskId) {
+      await supabase
+        .from('huma_video_content_history')
+        .update({ status: 'rendering', error_message: null })
+        .eq('id', id);
+      data.status = 'rendering';
+      data.error_message = null;
+    }
     return data;
   });
 

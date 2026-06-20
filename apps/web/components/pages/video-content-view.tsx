@@ -587,6 +587,10 @@ export function VideoContentView() {
     try {
       await api.renderVideoContent(selectedId);
       setActiveTab('progress');
+      setItems((prev) =>
+        prev.map((i) => (i.id === selectedId ? { ...i, status: 'rendering', error_message: null } : i)),
+      );
+      selectedStatusRef.current = 'rendering';
       const list = await load();
       const row = list.find((i) => i.id === selectedId);
       if (row) selectedStatusRef.current = row.status;

@@ -44,7 +44,28 @@ import type { GenerationConditions, VideoConti } from './types.js';
 const WEB_BASE = process.env.HUMA_WEB_URL?.trim() || 'http://localhost:3000';
 const STALE_VIDEO_CONTENT_MS = 15 * 60 * 1000;
 
-/** EvoLink task 없이 rendering에 고착된 row — worker/route 상태 불일치 복구 */
+/** EvoLink taskId는 있는데 status가 conti_ready로 되돌아간 row — 진행 중으로 복구 */
+export async function syncActiveVideoRenderStatuses(workspaces: string[]): Promise<number> {
+  const { data: rows } = await supabase
+    .from('huma_video_content_history')
+    .select('id, status, conti_json')
+    .in('workspace', workspaces)
+    .eq('status', 'conti_ready');
+
+  let synced = 0;
+  for (const row of rows ?? []) {
+    const taskId = (row.conti_json as Record<string, unknown> | null)?.evolinkTaskId;
+    if (!taskId) continue;
+    await supabase
+      .from('huma_video_content_history')
+      .update({ status: 'rendering', error_message: null })
+      .eq('id', row.id);
+    synced += 1;
+  }
+  return synced;
+}
+
+/** EvoLink task 없이 rendering에 고착된 row — render 재시도 시에만 복구 (목록 poll에서 호출 금지) */
 export async function recoverStuckVideoRender(historyId: string): Promise<boolean> {
   const { data: row } = await supabase
     .from('huma_video_content_history')
@@ -63,22 +84,6 @@ export async function recoverStuckVideoRender(historyId: string): Promise<boolea
     })
     .eq('id', historyId);
   return true;
-}
-
-export async function recoverStuckVideoRendersForWorkspaces(workspaces: string[]): Promise<number> {
-  const { data: rows } = await supabase
-    .from('huma_video_content_history')
-    .select('id, conti_json')
-    .in('workspace', workspaces)
-    .eq('status', 'rendering');
-
-  let recovered = 0;
-  for (const row of rows ?? []) {
-    if ((row.conti_json as Record<string, unknown> | null)?.evolinkTaskId) continue;
-    const ok = await recoverStuckVideoRender(String(row.id));
-    if (ok) recovered += 1;
-  }
-  return recovered;
 }
 
 /** 오래 conti_generating 등에 머문 row — 재시도 막힘 방지 */
@@ -831,6 +836,8 @@ export async function runVideoProduction(historyId: string): Promise<string> {
     await supabase
       .from('huma_video_content_history')
       .update({
+        status: 'rendering',
+        error_message: null,
         conti_json: { ...contiJson, ...conti, evolinkPrompt: evoPrompt, evolinkTaskId: taskId },
       })
       .eq('id', historyId);
