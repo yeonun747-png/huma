@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { HumaAccount, HumaVideoContentHistory } from '@huma/shared';
 import { api } from '@/lib/api';
+import { appAlert, appConfirm } from '@/lib/app-dialog';
 import { useAuth } from '@/lib/auth-context';
 import { getAccessibleBusinessUnits } from '@/lib/admin-scope';
 import { WORKSPACES } from '@/lib/constants';
@@ -131,7 +132,7 @@ function CompletedDetail({
 
   const copyText = async (text: string) => {
     await navigator.clipboard.writeText(text);
-    window.alert('클립보드에 복사되었습니다');
+    await appAlert('클립보드에 복사되었습니다');
   };
 
   return (
@@ -530,13 +531,13 @@ export function VideoContentView() {
   const handleCreateConti = async () => {
     const accountId = resolveContiGenerationAccountId(contiTarget, accounts);
     if (!accountId) {
-      window.alert('콘티를 생성할 대상을 선택하세요.');
+      await appAlert('콘티를 생성할 대상을 선택하세요.');
       return;
     }
     const label =
       contiTargetOptions.find((o) => o.value === contiTarget)?.label ??
       videoContentDisplayName(accountId, accounts);
-    if (!window.confirm(`${label}(으)로 콘티 1건을 생성합니다.`)) return;
+    if (!(await appConfirm(`${label}(으)로 콘티 1건을 생성합니다.`))) return;
     setCreatingConti(true);
     try {
       await api.generateConti(accountId);
@@ -547,7 +548,7 @@ export function VideoContentView() {
       if (newest) setSelectedId(newest.id);
       setActiveTab('progress');
     } catch (e) {
-      window.alert(e instanceof Error ? e.message : '콘티 생성 실패');
+      await appAlert(e instanceof Error ? e.message : '콘티 생성 실패');
     } finally {
       setCreatingConti(false);
     }
@@ -559,9 +560,10 @@ export function VideoContentView() {
     const name = videoContentDisplayName(selectedItem.account_id, accounts);
     const label = VIDEO_CONTENT_STATUS_LABEL[selectedItem.status] ?? selectedItem.status;
     if (
-      !window.confirm(
+      !(await appConfirm(
         `${name} · ${label}\n\n이 작업 기록을 삭제합니다. 콘티·영상 파일이 모두 제거되며 되돌릴 수 없습니다.`,
-      )
+        { destructive: true },
+      ))
     ) {
       return;
     }
@@ -572,7 +574,7 @@ export function VideoContentView() {
       setDetail(null);
       await load();
     } catch (e) {
-      window.alert(e instanceof Error ? e.message : '삭제 실패');
+      await appAlert(e instanceof Error ? e.message : '삭제 실패');
     } finally {
       setDeleting(false);
     }
@@ -580,7 +582,7 @@ export function VideoContentView() {
 
   const handleRender = async () => {
     if (!selectedId) return;
-    if (!window.confirm('검토한 콘티로 숏폼 영상을 제작합니다. 수 분 소요될 수 있습니다.')) return;
+    if (!(await appConfirm('검토한 콘티로 숏폼 영상을 제작합니다. 수 분 소요될 수 있습니다.'))) return;
     setRendering(true);
     try {
       await api.renderVideoContent(selectedId);
@@ -589,7 +591,7 @@ export function VideoContentView() {
       const row = list.find((i) => i.id === selectedId);
       if (row) selectedStatusRef.current = row.status;
     } catch (e) {
-      window.alert(e instanceof Error ? e.message : '영상 제작 실패');
+      await appAlert(e instanceof Error ? e.message : '영상 제작 실패');
     } finally {
       setRendering(false);
     }
@@ -598,9 +600,9 @@ export function VideoContentView() {
   const handleReburn = async () => {
     if (!selectedId) return;
     if (
-      !window.confirm(
+      !(await appConfirm(
         'EvoLink 재호출 없이 원본 영상에 자막만 다시 입힙니다.\n자막 스타일·타이밍이 새로 적용됩니다. (수십 초 소요)',
-      )
+      ))
     ) {
       return;
     }
@@ -612,7 +614,7 @@ export function VideoContentView() {
       await load();
       setVideoRefreshKey((k) => k + 1);
     } catch (e) {
-      window.alert(e instanceof Error ? e.message : '자막 재입히기 실패');
+      await appAlert(e instanceof Error ? e.message : '자막 재입히기 실패');
     } finally {
       setReburning(false);
     }

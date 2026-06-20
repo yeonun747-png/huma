@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
+import { appAlert } from '@/lib/app-dialog';
 import { cn } from '@/lib/constants';
 import { MGrid, MPanel, MStat } from '@/components/mockup/primitives';
 import {
@@ -118,16 +119,16 @@ export function CafeViralView() {
   const runScan = async () => {
     const target = cafes.find((c) => c.is_active !== false) ?? cafes[0];
     if (!target?.id) {
-      alert('활성 타겟 카페를 먼저 등록하세요.');
+      await appAlert('활성 타겟 카페를 먼저 등록하세요.');
       return;
     }
     setScanning(true);
     try {
       const result = await api.scanCafeViral(String(target.id));
-      alert(`키워드 스캔 완료 — ${result.count}건 수집`);
+      await appAlert(`키워드 스캔 완료 — ${result.count}건 수집`);
       load();
     } catch (e) {
-      alert(e instanceof Error ? e.message : '키워드 스캔 실패');
+      await appAlert(e instanceof Error ? e.message : '키워드 스캔 실패');
     } finally {
       setScanning(false);
     }

@@ -1,7 +1,8 @@
+import { appAlert } from '@/lib/app-dialog';
+
 /** API/DB 오류 메시지를 계정 관리 UI용 한글 메시지로 변환 */
 export function formatAccountError(message: string, context?: { naverId?: string; platform?: string }): string {
   const lower = message.toLowerCase();
-
   if (message.includes('huma_accounts_naver_id_key') || (lower.includes('duplicate key') && lower.includes('naver_id'))) {
     const id = context?.naverId?.trim();
     return id
@@ -24,5 +25,5 @@ export function formatAccountError(message: string, context?: { naverId?: string
 
 export function alertAccountError(err: unknown, context?: { naverId?: string; platform?: string }) {
   const raw = err instanceof Error ? err.message : '계정 등록에 실패했습니다.';
-  window.alert(formatAccountError(raw, context));
+  void appAlert(formatAccountError(raw, context));
 }

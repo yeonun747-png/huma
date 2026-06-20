@@ -12,6 +12,7 @@ import {
   sortAccountsByCrankLabel,
 } from '@huma/shared';
 import { api } from '@/lib/api';
+import { appAlert, appConfirm } from '@/lib/app-dialog';
 import { WORKSPACES } from '@/lib/constants';
 import { MAccountCard, MGrid, MStat } from '@/components/mockup/primitives';
 import { useRegisterPageAction } from '@/components/dashboard/page-action-context';
@@ -131,7 +132,7 @@ function statusLabel(ac: HumaAccount) {
 }
 
 async function confirmDelete(label: string) {
-  return window.confirm(`「${label}」 계정을 삭제할까요?\n삭제 후에는 복구할 수 없습니다.`);
+  return appConfirm(`「${label}」 계정을 삭제할까요?\n삭제 후에는 복구할 수 없습니다.`, { destructive: true });
 }
 
 function emptyForm(registerUnit: BusinessUnit) {
@@ -419,7 +420,7 @@ export function AccountsView() {
           vncNote = `\n\nVNC 주소가 클립보드에 복사되었습니다.\n${endpoint}\n\nRealVNC Direct로 접속해 naver.com에서 수동 설정하세요.`;
         }
       }
-      window.alert(
+      await appAlert(
         `${res.reused ? '원격접속 세션 포커스' : '원격접속 시작'} — ${ac.name} (${slot})\n해당 계정 IP로 naver.com만 열립니다.${vncNote}`,
       );
     } catch (e) {

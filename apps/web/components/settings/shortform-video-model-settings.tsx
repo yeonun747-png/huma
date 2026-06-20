@@ -6,7 +6,6 @@ import {
   PIPELINE_VIDEO_DURATION_OPTIONS,
   PIPELINE_VIDEO_HINT,
   PIPELINE_VIDEO_QUALITY_OPTIONS,
-  getPipelineAudioCopy,
   getPipelineVideoOption,
   normalizePipelineVideoQuality,
   pipelineVideoCost,
@@ -25,7 +24,6 @@ export function ShortformVideoModelSettings() {
   } = usePipelineModelSettings();
 
   const vidCost = pipelineVideoCost(DEFAULT_VIDEO_MODEL, videoDurationSec, videoQuality);
-  const audioCopy = getPipelineAudioCopy(DEFAULT_VIDEO_MODEL);
   const pipelineVideoDisplayName = getPipelineVideoOption(DEFAULT_VIDEO_MODEL).displayName;
 
   return (
@@ -79,17 +77,6 @@ export function ShortformVideoModelSettings() {
           </div>
           <div className="mt-1 rounded bg-[var(--ok-bg)] px-2 py-1 font-mono text-[10px] text-huma-ok">
             {PIPELINE_VIDEO_HINT}
-          </div>
-        </div>
-
-        <div>
-          <div className="mb-1 font-mono text-[11px] tracking-wide text-huma-t3">오디오</div>
-          <div className="flex items-center gap-2.5 rounded-md border border-[rgba(78,203,113,0.25)] bg-[var(--ok-bg)] px-2.5 py-2">
-            <div className="text-[17px]">{audioCopy.emoji}</div>
-            <div>
-              <div className="text-[13px] font-semibold text-huma-ok">{audioCopy.title}</div>
-              <div className="font-mono text-[11px] text-huma-t3">{audioCopy.sub}</div>
-            </div>
           </div>
         </div>
 

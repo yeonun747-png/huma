@@ -13,6 +13,7 @@ import {
 import { cn } from '@/lib/constants';
 import type { CrankActType, CrankFeedItem } from '@/lib/crank-mock-data';
 import { api } from '@/lib/api';
+import { appAlert, appConfirm } from '@/lib/app-dialog';
 import { useWorkspace } from '@/components/dashboard/workspace-context';
 import { EmptyPanel } from '@/components/ui/empty-panel';
 import {
@@ -196,9 +197,9 @@ export function CrankView() {
 
   const restoreCrankNetwork = useCallback(async () => {
     if (
-      !window.confirm(
+      !(await appConfirm(
         '포스팅 동글(1~5) + C-Rank 실폰(6·7) 네트워크를 복구합니다.\nADB·테더 연결 후 1~2분 걸릴 수 있습니다.',
-      )
+      ))
     ) {
       return;
     }
@@ -206,10 +207,10 @@ export function CrankView() {
     try {
       const res = await api.restoreModemNetwork();
       if (!res.success) throw new Error(res.error ?? '복구 실패');
-      window.alert(res.message ?? '복구 완료');
+      await appAlert(res.message ?? '복구 완료');
       await syncCrankModems();
     } catch (err: unknown) {
-      window.alert(err instanceof Error ? err.message : '복구 실패');
+      await appAlert(err instanceof Error ? err.message : '복구 실패');
     } finally {
       setRestoringNetwork(false);
     }

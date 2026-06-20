@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
+import { AppDialogProvider } from '@/lib/app-dialog';
 import { WorkspaceProvider } from '@/components/dashboard/workspace-context';
 import { AppShell } from '@/components/dashboard/app-shell';
 import { isPublicPath } from '@/lib/public-paths';
@@ -46,15 +47,17 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthProvider>
-      <AuthGuard>
-        {isPublic ? (
-          children
-        ) : (
-          <WorkspaceProvider>
-            <AuthenticatedLayout>{children}</AuthenticatedLayout>
-          </WorkspaceProvider>
-        )}
-      </AuthGuard>
+      <AppDialogProvider>
+        <AuthGuard>
+          {isPublic ? (
+            children
+          ) : (
+            <WorkspaceProvider>
+              <AuthenticatedLayout>{children}</AuthenticatedLayout>
+            </WorkspaceProvider>
+          )}
+        </AuthGuard>
+      </AppDialogProvider>
     </AuthProvider>
   );
 }

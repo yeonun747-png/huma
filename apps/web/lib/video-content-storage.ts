@@ -44,6 +44,7 @@ export interface VideoContentStorageItem {
   allPlatformsUploaded: boolean;
   latestUploadAt: string | null;
   ageDays: number;
+  durationSec: number | null;
 }
 
 export const STORAGE_FILTER_LABEL: Record<VideoContentStorageFilter, string> = {
@@ -60,6 +61,12 @@ export function formatStorageBytes(bytes: number): string {
   return `${bytes} B`;
 }
 
+/** 썸네일 뱃지용 — 13초 */
+export function formatVideoDurationSec(sec: number | null | undefined): string | null {
+  if (sec == null || sec <= 0 || !Number.isFinite(sec)) return null;
+  return `${Math.round(sec)}초`;
+}
+
 export interface VideoContentStorageFile {
   historyId: string;
   variant: 'subtitled' | 'source';
@@ -71,6 +78,7 @@ export interface VideoContentStorageFile {
   scenario_summary: string | null;
   status: string;
   created_at: string;
+  durationSec: number | null;
 }
 
 export function flattenStorageFiles(items: VideoContentStorageItem[]): VideoContentStorageFile[] {
@@ -84,6 +92,7 @@ export function flattenStorageFiles(items: VideoContentStorageItem[]): VideoCont
       scenario_summary: item.scenario_summary,
       status: item.status,
       created_at: item.created_at,
+      durationSec: item.durationSec,
     };
     if (item.hasSubtitled) {
       files.push({

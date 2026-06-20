@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { HumaAccount } from '@huma/shared';
 import { api } from '@/lib/api';
+import { appAlert, appConfirm } from '@/lib/app-dialog';
 import {
   STORAGE_FILTER_LABEL,
   formatStorageBytes,
@@ -95,25 +96,26 @@ export function VideoContentStorageModal({
       .filter((i) => (target === 'source' ? i.hasSource : i.hasSubtitled))
       .map((i) => i.id);
     if (!ids.length) {
-      window.alert('삭제할 파일이 없습니다.');
+      await appAlert('삭제할 파일이 없습니다.');
       return;
     }
     const label = target === 'source' ? '원본' : '자막본';
     if (
-      !window.confirm(
+      !(await appConfirm(
         `선택 ${ids.length}건의 ${label} mp4를 삭제합니다.\n약 ${formatStorageBytes(freedEstimate)} 확보\n\n콘티·캡션·작업 기록은 유지됩니다.`,
-      )
+        { destructive: true },
+      ))
     ) {
       return;
     }
     setDeleting(true);
     try {
       const result = await api.videoContentStorageBulkDelete(ids, target);
-      window.alert(`${result.deleted}건 삭제 · ${formatStorageBytes(result.freedBytes)} 확보`);
+      await appAlert(`${result.deleted}건 삭제 · ${formatStorageBytes(result.freedBytes)} 확보`);
       onDone();
       onClose();
     } catch (e) {
-      window.alert(e instanceof Error ? e.message : '일괄 삭제 실패');
+      await appAlert(e instanceof Error ? e.message : '일괄 삭제 실패');
     } finally {
       setDeleting(false);
     }

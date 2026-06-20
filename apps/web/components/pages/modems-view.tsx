@@ -9,6 +9,7 @@ import {
   postingSlotByPort,
 } from '@huma/shared';
 import { api } from '@/lib/api';
+import { appAlert, appConfirm } from '@/lib/app-dialog';
 import { WORKSPACES } from '@/lib/constants';
 import { MPanel, MTable, MTag } from '@/components/mockup/primitives';
 import { useRegisterPageAction } from '@/components/dashboard/page-action-context';
@@ -175,9 +176,9 @@ export function ModemsView() {
 
   const restoreNetwork = useCallback(async () => {
     if (
-      !window.confirm(
+      !(await appConfirm(
         '동글 DHCP · policy routing · 3proxy를 일괄 복구합니다.\n1~2분 걸릴 수 있습니다. 계속할까요?',
-      )
+      ))
     ) {
       return;
     }
@@ -188,12 +189,12 @@ export function ModemsView() {
       if (!res.success) {
         throw new Error(res.error ?? '복구 실패');
       }
-      window.alert(res.message ?? '복구 완료. SOCKS 재검사를 실행합니다.');
+      await appAlert(res.message ?? '복구 완료. SOCKS 재검사를 실행합니다.');
       await load();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '동글 네트워크 복구 실패';
       setLoadError(msg);
-      window.alert(msg);
+      await appAlert(msg);
     } finally {
       setRestoring(false);
     }
@@ -207,7 +208,7 @@ export function ModemsView() {
   }, [load]);
 
   useRegisterPageAction('openModemForm', () => {
-    alert(
+    void appAlert(
       '물리 동글 1~7은 Supabase huma_modems(v3_25) + i7 setup-dongle-slots.sh 로 설정합니다.',
     );
   });

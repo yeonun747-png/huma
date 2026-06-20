@@ -1,3 +1,5 @@
+import { appPrompt } from '@/lib/app-dialog';
+
 /** vnc://172.30.1.96:5900 → 172.30.1.96:5900 (RealVNC Direct용) */
 export function parseVncEndpoint(vncUrl: string): string | null {
   try {
@@ -20,12 +22,12 @@ export function isTailscaleEndpoint(endpoint: string): boolean {
   return parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127;
 }
 
-export async function copyVncEndpoint(endpoint: string): Promise<boolean> {
-  try {
+/** RealVNC Direct 주소 복사 실패 시 표시 */
+export async function copyVncEndpoint(endpoint: string): Promise<boolean> {  try {
     await navigator.clipboard.writeText(endpoint);
     return true;
   } catch {
-    window.prompt('RealVNC Direct 주소 (복사 후 붙여넣기)', endpoint);
+    await appPrompt('RealVNC Direct 주소 (복사 후 붙여넣기)', endpoint);
     return false;
   }
 }

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import type { HumaJob, Workspace } from '@huma/shared';
 import { isCaptchaDrillJob, isContentFullPipelineShell } from '@huma/shared';
 import { api } from '@/lib/api';
+import { appAlert, appConfirm } from '@/lib/app-dialog';
 import { WS_LABEL } from '@/lib/constants';
 import { useWorkspace } from '@/components/dashboard/workspace-context';
 import { PostingImageModelSettings } from '@/components/settings/posting-image-model-settings';
@@ -350,16 +351,16 @@ export function QueueManager() {
     setSelectedIds(new Set(staleFailedJobs.filter(isDeletableQueueJob).map((j) => j.id)));
   };
 
-  const handleAbortJob = (job: HumaJob) => {
+  const handleAbortJob = async (job: HumaJob) => {
     const msg = `「${job.title ?? job.job_type}」 LIVE 작업을 강제 중단할까요?\n브라우저·동글·계정 락을 해제하고 큐에서 제거합니다.`;
-    if (!window.confirm(msg)) return;
+    if (!(await appConfirm(msg, { destructive: true }))) return;
     api
       .abortJob(job.id, { delete: true })
       .then(() => load())
-      .catch((e) => alert((e as Error).message));
+      .catch((e) => void appAlert((e as Error).message));
   };
 
-  const handleDeleteJob = (job: HumaJob) => {
+  const handleDeleteJob = async (job: HumaJob) => {
     const drill = isCaptchaDrillJob(job);
     const captchaHold = job.status === 'awaiting_captcha';
     const msg = drill
@@ -367,7 +368,7 @@ export function QueueManager() {
       : captchaHold
         ? `「${job.title ?? job.job_type}」 CAPTCHA 대기 작업을 큐에서 제거할까요?\nVNC 브라우저·동글 세션도 종료됩니다.`
         : `「${job.title ?? job.job_type}」 작업을 큐에서 제거할까요?`;
-    if (!window.confirm(msg)) return;
+    if (!(await appConfirm(msg, { destructive: true }))) return;
     api
       .deleteJob(job.id)
       .then(() => {
@@ -382,14 +383,14 @@ export function QueueManager() {
         load();
       })
       .catch((e) => {
-        alert(e instanceof Error ? e.message : '삭제 실패');
+        void appAlert(e instanceof Error ? e.message : '삭제 실패');
       });
   };
 
   const handleBulkDelete = async () => {
     const ids = [...selectedIds];
     if (ids.length === 0) return;
-    if (!window.confirm(`선택한 ${ids.length}개 작업을 큐에서 제거할까요?`)) return;
+    if (!(await appConfirm(`선택한 ${ids.length}개 작업을 큐에서 제거할까요?`, { destructive: true }))) return;
 
     setBulkDeleting(true);
     try {
@@ -398,13 +399,13 @@ export function QueueManager() {
       } else {
         const result = await api.bulkDeleteJobs(ids);
         if (result.failed > 0) {
-          alert(`${result.deleted}개 삭제 · ${result.failed}개 실패\n${result.errors?.join('\n') ?? ''}`);
+          await appAlert(`${result.deleted}개 삭제 · ${result.failed}개 실패\n${result.errors?.join('\n') ?? ''}`);
         }
       }
       setSelectedIds(new Set());
       load();
     } catch (e) {
-      alert(e instanceof Error ? e.message : '일괄 삭제 실패');
+      await appAlert(e instanceof Error ? e.message : '일괄 삭제 실패');
     } finally {
       setBulkDeleting(false);
     }
@@ -689,9 +690,9 @@ export function QueueManager() {
                           .advanceJob(job.id)
                           .then(() => {
                             void load();
-                            alert('앞당김 — 큐에 등록했습니다. 잠시 후 LIVE로 바뀌는지 확인하세요.');
+                            void appAlert('앞당김 — 큐에 등록했습니다. 잠시 후 LIVE로 바뀌는지 확인하세요.');
                           })
-                          .catch((e) => alert((e as Error).message))
+                          .catch((e) => void appAlert((e as Error).message))
                     : undefined
                 }
                 onStop={

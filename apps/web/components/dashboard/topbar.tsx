@@ -5,6 +5,7 @@ import { BUSINESS_UNITS } from '@/lib/admin-scope';
 import { getPageMeta } from '@/lib/page-config';
 import { useWorkspace } from './workspace-context';
 import { api } from '@/lib/api';
+import { appAlert, appConfirm, appPrompt } from '@/lib/app-dialog';
 import { useDashboardPeriod } from './dashboard-period-context';
 import { formatLogKstTime, parseQueueKstParts, weekdayColorClass, type QueueKstParts } from '@/lib/format-kst';
 import { KstWeekdayDatetime } from '@/components/ui/kst-weekday-datetime';
@@ -195,8 +196,8 @@ export function Topbar({ title }: { title: string }) {
           <button
             type="button"
             className="btn-ghost"
-            onClick={() => {
-              const ok = window.confirm(
+            onClick={async () => {
+              const ok = await appConfirm(
                 `대기 중이던 큐 ${pendingCount}건은 그대로 유지됩니다.\n당일 C-Rank 큐가 없으면 자동 보정됩니다.\n재시작하시겠습니까?`,
               );
               if (!ok) return;
@@ -212,8 +213,8 @@ export function Topbar({ title }: { title: string }) {
           <button
             type="button"
             className="btn-ghost"
-            onClick={() => {
-              const reason = window.prompt(
+            onClick={async () => {
+              const reason = await appPrompt(
                 'HUMA 전체를 정지합니다.\n정지 이유를 입력하세요 (Operation Log에 기록됩니다):',
               );
               if (reason === null || !reason.trim()) return;

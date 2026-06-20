@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { HumaAccount } from '@huma/shared';
 import { api } from '@/lib/api';
+import { appAlert, appConfirm } from '@/lib/app-dialog';
 import {
   STORAGE_FILTER_LABEL,
   flattenStorageFiles,
@@ -106,24 +107,24 @@ export function VideoContentStoragePanel({
       const res = await api.updateVideoContentStorageSettings({ ...settings, ...patch });
       setSettings(res.settings);
     } catch (e) {
-      window.alert(e instanceof Error ? e.message : '설정 저장 실패');
+      await appAlert(e instanceof Error ? e.message : '설정 저장 실패');
     } finally {
       setSaving(false);
     }
   };
 
   const runCleanupNow = async () => {
-    if (!window.confirm('자동 정책 기준으로 지금 즉시 정리합니다. 계속할까요?')) return;
+    if (!(await appConfirm('자동 정책 기준으로 지금 즉시 정리합니다. 계속할까요?'))) return;
     setRunningCleanup(true);
     try {
       const result = await api.runVideoContentStorageCleanup();
-      window.alert(
+      await appAlert(
         `정리 완료 — 원본 ${result.deletedSources}건, 자막본 ${result.deletedSubtitled}건 · ${formatStorageBytes(result.freedBytes)} 확보`,
       );
       onRefresh();
       await Promise.all([loadStats(), loadFiles()]);
     } catch (e) {
-      window.alert(e instanceof Error ? e.message : '정리 실패');
+      await appAlert(e instanceof Error ? e.message : '정리 실패');
     } finally {
       setRunningCleanup(false);
     }
@@ -155,13 +156,52 @@ export function VideoContentStoragePanel({
             ) : null}
 
             <div>
-              <div className="mb-1 flex justify-between font-mono text-[10.5px] text-huma-t3">
-                <span>
-                  영상 {formatStorageBytes(s.totalBytes)} / {st.ssdCapGb} GB ({s.usedPercent}%)
-                </span>
-                <span>
-                  완료 {s.completedCount} · 양쪽 {s.withBothCount} · 자막만 {s.subtitledOnlyCount}
-                </span>
+              <div className="mb-1 flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
+                <div className="flex flex-wrap items-center gap-x-2 font-mono text-[10.5px] text-huma-t3">
+                  <span>
+                    영상 {formatStorageBytes(s.totalBytes)} / {st.ssdCapGb} GB ({s.usedPercent}%)
+                  </span>
+                  <span className="text-huma-t4">|</span>
+                  <span className="text-huma-t4">
+                    자막본 {formatStorageBytes(s.subtitledBytes)} · 원본 {formatStorageBytes(s.sourceBytes)}
+                  </span>
+                  <span className="text-huma-t4">|</span>
+                  <span>
+                    완료 {s.completedCount} · 양쪽 {s.withBothCount} · 자막만 {s.subtitledOnlyCount}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" className="btn-primary btn-sm" onClick={() => setShowModal(true)}>
+                    일괄 정리
+                  </button>
+                  <button type="button" className="btn-ghost btn-sm" onClick={() => setShowPolicy((v) => !v)}>
+                    {showPolicy ? '자동 정책 접기' : '자동 정책'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost btn-sm"
+                    disabled={runningCleanup || !st.autoCleanupEnabled}
+                    onClick={() => void runCleanupNow()}
+                  >
+                    {runningCleanup ? '정리 중…' : '지금 정리 실행'}
+                  </button>
+                  <div className="flex shrink-0 items-center gap-1.5 whitespace-nowrap">
+                    <span className="font-mono text-[10.5px] text-huma-t3">
+                      파일 목록{!listLoading ? ` (${files.length})` : ''}
+                    </span>
+                    <select
+                      className="m-model-select max-w-[128px] shrink-0 py-0.5 pl-1.5 pr-6 text-[10px] leading-tight"
+                      value={listFilter}
+                      onChange={(e) => setListFilter(e.target.value as VideoContentStorageFilter)}
+                    >
+                      {LIST_FILTERS.map((f) => (
+                        <option key={f} value={f}>
+                          {STORAGE_FILTER_LABEL[f]}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
               </div>
               <div className="h-2 overflow-hidden rounded-full bg-huma-bg3">
                 <div
@@ -169,27 +209,6 @@ export function VideoContentStoragePanel({
                   style={{ width: `${Math.max(s.usedPercent, s.totalBytes > 0 ? 2 : 0)}%` }}
                 />
               </div>
-              <div className="mt-1 flex flex-wrap gap-x-3 font-mono text-[10px] text-huma-t4">
-                <span>자막본 {formatStorageBytes(s.subtitledBytes)}</span>
-                <span>원본 {formatStorageBytes(s.sourceBytes)}</span>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <button type="button" className="btn-primary btn-sm" onClick={() => setShowModal(true)}>
-                일괄 정리
-              </button>
-              <button type="button" className="btn-ghost btn-sm" onClick={() => setShowPolicy((v) => !v)}>
-                {showPolicy ? '자동 정책 접기' : '자동 정책'}
-              </button>
-              <button
-                type="button"
-                className="btn-ghost btn-sm"
-                disabled={runningCleanup || !st.autoCleanupEnabled}
-                onClick={() => void runCleanupNow()}
-              >
-                {runningCleanup ? '정리 중…' : '지금 정리 실행'}
-              </button>
             </div>
 
             {showPolicy ? (
@@ -259,40 +278,16 @@ export function VideoContentStoragePanel({
               </div>
             ) : null}
 
-            <div className="border-t border-huma-bdr pt-3">
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <div className="text-[12px] font-semibold text-huma-t2">
-                  파일 목록
-                  {!listLoading ? (
-                    <span className="ml-1 font-normal text-huma-t3">({files.length})</span>
-                  ) : null}
-                </div>
-                <select
-                  className="m-model-select text-[10px]"
-                  value={listFilter}
-                  onChange={(e) => setListFilter(e.target.value as VideoContentStorageFilter)}
-                >
-                  {LIST_FILTERS.map((f) => (
-                    <option key={f} value={f}>
-                      {STORAGE_FILTER_LABEL[f]}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <p className="mb-2 text-[10px] text-huma-t4">
-                썸네일·파일명 클릭 → 재생. 썸네일은 영상 저장 시 FFmpeg로 자동 생성됩니다.
-              </p>
-              {listLoading ? (
-                <p className="py-6 text-center text-[11px] text-huma-t3">파일 목록 불러오는 중…</p>
-              ) : (
-                <VideoContentStorageFileGrid
-                  files={files}
-                  accountLabel={(id) => videoContentDisplayName(id, accounts)}
-                  onPlay={setPlayFile}
-                  onOpenJob={onOpenItem}
-                />
-              )}
-            </div>
+            {listLoading ? (
+              <p className="py-6 text-center text-[11px] text-huma-t3">파일 목록 불러오는 중…</p>
+            ) : (
+              <VideoContentStorageFileGrid
+                files={files}
+                accountLabel={(id) => videoContentDisplayName(id, accounts)}
+                onPlay={setPlayFile}
+                onOpenJob={onOpenItem}
+              />
+            )}
           </div>
         ) : (
           <p className="text-[11px] text-huma-t3">저장소 정보를 불러오지 못했습니다.</p>

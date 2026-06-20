@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
+import { appPrompt } from '@/lib/app-dialog';
 import { getAccessibleWorkspaces } from '@/lib/constants';
 import { useAuth } from '@/lib/auth-context';
 import { useWorkspace } from '@/components/dashboard/workspace-context';
@@ -234,8 +235,8 @@ export function DashboardHome() {
                 <button
                   type="button"
                   className="m-svc-stop"
-                  onClick={() => {
-                    const reason = window.prompt(`${m.name} 서비스를 정지합니다.\n정지 이유를 입력하세요:`);
+                  onClick={async () => {
+                    const reason = await appPrompt(`${m.name} 서비스를 정지합니다.\n정지 이유를 입력하세요:`);
                     if (reason?.trim()) void api.stopAll(reason.trim());
                   }}
                 >

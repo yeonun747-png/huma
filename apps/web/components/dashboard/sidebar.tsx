@@ -8,6 +8,7 @@ import { prefetchShellViews } from '@/lib/shell-routes';
 import { useWorkspace } from './workspace-context';
 import { useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
+import { appPrompt } from '@/lib/app-dialog';
 import { useShellNav } from './shell-nav-context';
 import { useSidebarBadges } from './use-sidebar-badges';
 
@@ -66,9 +67,9 @@ export function Sidebar() {
                 <span
                   className="ml-auto flex h-4 w-4 items-center justify-center rounded border border-huma-err bg-[var(--err-bg)] text-[9px] text-huma-err opacity-0 transition group-hover:opacity-100"
                   title={`${unit.short} 긴급정지`}
-                  onClick={(e) => {
+                  onClick={async (e) => {
                     e.stopPropagation();
-                    const reason = window.prompt(`${unit.short} 서비스를 즉시 정지합니다.\n정지 이유를 입력하세요:`);
+                    const reason = await appPrompt(`${unit.short} 서비스를 즉시 정지합니다.\n정지 이유를 입력하세요:`);
                     if (reason?.trim()) void api.stopAll(reason.trim());
                   }}
                 >

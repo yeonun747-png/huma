@@ -67,6 +67,7 @@ export interface VideoContentStorageItem {
   allPlatformsUploaded: boolean;
   latestUploadAt: string | null;
   ageDays: number;
+  durationSec: number | null;
 }
 
 type HistoryRow = Record<string, unknown>;
@@ -146,6 +147,25 @@ function resolveFileState(row: HistoryRow): {
   };
 }
 
+function resolveDurationSec(row: HistoryRow): number | null {
+  const fromCol = Number(row.duration);
+  if (Number.isFinite(fromCol) && fromCol > 0) return Math.round(fromCol);
+
+  const conti = row.conti_json as Record<string, unknown> | null | undefined;
+  if (conti && typeof conti === 'object') {
+    const fromConti = Number(conti.duration);
+    if (Number.isFinite(fromConti) && fromConti > 0) return Math.round(fromConti);
+
+    const shots = conti.shots as Array<{ endSec?: number }> | undefined;
+    if (Array.isArray(shots) && shots.length > 0) {
+      const lastEnd = shots[shots.length - 1]?.endSec;
+      if (Number.isFinite(lastEnd) && lastEnd > 0) return Math.round(lastEnd);
+    }
+  }
+
+  return null;
+}
+
 function rowToStorageItem(row: HistoryRow): VideoContentStorageItem | null {
   const files = resolveFileState(row);
   if (!files.hasSubtitled && !files.hasSource) return null;
@@ -175,6 +195,7 @@ function rowToStorageItem(row: HistoryRow): VideoContentStorageItem | null {
     allPlatformsUploaded: allPlatformsUploaded(row),
     latestUploadAt: uploadAt?.toISOString() ?? null,
     ageDays,
+    durationSec: resolveDurationSec(row),
   };
 }
 
@@ -182,7 +203,7 @@ async function loadStorageRows(allowedWorkspaces: string[]): Promise<HistoryRow[
   let query = supabase
     .from('huma_video_content_history')
     .select(
-      'id, account_id, workspace, status, scenario_summary, similarity_score, created_at, video_file_path, source_video_path, uploaded_youtube, uploaded_youtube_at, uploaded_tiktok, uploaded_tiktok_at, uploaded_instagram, uploaded_instagram_at, uploaded_threads, uploaded_threads_at, uploaded_x, uploaded_x_at',
+      'id, account_id, workspace, status, scenario_summary, similarity_score, duration, conti_json, created_at, video_file_path, source_video_path, uploaded_youtube, uploaded_youtube_at, uploaded_tiktok, uploaded_tiktok_at, uploaded_instagram, uploaded_instagram_at, uploaded_threads, uploaded_threads_at, uploaded_x, uploaded_x_at',
     )
     .in('workspace', allowedWorkspaces)
     .order('created_at', { ascending: false })

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import type { AccountType, HumaAccount } from '@huma/shared';
 import { isCrankPoolAccount } from '@huma/shared';
 import { api } from '@/lib/api';
+import { appConfirm } from '@/lib/app-dialog';
 import { useWorkspace } from '@/components/dashboard/workspace-context';
 import { cn } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
@@ -64,7 +65,7 @@ export function AccountList() {
   };
 
   const handleDelete = async (ac: HumaAccount) => {
-    if (!window.confirm(`「${ac.name}」 계정을 삭제할까요?`)) return;
+    if (!(await appConfirm(`「${ac.name}」 계정을 삭제할까요?`, { destructive: true }))) return;
     await api.deleteAccount(ac.id);
     load();
   };
