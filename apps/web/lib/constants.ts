@@ -39,6 +39,7 @@ export const NAV_ITEMS = [
   { href: '/oplog', label: 'Operation Log', icon: '📋', group: 'common' },
   { href: '/accounts', label: '계정 관리', icon: '◉', group: 'common' },
   { href: '/video-pipeline', label: '영상 파이프라인', icon: '▷', badgeKey: 'video', group: 'common' },
+  { href: '/video-content', label: '영상 콘텐츠', icon: '🎬', group: 'common' },
   { href: '/seo-keywords', label: 'SEO 키워드', icon: '🔍', badgeKey: 'seo', group: 'common' },
   { href: '/blog-check', label: '블로그 지수 분석', icon: '📊', badgeKey: 'blogcheck', group: 'common' },
   { href: '/watcher', label: 'Layer4 Watcher', icon: '⚠', badgeKey: 'watcher', badgeErr: true, group: 'common' },

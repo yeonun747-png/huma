@@ -1160,6 +1160,10 @@
   gap: 4px;
 }
 
+.accounts-view .m-ac-foot-secondary {
+  margin-top: 4px;
+}
+
 .accounts-view .m-af {
   flex: 1 1 0;
   min-width: 0;
@@ -1170,6 +1174,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.accounts-view .m-ac-foot-secondary .m-af {
+  font-size: 9.5px;
+}
+
 
 .accounts-view .accounts-form-row {
   display: grid;

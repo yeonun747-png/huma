@@ -37,6 +37,7 @@ export const PAGE_META: Record<string, PageMeta> = {
   '/oplog': { title: 'Operation Log', ...NO_ACTION },
   '/accounts': { title: '계정 관리', contentClass: 'accounts-page-main', ...NO_ACTION },
   '/video-pipeline': { title: '영상 파이프라인', ...NO_ACTION },
+  '/video-content': { title: '영상 콘텐츠', ...NO_ACTION },
   '/watcher': { title: 'Layer4 Watcher', ...NO_ACTION },
   '/human-engine': { title: '휴먼 엔진 설정', contentClass: 'px-[18px] py-4', ...NO_ACTION },
   '/bgm-library': { title: '오디오 정책', ...NO_ACTION },

@@ -10,7 +10,8 @@ export * from './pipeline-job';
 export * from './blog-link';
 export * from './workspace-service-mention';
 export * from './blog-check-search';
-export * from './review-duration';
+export * from './video-content';
+export * from './video-persona-text';
 
 export type Workspace = import('./account').Workspace;
 

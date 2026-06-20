@@ -22,6 +22,7 @@ import { uploadQuizOasisInstagramVariants } from '../social/quizoasis-reels.js';
 import { buildBlogVideoAppend } from '../queue/jobs/content-orchestrator.js';
 import { createPausedSocialReplyJob } from '../../lib/social-reply-chain.js';
 import { isGoogleImagenEnabled, isHiggsfieldVideoEnabled } from '../../lib/human-engine-policy.js';
+import { getPipelineModelSettings } from '../../lib/pipeline-settings.js';
 
 import { copyFile, mkdir } from 'fs/promises';
 
@@ -215,11 +216,14 @@ export async function runVideoPipeline(videoJobId: string) {
 
     await updateStep(videoJobId, 'video_generating');
 
+    const { videoQuality } = await getPipelineModelSettings(String(job.workspace));
+
     const videoUrl = await generateVideo({
       imageUrl,
       prompt: job.video_prompt,
       model: job.video_model as VideoModel,
       durationSec: Number(job.duration_sec) > 0 ? Number(job.duration_sec) : 15,
+      quality: videoQuality,
     });
 
     await updateVideoJob(videoJobId, { source_video_url: videoUrl });

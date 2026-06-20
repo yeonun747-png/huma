@@ -13,6 +13,8 @@ export const SHELL_VIEW_LOADERS: Record<string, ShellViewLoader> = {
   '/accounts': () => import('@/components/pages/accounts-view').then((m) => ({ default: m.AccountsView })),
   '/video-pipeline': () =>
     import('@/components/pages/video-view').then((m) => ({ default: m.VideoPipelineView })),
+  '/video-content': () =>
+    import('@/components/pages/video-content-view').then((m) => ({ default: m.VideoContentView })),
   '/seo-keywords': () =>
     import('@/components/pages/workspace-views').then((m) => ({ default: m.SeoKeywordsView })),
   '/blog-check': () => import('@/components/pages/blog-check-view').then((m) => ({ default: m.BlogCheckView })),

@@ -50,6 +50,7 @@ import { executeCafeReply } from './jobs/cafe-reply.js';
 import { executeSocialCrank } from './jobs/social-crank.js';
 import { executeScheduledSocialCrank } from '../crank/scheduled-session.js';
 import { executeVideoPipeline } from './jobs/video-pipeline.js';
+import { executeVideoContentGenerate } from './jobs/video-content-generate.js';
 import { executeContentFull } from '../claude/auto-content-orchestrator.js';
 import { recordPublishedPost } from '../blog-check/post-record.js';
 import { executeBlogCheckJob } from './jobs/blog-check.js';
@@ -169,7 +170,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         advanceRequested: advanceFlag,
       });
 
-      if (getSystemPaused() && type !== 'blog_check') {
+      if (getSystemPaused() && type !== 'blog_check' && type !== 'video_content_generate') {
         await deferHumaJob(job, humaJobId, CRANK_PAUSE_DEFER_MS, {
           reason: 'SYSTEM_PAUSED',
           accountId,
@@ -682,6 +683,9 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
           await markRunning();
           await executeVideoPipeline(payload.videoQueueId as string);
           if (humaJobId) await completeJob(humaJobId);
+        } else if (type === 'video_content_generate') {
+          await markRunning();
+          await executeVideoContentGenerate(payload as { accountId: string });
         } else if (type === 'content_full') {
           await markRunning();
           await executeContentFull(humaJobId!);

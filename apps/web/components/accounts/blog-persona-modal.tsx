@@ -22,7 +22,7 @@ export function BlogPersonaModal({ account, open, onClose, onSave, saving, error
   return (
     <div className="m-modal-bg open" onClick={onClose} role="presentation">
       <div className="m-modal m-modal-queue max-w-lg" onClick={(e) => e.stopPropagation()} role="dialog">
-        <div className="m-modal-t">✍️ 블로그 문체 페르소나 · {account.name}</div>
+        <div className="m-modal-t">✍️ 포스팅 페르소나 · {account.name}</div>
         <p className="mb-3 text-[12px] text-huma-t3">
           Claude Sonnet이 네이버 블로그 글을 쓸 때 따를 톤·말투입니다. 연운은 ~요체·경험담·AI 티 금지를 권장합니다.
           DB speech_style·character_mode_prompts와 함께 적용됩니다.

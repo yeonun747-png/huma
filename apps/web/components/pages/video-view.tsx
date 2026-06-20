@@ -8,16 +8,21 @@ import { cn } from '@/lib/constants';
 import { useWorkspace } from '@/components/dashboard/workspace-context';
 import {
   DEFAULT_VIDEO_MODEL,
+  EVOLINK_VIDEO_MODEL_ID,
   IMAGEN_PIPELINE_OPTIONS,
+  PIPELINE_VIDEO_DURATION_OPTIONS,
   PIPELINE_VIDEO_HINT,
-  PIPELINE_VIDEO_OPTIONS,
+  PIPELINE_VIDEO_QUALITY_OPTIONS,
+  DEFAULT_PIPELINE_VIDEO_QUALITY,
   type ImagenPipelineChoice,
+  type PipelineVideoQuality,
   estimateTodayPipelineCost,
   getPipelineAudioCopy,
   getPipelineVideoOption,
   getPipelineImageStepTitles,
   getPipelineVideoStepTitles,
   normalizeImagenPipelineChoice,
+  normalizePipelineVideoQuality,
   resolvePipelineImageChoice,
   normalizePipelineVideoSelect,
   pipelineImageCost,
@@ -25,6 +30,7 @@ import {
   pipelineVideoCost,
   pipelineVideoFromSelect,
   tableImageModelLabel,
+  tableVideoModelLabel,
 } from '@/lib/higgsfield-models';
 import { MGrid, MPanel, MStat, MTable, MTag } from '@/components/mockup/primitives';
 import { EmptyPanel } from '@/components/ui/empty-panel';
@@ -57,7 +63,8 @@ import { isSameKstDay } from '@/lib/format-kst';
 function rowCost(v: HumaVideoQueue, imgChoice: ImagenPipelineChoice): string {
   if (v.status === 'done') {
     const img = pipelineImageCost(normalizeImagenPipelineChoice(v.image_model) ?? imgChoice);
-    const vid = pipelineVideoCost(v.video_model ?? DEFAULT_VIDEO_MODEL);
+    const dur = Number(v.duration_sec) > 0 ? Number(v.duration_sec) : 15;
+    const vid = pipelineVideoCost(v.video_model ?? DEFAULT_VIDEO_MODEL, dur);
     return `$${(img.minUsd + vid.usd).toFixed(2)}`;
   }
   if (v.status === 'failed') return '—';
@@ -66,7 +73,7 @@ function rowCost(v: HumaVideoQueue, imgChoice: ImagenPipelineChoice): string {
 
 function audioTag(v: HumaVideoQueue): string {
   if (v.tts_script?.trim()) return 'TTS';
-  return (v.video_model ?? '').includes('seedance') ? 'Seedance 2.0' : 'Kling 3.0';
+  return 'Kling 3.0 Turbo';
 }
 
 function uploadTags(v: HumaVideoQueue) {
@@ -84,7 +91,9 @@ export function VideoPipelineView() {
   const [items, setItems] = useState<HumaVideoQueue[]>([]);
   const [imgChoice, setImgChoice] = useState<ImagenPipelineChoice>('auto');
   const [haikuAuto, setHaikuAuto] = useState(true);
-  const [vidSelect, setVidSelect] = useState('kling-3.0');
+  const [vidSelect, setVidSelect] = useState<string>(EVOLINK_VIDEO_MODEL_ID);
+  const [videoDurationSec, setVideoDurationSec] = useState<number>(15);
+  const [videoQuality, setVideoQuality] = useState<PipelineVideoQuality>(DEFAULT_PIPELINE_VIDEO_QUALITY);
   const [viewer, setViewer] = useState<{
     title: string;
     content?: string | null;
@@ -105,6 +114,14 @@ export function VideoPipelineView() {
         const settings = hg as Record<string, unknown>;
         const savedVid = normalizePipelineVideoSelect(String(settings.default_video_model ?? DEFAULT_VIDEO_MODEL));
         setVidSelect(savedVid);
+        const savedDur = Number(settings.video_duration_sec);
+        setVideoDurationSec(
+          PIPELINE_VIDEO_DURATION_OPTIONS.includes(savedDur as (typeof PIPELINE_VIDEO_DURATION_OPTIONS)[number])
+            ? savedDur
+            : 15,
+        );
+        const savedQ = String(settings.video_quality ?? settings.default_video_resolution ?? '720p');
+        setVideoQuality(normalizePipelineVideoQuality(savedQ));
         const savedImg = String(settings.default_image_model ?? 'auto');
         if (savedImg === 'auto' || !savedImg.startsWith('imagen-')) {
           setHaikuAuto(true);
@@ -125,17 +142,45 @@ export function VideoPipelineView() {
   }, [load]);
 
   const saveModelSettings = useCallback(
-    async (next: { img: ImagenPipelineChoice; haiku: boolean; vid: string }) => {
+    async (next: {
+      img: ImagenPipelineChoice;
+      haiku: boolean;
+      vid: string;
+      durationSec: number;
+      quality: PipelineVideoQuality;
+    }) => {
       const hg = (await api.getSetting('higgsfield').catch(() => ({}))) as Record<string, unknown>;
       const imageModel = next.haiku || next.img === 'auto' ? 'auto' : next.img;
       await api.updateSetting('higgsfield', {
         ...hg,
         default_image_model: imageModel,
         default_video_model: pipelineVideoFromSelect(next.vid),
-        video_duration_sec: 15,
+        video_duration_sec: next.durationSec,
+        video_quality: next.quality,
+        default_video_resolution: next.quality,
       });
     },
     [],
+  );
+
+  const persistSettings = useCallback(
+    (patch: Partial<{
+      img: ImagenPipelineChoice;
+      haiku: boolean;
+      vid: string;
+      durationSec: number;
+      quality: PipelineVideoQuality;
+    }>) => {
+      if (!settingsLoaded) return;
+      void saveModelSettings({
+        img: patch.img ?? imgChoice,
+        haiku: patch.haiku ?? haikuAuto,
+        vid: patch.vid ?? vidSelect,
+        durationSec: patch.durationSec ?? videoDurationSec,
+        quality: patch.quality ?? videoQuality,
+      });
+    },
+    [settingsLoaded, saveModelSettings, imgChoice, haikuAuto, vidSelect, videoDurationSec, videoQuality],
   );
 
   useEffect(() => {
@@ -165,7 +210,7 @@ export function VideoPipelineView() {
   const runningCount =
     wsItems.filter((v) => v.status !== 'done' && v.status !== 'failed').length + (simulActive ? 1 : 0);
   const doneToday = todayItems.filter((v) => v.status === 'done');
-  const costEst = estimateTodayPipelineCost(todayItems);
+  const costEst = estimateTodayPipelineCost(todayItems, videoDurationSec);
   const displayStep = simulActive
     ? PIPE_STEPS[simul!.step].key
     : running
@@ -174,9 +219,10 @@ export function VideoPipelineView() {
   const stepIndex = displayStep ? PIPE_STEPS.findIndex((s) => s.key === displayStep) : -1;
 
   const imgCost = pipelineImageCost(imgChoice);
-  const vidCost = pipelineVideoCost(vidSelect);
+  const vidCost = pipelineVideoCost(vidSelect, videoDurationSec, videoQuality);
   const audioCopy = getPipelineAudioCopy(vidSelect);
-  const totalCost = pipelineTotalCostDisplay(imgChoice, vidSelect);
+  const totalCost = pipelineTotalCostDisplay(imgChoice, vidSelect, videoDurationSec, videoQuality);
+  const pipelineVideoDisplayName = getPipelineVideoOption(vidSelect).displayName;
 
   const pipelineImgChoice = resolvePipelineImageChoice(imgChoice, haikuAuto, running?.image_model);
   const pipelineImageTitles = getPipelineImageStepTitles(pipelineImgChoice);
@@ -185,7 +231,8 @@ export function VideoPipelineView() {
   const pipelineVidSelect = running
     ? normalizePipelineVideoSelect(running.video_model ?? vidSelect)
     : vidSelect;
-  const pipelineVidCost = pipelineVideoCost(pipelineVidSelect);
+  const runningDur = running && Number(running.duration_sec) > 0 ? Number(running.duration_sec) : videoDurationSec;
+  const pipelineVidCost = pipelineVideoCost(pipelineVidSelect, runningDur, videoQuality);
   const pipelineVidOption = getPipelineVideoOption(pipelineVidSelect);
   const pipelineAudioCopy = getPipelineAudioCopy(pipelineVidSelect);
   const pipelineVideoTitles = getPipelineVideoStepTitles(pipelineVidSelect);
@@ -211,7 +258,7 @@ export function VideoPipelineView() {
       return `${prompt} — ${pipelineImgCost.label} · ${pipelineImgCost.display}`;
     }
     if (key === 'video_generating') {
-      return `${pipelineVidOption.displayName} · ${pipelineVidCost.durationLabel} · ${pipelineVidOption.credits}크레딧 · $${pipelineVidCost.usd.toFixed(2)} · ${pipelineAudioCopy.runningLabel} 포함`;
+      return `${pipelineVidOption.displayName} · ${pipelineVidCost.durationLabel} · ${pipelineVidCost.usdDisplay} · ${pipelineAudioCopy.runningLabel} 포함`;
     }
     if (key === 'finalizing') return '픽셀노이즈+EXIF · 9:16 720p';
     return 'TikTok · Instagram Reels · YouTube Shorts (API 동시 발행)';
@@ -277,9 +324,8 @@ export function VideoPipelineView() {
                     onClick={() => {
                       setHaikuAuto((v) => {
                         const next = !v;
-                        const img = next ? 'auto' : imgChoice;
                         if (next) setImgChoice('auto');
-                        if (settingsLoaded) void saveModelSettings({ img, haiku: next, vid: vidSelect });
+                        if (settingsLoaded) persistSettings({ img: next ? 'auto' : imgChoice, haiku: next });
                         return next;
                       });
                     }}
@@ -293,7 +339,7 @@ export function VideoPipelineView() {
                 onChange={(e) => {
                   const img = normalizeImagenPipelineChoice(e.target.value);
                   setImgChoice(img);
-                  if (settingsLoaded) void saveModelSettings({ img, haiku: haikuAuto, vid: vidSelect });
+                  persistSettings({ img });
                 }}
               >
                 {IMAGEN_PIPELINE_OPTIONS.map((o) => (
@@ -311,23 +357,41 @@ export function VideoPipelineView() {
 
             <div>
               <div className="mb-1 font-mono text-[11px] tracking-wide text-huma-t3">
-                ② 영상 모델 <span className="text-huma-acc">Higgsfield Cloud API</span>
+                ② 영상 모델 <span className="text-huma-acc">EvoLink API</span>
               </div>
               <select
                 className="m-model-select"
-                value={vidSelect}
+                value={videoQuality}
                 onChange={(e) => {
-                  const vid = e.target.value;
-                  setVidSelect(vid);
-                  if (settingsLoaded) void saveModelSettings({ img: imgChoice, haiku: haikuAuto, vid });
+                  const quality = normalizePipelineVideoQuality(e.target.value);
+                  setVideoQuality(quality);
+                  persistSettings({ quality });
                 }}
               >
-                {PIPELINE_VIDEO_OPTIONS.map((m) => (
-                  <option key={m.selectValue} value={m.selectValue}>
-                    {m.label}
+                {PIPELINE_VIDEO_QUALITY_OPTIONS.map((o) => (
+                  <option key={o.quality} value={o.quality}>
+                    {o.label}
                   </option>
                 ))}
               </select>
+              <div className="mt-2">
+                <div className="mb-1 font-mono text-[10px] text-huma-t3">영상 길이</div>
+                <select
+                  className="m-model-select"
+                  value={videoDurationSec}
+                  onChange={(e) => {
+                    const durationSec = Number(e.target.value);
+                    setVideoDurationSec(durationSec);
+                    persistSettings({ durationSec });
+                  }}
+                >
+                  {PIPELINE_VIDEO_DURATION_OPTIONS.map((d) => (
+                    <option key={d} value={d}>
+                      {d}초
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div className="mt-1 rounded bg-[var(--ok-bg)] px-2 py-1 font-mono text-[10px] text-huma-ok">
                 {PIPELINE_VIDEO_HINT}
               </div>
@@ -354,15 +418,13 @@ export function VideoPipelineView() {
               </div>
               <div className="mt-0.5 flex justify-between text-[11.5px] text-huma-t3">
                 <span>
-                  영상 {getPipelineVideoOption(vidSelect).displayName} {vidCost.durationLabel}
+                  영상 {pipelineVideoDisplayName} {vidCost.durationLabel}
                 </span>
-                <span className="font-mono text-huma-t">
-                  ${vidCost.usd.toFixed(2)} · {getPipelineVideoOption(vidSelect).credits}크레딧
-                </span>
+                <span className="font-mono text-huma-t">{vidCost.usdDisplay}</span>
               </div>
               <div className="mt-1.5 flex justify-between border-t border-huma-bdr2 pt-1.5">
                 <span className="text-[12px] font-bold text-huma-t2">합계 (영상 포함)</span>
-                <span className="font-mono text-[13.5px] font-bold text-huma-acc">~{totalCost}</span>
+                <span className="font-mono text-[13.5px] font-bold text-huma-acc">{totalCost}</span>
               </div>
             </div>
           </div>
@@ -460,8 +522,7 @@ export function VideoPipelineView() {
                   {tableImageModelLabel(v.image_model)}
                 </span>,
                 <span key="v" className="font-mono text-[11px]">
-                  {pipelineVideoFromSelect(normalizePipelineVideoSelect(v.video_model ?? vidSelect))}{' '}
-                  {pipelineVideoCost(v.video_model ?? vidSelect).durationLabel}
+                  {tableVideoModelLabel(v.video_model, v.duration_sec)}
                 </span>,
                 <MTag key="a" tone="ok">
                   {audioTag(v)}

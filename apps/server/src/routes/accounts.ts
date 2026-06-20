@@ -19,6 +19,13 @@ import {
   resolvePostingProxyPortForCreate,
 } from '../lib/posting-proxy.js';
 import { mergeBlogWritingPersonaField } from '../lib/account-persona.js';
+import {
+  hasStoredVideoPersona,
+  parseVideoPersonaText,
+  type VideoPersonaConfig,
+  type Workspace,
+} from '@huma/shared';
+import { DEFAULT_VIDEO_PERSONAS } from '../modules/video-content/types.js';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -236,6 +243,82 @@ export async function registerAccountRoutes(app: FastifyInstance) {
       request.log.error(err, 'blog-persona patch failed');
       return reply.code(500).send({ error: (err as Error).message ?? '페르소나 저장 실패' });
     }
+  });
+
+  app.get('/api/accounts/:id/video-persona', { preHandler: authMiddleware }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const allowedWorkspaces = getWorkspaceFilter(request);
+    const { data: account, loadError } = await loadAccountRow(id);
+
+    if (loadError === 'INVALID_ID') {
+      return reply.code(400).send({ error: `잘못된 계정 id (${id})` });
+    }
+    if (!account) return reply.code(404).send({ error: '계정 없음' });
+    if (!assertAccountMutateAccess(account, allowedWorkspaces)) {
+      return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
+    }
+
+    const ws = (account.workspace as Workspace) ?? 'yeonun';
+    const defaults = DEFAULT_VIDEO_PERSONAS[ws] ?? DEFAULT_VIDEO_PERSONAS.yeonun;
+    const stored = (account.persona as Record<string, unknown> | null)?.videoPersona as
+      | Partial<VideoPersonaConfig>
+      | undefined;
+
+    return {
+      videoPersona: hasStoredVideoPersona(stored) ? stored : null,
+      defaults,
+    };
+  });
+
+  app.patch('/api/accounts/:id/video-persona', { preHandler: authMiddleware }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const allowedWorkspaces = getWorkspaceFilter(request);
+    const { data: existing, loadError } = await loadAccountRow(id);
+
+    if (loadError === 'INVALID_ID') {
+      return reply.code(400).send({ error: `잘못된 계정 id (${id})` });
+    }
+    if (!existing) return reply.code(404).send({ error: '계정 없음' });
+    if (!assertAccountMutateAccess(existing, allowedWorkspaces)) {
+      return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
+    }
+
+    const body = request.body as { rawText?: string; videoPersona?: VideoPersonaConfig };
+    const ws = (existing.workspace as Workspace) ?? 'yeonun';
+    const defaults = DEFAULT_VIDEO_PERSONAS[ws] ?? DEFAULT_VIDEO_PERSONAS.yeonun;
+
+    let videoPersona: VideoPersonaConfig;
+    let missingSections: string[] = [];
+    let unknownSections: string[] = [];
+
+    if (typeof body.rawText === 'string') {
+      const parsed = parseVideoPersonaText(body.rawText, ws);
+      videoPersona = {
+        ...parsed.config,
+        hookTypeMaxWeight: defaults.hookTypeMaxWeight,
+      };
+      missingSections = parsed.missingSections;
+      unknownSections = parsed.unknownSections;
+    } else if (body.videoPersona) {
+      videoPersona = body.videoPersona;
+    } else {
+      return reply.code(400).send({ error: 'rawText 또는 videoPersona가 필요합니다' });
+    }
+
+    const persona = {
+      ...(existing.persona as Record<string, unknown> | null),
+      videoPersona,
+    };
+
+    const { data, error } = await supabase
+      .from('huma_accounts')
+      .update({ persona, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select('id, persona, workspace')
+      .single();
+
+    if (error) return reply.code(400).send({ error: mapAccountDbError(error.message) });
+    return { ok: true, missingSections, unknownSections, account: stripAccountSecret(data) };
   });
 
   app.patch('/api/accounts/:id', { preHandler: authMiddleware }, async (request, reply) => {

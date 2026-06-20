@@ -51,7 +51,9 @@ import { registerMonitorRoutes } from './routes/monitor.js';
 import { registerVncRoutes } from './routes/vnc.js';
 import { registerSeoRoutes } from './routes/seo.js';
 import { registerBlogCheckRoutes } from './routes/blog-check.js';
+import { registerVideoContentRoutes } from './routes/video-content.js';
 import { startBlogCheckScheduler } from './modules/blog-check/service.js';
+import { startPananaCharacterSyncScheduler } from './lib/panana-character-scheduler.js';
 import { assertSecretsConfigured } from './lib/secrets.js';
 
 
@@ -137,6 +139,7 @@ async function main() {
   await registerVncRoutes(app);
   await registerSeoRoutes(app);
   await registerBlogCheckRoutes(app);
+  await registerVideoContentRoutes(app);
 
   await app.listen({ port: PORT, host: '0.0.0.0' });
 
@@ -222,7 +225,8 @@ async function main() {
     startCrankScheduler();
     startCafeActivityScheduler();
     startBlogCheckScheduler();
-    app.log.info('BullMQ worker + crank scheduler + cafe activity + blog-check scheduler started');
+    startPananaCharacterSyncScheduler();
+    app.log.info('BullMQ worker + crank scheduler + cafe activity + blog-check + panana-sync scheduler started');
 
     registerGracefulShutdown(app, worker);
 

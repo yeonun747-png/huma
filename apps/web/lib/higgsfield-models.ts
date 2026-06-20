@@ -15,21 +15,38 @@ export const IMAGE_MODELS = [
   { id: 'topaz', label: 'Topaz', emoji: '🔍', sub: '고해상도 업스케일', credits: 4 },
 ] as const;
 
-/** Higgsfield Plus — 영상 생성 모델 (UI 13종) */
+/** 영상 파이프라인 — EvoLink Kling 3.0 Turbo (유일) */
+export const EVOLINK_VIDEO_MODEL_ID = 'kling-v3-turbo-text-to-video' as const;
+export const EVOLINK_VIDEO_PRICE_PER_SEC_USD = 0.106;
+export const EVOLINK_VIDEO_1080P_MULTIPLIER = 1.25;
+export const PIPELINE_VIDEO_DURATION_OPTIONS = [9, 11, 13, 15] as const;
+export type PipelineVideoDuration = (typeof PIPELINE_VIDEO_DURATION_OPTIONS)[number];
+export type PipelineVideoQuality = '720p' | '1080p';
+
+/** 영상 파이프라인 ② — EvoLink Kling 3.0 Turbo 화질 옵션 */
+export const PIPELINE_VIDEO_QUALITY_OPTIONS = [
+  {
+    quality: '720p' as const,
+    label: 'Kling 3.0 Turbo — 720p — $0.106/초',
+    pricePerSecUsd: EVOLINK_VIDEO_PRICE_PER_SEC_USD,
+  },
+  {
+    quality: '1080p' as const,
+    label: 'Kling 3.0 Turbo — 1080p — $0.133/초 (720p × 1.25)',
+    pricePerSecUsd: EVOLINK_VIDEO_PRICE_PER_SEC_USD * EVOLINK_VIDEO_1080P_MULTIPLIER,
+  },
+] as const;
+
+export const DEFAULT_PIPELINE_VIDEO_QUALITY: PipelineVideoQuality = '720p';
+
+/** 레거시 UI 목록 — 파이프라인 영상 모델은 EvoLink 1종만 사용 */
 export const VIDEO_MODELS = [
-  { id: 'seedance-2.0', label: 'Seedance 2.0', emoji: '🌟', sub: '최첨단 영상 모델', credits: 75, badge: 'TOP' as const },
-  { id: 'kling-3.0', label: 'Kling 3.0', emoji: '🎥', sub: '시네마틱+오디오', credits: 21 },
-  { id: 'kling-3.0-motion-control', label: 'Kling 3.0 Motion Control', emoji: '🕺', sub: '영상→이미지 모션 전달', credits: 9, badge: 'NEW' as const },
-  { id: 'kling-o1-edit', label: 'Kling o1 Edit', emoji: '✂️', sub: '고급 영상 편집', credits: 10 },
-  { id: 'sora-2', label: 'Sora 2', emoji: '🌐', sub: 'OpenAI 최상위 영상', credits: 30 },
-  { id: 'veo-3.1-lite', label: 'Google Veo 3.1 Lite', emoji: '🚀', sub: 'Google 빠른 생성', credits: 22, badge: 'NEW' as const },
-  { id: 'veo-3.1', label: 'Google Veo 3.1', emoji: '💫', sub: '오디오 포함 고급 AI 영상', credits: 58 },
-  { id: 'happyhorse', label: 'HappyHorse', emoji: '🐴', sub: 'Alibaba 1위 영상·오디오', credits: 20, badge: 'NEW' as const },
-  { id: 'grok-imagine-video', label: 'Grok Imagine', emoji: '🛰', sub: '동기화 오디오 시네마틱', credits: 15 },
-  { id: 'wan-2.7', label: 'Wan 2.7', emoji: '🌀', sub: '시작·끝 프레임 제어', credits: 12, badge: 'NEW' as const },
-  { id: 'minimax-hailuo-2.3', label: 'Minimax Hailuo 2.3', emoji: '🌊', sub: '고속 고다이내믹', credits: 8 },
-  { id: 'seedance-1.5-pro', label: 'Seedance 1.5 Pro', emoji: '🎬', sub: '프로 오디오·비주얼 싱크', credits: 18 },
-  { id: 'higgsfield-dop', label: 'Higgsfield DOP', emoji: '🎞', sub: 'VFX · 카메라 제어', credits: 12 },
+  {
+    id: EVOLINK_VIDEO_MODEL_ID,
+    label: 'Kling 3.0 Turbo',
+    emoji: '🎥',
+    sub: 'EvoLink API · 멀티샷',
+  },
 ] as const;
 
 export type ImageModelId = (typeof IMAGE_MODELS)[number]['id'];
@@ -38,7 +55,7 @@ export type VideoModelId = (typeof VIDEO_MODELS)[number]['id'];
 /** 레거시 Higgsfield UI ID — v3.26 실제 생성은 Imagen 4 */
 export const DEFAULT_IMAGE_MODEL: ImageModelId = 'gpt-image-2';
 export const DEFAULT_IMAGEN_MODEL = 'imagen-4.0-fast-generate-001';
-export const DEFAULT_VIDEO_MODEL: VideoModelId = 'kling-3.0';
+export const DEFAULT_VIDEO_MODEL: VideoModelId = EVOLINK_VIDEO_MODEL_ID;
 
 /** v3.26+ 영상 파이프라인 — Google Imagen 4 (Haiku가 Fast/Standard 자동 선택) */
 export const PIPELINE_IMAGE_STEP_LABEL = 'Imagen 4 Fast/Standard (자동)';
@@ -55,34 +72,31 @@ export const IMAGEN_PIPELINE_OPTIONS: ReadonlyArray<{ id: ImagenPipelineChoice; 
   { id: 'imagen-4.0-generate-001', label: '✨ Imagen 4 Standard — $0.04/장 · 텍스트·배너 고화질' },
 ];
 
-export type PipelineVideoAudioFamily = 'kling' | 'seedance' | 'builtin';
+export type PipelineVideoAudioFamily = 'evolink';
 
-/** v3.26 목업 ② — Kling 3.0 / Seedance 2.0 Standard 만 */
+/** 영상 파이프라인 ② — EvoLink Kling 3.0 Turbo */
 export const PIPELINE_VIDEO_OPTIONS = [
   {
-    selectValue: 'kling-3.0',
-    id: 'kling-3.0' as VideoModelId,
-    displayName: 'Kling 3.0',
-    label: '🎥 Kling 3.0 — $1.05/15초 (21크레딧) · 시네마틱+내장오디오',
-    videoUsd: 1.05,
-    durationLabel: '15초',
-    credits: 21,
-    audioFamily: 'kling' as PipelineVideoAudioFamily,
-  },
-  {
-    selectValue: 'seedance-2.0',
-    id: 'seedance-2.0' as VideoModelId,
-    displayName: 'Seedance 2.0 Standard',
-    label: '🌟 Seedance 2.0 Standard — $3.75/15초 (75크레딧) · 최고화질+오디오',
-    videoUsd: 3.75,
-    durationLabel: '15초',
-    credits: 75,
-    audioFamily: 'seedance' as PipelineVideoAudioFamily,
+    selectValue: EVOLINK_VIDEO_MODEL_ID,
+    id: EVOLINK_VIDEO_MODEL_ID,
+    displayName: 'Kling 3.0 Turbo',
+    label: 'Kling 3.0 Turbo — $0.106/초(720p)·멀티샷 지원',
+    audioFamily: 'evolink' as PipelineVideoAudioFamily,
   },
 ] as const;
 
 export const PIPELINE_VIDEO_HINT =
-  '✓ 두 모델 모두 Higgsfield Cloud API · 15초 기준 Kling $1.05 · Seedance $3.75 · 내장 오디오 자동 생성';
+  '✓ EvoLink API · Kling 3.0 Turbo · 멀티샷 · 720p $0.106/초 · 1080p $0.133/초 · 음성 포함';
+
+export function normalizePipelineVideoQuality(raw?: string | null): PipelineVideoQuality {
+  return raw === '1080p' ? '1080p' : '720p';
+}
+
+export function pipelineVideoPricePerSec(quality: PipelineVideoQuality): number {
+  return quality === '1080p'
+    ? EVOLINK_VIDEO_PRICE_PER_SEC_USD * EVOLINK_VIDEO_1080P_MULTIPLIER
+    : EVOLINK_VIDEO_PRICE_PER_SEC_USD;
+}
 
 export function getPipelineVideoOption(selectValue: string) {
   return (
@@ -97,46 +111,25 @@ export function getPipelineVideoStepTitles(selectValue: string) {
   return {
     titleDone: '영상 생성 완료',
     titleActive: `${name} 영상 생성 중…`,
-    titleIdle: `${name} 영상 (내장 오디오)`,
+    titleIdle: `${name} 영상 (오디오 포함)`,
   };
 }
 
-/** ② 영상 모델 선택 → ③ 오디오 패널 문구 (목업 연동) */
-export function getPipelineAudioCopy(selectValue: string) {
-  const opt = getPipelineVideoOption(selectValue);
-  if (opt.audioFamily === 'seedance') {
-    return {
-      title: 'Seedance 2.0 내장 오디오 자동 생성',
-      sub: 'BGM · 효과음 · 주변음 — 영상과 동기화, 별도 TTS 불필요',
-      hint: '✓ Seedance 2.0 · 15초 기준 내장 오디오 · Higgsfield Cloud API',
-      emoji: '🎵',
-      runningLabel: 'Seedance 2.0 내장 오디오',
-    };
-  }
-  if (opt.audioFamily === 'kling') {
-    return {
-      title: 'Kling 3.0 내장 오디오 자동 생성',
-      sub: 'BGM · 효과음 · 주변음 — 영상과 동기화, 별도 설정 불필요',
-      hint: '✓ Kling 3.0 · 15초 · 21크레딧 · 시네마틱+내장오디오',
-      emoji: '🎵',
-      runningLabel: 'Kling 3.0 내장 오디오',
-    };
-  }
+/** ② 영상 모델 → ③ 오디오 패널 */
+export function getPipelineAudioCopy(_selectValue?: string) {
   return {
-    title: `${pipelineVideoFromSelect(selectValue)} 내장 오디오 자동 생성`,
-    sub: 'BGM · 효과음 — 영상 모델과 동기화',
-    hint: '✓ TTS 불필요 — Higgsfield Cloud 내장 오디오',
+    title: 'Kling 3.0 Turbo 오디오',
+    sub: '음성 비용이 영상 가격에 항상 포함됨, 별도 온/오프 옵션 없음 (대사·환경음 자동 생성)',
+    hint: '✓ EvoLink API · 음성 별도 과금 없음',
     emoji: '🎵',
-    runningLabel: '내장 오디오',
+    runningLabel: 'Kling 3.0 Turbo 오디오',
   };
 }
 
 export function normalizePipelineVideoSelect(raw?: string | null): string {
-  if (raw === 'seedance-2.0' || raw === 'seedance-2.0-fast') return 'seedance-2.0';
-  const v = raw ? (LEGACY_VIDEO[raw] ?? raw) : DEFAULT_VIDEO_MODEL;
-  if (v === 'seedance-2.0') return 'seedance-2.0';
-  const hit = PIPELINE_VIDEO_OPTIONS.find((o) => o.selectValue === v || o.id === v);
-  return hit?.selectValue ?? 'kling-3.0';
+  if (!raw) return EVOLINK_VIDEO_MODEL_ID;
+  if (raw === EVOLINK_VIDEO_MODEL_ID) return EVOLINK_VIDEO_MODEL_ID;
+  return EVOLINK_VIDEO_MODEL_ID;
 }
 
 export function pipelineVideoFromSelect(selectValue: string): VideoModelId {
@@ -182,24 +175,41 @@ export function resolvePipelineImageChoice(
   return formChoice;
 }
 
-export function pipelineVideoCost(modelId: string) {
-  const normalized = normalizeVideoModel(modelId);
-  const opt =
-    PIPELINE_VIDEO_OPTIONS.find((o) => o.selectValue === modelId || o.id === normalized) ??
-    PIPELINE_VIDEO_OPTIONS[0];
+export function pipelineVideoCost(
+  _modelId?: string,
+  durationSec: number = 15,
+  quality: PipelineVideoQuality = DEFAULT_PIPELINE_VIDEO_QUALITY,
+) {
+  const usd = durationSec * pipelineVideoPricePerSec(quality);
   return {
-    usd: opt.videoUsd,
-    durationLabel: opt.durationLabel,
+    usd,
+    durationLabel: `${durationSec}초(${quality})`,
+    usdDisplay: `$${usd.toFixed(2)}`,
+    quality,
   };
 }
 
-export function pipelineTotalCostDisplay(img: ImagenPipelineChoice, videoModelId: string) {
+export function pipelineTotalCostDisplay(
+  img: ImagenPipelineChoice,
+  videoModelId: string,
+  durationSec: number = 15,
+  quality: PipelineVideoQuality = '720p',
+) {
   const imgCost = pipelineImageCost(img);
-  const vid = pipelineVideoCost(videoModelId);
+  const vid = pipelineVideoCost(videoModelId, durationSec, quality);
   const min = imgCost.minUsd + vid.usd;
   const max = imgCost.maxUsd + vid.usd;
   if (min === max) return `$${min.toFixed(2)}`;
   return `$${min.toFixed(2)}~$${max.toFixed(2)}`;
+}
+
+export function tableVideoModelLabel(
+  videoModel?: string | null,
+  durationSec?: number | null,
+): string {
+  const opt = getPipelineVideoOption(normalizePipelineVideoSelect(videoModel));
+  const dur = Number(durationSec) > 0 ? Number(durationSec) : 15;
+  return `${opt.displayName} ${dur}초`;
 }
 
 export function tableImageModelLabel(imageModel?: string | null): string {
@@ -208,7 +218,15 @@ export function tableImageModelLabel(imageModel?: string | null): string {
   return 'imagen-4-auto';
 }
 
-export function estimateTodayPipelineCost(items: Array<{ status: string; image_model?: string | null; video_model?: string | null }>) {
+export function estimateTodayPipelineCost(
+  items: Array<{
+    status: string;
+    image_model?: string | null;
+    video_model?: string | null;
+    duration_sec?: number | null;
+  }>,
+  defaultDurationSec = 15,
+) {
   let imageUsd = 0;
   let videoUsd = 0;
   let done = 0;
@@ -218,13 +236,14 @@ export function estimateTodayPipelineCost(items: Array<{ status: string; image_m
     const img = normalizeImagenPipelineChoice(item.image_model);
     const imgC = pipelineImageCost(img);
     imageUsd += (imgC.minUsd + imgC.maxUsd) / 2;
-    videoUsd += pipelineVideoCost(item.video_model ?? DEFAULT_VIDEO_MODEL).usd;
+    const dur = Number(item.duration_sec) > 0 ? Number(item.duration_sec) : defaultDurationSec;
+    videoUsd += pipelineVideoCost(item.video_model ?? DEFAULT_VIDEO_MODEL, dur).usd;
   }
   const total = imageUsd + videoUsd;
   return {
     totalUsd: total,
     totalDisplay: total > 0 ? `$${total.toFixed(2)}` : '$0.00',
-    subDisplay: done > 0 ? `영상$${videoUsd.toFixed(2)} + 이미지$${imageUsd.toFixed(2)}` : '완료 건 없음',
+    subDisplay: done > 0 ? `영상 $${videoUsd.toFixed(2)} + 이미지 $${imageUsd.toFixed(2)}` : '완료 건 없음',
     done,
   };
 }
@@ -235,10 +254,13 @@ const LEGACY_IMAGE: Record<string, ImageModelId> = {
 };
 
 const LEGACY_VIDEO: Record<string, VideoModelId> = {
-  'seedance-2.0-fast': 'seedance-2.0',
-  'veo-3.1-fast': 'veo-3.1-lite',
-  'kling-o1': 'kling-o1-edit',
-  'kling-2.6': 'kling-3.0',
+  'seedance-2.0': EVOLINK_VIDEO_MODEL_ID,
+  'seedance-2.0-fast': EVOLINK_VIDEO_MODEL_ID,
+  'kling-3.0': EVOLINK_VIDEO_MODEL_ID,
+  'kling-3.0-motion-control': EVOLINK_VIDEO_MODEL_ID,
+  'kling-2.6': EVOLINK_VIDEO_MODEL_ID,
+  'veo-3.1-fast': EVOLINK_VIDEO_MODEL_ID,
+  'kling-o1': EVOLINK_VIDEO_MODEL_ID,
 };
 
 export function normalizeImageModel(raw?: string | null): ImageModelId {
@@ -273,6 +295,5 @@ export function imageModelOptionLabel(m: (typeof IMAGE_MODELS)[number]): string 
 }
 
 export function videoModelOptionLabel(m: (typeof VIDEO_MODELS)[number]): string {
-  const badge = 'badge' in m ? m.badge : undefined;
-  return `${m.emoji} ${m.label} — ${badgePrefix(badge)}${m.sub}`;
+  return `${m.emoji} ${m.label} — ${m.sub}`;
 }

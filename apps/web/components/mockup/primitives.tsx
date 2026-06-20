@@ -252,6 +252,7 @@ export function MAccountCard({
   statusTone,
   stats,
   actions,
+  actionsSecondary,
 }: {
   icon: string;
   iconBg: string;
@@ -262,6 +263,7 @@ export function MAccountCard({
   statusTone: 'ok' | 'warn' | 'err' | 'live' | 'idle';
   stats: { label: string; value: ReactNode; tone?: string }[];
   actions: { label: string; primary?: boolean; danger?: boolean; onClick?: () => void }[];
+  actionsSecondary?: { label: string; primary?: boolean; onClick?: () => void }[];
 }) {
   return (
     <div className="m-ac">
@@ -293,6 +295,20 @@ export function MAccountCard({
           </button>
         ))}
       </div>
+      {actionsSecondary?.length ? (
+        <div className="m-ac-foot m-ac-foot-secondary">
+          {actionsSecondary.map((a) => (
+            <button
+              key={a.label}
+              type="button"
+              className={cn('m-af', a.primary && 'e')}
+              onClick={a.onClick}
+            >
+              {a.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

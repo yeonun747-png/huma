@@ -20,6 +20,7 @@ import { useAuth } from '@/lib/auth-context';
 import { alertAccountError } from '@/lib/account-errors';
 import { copyVncEndpoint, parseVncEndpoint } from '@/lib/open-vnc';
 import { BlogPersonaModal } from '@/components/accounts/blog-persona-modal';
+import { VideoPersonaModal } from '@/components/accounts/video-persona-modal';
 import {
   BUSINESS_UNITS,
   defaultAccountGroup,
@@ -171,6 +172,7 @@ export function AccountsView() {
   const [editPlatformUserId, setEditPlatformUserId] = useState('');
   const [editPlatformSaving, setEditPlatformSaving] = useState(false);
   const [personaAccount, setPersonaAccount] = useState<HumaAccount | null>(null);
+  const [videoPersonaAccount, setVideoPersonaAccount] = useState<HumaAccount | null>(null);
   const [personaSaving, setPersonaSaving] = useState(false);
   const [personaError, setPersonaError] = useState('');
   const [remoteAccessId, setRemoteAccessId] = useState<string | null>(null);
@@ -674,6 +676,14 @@ export function AccountsView() {
         />
       )}
 
+      {videoPersonaAccount && (
+        <VideoPersonaModal
+          account={videoPersonaAccount}
+          open
+          onClose={() => setVideoPersonaAccount(null)}
+        />
+      )}
+
       {editingAccount && (
         <div className="m-panel mb-3 space-y-2">
           <div className="text-[12px] font-semibold text-huma-t">
@@ -814,8 +824,11 @@ export function AccountsView() {
                           label: remoteAccessId === ac.id ? '접속 중…' : '🖥 원격접속',
                           onClick: () => void handleRemoteAccess(ac),
                         },
-                        { label: '페르소나', onClick: () => handleOpenPersona(ac) },
                         { label: ac.is_active ? '정지' : '재개', onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(() => load({ force: true })) },
+                      ]}
+                      actionsSecondary={[
+                        { label: '포스팅 페르소나', onClick: () => handleOpenPersona(ac) },
+                        { label: '영상 페르소나', primary: true, onClick: () => setVideoPersonaAccount(ac) },
                       ]}
                     />
                   ))

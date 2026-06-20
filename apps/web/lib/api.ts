@@ -1,4 +1,4 @@
-import type { HumaJob, HumaAccount, HumaModem, HumaVideoQueue } from '@huma/shared';
+import type { HumaJob, HumaAccount, HumaModem, HumaVideoQueue, HumaVideoContentHistory, VideoPersonaConfig } from '@huma/shared';
 import { cachedFetch, invalidateApiCache } from '@/lib/api-cache';
 import { refreshNavBadges } from '@/lib/nav-badge-events';
 
@@ -387,6 +387,65 @@ export const api = {
   videoQueue: () => request<HumaVideoQueue[]>('/api/video/queue'),
   createVideo: (body: Record<string, unknown>) =>
     request('/api/video/generate', { method: 'POST', body: JSON.stringify(body) }),
+  videoContentList: (params?: { account_id?: string; workspace?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.account_id) q.set('account_id', params.account_id);
+    if (params?.workspace) q.set('workspace', params.workspace);
+    const qs = q.toString();
+    return request<HumaVideoContentHistory[]>(`/api/video-content${qs ? `?${qs}` : ''}`);
+  },
+  videoContentGet: (id: string) => request<HumaVideoContentHistory>(`/api/video-content/${id}`),
+  videoContentHistory: (accountId: string) =>
+    request<HumaVideoContentHistory[]>(`/api/accounts/${accountId}/video-content-history`),
+  getAccountVideoPersona: (accountId: string) =>
+    request<{ videoPersona: VideoPersonaConfig | null; defaults: VideoPersonaConfig }>(
+      `/api/accounts/${accountId}/video-persona`,
+    ),
+  updateAccountVideoPersona: (accountId: string, body: { rawText: string }) =>
+    request<{ ok: boolean; missingSections: string[]; unknownSections: string[] }>(
+      `/api/accounts/${accountId}/video-persona`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      },
+    ),
+  generateVideoContent: (accountId: string) =>
+    request<{ ok: boolean; message?: string }>(`/api/accounts/${accountId}/generate-video`, {
+      method: 'POST',
+    }),
+  updateVideoContentUpload: (id: string, body: Record<string, boolean>) =>
+    request(`/api/video-content/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  fetchVideoContentBlob: async (id: string): Promise<Blob> => {
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/api/video-content/${id}/stream`, {
+      headers: token ? { 'X-HUMA-KEY': token } : {},
+    });
+    if (!res.ok) throw new Error('영상 로드 실패');
+    return res.blob();
+  },
+  downloadVideoContent: async (id: string) => {
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/api/video-content/${id}/download`, {
+      headers: token ? { 'X-HUMA-KEY': token } : {},
+    });
+    if (!res.ok) throw new Error('다운로드 실패');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `huma-video-${id}.mp4`;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+  pananaCharacters: (accountId?: string) => {
+    const q = accountId ? `?account_id=${encodeURIComponent(accountId)}` : '';
+    return request<{
+      characters: Array<{ id: string; name: string; description?: string | null; appearanceCount?: number }>;
+      lastSyncedAt: string | null;
+    }>(`/api/panana-characters${q}`);
+  },
+  syncPananaCharacters: () =>
+    request<{ synced: number; error?: string }>('/api/panana-characters/sync', { method: 'POST' }),
   settings: () => request<Array<{ key: string; value: unknown }>>('/api/settings'),
   getSetting: (key: string) => request<Record<string, unknown>>(`/api/settings/${key}`),
   updateSetting: (key: string, value: unknown) =>
