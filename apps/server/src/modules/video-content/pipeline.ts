@@ -7,7 +7,7 @@ import { getPipelineModelSettings } from '../../lib/pipeline-settings.js';
 import { notifyTelegram } from '../watcher/telegram.js';
 import { generatePlatformCaptions } from './captions.js';
 import { generateConti } from './conti-generator.js';
-import { ContiValidationError } from './conti-validation.js';
+import { ContiValidationError, formatContiTokenSettingsLog } from './conti-validation.js';
 import {
   buildEvoLinkPrompt,
   createEvoLinkVideoTask,
@@ -303,6 +303,13 @@ export async function runContiGeneration(accountId: string): Promise<string> {
   const historyId = historyRow.id as string;
 
   try {
+    await logOperation({
+      level: 'info',
+      message: formatContiTokenSettingsLog(),
+      workspace,
+      account_id: accountId,
+    });
+
     const pastSummaries = await loadPastSummaries(accountId);
     let conti!: VideoConti & { locationKeyword: string; timeOfDay: string };
     let embedding: number[] = [];
@@ -372,6 +379,16 @@ export async function runContiGeneration(accountId: string): Promise<string> {
           `⚠️ 콘티 샷 자동 보완\n계정: ${accountName} (${accountId})\n${generated.contentWarnings.join('\n')}`,
           workspace,
         );
+      }
+
+      if (generated.lastShotIncompleteDetected) {
+        await logOperation({
+          level: 'warn',
+          message:
+            `[video-content] 마지막 샷 문장 미완결 감지 — max_tokens 부족 가능성. ${formatContiTokenSettingsLog()}`,
+          workspace,
+          account_id: accountId,
+        });
       }
 
       embedding = embedText(conti.fullText || conti.scenarioSummary);

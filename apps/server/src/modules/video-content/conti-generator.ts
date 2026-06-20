@@ -6,10 +6,12 @@ import {
   validateCutTypeMatchesRawShots,
   validatePunchlineShotMinDuration,
   validateAllShotsMinDuration,
-  findInvalidRawShotIndices,
   findAdjacentDuplicateShotIndices,
+  findRawShotQualityIssues,
+  findIncompleteLastShotIndex,
   buildMinShotDurationRule,
   buildShotContentRule,
+  buildSentenceCompleteRule,
   buildNoDuplicateFillRule,
   buildEmptyShotContentFeedback,
   buildAdjacentDuplicateFeedback,
@@ -21,6 +23,7 @@ import {
   MAX_SHOT_DURATION_REGENERATION_ATTEMPTS,
   MAX_EMPTY_CONTENT_REGENERATION_ATTEMPTS,
   MAX_ADJACENT_DUPLICATE_PATCH_ATTEMPTS,
+  MAX_SHOT_QUALITY_PATCH_ATTEMPTS,
   PUNCHLINE_MIN_DURATION_SEC,
   SHOT_CONTENT_MIN_CHARS,
 } from './conti-validation.js';
@@ -34,6 +37,8 @@ export interface ContiGenerationResult extends VideoConti {
   timeOfDay: string;
   /** 기본 action 대체 등 — 콘티는 완성되나 운영자 경고용 */
   contentWarnings?: string[];
+  /** 마지막 샷 문장 미완결 — max_tokens 부족 신호 */
+  lastShotIncompleteDetected?: boolean;
 }
 
 interface ContiFoundation {
@@ -242,6 +247,7 @@ ${reasonBlock}
 ${existing.join('\n')}
 
 ${buildShotFillPrompt(shotNumbers)}
+${buildSentenceCompleteRule()}
 
 JSON:
 {
@@ -350,13 +356,6 @@ async function fillSpecificShots(
   return mergeShotPatches(conti, patches);
 }
 
-function collectRawShotIssues(conti: VideoConti): { empty: number[]; duplicate: number[] } {
-  return {
-    empty: findInvalidRawShotIndices(conti),
-    duplicate: findAdjacentDuplicateShotIndices(conti),
-  };
-}
-
 async function patchShotIssues(
   ctx: PromptContext,
   foundation: ContiFoundation,
@@ -368,37 +367,56 @@ async function patchShotIssues(
   return fillSpecificShots({ ...ctx, feedback }, foundation, conti, indices, model, feedback);
 }
 
-async function recoverRawShotContent(
+async function recoverShotQualityIssues(
   ctx: PromptContext,
   foundation: ContiFoundation,
   conti: VideoConti,
   model: string,
+  options: { allowEmptyFullRetry: boolean },
 ): Promise<{ conti: VideoConti; warnings: string[] }> {
   const warnings: string[] = [];
   let current = conti;
   let emptyFullRetries = 0;
   let narrowPatchAttempts = 0;
-  const maxNarrow = 3;
+  const maxNarrow =
+    MAX_SHOT_QUALITY_PATCH_ATTEMPTS + MAX_ADJACENT_DUPLICATE_PATCH_ATTEMPTS + 1;
 
   while (true) {
-    const { empty, duplicate } = collectRawShotIssues(current);
-    if (empty.length === 0 && duplicate.length === 0) break;
+    const qualityIssues = findRawShotQualityIssues(current);
+    const duplicates = findAdjacentDuplicateShotIndices(current);
+    const emptyIssues = qualityIssues.filter((issue) => issue.kind === 'empty');
+    const nonEmptyQuality = qualityIssues.filter((issue) => issue.kind !== 'empty');
 
-    if (empty.length > 0 && emptyFullRetries < MAX_EMPTY_CONTENT_REGENERATION_ATTEMPTS) {
+    if (emptyIssues.length === 0 && nonEmptyQuality.length === 0 && duplicates.length === 0) {
+      break;
+    }
+
+    if (
+      options.allowEmptyFullRetry &&
+      emptyIssues.length > 0 &&
+      emptyFullRetries < MAX_EMPTY_CONTENT_REGENERATION_ATTEMPTS
+    ) {
       emptyFullRetries += 1;
-      const shotsFeedback = buildEmptyShotContentFeedback(empty[0]! + 1);
+      const shotsFeedback = buildEmptyShotContentFeedback(emptyIssues[0]!.index + 1);
       const { shots, fullText } = await generateShots({ ...ctx, feedback: shotsFeedback }, foundation, model);
       current = assembleConti(foundation, shots, ctx.conditions, fullText ?? current.fullText);
       continue;
     }
 
-    const dupIdx = duplicate[0];
-    const emptyIdx = empty[0];
-    const patchIdx = dupIdx ?? emptyIdx!;
-    const feedback =
-      dupIdx != null
-        ? buildAdjacentDuplicateFeedback(dupIdx + 1)
-        : buildEmptyShotContentFeedback(emptyIdx! + 1);
+    let patchIdx: number;
+    let feedback: string;
+
+    if (duplicates.length > 0) {
+      patchIdx = duplicates[0]!;
+      feedback = buildAdjacentDuplicateFeedback(patchIdx + 1);
+    } else if (nonEmptyQuality.length > 0) {
+      const issue = nonEmptyQuality[0]!;
+      patchIdx = issue.index;
+      feedback = issue.feedback;
+    } else {
+      patchIdx = emptyIssues[0]!.index;
+      feedback = emptyIssues[0]!.feedback;
+    }
 
     if (narrowPatchAttempts < maxNarrow) {
       narrowPatchAttempts += 1;
@@ -406,7 +424,13 @@ async function recoverRawShotContent(
       continue;
     }
 
-    const fallbackIndices = [...new Set([...empty, ...duplicate])];
+    const fallbackIndices = [
+      ...new Set([
+        ...emptyIssues.map((issue) => issue.index),
+        ...nonEmptyQuality.map((issue) => issue.index),
+        ...duplicates,
+      ]),
+    ];
     current = applyDefaultToRawShots(current, fallbackIndices);
     const nums = fallbackIndices.map((i) => i + 1).join(', ');
     warnings.push(
@@ -418,34 +442,22 @@ async function recoverRawShotContent(
   return { conti: current, warnings };
 }
 
+async function recoverRawShotContent(
+  ctx: PromptContext,
+  foundation: ContiFoundation,
+  conti: VideoConti,
+  model: string,
+): Promise<{ conti: VideoConti; warnings: string[] }> {
+  return recoverShotQualityIssues(ctx, foundation, conti, model, { allowEmptyFullRetry: true });
+}
+
 async function recoverAdjacentDuplicates(
   ctx: PromptContext,
   foundation: ContiFoundation,
   conti: VideoConti,
   model: string,
 ): Promise<{ conti: VideoConti; warnings: string[] }> {
-  const warnings: string[] = [];
-  let current = conti;
-  let patchAttempts = 0;
-
-  while (findAdjacentDuplicateShotIndices(current).length > 0) {
-    const dupIdx = findAdjacentDuplicateShotIndices(current)[0]!;
-    const feedback = buildAdjacentDuplicateFeedback(dupIdx + 1);
-
-    if (patchAttempts < MAX_ADJACENT_DUPLICATE_PATCH_ATTEMPTS) {
-      patchAttempts += 1;
-      current = await patchShotIssues(ctx, foundation, current, [dupIdx], feedback, model);
-      continue;
-    }
-
-    current = applyDefaultToRawShots(current, [dupIdx]);
-    warnings.push(
-      `샷 ${dupIdx + 1}이 직전 샷과 유사 — LLM 보완 실패 후 기본 action으로 대체했습니다.`,
-    );
-    break;
-  }
-
-  return { conti: current, warnings };
+  return recoverShotQualityIssues(ctx, foundation, conti, model, { allowEmptyFullRetry: false });
 }
 
 export async function generateConti(params: PromptContext): Promise<ContiGenerationResult> {
@@ -455,6 +467,7 @@ export async function generateConti(params: PromptContext): Promise<ContiGenerat
 
   let conti = assembleConti(foundation, shots, params.conditions, fullText);
   const contentWarnings: string[] = [];
+  let lastShotIncompleteDetected = findIncompleteLastShotIndex(conti) != null;
 
   const cutCheck = validateCutTypeMatchesRawShots(params.conditions.cutType, conti.shots);
   if (!cutCheck.ok) {
@@ -498,11 +511,15 @@ export async function generateConti(params: PromptContext): Promise<ContiGenerat
     });
   }
 
+  lastShotIncompleteDetected =
+    lastShotIncompleteDetected || findIncompleteLastShotIndex(conti) != null;
+
   return {
     ...conti,
     locationKeyword: foundation.locationKeyword,
     timeOfDay: conti.timeOfDay,
     contentWarnings: contentWarnings.length ? contentWarnings : undefined,
+    lastShotIncompleteDetected: lastShotIncompleteDetected || undefined,
   };
 }
 

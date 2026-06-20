@@ -28,6 +28,7 @@ export const SHOT_MIN_DURATION_SEC = 1.5;
 export const SHOT_CONTENT_MIN_CHARS = 10;
 export const ADJACENT_SHOT_SIMILARITY_THRESHOLD = 0.9;
 export const MAX_ADJACENT_DUPLICATE_PATCH_ATTEMPTS = 1;
+export const MAX_SHOT_QUALITY_PATCH_ATTEMPTS = 1;
 
 /** 1단계: 시나리오·인물·장소 / 2단계: 샷·대사 / 보완: 빈 샷만 */
 export const CONTI_FOUNDATION_MAX_TOKENS = 4096;
@@ -286,16 +287,143 @@ export function validateAllShotsContent(
   return { ok: true };
 }
 
-export function buildShotContentRule(): string {
+export function formatContiTokenSettingsLog(): string {
   return (
-    `모든 샷의 action 필드는 ${SHOT_CONTENT_MIN_CHARS}자 이상의 구체적 카메라·행동 묘사 필수. ` +
-    `대사가 있는 샷은 dialogue도 ${SHOT_CONTENT_MIN_CHARS}자 이상. ` +
-    `"장면 전개", "내용 없음", "TBD" 등 자리표시자 금지. ` +
-    `${buildAdjacentShotDistinctRule()}`
+    `[video-content] 콘티 LLM 설정(2단계 분리) — foundation_max_tokens=${CONTI_FOUNDATION_MAX_TOKENS} ` +
+    `shots_max_tokens=${CONTI_SHOTS_MAX_TOKENS} shot_fill_max_tokens=${CONTI_SHOT_FILL_MAX_TOKENS}`
   );
 }
 
-/** LLM raw shots 기준 — normalizeMultiShotConti 이전에 검사 */
+export function buildSentenceCompleteRule(): string {
+  return (
+    '각 샷 action/dialogue는 마침표·느낌표·물음표 또는 자연스러운 한글 종결어미로 끝나는 완결된 문장이어야 한다. ' +
+    '단어 중간에서 끊기거나 조사만 남은 채 끝나면 안 된다. camera 라벨과 action 첫 문장의 샷 종류(와이드/미디엄/클로즈업)는 일치해야 한다.'
+  );
+}
+
+export function buildShotContentRule(): string {
+  return (
+    `모든 샷 action 필드는 ${SHOT_CONTENT_MIN_CHARS}자 이상의 구체적 카메라·행동 묘사 필수. ` +
+    `대사가 있는 샷은 dialogue도 ${SHOT_CONTENT_MIN_CHARS}자 이상. ` +
+    `"장면 전개", "내용 없음", "TBD" 등 자리표시자 금지. ` +
+    `${buildAdjacentShotDistinctRule()} ${buildSentenceCompleteRule()}`
+  );
+}
+
+const KOREAN_SENTENCE_ENDING =
+  /(?:다|요|죠|네|함|음|군|니|냐|까|자|세|래|겠|습니다|니다|어요|아요|해요|했어|세요|지요|거든|네요|예요|래요|같아|좋아|선다|본다|간다|인다|운다|친다|한다|된다|있다|없다|였다|했다|마친다|끝난다)$/u;
+
+/** 마침표·느낌표·물음표·닫는 인용부호 또는 한글 종결어미 */
+export function isSentenceComplete(text: string): boolean {
+  const t = trimField(text);
+  if (!t) return true;
+
+  let core = t.replace(/[\s"'“”‘’」』\)\]》]+$/gu, '');
+  if (!core) return false;
+
+  const last = core.at(-1)!;
+  if ('.!?…'.includes(last)) return true;
+  if (KOREAN_SENTENCE_ENDING.test(core)) return true;
+
+  return false;
+}
+
+/** 조사형 글자로 끝나며 문장부호·종결어미 없음 — "폰으" 등 */
+function endsWithSuspiciousIncompleteParticle(text: string): boolean {
+  const t = trimField(text);
+  if (!t || isSentenceComplete(t)) return false;
+  const last = t.at(-1)!;
+  return /[을를이가에의와과로면도만은조]$/.test(last);
+}
+
+export function isIncompleteSentence(text: string | undefined | null): boolean {
+  const t = trimField(text);
+  if (!t) return false;
+  if (isSentenceComplete(t)) return false;
+  if (endsWithSuspiciousIncompleteParticle(t)) return true;
+  return true;
+}
+
+export function buildIncompleteSentenceFeedback(shotNumber: number): string {
+  return (
+    `샷 ${shotNumber}의 내용이 중간에 끊겼다, 완결된 문장으로 다시 작성하라. ` +
+    '마침표·느낌표·물음표 또는 자연스러운 종결어미로 끝낼 것.'
+  );
+}
+
+type CameraKind = 'wide' | 'close' | 'medium' | 'long';
+
+function detectCameraKind(text: string): CameraKind | null {
+  const t = normalizeCompareText(text);
+  if (t.includes('클로즈') || t.includes('close')) return 'close';
+  if (t.includes('와이드') || t.includes('wide')) return 'wide';
+  if (t.includes('미디엄') || t.includes('medium')) return 'medium';
+  if (t.includes('롱') || t.includes('long')) return 'long';
+  return null;
+}
+
+export function cameraLabelMatchesAction(shot: VideoContiShot): boolean {
+  const cameraKind = detectCameraKind(shot.camera ?? '');
+  const firstSentence = trimField(shot.action).split(/[.。!?\n]/)[0] ?? '';
+  const actionKind = detectCameraKind(firstSentence);
+  if (!cameraKind || !actionKind) return true;
+  return cameraKind === actionKind;
+}
+
+export function buildCameraMismatchFeedback(shotNumber: number): string {
+  return (
+    `샷 ${shotNumber}의 camera 라벨과 action 본문 첫 문장의 샷 종류가 일치하지 않는다, ` +
+    'camera와 action을 같은 샷 타입으로 맞춰 완결된 문장으로 다시 작성하라.'
+  );
+}
+
+export type RawShotQualityKind = 'empty' | 'incomplete' | 'camera_mismatch';
+
+export interface RawShotQualityIssue {
+  index: number;
+  kind: RawShotQualityKind;
+  feedback: string;
+}
+
+export function findRawShotQualityIssues(conti: VideoConti): RawShotQualityIssue[] {
+  const issues: RawShotQualityIssue[] = [];
+  for (let i = 0; i < conti.shots.length; i++) {
+    const shot = conti.shots[i]!;
+    const shotNumber = i + 1;
+
+    const content = validateShotContent(shot, shotNumber);
+    if (!content.ok) {
+      issues.push({ index: i, kind: 'empty', feedback: content.feedback });
+      continue;
+    }
+
+    if (isIncompleteSentence(shot.action)) {
+      issues.push({ index: i, kind: 'incomplete', feedback: buildIncompleteSentenceFeedback(shotNumber) });
+      continue;
+    }
+
+    const dialogue = trimField(shot.dialogue);
+    if (dialogue && isIncompleteSentence(dialogue)) {
+      issues.push({ index: i, kind: 'incomplete', feedback: buildIncompleteSentenceFeedback(shotNumber) });
+      continue;
+    }
+
+    if (!cameraLabelMatchesAction(shot)) {
+      issues.push({ index: i, kind: 'camera_mismatch', feedback: buildCameraMismatchFeedback(shotNumber) });
+    }
+  }
+  return issues;
+}
+
+export function findIncompleteLastShotIndex(conti: VideoConti): number | null {
+  if (!conti.shots.length) return null;
+  const lastIdx = conti.shots.length - 1;
+  const issues = findRawShotQualityIssues(conti).filter(
+    (issue) => issue.index === lastIdx && issue.kind === 'incomplete',
+  );
+  return issues.length ? lastIdx : null;
+}
+
 export function validateCutTypeMatchesRawShots(
   cutType: VideoConti['cutType'],
   rawShots: VideoContiShot[],
