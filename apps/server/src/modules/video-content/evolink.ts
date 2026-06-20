@@ -31,7 +31,30 @@ export {
 } from './prompt-length.js';
 
 const API_BASE = process.env.EVOLINK_API_BASE?.trim() || 'https://api.evolink.ai';
-const MODEL = 'kling-v3-turbo-text-to-video';
+const MODEL =
+  process.env.EVOLINK_VIDEO_MODEL?.trim() || 'kling-v3-turbo-text-to-video';
+
+export function hasEvoLinkApiKey(): boolean {
+  return Boolean(process.env.EVOLINK_API_KEY?.trim());
+}
+
+function formatEvoLinkAxiosError(err: unknown): string {
+  if (axios.isAxiosError(err)) {
+    const data = err.response?.data as Record<string, unknown> | undefined;
+    const nestedErr = data?.error;
+    if (nestedErr && typeof nestedErr === 'object' && 'message' in nestedErr) {
+      const msg = (nestedErr as { message?: string }).message;
+      if (msg) return `EvoLink API: ${msg}`;
+    }
+    for (const key of ['message', 'detail', 'error'] as const) {
+      const val = data?.[key];
+      if (typeof val === 'string' && val.trim()) return `EvoLink API: ${val}`;
+    }
+    const status = err.response?.status;
+    return status ? `EvoLink API HTTP ${status}: ${err.message}` : `EvoLink API: ${err.message}`;
+  }
+  return (err as Error).message ?? String(err);
+}
 
 function apiKey(): string {
   const key = process.env.EVOLINK_API_KEY?.trim();
@@ -115,13 +138,68 @@ export function buildEvoLinkPrompt(conti: VideoConti, conditions: GenerationCond
   return buildEvoLinkSingleShotPrompt(conti, conditions);
 }
 
-type TaskStatus = 'pending' | 'processing' | 'completed' | 'failed';
-
 interface TaskDetail {
-  id: string;
-  status: TaskStatus;
-  results?: string[];
-  error?: { message?: string };
+  id?: string;
+  status?: string;
+  results?: unknown[];
+  output?: unknown;
+  error?: { message?: string } | string;
+}
+
+function extractTaskId(data: Record<string, unknown>): string {
+  const direct = data.id ?? data.task_id;
+  if (typeof direct === 'string' && direct.trim()) return direct.trim();
+  const nested = data.data;
+  if (nested && typeof nested === 'object') {
+    const n = nested as Record<string, unknown>;
+    const inner = n.id ?? n.task_id;
+    if (typeof inner === 'string' && inner.trim()) return inner.trim();
+  }
+  throw new Error('EvoLink task_id 없음');
+}
+
+function pickUrl(value: unknown): string | null {
+  if (typeof value === 'string' && /^https?:\/\//i.test(value)) return value;
+  if (value && typeof value === 'object') {
+    const o = value as Record<string, unknown>;
+    for (const key of ['url', 'video_url', 'uri', 'download_url']) {
+      const u = o[key];
+      if (typeof u === 'string' && /^https?:\/\//i.test(u)) return u;
+    }
+  }
+  return null;
+}
+
+/** GET /v1/tasks/{id} — results 배열·output 객체 모두 지원 */
+export function extractVideoUrlFromTask(task: TaskDetail): string | null {
+  if (Array.isArray(task.results)) {
+    for (const item of task.results) {
+      const url = pickUrl(item);
+      if (url) return url;
+    }
+  }
+  const fromOutput = pickUrl(task.output);
+  if (fromOutput) return fromOutput;
+  if (Array.isArray(task.output)) {
+    for (const item of task.output) {
+      const url = pickUrl(item);
+      if (url) return url;
+    }
+  }
+  return null;
+}
+
+function isTaskCompleted(status: string | undefined): boolean {
+  return status === 'completed' || status === 'succeeded' || status === 'success';
+}
+
+function isTaskFailed(status: string | undefined): boolean {
+  return status === 'failed' || status === 'error' || status === 'cancelled';
+}
+
+function taskErrorMessage(task: TaskDetail): string {
+  if (typeof task.error === 'string') return task.error;
+  return task.error?.message ?? 'EvoLink 영상 생성 실패';
 }
 
 export async function createEvoLinkVideoTask(params: {
@@ -140,25 +218,39 @@ export async function createEvoLinkVideoTask(params: {
   const cb = callbackUrl();
   if (cb) body.callback_url = cb;
 
-  const { data } = await axios.post<{ id: string }>(`${API_BASE}/v1/videos/generations`, body, {
-    headers: authHeaders(),
-    timeout: 60_000,
-  });
-  if (!data?.id) throw new Error('EvoLink task_id 없음');
-  return data.id;
+  try {
+    const { data } = await axios.post<Record<string, unknown>>(
+      `${API_BASE}/v1/videos/generations`,
+      body,
+      {
+        headers: authHeaders(),
+        timeout: 60_000,
+      },
+    );
+    return extractTaskId(data ?? {});
+  } catch (err) {
+    throw new Error(formatEvoLinkAxiosError(err));
+  }
 }
 
 export async function getEvoLinkTask(taskId: string): Promise<TaskDetail> {
-  const { data } = await axios.get<TaskDetail>(`${API_BASE}/v1/tasks/${encodeURIComponent(taskId)}`, {
-    headers: authHeaders(),
-    timeout: 30_000,
-  });
-  return data;
+  try {
+    const { data } = await axios.get<TaskDetail>(
+      `${API_BASE}/v1/tasks/${encodeURIComponent(taskId)}`,
+      {
+        headers: authHeaders(),
+        timeout: 30_000,
+      },
+    );
+    return data;
+  } catch (err) {
+    throw new Error(formatEvoLinkAxiosError(err));
+  }
 }
 
 export async function pollEvoLinkVideoUrl(
   taskId: string,
-  opts?: { maxWaitMs?: number; intervalMs?: number },
+  opts?: { maxWaitMs?: number; intervalMs?: number; onPoll?: (task: TaskDetail) => void },
 ): Promise<string> {
   const maxWaitMs = opts?.maxWaitMs ?? 20 * 60 * 1000;
   const intervalMs = opts?.intervalMs ?? 5000;
@@ -166,17 +258,19 @@ export async function pollEvoLinkVideoUrl(
 
   while (Date.now() < deadline) {
     const task = await getEvoLinkTask(taskId);
-    if (task.status === 'completed') {
-      const url = task.results?.[0];
+    opts?.onPoll?.(task);
+    const status = task.status;
+    if (isTaskCompleted(status)) {
+      const url = extractVideoUrlFromTask(task);
       if (!url) throw new Error('EvoLink 완료 응답에 영상 URL 없음');
       return url;
     }
-    if (task.status === 'failed') {
-      throw new Error(task.error?.message ?? 'EvoLink 영상 생성 실패');
+    if (isTaskFailed(status)) {
+      throw new Error(taskErrorMessage(task));
     }
     await sleep(intervalMs);
   }
-  throw new Error('EvoLink 영상 생성 시간 초과');
+  throw new Error('EvoLink 영상 생성 시간 초과 (20분)');
 }
 
 export async function downloadEvoLinkVideoToPath(params: {

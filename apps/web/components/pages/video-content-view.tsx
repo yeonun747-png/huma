@@ -26,6 +26,7 @@ import {
 } from '@/lib/video-content-targets';
 import { ShortformVideoModelSettings } from '@/components/settings/shortform-video-model-settings';
 import { ContiPreview } from '@/components/video/conti-preview';
+import { VideoContentStoragePanel } from '@/components/video/video-content-storage-panel';
 import { MGrid, MPanel, MTag } from '@/components/mockup/primitives';
 
 const PLATFORMS = [
@@ -36,21 +37,32 @@ const PLATFORMS = [
   { key: 'x', label: 'X', captionKey: 'caption_x' as const, uploadedKey: 'uploaded_x' as const },
 ];
 
-function useVideoBlob(id: string | null, enabled: boolean) {
+function useVideoBlob(
+  id: string | null,
+  enabled: boolean,
+  variant: 'subtitled' | 'source' = 'subtitled',
+  refreshKey = 0,
+) {
   const [url, setUrl] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
   useEffect(() => {
     if (!id || !enabled) return;
     let revoked: string | null = null;
-    void api.fetchVideoContentBlob(id).then((blob) => {
-      revoked = URL.createObjectURL(blob);
-      setUrl(revoked);
-    });
+    setLoadError(false);
+    setUrl(null);
+    void api
+      .fetchVideoContentBlob(id, variant === 'source' ? 'source' : undefined)
+      .then((blob) => {
+        revoked = URL.createObjectURL(blob);
+        setUrl(revoked);
+      })
+      .catch(() => setLoadError(true));
     return () => {
       if (revoked) URL.revokeObjectURL(revoked);
       setUrl(null);
     };
-  }, [id, enabled]);
-  return url;
+  }, [id, enabled, variant, refreshKey]);
+  return { url, loadError };
 }
 
 function statusTone(status: string): 'ok' | 'warn' | 'err' | 'idle' {
@@ -60,21 +72,58 @@ function statusTone(status: string): 'ok' | 'warn' | 'err' | 'idle' {
   return 'warn';
 }
 
+function ProgressWait({ status }: { status: string }) {
+  const isConti = status === 'conti_generating';
+  return (
+    <div className="py-12 text-center">
+      <div className="mx-auto mb-4 h-1.5 max-w-[240px] overflow-hidden rounded-full bg-huma-bg3">
+        <div className="vc-progress-indeterminate h-full w-2/5 rounded-full bg-huma-acc" />
+      </div>
+      <div className="animate-pulse text-[14px] font-semibold text-huma-t2">
+        {VIDEO_CONTENT_STATUS_LABEL[status] ?? status}
+      </div>
+      <p className="mt-2 font-mono text-[11px] text-huma-t3">
+        {isConti
+          ? 'Sonnet이 콘티를 작성 중입니다. 완료되면 「검토 대기」 탭으로 이동합니다.'
+          : 'EvoLink 영상 제작·자막·캡션 생성 중입니다.'}
+      </p>
+    </div>
+  );
+}
+
 function CompletedDetail({
   item,
+  conti,
   accountName,
   deleting,
+  reburning,
+  videoRefreshKey,
+  onReburn,
   onDelete,
   onRefresh,
 }: {
   item: HumaVideoContentHistory;
+  conti: ReturnType<typeof parseContiPreview>;
   accountName?: string;
   deleting: boolean;
+  reburning: boolean;
+  videoRefreshKey: number;
+  onReburn: () => void;
   onDelete: () => void;
   onRefresh: () => void;
 }) {
   const [tab, setTab] = useState('youtube');
-  const videoUrl = useVideoBlob(item.id, item.status === 'completed');
+  const [showConti, setShowConti] = useState(false);
+  const [videoVariant, setVideoVariant] = useState<'subtitled' | 'source'>('subtitled');
+  const { url: videoUrl, loadError: videoLoadError } = useVideoBlob(
+    item.id,
+    item.status === 'completed' &&
+      (videoVariant === 'subtitled' ? Boolean(item.video_file_path) : Boolean(item.source_video_path)),
+    videoVariant,
+    videoRefreshKey,
+  );
+  const hasSubtitled = Boolean(item.video_file_path);
+  const hasSource = Boolean(item.source_video_path);
   const platform = PLATFORMS.find((p) => p.key === tab)!;
   const captionText = String(item[platform.captionKey] ?? '');
   const firstComment =
@@ -96,15 +145,42 @@ function CompletedDetail({
             disabled={deleting}
             onClick={onDelete}
           >
-            {deleting ? '삭제 중…' : '삭제'}
+            {deleting ? '삭제 중…' : '작업 삭제'}
           </button>
         ) : null}
       </div>
+
+      <div className="flex flex-wrap gap-1">
+        <button
+          type="button"
+          className={`m-af ${videoVariant === 'subtitled' ? 'e' : ''}`}
+          disabled={!hasSubtitled}
+          onClick={() => setVideoVariant('subtitled')}
+        >
+          자막본
+        </button>
+        <button
+          type="button"
+          className={`m-af ${videoVariant === 'source' ? 'e' : ''}`}
+          disabled={!hasSource}
+          onClick={() => setVideoVariant('source')}
+        >
+          원본
+        </button>
+      </div>
+
       {videoUrl ? (
         <video src={videoUrl} controls className="max-h-[360px] w-full rounded bg-black" playsInline />
+      ) : videoLoadError ? (
+        <p className="rounded border border-huma-bdr bg-huma-bg2 px-3 py-6 text-center text-[11px] text-huma-t3">
+          {videoVariant === 'source'
+            ? '원본 파일 없음 (이전 작업이거나 삭제됨)'
+            : '자막본 없음 — 원본에서 「자막만 다시 입히기」 가능'}
+        </p>
       ) : (
         <p className="text-[11px] text-huma-t3">영상 로드 중…</p>
       )}
+
       <div className="flex flex-wrap gap-1">
         {PLATFORMS.map((p) => (
           <button key={p.key} type="button" className={`m-af ${tab === p.key ? 'e' : ''}`} onClick={() => setTab(p.key)}>
@@ -121,6 +197,28 @@ function CompletedDetail({
         </div>
       ) : null}
       <div className="flex flex-wrap gap-2">
+        {conti ? (
+          <button type="button" className="btn-ghost btn-sm" onClick={() => setShowConti((v) => !v)}>
+            {showConti ? '콘티 닫기' : '콘티 보기'}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className={`btn-ghost btn-sm ${reburning ? 'animate-pulse' : ''}`}
+          disabled={!hasSource || reburning}
+          title={hasSource ? undefined : '원본이 보관된 작업만 가능 (신규 생성분부터)'}
+          onClick={onReburn}
+        >
+          {reburning ? '자막 입히는 중…' : '자막만 다시 입히기'}
+        </button>
+        <button
+          type="button"
+          className="btn-ghost btn-sm"
+          disabled={videoVariant === 'source' ? !hasSource : !hasSubtitled}
+          onClick={() => void api.downloadVideoContent(item.id, videoVariant === 'source' ? 'source' : undefined)}
+        >
+          {videoVariant === 'source' ? '원본 다운로드' : '자막본 다운로드'}
+        </button>
         <button type="button" className="btn-ghost btn-sm" onClick={() => void copyText(captionText)}>
           캡션 복사
         </button>
@@ -129,10 +227,13 @@ function CompletedDetail({
             첫 댓글 복사
           </button>
         ) : null}
-        <button type="button" className="btn-primary btn-sm" onClick={() => void api.downloadVideoContent(item.id)}>
-          다운로드
-        </button>
       </div>
+      {showConti && conti ? (
+        <div className="rounded border border-huma-bdr bg-huma-bg2 p-3">
+          <ContiPreview conti={conti} />
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap gap-2 border-t border-huma-bdr pt-2">
         {PLATFORMS.map((p) => (
           <label key={p.key} className="flex items-center gap-1 text-[10px] text-huma-t2">
@@ -158,8 +259,11 @@ function DetailPanel({
   loadingDetail,
   rendering,
   deleting,
+  reburning,
+  videoRefreshKey,
   onRender,
   onDelete,
+  onReburn,
   onRefresh,
 }: {
   item: HumaVideoContentHistory;
@@ -168,8 +272,11 @@ function DetailPanel({
   loadingDetail: boolean;
   rendering: boolean;
   deleting: boolean;
+  reburning: boolean;
+  videoRefreshKey: number;
   onRender: () => void;
   onDelete: () => void;
+  onReburn: () => void;
   onRefresh: () => void;
 }) {
   const full = detail ?? item;
@@ -183,28 +290,20 @@ function DetailPanel({
     return (
       <CompletedDetail
         item={full}
+        conti={conti}
         accountName={accountName}
         deleting={deleting}
+        reburning={reburning}
+        videoRefreshKey={videoRefreshKey}
         onDelete={onDelete}
+        onReburn={onReburn}
         onRefresh={onRefresh}
       />
     );
   }
 
   if (item.status === 'conti_generating' || item.status === 'rendering' || item.status === 'generating') {
-    return (
-      <div className="py-12 text-center">
-        <div className="mb-2 text-[28px] opacity-30">⏳</div>
-        <div className="text-[14px] font-semibold text-huma-t2">
-          {VIDEO_CONTENT_STATUS_LABEL[item.status] ?? item.status}
-        </div>
-        <p className="mt-2 font-mono text-[11px] text-huma-t3">
-          {item.status === 'conti_generating'
-            ? 'Sonnet이 콘티를 작성 중입니다. 완료되면 「검토 대기」 탭으로 이동합니다.'
-            : 'EvoLink 영상 제작·자막·캡션 생성 중입니다.'}
-        </p>
-      </div>
-    );
+    return <ProgressWait status={item.status} />;
   }
 
   const deletable = isDeletableVideoContent(item.status);
@@ -252,8 +351,13 @@ function DetailPanel({
             </button>
           ) : null}
           {item.status === 'conti_ready' ? (
-            <button type="button" className="btn-primary btn-sm" disabled={rendering} onClick={onRender}>
-              {rendering ? '요청 중…' : '숏폼 생성'}
+            <button
+              type="button"
+              className={`btn-primary btn-sm ${rendering ? 'animate-pulse' : ''}`}
+              disabled={rendering}
+              onClick={onRender}
+            >
+              {rendering ? '영상 생성 중…' : '숏폼 생성'}
             </button>
           ) : null}
         </div>
@@ -287,6 +391,9 @@ export function VideoContentView() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [creatingConti, setCreatingConti] = useState(false);
   const [rendering, setRendering] = useState(false);
+  const [reburning, setReburning] = useState(false);
+  const [videoRefreshKey, setVideoRefreshKey] = useState(0);
+  const [storageRefreshToken, setStorageRefreshToken] = useState(0);
   const [deleting, setDeleting] = useState(false);
   const selectedStatusRef = useRef<string | null>(null);
 
@@ -403,6 +510,21 @@ export function VideoContentView() {
     setSelectedId(filteredItems[0]!.id);
   }, [filteredItems, selectedId, items]);
 
+  const refreshSelectedDetail = useCallback(async () => {
+    const list = await load();
+    setStorageRefreshToken((t) => t + 1);
+    if (!selectedId) return list;
+    try {
+      const row = await api.videoContentGet(selectedId);
+      setDetail(row);
+      setVideoRefreshKey((k) => k + 1);
+    } catch {
+      const row = list.find((i) => i.id === selectedId);
+      if (row) setDetail(row as HumaVideoContentHistory);
+    }
+    return list;
+  }, [load, selectedId]);
+
   const selectedItem = selectedId ? items.find((i) => i.id === selectedId) ?? null : null;
 
   const handleCreateConti = async () => {
@@ -473,6 +595,29 @@ export function VideoContentView() {
     }
   };
 
+  const handleReburn = async () => {
+    if (!selectedId) return;
+    if (
+      !window.confirm(
+        'EvoLink 재호출 없이 원본 영상에 자막만 다시 입힙니다.\n자막 스타일·타이밍이 새로 적용됩니다. (수십 초 소요)',
+      )
+    ) {
+      return;
+    }
+    setReburning(true);
+    try {
+      await api.reburnVideoSubtitles(selectedId);
+      const row = await api.videoContentGet(selectedId);
+      setDetail(row);
+      await load();
+      setVideoRefreshKey((k) => k + 1);
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : '자막 재입히기 실패');
+    } finally {
+      setReburning(false);
+    }
+  };
+
   return (
     <div className="space-y-4 p-1">
       <p className="text-[12px] leading-relaxed text-huma-t3">
@@ -487,26 +632,34 @@ export function VideoContentView() {
       <MGrid cols={2}>
         <ShortformVideoModelSettings />
         <MPanel title="📊 작업 현황">
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-4 gap-1.5">
             {(Object.keys(VIDEO_CONTENT_TAB_LABEL) as VideoContentTab[]).map((tab) => (
               <button
                 key={tab}
                 type="button"
-                className={`rounded border px-2 py-2 text-center transition-colors ${
+                className={`rounded border px-1 py-1.5 text-center transition-colors ${
                   activeTab === tab ? 'border-huma-acc bg-huma-glow' : 'border-huma-bdr bg-huma-bg2'
                 }`}
                 onClick={() => setActiveTab(tab)}
               >
-                <div className="text-[16px] font-bold text-huma-t">{tabCounts[tab]}</div>
-                <div className="text-[9px] text-huma-t3">{VIDEO_CONTENT_TAB_LABEL[tab]}</div>
+                <div className="text-[15px] font-bold leading-tight text-huma-t">{tabCounts[tab]}</div>
+                <div className="text-[8.5px] leading-tight text-huma-t3">{VIDEO_CONTENT_TAB_LABEL[tab]}</div>
               </button>
             ))}
           </div>
-          <p className="mt-3 font-mono text-[10.5px] leading-relaxed text-huma-t3">
-            페르소나는 계정 관리 → 「영상 페르소나」에서 설정합니다.
-          </p>
         </MPanel>
       </MGrid>
+
+      <VideoContentStoragePanel
+        filterWorkspace={filterWorkspace}
+        accounts={accounts}
+        refreshToken={storageRefreshToken}
+        onRefresh={() => void refreshSelectedDetail()}
+        onOpenItem={(id) => {
+          setSelectedId(id);
+          setActiveTab('done');
+        }}
+      />
 
       <div className="flex min-h-[520px] items-stretch gap-3">
         {/* 좌: 작업 목록 */}
@@ -539,14 +692,11 @@ export function VideoContentView() {
             <div className="flex gap-2">
               <button
                 type="button"
-                className="btn-primary btn-sm flex-1"
+                className={`btn-primary btn-sm w-full ${creatingConti ? 'animate-pulse' : ''}`}
                 disabled={!contiTarget || creatingConti}
                 onClick={() => void handleCreateConti()}
               >
-                {creatingConti ? '요청 중…' : '콘티 생성'}
-              </button>
-              <button type="button" className="btn-ghost btn-sm" onClick={() => void load()}>
-                ↻
+                {creatingConti ? '콘티 생성 중…' : '콘티 생성'}
               </button>
             </div>
           </div>
@@ -583,7 +733,10 @@ export function VideoContentView() {
                         <span className="truncate text-[11px] font-semibold text-huma-t">
                           {videoContentDisplayName(item.account_id, accounts)}
                         </span>
-                        <MTag tone={statusTone(item.status)} className="shrink-0 text-[9px]">
+                        <MTag
+                          tone={statusTone(item.status)}
+                          className={`shrink-0 text-[9px] ${isVideoProgressStatus(item.status) ? 'animate-pulse' : ''}`}
+                        >
                           {VIDEO_CONTENT_STATUS_LABEL[item.status] ?? item.status}
                         </MTag>
                       </div>
@@ -621,9 +774,12 @@ export function VideoContentView() {
                 loadingDetail={loadingDetail}
                 rendering={rendering}
                 deleting={deleting}
+                reburning={reburning}
+                videoRefreshKey={videoRefreshKey}
                 onRender={() => void handleRender()}
                 onDelete={() => void handleDelete()}
-                onRefresh={() => void load()}
+                onReburn={() => void handleReburn()}
+                onRefresh={() => void refreshSelectedDetail()}
               />
             ) : (
               <div className="py-16 text-center text-[12px] text-huma-t3">

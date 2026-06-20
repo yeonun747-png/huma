@@ -44,6 +44,8 @@ export interface HumaVideoContentHistory {
   uploaded_x?: boolean;
   uploaded_x_at?: string | null;
   video_file_path?: string | null;
+  /** EvoLink 원본 (자막 없음) — 서버 로컬 경로 */
+  source_video_path?: string | null;
   error_message?: string | null;
   created_at: string;
 }

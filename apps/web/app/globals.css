@@ -1634,3 +1634,15 @@
   margin: -4px 0 10px;
   padding: 0 2px;
 }
+
+@keyframes vc-progress-slide {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(420%);
+  }
+}
+.vc-progress-indeterminate {
+  animation: vc-progress-slide 1.5s ease-in-out infinite;
+}

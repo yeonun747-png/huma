@@ -417,6 +417,50 @@ export const api = {
     request<{ ok: boolean; message?: string }>(`/api/video-content/${historyId}/render-video`, {
       method: 'POST',
     }),
+  reburnVideoSubtitles: (historyId: string) =>
+    request<{ ok: boolean; message?: string }>(`/api/video-content/${historyId}/reburn-subtitles`, {
+      method: 'POST',
+    }),
+  deleteVideoContentFile: (id: string, target: 'source' | 'subtitled') =>
+    request<{ ok: boolean; deleted: string }>(
+      `/api/video-content/${id}/video-file?target=${encodeURIComponent(target)}`,
+      { method: 'DELETE' },
+    ),
+  videoContentStorageStats: (workspace?: string) => {
+    const qs = workspace ? `?workspace=${encodeURIComponent(workspace)}` : '';
+    return request<{
+      stats: import('@/lib/video-content-storage').VideoContentStorageStats;
+      settings: import('@/lib/video-content-storage').VideoContentStorageSettings;
+    }>(`/api/video-content/storage/stats${qs}`);
+  },
+  videoContentStorageItems: (params?: { workspace?: string; filter?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.workspace) q.set('workspace', params.workspace);
+    if (params?.filter) q.set('filter', params.filter);
+    const qs = q.toString();
+    return request<import('@/lib/video-content-storage').VideoContentStorageItem[]>(
+      `/api/video-content/storage/items${qs ? `?${qs}` : ''}`,
+    );
+  },
+  videoContentStorageBulkDelete: (ids: string[], target: 'source' | 'subtitled') =>
+    request<{ ok: boolean; deleted: number; freedBytes: number }>(
+      '/api/video-content/storage/bulk-delete',
+      { method: 'POST', body: JSON.stringify({ ids, target }) },
+    ),
+  getVideoContentStorageSettings: () =>
+    request<import('@/lib/video-content-storage').VideoContentStorageSettings>(
+      '/api/video-content/storage/settings',
+    ),
+  updateVideoContentStorageSettings: (body: Partial<import('@/lib/video-content-storage').VideoContentStorageSettings>) =>
+    request<{ ok: boolean; settings: import('@/lib/video-content-storage').VideoContentStorageSettings }>(
+      '/api/video-content/storage/settings',
+      { method: 'PUT', body: JSON.stringify(body) },
+    ),
+  runVideoContentStorageCleanup: () =>
+    request<{ ok: boolean; deletedSources: number; deletedSubtitled: number; freedBytes: number }>(
+      '/api/video-content/storage/run-cleanup',
+      { method: 'POST' },
+    ),
   /** @deprecated generateConti 사용 */
   generateVideoContent: (accountId: string) =>
     request<{ ok: boolean; message?: string }>(`/api/accounts/${accountId}/generate-conti`, {
@@ -426,17 +470,28 @@ export const api = {
     request(`/api/video-content/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteVideoContent: (id: string) =>
     request<{ ok: boolean }>(`/api/video-content/${id}`, { method: 'DELETE' }),
-  fetchVideoContentBlob: async (id: string): Promise<Blob> => {
+  fetchVideoContentBlob: async (id: string, variant?: 'source' | 'subtitled'): Promise<Blob> => {
     const token = getToken();
-    const res = await fetch(`${API_BASE}/api/video-content/${id}/stream`, {
+    const qs = variant === 'source' ? '?variant=source' : '';
+    const res = await fetch(`${API_BASE}/api/video-content/${id}/stream${qs}`, {
       headers: token ? { 'X-HUMA-KEY': token } : {},
     });
-    if (!res.ok) throw new Error('영상 로드 실패');
+    if (!res.ok) throw new Error(variant === 'source' ? '원본 로드 실패' : '영상 로드 실패');
     return res.blob();
   },
-  downloadVideoContent: async (id: string) => {
+  fetchVideoContentThumbnail: async (id: string, variant: 'source' | 'subtitled'): Promise<Blob> => {
     const token = getToken();
-    const res = await fetch(`${API_BASE}/api/video-content/${id}/download`, {
+    const qs = variant === 'source' ? '?variant=source' : '';
+    const res = await fetch(`${API_BASE}/api/video-content/${id}/thumbnail${qs}`, {
+      headers: token ? { 'X-HUMA-KEY': token } : {},
+    });
+    if (!res.ok) throw new Error('썸네일 로드 실패');
+    return res.blob();
+  },
+  downloadVideoContent: async (id: string, variant?: 'source' | 'subtitled') => {
+    const token = getToken();
+    const qs = variant === 'source' ? '?variant=source' : '';
+    const res = await fetch(`${API_BASE}/api/video-content/${id}/download${qs}`, {
       headers: token ? { 'X-HUMA-KEY': token } : {},
     });
     if (!res.ok) throw new Error('다운로드 실패');

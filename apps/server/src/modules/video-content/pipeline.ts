@@ -1,4 +1,5 @@
 import { copyFile, mkdir } from 'fs/promises';
+import { existsSync } from 'fs';
 import { join } from 'path';
 import type { Workspace } from '@huma/shared';
 import { supabase } from '../../middleware/auth.js';
@@ -36,6 +37,8 @@ import {
   saveSubtitleStyleHistory,
 } from './selection.js';
 import { burnSubtitles } from './subtitle.js';
+import { videoContentFinalPath, videoContentSourcePath } from './paths.js';
+import { generateVideoContentThumbnails } from './thumbnail.js';
 import type { GenerationConditions, VideoConti } from './types.js';
 
 const WEB_BASE = process.env.HUMA_WEB_URL?.trim() || 'http://localhost:3000';
@@ -276,14 +279,32 @@ async function finalizeVideoContent(params: {
   const tmpDir = join(process.cwd(), 'tmp', 'video-content', historyId);
   await mkdir(tmpDir, { recursive: true });
 
+  const sourcePersistPath = videoContentSourcePath(historyId);
+  const finalPath = videoContentFinalPath(historyId);
+  await mkdir(join(process.cwd(), 'data', 'video-content'), { recursive: true });
+  if (sourcePath !== sourcePersistPath) {
+    await copyFile(sourcePath, sourcePersistPath);
+  }
+
   const subtitleStyle = await pickSubtitleStyle(accountId);
   const subtitledPath = join(tmpDir, 'final.mp4');
-  await burnSubtitles({
-    inputVideoPath: sourcePath,
-    outputVideoPath: subtitledPath,
-    conti,
-    style: subtitleStyle,
-  });
+  try {
+    await burnSubtitles({
+      inputVideoPath: sourcePersistPath,
+      outputVideoPath: subtitledPath,
+      conti,
+      style: subtitleStyle,
+    });
+  } catch (subErr) {
+    const msg = (subErr as Error).message;
+    await logOperation({
+      level: 'warn',
+      message: `[video-content] 자막 burn 실패 — Kling 원본 사용: ${msg}`,
+      workspace,
+      account_id: accountId,
+    });
+    await copyFile(sourcePersistPath, subtitledPath);
+  }
   await saveSubtitleStyleHistory(accountId, subtitleStyle);
 
   const captions = await generatePlatformCaptions({
@@ -293,15 +314,20 @@ async function finalizeVideoContent(params: {
     recentCaptions: await loadRecentCaptions(accountId),
   });
 
-  const finalPath = join(process.cwd(), 'data', 'video-content', `${historyId}.mp4`);
-  await mkdir(join(process.cwd(), 'data', 'video-content'), { recursive: true });
   await copyFile(subtitledPath, finalPath);
+
+  await generateVideoContentThumbnails({
+    historyId,
+    sourcePath: sourcePersistPath,
+    subtitledPath: finalPath,
+  }).catch(() => {});
 
   await supabase
     .from('huma_video_content_history')
     .update({
       status: 'completed',
       video_file_path: finalPath,
+      source_video_path: sourcePersistPath,
       caption_youtube: captions.captionYoutube,
       caption_tiktok: captions.captionTiktok,
       caption_instagram: captions.captionInstagram,
@@ -318,6 +344,90 @@ async function finalizeVideoContent(params: {
   await logOperation({
     level: 'info',
     message: `[video-content] 생성 완료 — ${accountName}`,
+    workspace,
+    account_id: accountId,
+  });
+}
+
+/** 완료된 작업 — EvoLink 재호출 없이 원본에 자막만 다시 burn */
+export async function runSubtitleReburn(historyId: string): Promise<void> {
+  const { data: history, error } = await supabase
+    .from('huma_video_content_history')
+    .select('id, account_id, workspace, status, conti_json, source_video_path, video_file_path')
+    .eq('id', historyId)
+    .maybeSingle();
+
+  if (error || !history) throw new Error('작업 없음');
+  if (history.status !== 'completed') {
+    throw new Error(`자막 재입히기 불가 상태: ${history.status}`);
+  }
+
+  const accountId = history.account_id as string;
+  const workspace = history.workspace as Workspace;
+  const sourcePath =
+    (history.source_video_path as string | null) || videoContentSourcePath(historyId);
+
+  if (!existsSync(sourcePath)) {
+    throw new Error('원본 영상이 서버에 없습니다. (이전 작업이거나 원본이 삭제됨)');
+  }
+
+  const conti = parseContiFromJson(history.conti_json);
+  const tmpDir = join(process.cwd(), 'tmp', 'video-content', historyId);
+  await mkdir(tmpDir, { recursive: true });
+
+  const subtitleStyle = await pickSubtitleStyle(accountId);
+  const subtitledPath = join(tmpDir, 'reburn_final.mp4');
+
+  await logOperation({
+    level: 'info',
+    message: `[video-content] 자막 재입히기 시작 — history=${historyId}`,
+    workspace,
+    account_id: accountId,
+  });
+
+  try {
+    await burnSubtitles({
+      inputVideoPath: sourcePath,
+      outputVideoPath: subtitledPath,
+      conti,
+      style: subtitleStyle,
+    });
+  } catch (subErr) {
+    const msg = (subErr as Error).message;
+    await logOperation({
+      level: 'warn',
+      message: `[video-content] 자막 재입히기 실패 — ${msg}`,
+      workspace,
+      account_id: accountId,
+    });
+    throw new Error(`자막 입히기 실패: ${msg}`);
+  }
+
+  await saveSubtitleStyleHistory(accountId, subtitleStyle);
+
+  const finalPath = videoContentFinalPath(historyId);
+  await mkdir(join(process.cwd(), 'data', 'video-content'), { recursive: true });
+  await copyFile(subtitledPath, finalPath);
+
+  await generateVideoContentThumbnails({
+    historyId,
+    sourcePath: sourcePath,
+    subtitledPath: finalPath,
+  }).catch(() => {});
+
+  const patch: Record<string, unknown> = {
+    video_file_path: finalPath,
+    error_message: null,
+  };
+  if (!history.source_video_path) {
+    patch.source_video_path = sourcePath;
+  }
+
+  await supabase.from('huma_video_content_history').update(patch).eq('id', historyId);
+
+  await logOperation({
+    level: 'info',
+    message: `[video-content] 자막 재입히기 완료 — history=${historyId}`,
     workspace,
     account_id: accountId,
   });
@@ -654,10 +764,24 @@ export async function runVideoProduction(historyId: string): Promise<string> {
   try {
     const { videoQuality } = await getPipelineModelSettings(workspace);
 
+    await logOperation({
+      level: 'info',
+      message: `[video-content] EvoLink Kling 3 Turbo ${videoQuality} 요청 — ${baseConditions.duration}초 history=${historyId}`,
+      workspace,
+      account_id: accountId,
+    });
+
     const taskId = await createEvoLinkVideoTask({
       prompt: evoPrompt,
       duration: baseConditions.duration,
       quality: videoQuality,
+    });
+
+    await logOperation({
+      level: 'info',
+      message: `[video-content] EvoLink task=${taskId} — 폴링 시작 history=${historyId}`,
+      workspace,
+      account_id: accountId,
     });
 
     await supabase
@@ -670,6 +794,12 @@ export async function runVideoProduction(historyId: string): Promise<string> {
     let sourcePath: string;
     try {
       const videoUrl = await pollEvoLinkVideoUrl(taskId);
+      await logOperation({
+        level: 'info',
+        message: `[video-content] EvoLink 완료 — 다운로드 시작 history=${historyId}`,
+        workspace,
+        account_id: accountId,
+      });
       sourcePath = await downloadEvoLinkVideoToPath({ videoUrl, historyId });
     } catch (dlErr) {
       const msg = (dlErr as Error).message;

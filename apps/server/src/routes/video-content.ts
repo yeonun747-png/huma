@@ -5,7 +5,21 @@ import { join } from 'path';
 import { authMiddleware, getWorkspaceFilter, supabase } from '../middleware/auth.js';
 import { mapAccountDbError } from '../lib/account-errors.js';
 import { enqueueJob } from '../modules/queue/producer.js';
-import { failStaleVideoContentJobs } from '../modules/video-content/pipeline.js';
+import { failStaleVideoContentJobs, runSubtitleReburn } from '../modules/video-content/pipeline.js';
+import { hasEvoLinkApiKey } from '../modules/video-content/evolink.js';
+import { videoContentFinalPath, videoContentSourcePath } from '../modules/video-content/paths.js';
+import { ensureVideoThumbnail, removeVideoContentThumb } from '../modules/video-content/thumbnail.js';
+import {
+  bulkDeleteVideoContentFiles,
+  deleteVideoContentFileForHistory,
+  getVideoContentStorageSettings,
+  getVideoContentStorageStats,
+  listVideoContentStorageItems,
+  runVideoContentStorageAutoCleanup,
+  updateVideoContentStorageSettings,
+  type StorageListFilter,
+  type VideoContentStorageSettings,
+} from '../modules/video-content/storage.js';
 import {
   getCharacterAppearanceCounts,
   getLastSyncTime,
@@ -32,18 +46,38 @@ async function assertAccountAccess(
 
 const IN_PROGRESS_STATUSES = ['conti_generating', 'rendering', 'generating'] as const;
 
-async function removeVideoContentFiles(historyId: string, videoFilePath: string | null): Promise<void> {
+async function removeVideoContentFiles(
+  historyId: string,
+  videoFilePath: string | null,
+  sourceVideoPath?: string | null,
+): Promise<void> {
   if (videoFilePath && existsSync(videoFilePath)) {
     await unlink(videoFilePath).catch(() => {});
   }
-  const defaultPath = join(process.cwd(), 'data', 'video-content', `${historyId}.mp4`);
-  if (existsSync(defaultPath)) {
-    await unlink(defaultPath).catch(() => {});
+  const defaultFinal = videoContentFinalPath(historyId);
+  if (existsSync(defaultFinal)) {
+    await unlink(defaultFinal).catch(() => {});
   }
+  const sourcePath = sourceVideoPath || videoContentSourcePath(historyId);
+  if (sourcePath && existsSync(sourcePath)) {
+    await unlink(sourcePath).catch(() => {});
+  }
+  await removeVideoContentThumb(historyId, 'subtitled');
+  await removeVideoContentThumb(historyId, 'source');
   const tmpDir = join(process.cwd(), 'tmp', 'video-content', historyId);
   if (existsSync(tmpDir)) {
     await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+function resolveStoredVideoPath(
+  historyId: string,
+  storedPath: string | null | undefined,
+  kind: 'final' | 'source',
+): string {
+  if (storedPath && existsSync(storedPath)) return storedPath;
+  const fallback = kind === 'final' ? videoContentFinalPath(historyId) : videoContentSourcePath(historyId);
+  return fallback;
 }
 
 export async function registerVideoContentRoutes(app: FastifyInstance) {
@@ -54,7 +88,7 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
     let query = supabase
       .from('huma_video_content_history')
       .select(
-        'id, account_id, workspace, status, relationship_axis, emotion_curve, hook_type, cut_type, duration, scenario_summary, similarity_score, character_used, caption_youtube, caption_tiktok, caption_instagram, caption_threads, caption_x, first_comment_threads, first_comment_x, uploaded_youtube, uploaded_youtube_at, uploaded_tiktok, uploaded_tiktok_at, uploaded_instagram, uploaded_instagram_at, uploaded_threads, uploaded_threads_at, uploaded_x, uploaded_x_at, video_file_path, error_message, created_at',
+        'id, account_id, workspace, status, relationship_axis, emotion_curve, hook_type, cut_type, duration, scenario_summary, similarity_score, character_used, caption_youtube, caption_tiktok, caption_instagram, caption_threads, caption_x, first_comment_threads, first_comment_x, uploaded_youtube, uploaded_youtube_at, uploaded_tiktok, uploaded_tiktok_at, uploaded_instagram, uploaded_instagram_at, uploaded_threads, uploaded_threads_at, uploaded_x, uploaded_x_at, video_file_path, source_video_path, error_message, created_at',
       )
       .in('workspace', allowed)
       .order('created_at', { ascending: false })
@@ -82,36 +116,90 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
 
   app.get('/api/video-content/:id/stream', { preHandler: authMiddleware }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const { variant } = request.query as { variant?: string };
     const allowed = getWorkspaceFilter(request);
     const { data } = await supabase
       .from('huma_video_content_history')
-      .select('workspace, video_file_path, status')
+      .select('workspace, video_file_path, source_video_path, status')
       .eq('id', id)
       .maybeSingle();
-    if (!data?.video_file_path) return reply.code(404).send({ error: '영상 없음' });
+    if (!data) return reply.code(404).send({ error: '없음' });
     if (!allowed.includes(data.workspace)) return reply.code(403).send({ error: '권한 없음' });
-    if (!existsSync(data.video_file_path)) return reply.code(404).send({ error: '파일 없음' });
+
+    const isSource = variant === 'source';
+    const filePath = isSource
+      ? resolveStoredVideoPath(id, data.source_video_path, 'source')
+      : resolveStoredVideoPath(id, data.video_file_path, 'final');
+
+    if (!existsSync(filePath)) {
+      return reply.code(404).send({ error: isSource ? '원본 없음' : '영상 없음' });
+    }
 
     reply.header('Content-Type', 'video/mp4');
-    return reply.send(createReadStream(data.video_file_path));
+    return reply.send(createReadStream(filePath));
+  });
+
+  app.get('/api/video-content/:id/thumbnail', { preHandler: authMiddleware }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { variant } = request.query as { variant?: string };
+    const allowed = getWorkspaceFilter(request);
+    const isSource = variant === 'source';
+    const fileVariant = isSource ? 'source' : 'subtitled';
+
+    const { data } = await supabase
+      .from('huma_video_content_history')
+      .select('workspace, video_file_path, source_video_path')
+      .eq('id', id)
+      .maybeSingle();
+    if (!data) return reply.code(404).send({ error: '없음' });
+    if (!allowed.includes(data.workspace)) return reply.code(403).send({ error: '권한 없음' });
+
+    const videoPath = isSource
+      ? resolveStoredVideoPath(id, data.source_video_path, 'source')
+      : resolveStoredVideoPath(id, data.video_file_path, 'final');
+    if (!existsSync(videoPath)) return reply.code(404).send({ error: '영상 없음' });
+
+    const thumbPath = await ensureVideoThumbnail({
+      historyId: id,
+      variant: fileVariant,
+      videoPath: isSource ? data.source_video_path : data.video_file_path,
+    });
+    if (!thumbPath || !existsSync(thumbPath)) {
+      return reply.code(404).send({ error: '썸네일 생성 실패' });
+    }
+
+    reply.header('Content-Type', 'image/jpeg');
+    reply.header('Cache-Control', 'private, max-age=3600');
+    return reply.send(createReadStream(thumbPath));
   });
 
   app.get('/api/video-content/:id/download', { preHandler: authMiddleware }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const { variant } = request.query as { variant?: string };
     const allowed = getWorkspaceFilter(request);
     const { data } = await supabase
       .from('huma_video_content_history')
-      .select('workspace, video_file_path')
+      .select('workspace, video_file_path, source_video_path')
       .eq('id', id)
       .maybeSingle();
-    if (!data?.video_file_path || !existsSync(data.video_file_path)) {
-      return reply.code(404).send({ error: '파일 없음' });
-    }
+    if (!data) return reply.code(404).send({ error: '없음' });
     if (!allowed.includes(data.workspace)) return reply.code(403).send({ error: '권한 없음' });
 
+    const isSource = variant === 'source';
+    const filePath = isSource
+      ? resolveStoredVideoPath(id, data.source_video_path, 'source')
+      : resolveStoredVideoPath(id, data.video_file_path, 'final');
+
+    if (!existsSync(filePath)) {
+      return reply.code(404).send({ error: '파일 없음' });
+    }
+
     reply.header('Content-Type', 'video/mp4');
-    reply.header('Content-Disposition', `attachment; filename="huma-video-${id}.mp4"`);
-    return reply.send(createReadStream(data.video_file_path));
+    reply.header(
+      'Content-Disposition',
+      `attachment; filename="huma-video-${isSource ? 'source-' : ''}${id}.mp4"`,
+    );
+    return reply.send(createReadStream(filePath));
   });
 
   app.delete('/api/video-content/:id', { preHandler: authMiddleware }, async (request, reply) => {
@@ -119,7 +207,7 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
     const allowed = getWorkspaceFilter(request);
     const { data: existing } = await supabase
       .from('huma_video_content_history')
-      .select('workspace, status, video_file_path')
+      .select('workspace, status, video_file_path, source_video_path')
       .eq('id', id)
       .maybeSingle();
     if (!existing) return reply.code(404).send({ error: '없음' });
@@ -128,7 +216,7 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
       return reply.code(409).send({ error: '진행 중인 작업은 삭제할 수 없습니다' });
     }
 
-    await removeVideoContentFiles(id, existing.video_file_path);
+    await removeVideoContentFiles(id, existing.video_file_path, existing.source_video_path);
 
     const { error } = await supabase.from('huma_video_content_history').delete().eq('id', id);
     if (error) return reply.code(400).send({ error: error.message });
@@ -233,12 +321,141 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
       return reply.code(409).send({ error: '이미 진행 중인 콘티·영상 작업이 있습니다' });
     }
 
+    if (!hasEvoLinkApiKey()) {
+      return reply.code(503).send({
+        error: 'EVOLINK_API_KEY가 설정되지 않았습니다. 서버 .env에 EvoLink API 키를 추가하세요.',
+      });
+    }
+
+    await supabase
+      .from('huma_video_content_history')
+      .update({ status: 'rendering', error_message: null })
+      .eq('id', id);
+
     await enqueueJob({
       type: 'video_content_render',
       payload: { historyId: id },
     });
 
     return { ok: true, message: '숏폼 영상 제작이 시작되었습니다' };
+  });
+
+  app.post('/api/video-content/:id/reburn-subtitles', { preHandler: authMiddleware }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const allowed = getWorkspaceFilter(request);
+    const { data: row } = await supabase
+      .from('huma_video_content_history')
+      .select('workspace, status, account_id, source_video_path')
+      .eq('id', id)
+      .maybeSingle();
+    if (!row) return reply.code(404).send({ error: '없음' });
+    if (!allowed.includes(row.workspace)) return reply.code(403).send({ error: '권한 없음' });
+    if (row.status !== 'completed') {
+      return reply.code(409).send({ error: `자막 재입히기 불가 상태: ${row.status}` });
+    }
+
+    const sourcePath = resolveStoredVideoPath(id, row.source_video_path, 'source');
+    if (!existsSync(sourcePath)) {
+      return reply.code(404).send({
+        error: '원본 영상이 없습니다. 이 작업은 원본 보관 이전에 생성되었거나 원본이 삭제되었습니다.',
+      });
+    }
+
+    try {
+      await runSubtitleReburn(id);
+      return { ok: true, message: '자막을 다시 입혔습니다' };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '자막 재입히기 실패';
+      return reply.code(500).send({ error: msg });
+    }
+  });
+
+  app.delete('/api/video-content/:id/video-file', { preHandler: authMiddleware }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { target } = request.query as { target?: string };
+    const allowed = getWorkspaceFilter(request);
+
+    if (target !== 'source' && target !== 'subtitled') {
+      return reply.code(400).send({ error: 'target=source 또는 target=subtitled 필요' });
+    }
+
+    const { data: row } = await supabase
+      .from('huma_video_content_history')
+      .select('workspace, status, video_file_path, source_video_path')
+      .eq('id', id)
+      .maybeSingle();
+    if (!row) return reply.code(404).send({ error: '없음' });
+    if (!allowed.includes(row.workspace)) return reply.code(403).send({ error: '권한 없음' });
+    if (row.status !== 'completed') {
+      return reply.code(409).send({ error: '완료된 작업만 파일을 개별 삭제할 수 있습니다' });
+    }
+
+    await deleteVideoContentFileForHistory({
+      historyId: id,
+      target,
+      videoFilePath: row.video_file_path,
+      sourceVideoPath: row.source_video_path,
+    });
+    return { ok: true, deleted: target };
+  });
+
+  app.get('/api/video-content/storage/stats', { preHandler: authMiddleware }, async (request) => {
+    const allowed = getWorkspaceFilter(request);
+    const { workspace } = request.query as { workspace?: string };
+    const workspaces =
+      workspace && allowed.includes(workspace) ? [workspace] : allowed;
+    const stats = await getVideoContentStorageStats({ allowedWorkspaces: workspaces });
+    const settings = await getVideoContentStorageSettings();
+    return { stats, settings };
+  });
+
+  app.get('/api/video-content/storage/items', { preHandler: authMiddleware }, async (request) => {
+    const allowed = getWorkspaceFilter(request);
+    const { workspace, filter } = request.query as { workspace?: string; filter?: StorageListFilter };
+    const workspaces =
+      workspace && allowed.includes(workspace) ? [workspace] : allowed;
+    const validFilters: StorageListFilter[] = [
+      'uploaded_with_source',
+      'older_than_30',
+      'failed_or_hold',
+      'all_with_files',
+    ];
+    const f = validFilters.includes(filter as StorageListFilter)
+      ? (filter as StorageListFilter)
+      : 'all_with_files';
+    const items = await listVideoContentStorageItems({ allowedWorkspaces: workspaces, filter: f });
+    return items;
+  });
+
+  app.post('/api/video-content/storage/bulk-delete', { preHandler: authMiddleware }, async (request, reply) => {
+    const allowed = getWorkspaceFilter(request);
+    const body = request.body as { ids?: string[]; target?: string };
+    const ids = Array.isArray(body.ids) ? body.ids.filter((id) => typeof id === 'string') : [];
+    if (!ids.length) return reply.code(400).send({ error: 'ids 필요' });
+    if (body.target !== 'source' && body.target !== 'subtitled') {
+      return reply.code(400).send({ error: 'target=source 또는 target=subtitled' });
+    }
+    const result = await bulkDeleteVideoContentFiles({
+      ids,
+      target: body.target,
+      allowedWorkspaces: allowed,
+    });
+    return { ok: true, ...result };
+  });
+
+  app.get('/api/video-content/storage/settings', { preHandler: authMiddleware }, async () => {
+    return getVideoContentStorageSettings();
+  });
+
+  app.put('/api/video-content/storage/settings', { preHandler: authMiddleware }, async (request, reply) => {
+    const body = request.body as Partial<VideoContentStorageSettings>;
+    const next = await updateVideoContentStorageSettings(body);
+    return { ok: true, settings: next };
+  });
+
+  app.post('/api/video-content/storage/run-cleanup', { preHandler: authMiddleware }, async () => {
+    const result = await runVideoContentStorageAutoCleanup();
+    return { ok: true, ...result };
   });
 
   /** @deprecated generate-conti 사용 */
