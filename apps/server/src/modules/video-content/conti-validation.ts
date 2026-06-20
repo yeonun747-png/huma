@@ -26,6 +26,8 @@ export const MAX_SHOT_DURATION_REGENERATION_ATTEMPTS = 2;
 export const MAX_EMPTY_CONTENT_REGENERATION_ATTEMPTS = 1;
 export const SHOT_MIN_DURATION_SEC = 1.5;
 export const SHOT_CONTENT_MIN_CHARS = 10;
+export const ADJACENT_SHOT_SIMILARITY_THRESHOLD = 0.9;
+export const MAX_ADJACENT_DUPLICATE_PATCH_ATTEMPTS = 1;
 
 /** 1단계: 시나리오·인물·장소 / 2단계: 샷·대사 / 보완: 빈 샷만 */
 export const CONTI_FOUNDATION_MAX_TOKENS = 4096;
@@ -92,10 +94,43 @@ export function buildDurationShotCountGuide(duration: number): string {
   return guides[duration] ?? `${duration}초 영상: 샷 개수를 줄여 샷당 최소 ${SHOT_MIN_DURATION_SEC}초 이상 확보`;
 }
 
+const SHOT_COUNT_LOWER_BOUNDS: Record<number, number> = {
+  9: 4,
+  11: 4,
+  13: 5,
+  15: 5,
+};
+
+/** 시나리오가 빈약할 때 권장 범위 하한 우선 */
+export function buildShotCountPreferLowerGuide(duration: number): string {
+  const base = buildDurationShotCountGuide(duration);
+  const lower = SHOT_COUNT_LOWER_BOUNDS[duration];
+  if (!lower) return base;
+  return (
+    `${base} 시나리오 내용이 충분히 풍부하지 않으면 권장 범위 하한(${lower}개)을 우선 사용하고, ` +
+    '인접 샷 내용 복제로 시간을 채우지 말 것.'
+  );
+}
+
+export function buildNoDuplicateFillRule(): string {
+  return (
+    `각 샷은 최소 ${SHOT_MIN_DURATION_SEC}초 이상이어야 하지만, 그 시간을 채우기 위해 다른 샷의 내용을 복제하지 않는다. ` +
+    '짧은 샷이라도 직전 샷과 구별되는 새로운 행동, 표정 변화, 또는 카메라 움직임을 담아야 한다. ' +
+    '특정 샷에 채울 새로운 내용이 부족하다면, 샷 개수를 줄이고 남은 샷들의 시간을 늘려서 재구성한다.'
+  );
+}
+
+export function buildAdjacentShotDistinctRule(): string {
+  return (
+    '연속된 두 샷의 action/dialogue는 완전히 동일하거나 거의 같으면 안 된다. ' +
+    '직전 샷과 다른 행동·대사·카메라 앵글로 작성하라.'
+  );
+}
+
 export function buildMinShotDurationRule(duration: number): string {
   return (
     `모든 개별 샷은 최소 ${SHOT_MIN_DURATION_SEC}초 이상이어야 한다. ` +
-    `0초 또는 1초 미만의 샷 금지. ${buildDurationShotCountGuide(duration)}`
+    `0초 또는 1초 미만의 샷 금지. ${buildShotCountPreferLowerGuide(duration)}`
   );
 }
 
@@ -168,6 +203,78 @@ export function buildShotFillPrompt(shotNumbers: number[]): string {
   );
 }
 
+function normalizeCompareText(text: string): string {
+  return text.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function levenshteinDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  const row = Array.from({ length: n + 1 }, (_, i) => i);
+  for (let i = 1; i <= m; i++) {
+    let prev = row[0]!;
+    row[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = row[j]!;
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      row[j] = Math.min(row[j - 1]! + 1, row[j]! + 1, prev + cost);
+      prev = tmp;
+    }
+  }
+  return row[n]!;
+}
+
+/** 0~1 — 1이 완전 동일 */
+export function textSimilarity(a: string, b: string): number {
+  const na = normalizeCompareText(a);
+  const nb = normalizeCompareText(b);
+  if (!na || !nb) return 0;
+  if (na === nb) return 1;
+  const longer = na.length >= nb.length ? na : nb;
+  const shorter = na.length >= nb.length ? nb : na;
+  const dist = levenshteinDistance(longer, shorter);
+  return 1 - dist / longer.length;
+}
+
+function fieldsTooSimilar(a: string | undefined | null, b: string | undefined | null): boolean {
+  const ta = trimField(a);
+  const tb = trimField(b);
+  if (!ta || !tb) return false;
+  if (ta === tb) return true;
+  return textSimilarity(ta, tb) >= ADJACENT_SHOT_SIMILARITY_THRESHOLD;
+}
+
+function adjacentShotsTooSimilar(prev: VideoContiShot, curr: VideoContiShot): boolean {
+  if (fieldsTooSimilar(prev.action, curr.action)) return true;
+  if (fieldsTooSimilar(prev.dialogue, curr.dialogue)) return true;
+  const combinedPrev = [prev.action, prev.dialogue].map((t) => trimField(t)).filter(Boolean).join(' | ');
+  const combinedCurr = [curr.action, curr.dialogue].map((t) => trimField(t)).filter(Boolean).join(' | ');
+  if (combinedPrev && combinedCurr && textSimilarity(combinedPrev, combinedCurr) >= ADJACENT_SHOT_SIMILARITY_THRESHOLD) {
+    return true;
+  }
+  return false;
+}
+
+export function buildAdjacentDuplicateFeedback(shotNumber: number): string {
+  return (
+    `샷 ${shotNumber}이 직전 샷과 내용이 동일하다, 다른 행동이나 대사로 새로 작성하라. ` +
+    '직전 샷과 구별되는 카메라·행동·표정 변화를 담을 것.'
+  );
+}
+
+/** 인접 중복 — 후행 샷 인덱스(0-based) 목록 */
+export function findAdjacentDuplicateShotIndices(conti: VideoConti): number[] {
+  const invalid: number[] = [];
+  for (let i = 1; i < conti.shots.length; i++) {
+    if (adjacentShotsTooSimilar(conti.shots[i - 1]!, conti.shots[i]!)) {
+      invalid.push(i);
+    }
+  }
+  return invalid;
+}
+
 /** normalize·펀치라인 보정 이후 — 모든 샷 액션/대사 실질 내용 검사 */
 export function validateAllShotsContent(
   conti: VideoConti,
@@ -183,7 +290,8 @@ export function buildShotContentRule(): string {
   return (
     `모든 샷의 action 필드는 ${SHOT_CONTENT_MIN_CHARS}자 이상의 구체적 카메라·행동 묘사 필수. ` +
     `대사가 있는 샷은 dialogue도 ${SHOT_CONTENT_MIN_CHARS}자 이상. ` +
-    `"장면 전개", "내용 없음", "TBD" 등 자리표시자 금지.`
+    `"장면 전개", "내용 없음", "TBD" 등 자리표시자 금지. ` +
+    `${buildAdjacentShotDistinctRule()}`
   );
 }
 

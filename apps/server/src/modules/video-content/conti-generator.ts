@@ -7,9 +7,12 @@ import {
   validatePunchlineShotMinDuration,
   validateAllShotsMinDuration,
   findInvalidRawShotIndices,
+  findAdjacentDuplicateShotIndices,
   buildMinShotDurationRule,
   buildShotContentRule,
+  buildNoDuplicateFillRule,
   buildEmptyShotContentFeedback,
+  buildAdjacentDuplicateFeedback,
   buildShotFillPrompt,
   ContiValidationError,
   CONTI_FOUNDATION_MAX_TOKENS,
@@ -17,6 +20,7 @@ import {
   CONTI_SHOT_FILL_MAX_TOKENS,
   MAX_SHOT_DURATION_REGENERATION_ATTEMPTS,
   MAX_EMPTY_CONTENT_REGENERATION_ATTEMPTS,
+  MAX_ADJACENT_DUPLICATE_PATCH_ATTEMPTS,
   PUNCHLINE_MIN_DURATION_SEC,
   SHOT_CONTENT_MIN_CHARS,
 } from './conti-validation.js';
@@ -171,12 +175,14 @@ function buildShotsPrompt(ctx: PromptContext, foundation: ContiFoundation): stri
   const { feedbackBlock } = buildSharedContext(ctx);
   const minShotDurationRule = buildMinShotDurationRule(conditions.duration);
   const shotContentRule = buildShotContentRule();
+  const noDuplicateFillRule = buildNoDuplicateFillRule();
   const punchlineDurationRule = `펀치라인이 들어가는 샷(마지막 또는 마지막 직전)은 대사를 끝까지 전달할 수 있도록 최소 ${PUNCHLINE_MIN_DURATION_SEC}초를 확보하라.`;
 
   const shotGuide =
     config.shotStructure?.trim() ??
     (conditions.cutType === 'multi_shot'
       ? `${minShotDurationRule}
+${noDuplicateFillRule}
 ${shotContentRule}
 
 6샷 멀티샷 (${conditions.duration}초) — 타임라인: ${formatTimelineGuide(conditions.duration)}
@@ -186,6 +192,7 @@ ${punchlineDurationRule}
 ${EVOLINK_PROMPT_LENGTH_GUIDANCE}`
       : `싱글샷 (${conditions.duration}초). shots 배열 1개만.
 ${minShotDurationRule}
+${noDuplicateFillRule}
 ${shotContentRule}
 ${punchlineDurationRule}
 ${EVOLINK_PROMPT_LENGTH_GUIDANCE}`);
@@ -211,17 +218,25 @@ function buildShotPatchPrompt(
   foundation: ContiFoundation,
   conti: VideoConti,
   invalidIndices: number[],
+  reason?: string,
 ): string {
   const shotNumbers = invalidIndices.map((i) => i + 1);
   const existing = invalidIndices.map((i) => {
     const s = conti.shots[i]!;
-    return `샷${i + 1}: camera=${s.camera ?? ''}, action=${s.action ?? ''}, dialogue=${s.dialogue ?? ''}`;
+    const prev = i > 0 ? conti.shots[i - 1] : null;
+    const prevLine = prev
+      ? `직전 샷${i}: action=${prev.action ?? ''}, dialogue=${prev.dialogue ?? ''}`
+      : '';
+    return `샷${i + 1}: camera=${s.camera ?? ''}, action=${s.action ?? ''}, dialogue=${s.dialogue ?? ''}${prevLine ? `\n  ${prevLine}` : ''}`;
   });
 
-  return `다음 영상 설정과 기존 콘티에서 비어 있거나 부실한 샷만 보완하라.
+  const reasonBlock = reason ? `\n보완 사유: ${reason}\n` : ctx.feedback ? `\n${ctx.feedback}\n` : '';
+
+  return `다음 영상 설정과 기존 콘티에서 지정 샷만 보완하라.
 
 설정:
 ${JSON.stringify(foundation, null, 2)}
+${reasonBlock}
 
 보완 대상:
 ${existing.join('\n')}
@@ -324,14 +339,33 @@ async function fillSpecificShots(
   conti: VideoConti,
   invalidIndices: number[],
   model: string,
+  reason?: string,
 ): Promise<VideoConti> {
   const parsed = await callClaudeJson({
     model,
     max_tokens: CONTI_SHOT_FILL_MAX_TOKENS,
-    prompt: buildShotPatchPrompt(ctx, foundation, conti, invalidIndices),
+    prompt: buildShotPatchPrompt(ctx, foundation, conti, invalidIndices, reason),
   });
   const patches = (parsed.patches as VideoContiShot[]) ?? [];
   return mergeShotPatches(conti, patches);
+}
+
+function collectRawShotIssues(conti: VideoConti): { empty: number[]; duplicate: number[] } {
+  return {
+    empty: findInvalidRawShotIndices(conti),
+    duplicate: findAdjacentDuplicateShotIndices(conti),
+  };
+}
+
+async function patchShotIssues(
+  ctx: PromptContext,
+  foundation: ContiFoundation,
+  conti: VideoConti,
+  indices: number[],
+  feedback: string,
+  model: string,
+): Promise<VideoConti> {
+  return fillSpecificShots({ ...ctx, feedback }, foundation, conti, indices, model, feedback);
 }
 
 async function recoverRawShotContent(
@@ -342,27 +376,71 @@ async function recoverRawShotContent(
 ): Promise<{ conti: VideoConti; warnings: string[] }> {
   const warnings: string[] = [];
   let current = conti;
-  let fullRetries = 0;
+  let emptyFullRetries = 0;
+  let narrowPatchAttempts = 0;
+  const maxNarrow = 3;
 
-  while (findInvalidRawShotIndices(current).length > 0) {
-    const invalid = findInvalidRawShotIndices(current);
+  while (true) {
+    const { empty, duplicate } = collectRawShotIssues(current);
+    if (empty.length === 0 && duplicate.length === 0) break;
 
-    if (fullRetries < MAX_EMPTY_CONTENT_REGENERATION_ATTEMPTS) {
-      fullRetries += 1;
-      const shotsFeedback = buildEmptyShotContentFeedback(invalid[0]! + 1);
+    if (empty.length > 0 && emptyFullRetries < MAX_EMPTY_CONTENT_REGENERATION_ATTEMPTS) {
+      emptyFullRetries += 1;
+      const shotsFeedback = buildEmptyShotContentFeedback(empty[0]! + 1);
       const { shots, fullText } = await generateShots({ ...ctx, feedback: shotsFeedback }, foundation, model);
       current = assembleConti(foundation, shots, ctx.conditions, fullText ?? current.fullText);
       continue;
     }
 
-    current = await fillSpecificShots(ctx, foundation, current, invalid, model);
-    const stillInvalid = findInvalidRawShotIndices(current);
-    if (stillInvalid.length === 0) break;
+    const dupIdx = duplicate[0];
+    const emptyIdx = empty[0];
+    const patchIdx = dupIdx ?? emptyIdx!;
+    const feedback =
+      dupIdx != null
+        ? buildAdjacentDuplicateFeedback(dupIdx + 1)
+        : buildEmptyShotContentFeedback(emptyIdx! + 1);
 
-    current = applyDefaultToRawShots(current, stillInvalid);
-    const nums = stillInvalid.map((i) => i + 1).join(', ');
+    if (narrowPatchAttempts < maxNarrow) {
+      narrowPatchAttempts += 1;
+      current = await patchShotIssues(ctx, foundation, current, [patchIdx], feedback, model);
+      continue;
+    }
+
+    const fallbackIndices = [...new Set([...empty, ...duplicate])];
+    current = applyDefaultToRawShots(current, fallbackIndices);
+    const nums = fallbackIndices.map((i) => i + 1).join(', ');
     warnings.push(
-      `샷 ${nums}에 LLM 보완 실패 — 기본 action으로 대체했습니다. 콘티 검토 후 필요 시 재생성하세요.`,
+      `샷 ${nums} 자동 보완 실패 — 기본 action으로 대체했습니다. 콘티 검토 후 필요 시 재생성하세요.`,
+    );
+    break;
+  }
+
+  return { conti: current, warnings };
+}
+
+async function recoverAdjacentDuplicates(
+  ctx: PromptContext,
+  foundation: ContiFoundation,
+  conti: VideoConti,
+  model: string,
+): Promise<{ conti: VideoConti; warnings: string[] }> {
+  const warnings: string[] = [];
+  let current = conti;
+  let patchAttempts = 0;
+
+  while (findAdjacentDuplicateShotIndices(current).length > 0) {
+    const dupIdx = findAdjacentDuplicateShotIndices(current)[0]!;
+    const feedback = buildAdjacentDuplicateFeedback(dupIdx + 1);
+
+    if (patchAttempts < MAX_ADJACENT_DUPLICATE_PATCH_ATTEMPTS) {
+      patchAttempts += 1;
+      current = await patchShotIssues(ctx, foundation, current, [dupIdx], feedback, model);
+      continue;
+    }
+
+    current = applyDefaultToRawShots(current, [dupIdx]);
+    warnings.push(
+      `샷 ${dupIdx + 1}이 직전 샷과 유사 — LLM 보완 실패 후 기본 action으로 대체했습니다.`,
     );
     break;
   }
@@ -396,6 +474,13 @@ export async function generateConti(params: PromptContext): Promise<ContiGenerat
 
   if (params.conditions.cutType === 'multi_shot') {
     conti = normalizeMultiShotConti(conti, params.conditions.duration);
+    const dupRecovered = await recoverAdjacentDuplicates(params, foundation, conti, model);
+    conti = dupRecovered.conti;
+    contentWarnings.push(...dupRecovered.warnings);
+  } else if (conti.shots.length >= 2) {
+    const dupRecovered = await recoverAdjacentDuplicates(params, foundation, conti, model);
+    conti = dupRecovered.conti;
+    contentWarnings.push(...dupRecovered.warnings);
   }
 
   conti = enforcePunchlineShotMinDuration(conti);
