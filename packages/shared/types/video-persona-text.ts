@@ -9,6 +9,7 @@ export const VIDEO_PERSONA_KNOWN_HEADERS = [
   '펀치라인 메커니즘',
   '컷 구성',
   '샷 구조',
+  '싱글샷 구조',
   '서비스 제약',
 ] as const;
 
@@ -68,6 +69,7 @@ function emptyConfig(): VideoPersonaConfig {
     hookTypes: [],
     cutTypeRule: '',
     shotStructure: '',
+    singleShotStructure: '',
     serviceConstraints: '',
   };
 }
@@ -118,6 +120,9 @@ function applyKnownSection(config: VideoPersonaConfig, header: VideoPersonaKnown
       break;
     case '샷 구조':
       config.shotStructure = body;
+      break;
+    case '싱글샷 구조':
+      config.singleShotStructure = body;
       break;
     case '서비스 제약':
       config.serviceConstraints = body;
@@ -170,6 +175,9 @@ export function serializeVideoPersonaText(cfg: Partial<VideoPersonaConfig>, work
     ['## 펀치라인 메커니즘', ...(cfg.hookTypes ?? [])],
     ['## 컷 구성', cfg.cutTypeRule ?? ''],
     ['## 샷 구조', cfg.shotStructure ?? ''],
+    ...(cfg.singleShotStructure?.trim()
+      ? [['## 싱글샷 구조', cfg.singleShotStructure.trim()]]
+      : []),
     ['## 서비스 제약', cfg.serviceConstraints ?? ''],
   );
 
@@ -185,6 +193,7 @@ export function hasStoredVideoPersona(cfg: Partial<VideoPersonaConfig> | null | 
     (cfg.hookTypes?.length ?? 0) > 0 ||
     Boolean(cfg.cutTypeRule?.trim()) ||
     Boolean(cfg.shotStructure?.trim()) ||
+    Boolean(cfg.singleShotStructure?.trim()) ||
     Boolean(cfg.serviceConstraints?.trim())
   );
 }

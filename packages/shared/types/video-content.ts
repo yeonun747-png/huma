@@ -56,6 +56,7 @@ export interface VideoPersonaConfig {
   hookTypeMaxWeight?: Record<string, number>;
   cutTypeRule?: string;
   shotStructure?: string;
+  singleShotStructure?: string;
   serviceConstraints: string;
   extraPromptNotes?: string;
 }

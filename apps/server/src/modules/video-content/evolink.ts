@@ -7,7 +7,7 @@ import { logOperation } from '../../lib/log-emitter.js';
 import { enqueueJob } from '../queue/producer.js';
 import type { VideoConti, VideoContiShot, GenerationConditions } from './types.js';
 import { buildSixShotTimeline, scaleSixShotDurations, MULTI_SHOT_COUNT } from './shot-timing.js';
-import { isInvalidShotContentField } from './conti-validation.js';
+import { isInvalidShotContentField, findPunchlineShotIndex } from './conti-validation.js';
 import { assertEvoLinkPromptLength } from './prompt-length.js';
 
 export {
@@ -275,4 +275,89 @@ export function normalizeMultiShotConti(conti: VideoConti, duration: number): Vi
   });
 
   return { ...conti, duration, cutType: 'multi_shot', shots };
+}
+
+function mergeSingleShotAction(src: VideoContiShot[], duration: number): string {
+  if (src.length <= 1) {
+    return src[0]?.action?.trim() || getDefaultShotAction(0);
+  }
+  return src
+    .map((s, i) => {
+      const start = s.startSec ?? 0;
+      const end =
+        s.endSec > start ? s.endSec : i < src.length - 1 ? (src[i + 1]?.startSec ?? duration) : duration;
+      const action = s.action?.trim() ?? '';
+      return action ? `[${start}~${end}초] ${action}` : '';
+    })
+    .filter(Boolean)
+    .join(' → ');
+}
+
+function pickSingleShotDialogue(src: VideoContiShot[]): string | undefined {
+  const idx = findPunchlineShotIndex(src);
+  const fromPunchline = idx >= 0 ? src[idx]?.dialogue?.trim() : '';
+  if (fromPunchline) return fromPunchline;
+  for (let i = src.length - 1; i >= 0; i--) {
+    const d = src[i]?.dialogue?.trim();
+    if (d) return d;
+  }
+  return undefined;
+}
+
+/** LLM이 N>1 샷을 반환해도 1샷으로 병합 — single_shot 정의 강제 */
+export function normalizeSingleShotConti(
+  conti: VideoConti,
+  duration: number,
+): { conti: VideoConti; merged: boolean } {
+  const src = conti.shots.length > 0 ? conti.shots : [];
+  const merged = src.length > 1;
+
+  if (src.length <= 1) {
+    const base = src[0];
+    const action =
+      base?.action?.trim() && !isInvalidShotContentField(base.action)
+        ? base.action.trim()
+        : getDefaultShotAction(0);
+    return {
+      conti: {
+        ...conti,
+        duration,
+        cutType: 'single_shot',
+        shots: [
+          {
+            shotNumber: 1,
+            startSec: 0,
+            endSec: duration,
+            camera: base?.camera?.trim() || '고정 샷',
+            action,
+            dialogue: base?.dialogue?.trim() || undefined,
+          },
+        ],
+      },
+      merged: false,
+    };
+  }
+
+  const camera = src[0]?.camera?.trim() || '고정 샷';
+  const action = mergeSingleShotAction(src, duration);
+  const dialogue = pickSingleShotDialogue(src);
+
+  return {
+    conti: {
+      ...conti,
+      duration,
+      cutType: 'single_shot',
+      shots: [
+        {
+          shotNumber: 1,
+          startSec: 0,
+          endSec: duration,
+          camera,
+          action,
+          dialogue,
+        },
+      ],
+    },
+    merged,
+  };
 }

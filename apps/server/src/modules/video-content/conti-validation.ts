@@ -33,7 +33,10 @@ export const MAX_SHOT_QUALITY_PATCH_ATTEMPTS = 1;
 /** 1단계: 시나리오·인물·장소 / 2단계: 샷·대사 / 보완: 빈 샷만 */
 export const CONTI_FOUNDATION_MAX_TOKENS = 4096;
 export const CONTI_SHOTS_MAX_TOKENS = 4096;
+/** single_shot 2단계 — shots 1개만 생성 */
+export const CONTI_SINGLE_SHOTS_MAX_TOKENS = 2048;
 export const CONTI_SHOT_FILL_MAX_TOKENS = 2048;
+export const MAX_SINGLE_SHOT_CUT_REGENERATION_ATTEMPTS = 1;
 
 /** @deprecated 2단계 분리 전 단일 호출용 — 신규 코드는 FOUNDATION+SHOTS 사용 */
 export const CONTI_GENERATION_MAX_TOKENS = 8192;
@@ -132,6 +135,39 @@ export function buildMinShotDurationRule(duration: number): string {
   return (
     `모든 개별 샷은 최소 ${SHOT_MIN_DURATION_SEC}초 이상이어야 한다. ` +
     `0초 또는 1초 미만의 샷 금지. ${buildShotCountPreferLowerGuide(duration)}`
+  );
+}
+
+export function buildSingleShotDurationRule(duration: number): string {
+  return (
+    `shots 배열은 요소 1개만. startSec=0, endSec=${duration} (${duration}초 전체). ` +
+    '컷 전환·카메라 앵글 변경 없음. 시간 흐름은 action 문장 안 [0~3초]… 형태로만 표현.'
+  );
+}
+
+export function buildSingleShotFoundationCutRule(): string {
+  return (
+    '이번 영상 cut_type=single_shot. 2단계 JSON shots 배열은 반드시 1개만. ' +
+    'shotNumber 2 이상·여러 startSec/endSec 구간으로 나뉜 shots 객체 금지. ' +
+    '시간 전개(4~5비트)는 하나의 action 문자열 안에서만 표현하고 컷/카메라 전환은 없다.'
+  );
+}
+
+export function buildMultiShotFoundationCutRule(personaRule?: string): string {
+  const base = personaRule?.trim();
+  if (base) return `이번 영상 cut_type=multi_shot.\n${base}`;
+  return '이번 영상 cut_type=multi_shot. 여러 컷(샷)으로 구성.';
+}
+
+export function buildSingleShotGuide(duration: number, personaGuide?: string): string {
+  const extra = personaGuide?.trim();
+  const punchlineRule = `펀치라인 대사는 이 1개 shot의 dialogue에 담고, ${duration}초 안에 끝까지 전달 가능하게 작성.`;
+  return (
+    `싱글샷 (${duration}초) — JSON shots 배열 길이는 반드시 1.\n` +
+    `${buildSingleShotDurationRule(duration)}\n` +
+    `${buildShotContentRule()}\n` +
+    `${punchlineRule}` +
+    (extra ? `\n${extra}` : '')
   );
 }
 
@@ -305,7 +341,8 @@ export function validateAllShotsContent(
 export function formatContiTokenSettingsLog(): string {
   return (
     `[video-content] 콘티 LLM 설정(2단계 분리) — foundation_max_tokens=${CONTI_FOUNDATION_MAX_TOKENS} ` +
-    `shots_max_tokens=${CONTI_SHOTS_MAX_TOKENS} shot_fill_max_tokens=${CONTI_SHOT_FILL_MAX_TOKENS}`
+    `shots_max_tokens=${CONTI_SHOTS_MAX_TOKENS} single_shots_max_tokens=${CONTI_SINGLE_SHOTS_MAX_TOKENS} ` +
+    `shot_fill_max_tokens=${CONTI_SHOT_FILL_MAX_TOKENS}`
   );
 }
 

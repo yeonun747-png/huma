@@ -75,7 +75,7 @@ export function pickHookType(
 export function pickCutType(recentCutTypes: string[]): 'single_shot' | 'multi_shot' {
   const recent = recentCutTypes.filter(Boolean);
   const noSingle = recent.length >= 5 && !recent.some((c) => c === 'single_shot');
-  const singleWeight = noSingle ? 0.35 : 0.25;
+  const singleWeight = noSingle ? 0.3 : 0.25;
   return Math.random() < singleWeight ? 'single_shot' : 'multi_shot';
 }
 
@@ -117,6 +117,9 @@ export function resolveVideoPersona(
     hookTypeMaxWeight: custom.hookTypeMaxWeight ?? defaults.hookTypeMaxWeight,
     cutTypeRule: custom.cutTypeRule?.trim() ? custom.cutTypeRule : defaults.cutTypeRule,
     shotStructure: custom.shotStructure?.trim() ? custom.shotStructure : defaults.shotStructure,
+    singleShotStructure: custom.singleShotStructure?.trim()
+      ? custom.singleShotStructure
+      : defaults.singleShotStructure,
     serviceConstraints: custom.serviceConstraints?.trim()
       ? custom.serviceConstraints
       : defaults.serviceConstraints,
