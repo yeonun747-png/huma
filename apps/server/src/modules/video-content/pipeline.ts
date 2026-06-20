@@ -328,14 +328,28 @@ export async function runContiGeneration(accountId: string): Promise<string> {
       } catch (err) {
         if (err instanceof ContiValidationError) {
           feedback = err.message;
-          if (attempt === MAX_REGENERATION_ATTEMPTS) {
-            await supabase
-              .from('huma_video_content_history')
-              .update({
-                status: 'failed',
-                error_message: err.message.slice(0, 500),
-              })
-              .eq('id', historyId);
+          if (attempt >= err.maxAttempts) {
+            if (err.holdOnFailure) {
+              await supabase
+                .from('huma_video_content_history')
+                .update({
+                  status: 'on_hold',
+                  error_message: err.message.slice(0, 500),
+                })
+                .eq('id', historyId);
+              await notifyTelegram(
+                `⚠️ 영상 콘티 보류 — 샷 길이 검증 실패\n계정: ${accountName} (${accountId})\n${err.message}`,
+                workspace,
+              );
+            } else {
+              await supabase
+                .from('huma_video_content_history')
+                .update({
+                  status: 'failed',
+                  error_message: err.message.slice(0, 500),
+                })
+                .eq('id', historyId);
+            }
             throw err;
           }
           continue;

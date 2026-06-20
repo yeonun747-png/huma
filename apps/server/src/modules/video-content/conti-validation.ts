@@ -1,11 +1,23 @@
 import type { VideoConti, VideoContiShot } from './types.js';
 
 export class ContiValidationError extends Error {
-  constructor(message: string) {
+  readonly maxAttempts: number;
+  readonly holdOnFailure: boolean;
+
+  constructor(
+    message: string,
+    options?: { maxAttempts?: number; holdOnFailure?: boolean },
+  ) {
     super(message);
     this.name = 'ContiValidationError';
+    this.maxAttempts = options?.maxAttempts ?? DEFAULT_CONTI_VALIDATION_MAX_ATTEMPTS;
+    this.holdOnFailure = options?.holdOnFailure ?? false;
   }
 }
+
+export const DEFAULT_CONTI_VALIDATION_MAX_ATTEMPTS = 3;
+export const MAX_SHOT_DURATION_REGENERATION_ATTEMPTS = 2;
+export const SHOT_MIN_DURATION_SEC = 1.5;
 
 export const SINGLE_SHOT_CUT_MISMATCH_FEEDBACK =
   'single_shot은 컷 전환이 전혀 없는 한 화면 구성이어야 한다. 현재 결과는 여러 컷으로 나뉘어 있어 single_shot 정의에 맞지 않는다, 컷을 하나로 통합해서 다시 작성하라.';
@@ -18,6 +30,44 @@ export const PUNCHLINE_MIN_DURATION_SEC = 2;
 function shotDurationSec(shot: VideoContiShot): number {
   const d = shot.endSec - shot.startSec;
   return d > 0 ? d : 0;
+}
+
+export function buildShotTooShortFeedback(shotNumber: number, durationSec: number): string {
+  return (
+    `샷 ${shotNumber}의 길이가 너무 짧다(${durationSec}초, 0초 또는 1초 미만), ` +
+    `전체 샷 개수를 줄이거나 시간 배분을 재조정해서 모든 샷이 최소 ${SHOT_MIN_DURATION_SEC}초 이상이 되도록 다시 작성하라.`
+  );
+}
+
+/** 모든 샷 최소 길이 — normalize·펀치라인 보정 이후 검사 */
+export function validateAllShotsMinDuration(
+  conti: VideoConti,
+  minSec = SHOT_MIN_DURATION_SEC,
+): { ok: true } | { ok: false; feedback: string } {
+  for (let i = 0; i < conti.shots.length; i++) {
+    const dur = shotDurationSec(conti.shots[i]!);
+    if (dur < minSec) {
+      return { ok: false, feedback: buildShotTooShortFeedback(i + 1, dur) };
+    }
+  }
+  return { ok: true };
+}
+
+export function buildDurationShotCountGuide(duration: number): string {
+  const guides: Record<number, string> = {
+    9: '9초 영상: 샷 개수 4~5개 권장 (샷당 평균 약 2초 확보)',
+    11: '11초 영상: 샷 개수 4~6개',
+    13: '13초 영상: 샷 개수 5~6개',
+    15: '15초 영상: 샷 개수 5~6개',
+  };
+  return guides[duration] ?? `${duration}초 영상: 샷 개수를 줄여 샷당 최소 ${SHOT_MIN_DURATION_SEC}초 이상 확보`;
+}
+
+export function buildMinShotDurationRule(duration: number): string {
+  return (
+    `모든 개별 샷은 최소 ${SHOT_MIN_DURATION_SEC}초 이상이어야 한다. ` +
+    `0초 또는 1초 미만의 샷 금지. ${buildDurationShotCountGuide(duration)}`
+  );
 }
 
 /** LLM raw shots 기준 — normalizeMultiShotConti 이전에 검사 */
@@ -93,7 +143,7 @@ export function enforcePunchlineShotMinDuration(conti: VideoConti, minSec = PUNC
 
   for (const donor of donors) {
     if (need <= 0) break;
-    const floor = conti.shots.length <= 2 ? 0 : 1;
+    const floor = SHOT_MIN_DURATION_SEC;
     const take = Math.min(need, Math.max(0, donor.d - floor));
     if (take <= 0) continue;
     durations[donor.i]! -= take;

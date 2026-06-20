@@ -5,12 +5,16 @@ import {
   enforcePunchlineShotMinDuration,
   validateCutTypeMatchesRawShots,
   validatePunchlineShotMinDuration,
+  validateAllShotsMinDuration,
+  buildMinShotDurationRule,
+  buildDurationShotCountGuide,
   ContiValidationError,
+  MAX_SHOT_DURATION_REGENERATION_ATTEMPTS,
   PUNCHLINE_MIN_DURATION_SEC,
 } from './conti-validation.js';
 import { normalizeMultiShotConti, buildEvoLinkPrompt } from './evolink.js';
 import { EVOLINK_PROMPT_LENGTH_GUIDANCE } from './prompt-length.js';
-import { buildSixShotTimeline, MULTI_SHOT_TEMPLATE_15S } from './shot-timing.js';
+import { buildSixShotTimeline } from './shot-timing.js';
 import type { GenerationConditions, VideoConti, VideoPersonaConfig } from './types.js';
 
 function parseJsonBlock(raw: string): unknown {
@@ -51,11 +55,15 @@ function buildContiPrompt(params: {
 
   const punchlineDurationRule = `펀치라인이 들어가는 샷(마지막 또는 마지막 직전)은 대사를 끝까지 전달할 수 있도록 최소 ${PUNCHLINE_MIN_DURATION_SEC}초를 확보하라. 영상이 ${conditions.duration}초로 짧아도 이 최소 시간은 반드시 지켜라.`;
 
-  const defaultMultiShotGuide = `6샷 멀티샷 (${conditions.duration}초, 6개 샷 길이 합 = ${conditions.duration}초):
-${MULTI_SHOT_TEMPLATE_15S}
+  const minShotDurationRule = buildMinShotDurationRule(conditions.duration);
+  const shotCountGuide = buildDurationShotCountGuide(conditions.duration);
 
-이번 영상(${conditions.duration}초) 비례 타임라인: ${formatTimelineGuide(conditions.duration)}
-shots 배열은 정확히 6개. startSec/endSec 합이 ${conditions.duration}과 일치.
+  const defaultMultiShotGuide = `${shotCountGuide}
+${minShotDurationRule}
+
+6샷 멀티샷 (${conditions.duration}초) — EvoLink용 정규 타임라인: ${formatTimelineGuide(conditions.duration)}
+shots 배열은 ${conditions.duration <= 9 ? '4~5개' : conditions.duration <= 11 ? '4~6개' : '5~6개'} 권장. startSec/endSec 합이 ${conditions.duration}과 일치.
+짧은 영상에서 샷 개수를 무리하게 늘리지 말 것. 각 샷 구간은 최소 1.5초 이상.
 최소 4샷(권장: 샷1,3,4,5)에 대사. 샷3은 행동+대사+디테일 밀도 높게(가장 긴 구간 중 하나).
 펀치라인은 샷5 후반부에서 터지도록. 말하는 샷과 보여주는 샷 교차.
 ${punchlineDurationRule}
@@ -63,6 +71,7 @@ ${EVOLINK_PROMPT_LENGTH_GUIDANCE}`;
 
   const defaultSingleShotGuide = `싱글샷 연속 (${conditions.duration}초, 4~5 시간 비트로 대사/행동 순차 전개, 컷 전환 없음).
 shots 배열은 1개만 — 컷 전환·다중 샷 금지.
+${minShotDurationRule}
 ${punchlineDurationRule}
 ${EVOLINK_PROMPT_LENGTH_GUIDANCE}`;
 
@@ -166,6 +175,14 @@ export async function generateConti(params: {
   const punchCheck = validatePunchlineShotMinDuration(conti);
   if (!punchCheck.ok) {
     throw new ContiValidationError(punchCheck.feedback);
+  }
+
+  const shotDurCheck = validateAllShotsMinDuration(conti);
+  if (!shotDurCheck.ok) {
+    throw new ContiValidationError(shotDurCheck.feedback, {
+      maxAttempts: MAX_SHOT_DURATION_REGENERATION_ATTEMPTS,
+      holdOnFailure: true,
+    });
   }
 
   return {

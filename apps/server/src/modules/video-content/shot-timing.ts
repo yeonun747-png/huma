@@ -1,20 +1,31 @@
-/** 15초 기준 6샷 길이(초): 샷1=3, 샷2=1, 샷3=3, 샷4=3, 샷5=3, 샷6=2 */
-const BASE_SHOT_DURATIONS = [3, 1, 3, 3, 3, 2];
+/** 15초 기준 6샷 상대 비중 — 절대 초 단위 아님 */
+const BASE_SHOT_WEIGHTS = [3, 1, 3, 3, 3, 2];
 const BASE_TOTAL = 15;
+export const MULTI_SHOT_COUNT = BASE_SHOT_WEIGHTS.length;
 
-/** duration(9|11|13|15)에 맞게 6샷 길이를 비례 배분 — 합계 = duration */
-export function scaleSixShotDurations(totalDuration: number): number[] {
-  const scaled = BASE_SHOT_DURATIONS.map((d) => (d * totalDuration) / BASE_TOTAL);
-  const floors = scaled.map((d) => Math.floor(d));
-  let remainder = totalDuration - floors.reduce((a, b) => a + b, 0);
-  const order = scaled
-    .map((d, i) => ({ i, frac: d - floors[i]! }))
-    .sort((a, b) => b.frac - a.frac);
-  const result = [...floors];
-  for (let j = 0; j < remainder; j++) {
-    result[order[j % order.length]!.i]++;
+/** duration(9|11|13|15)에 맞게 6샷 길이 배분 — 각 샷 ≥ minSec, 합계 = duration */
+export function scaleSixShotDurations(
+  totalDuration: number,
+  minSec = 1.5,
+): number[] {
+  const n = BASE_SHOT_WEIGHTS.length;
+  const minTotal = n * minSec;
+  if (totalDuration < minTotal) {
+    throw new Error(`${totalDuration}초 영상은 ${n}샷×${minSec}초 최소를 만족할 수 없음`);
   }
-  return result;
+
+  const available = totalDuration - minTotal;
+  const weights = BASE_SHOT_WEIGHTS.map((d) => d / BASE_TOTAL);
+  const extraFloat = weights.map((w) => w * available);
+  const extras = extraFloat.map((e) => Math.floor(e));
+  let remainder = Math.round(available - extras.reduce((a, b) => a + b, 0));
+  const order = extraFloat
+    .map((e, i) => ({ i, frac: e - extras[i]! }))
+    .sort((a, b) => b.frac - a.frac);
+  for (let j = 0; j < remainder; j++) {
+    extras[order[j % n]!.i]! += 1;
+  }
+  return extras.map((extra) => minSec + extra);
 }
 
 export function buildSixShotTimeline(totalDuration: number): Array<{ shotNumber: number; startSec: number; endSec: number; durationSec: number }> {
@@ -26,8 +37,6 @@ export function buildSixShotTimeline(totalDuration: number): Array<{ shotNumber:
     return { shotNumber: i + 1, startSec, endSec: cursor, durationSec };
   });
 }
-
-export const MULTI_SHOT_COUNT = 6;
 
 export const MULTI_SHOT_TEMPLATE_15S = `
 샷1(0~3초): 와이드샷. 상황 설정 + 첫 대사.
