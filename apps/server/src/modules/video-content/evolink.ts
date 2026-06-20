@@ -12,6 +12,11 @@ import {
   buildMultiShotTimeline,
 } from './shot-timing.js';
 import { isInvalidShotContentField, findPunchlineShotIndex } from './conti-validation.js';
+import {
+  buildCharacterNameToLabelMap,
+  formatEvoLinkCharacterBlock,
+  normalizeShotForEvoLinkPrompt,
+} from './character-labels.js';
 import { assertEvoLinkPromptLength } from './prompt-length.js';
 
 export {
@@ -44,15 +49,14 @@ function callbackUrl(): string | undefined {
   return `${base.replace(/\/$/, '')}/api/evolink/video-callback`;
 }
 
-function charBlock(conti: VideoConti): string {
-  return conti.characters
-    .map((c) => `${c.label}: ${c.age} ${c.gender}, ${c.hair}, ${c.outfit}, ${c.shoes}`)
-    .join('; ');
-}
-
-function shotWords(shot: VideoConti['shots'][number], maxLen = 500): string {
-  const parts = [`${shot.camera}`, shot.action];
-  if (shot.dialogue?.trim()) parts.push(`대사: "${shot.dialogue.trim()}"`);
+function shotWords(
+  shot: VideoConti['shots'][number],
+  nameToLabel: Map<string, string>,
+  maxLen = 500,
+): string {
+  const normalized = normalizeShotForEvoLinkPrompt(shot, nameToLabel);
+  const parts = [`${shot.camera}`, normalized.action];
+  if (normalized.dialogue) parts.push(`대사: "${normalized.dialogue}"`);
   return parts.join('. ').slice(0, maxLen);
 }
 
@@ -66,12 +70,13 @@ function shotDurationSec(shot: VideoContiShot): number {
  * `镜头 n, m, words;` — n=샷번호, m=해당 샷 길이(초), 합계=duration
  */
 export function buildEvoLinkMultiShotPrompt(conti: VideoConti, duration: number): string {
-  const scene = `세로 9:16, ${conti.location}, ${conti.lighting}, ${conti.timeOfDay}. 등장인물(고정): ${charBlock(conti)}. 한국어 대사·자연스러운 오디오.`;
+  const nameToLabel = buildCharacterNameToLabelMap(conti);
+  const scene = `세로 9:16, ${conti.location}, ${conti.lighting}, ${conti.timeOfDay}. 등장인물(고정): ${formatEvoLinkCharacterBlock(conti, nameToLabel)}. 한국어 대사·자연스러운 오디오.`;
   const shots = conti.shots.slice(0, EVOLINK_MAX_SHOTS);
 
   const segments = shots.map((shot, i) => {
     const sec = Math.max(1, Math.round(shotDurationSec(shot) || duration / Math.max(shots.length, 1)));
-    const words = shotWords(shot);
+    const words = shotWords(shot, nameToLabel);
     return `镜头 ${i + 1}, ${sec}, ${words}`;
   });
 
@@ -81,12 +86,13 @@ export function buildEvoLinkMultiShotPrompt(conti: VideoConti, duration: number)
 
 /** single_shot — 镜头 문법 없이 연속 숏 묘사 */
 export function buildEvoLinkSingleShotPrompt(conti: VideoConti, conditions: GenerationConditions): string {
-  const charDesc = charBlock(conti);
+  const nameToLabel = buildCharacterNameToLabelMap(conti);
+  const charDesc = formatEvoLinkCharacterBlock(conti, nameToLabel);
   const beats = conti.shots
-    .map(
-      (s) =>
-        `[${s.startSec}-${s.endSec}s] ${s.camera}: ${s.action}${s.dialogue ? ` — "${s.dialogue}"` : ''}`,
-    )
+    .map((s) => {
+      const normalized = normalizeShotForEvoLinkPrompt(s, nameToLabel);
+      return `[${s.startSec}-${s.endSec}s] ${s.camera}: ${normalized.action}${normalized.dialogue ? ` — "${normalized.dialogue}"` : ''}`;
+    })
     .join(' ');
 
   const prompt = `Vertical 9:16, ${conditions.duration}s single continuous take, no cuts. Korean dialogue with natural audio. Location: ${conti.location}. Lighting: ${conti.lighting}. Time: ${conti.timeOfDay}. Characters (fixed): ${charDesc}. Timeline: ${beats}. Cinematic realistic mobile framing.`;

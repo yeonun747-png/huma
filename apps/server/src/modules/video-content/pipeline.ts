@@ -634,10 +634,7 @@ export async function runVideoProduction(historyId: string): Promise<string> {
   const conti = parseContiFromJson(history.conti_json);
   const baseConditions = conditionsFromHistoryRow(history, history.character_used as string | null);
   const contiJson = history.conti_json as Record<string, unknown>;
-  let evoPrompt = String(contiJson.evolinkPrompt ?? '');
-  if (!evoPrompt) {
-    evoPrompt = buildEvoLinkPrompt(conti, baseConditions);
-  }
+  const evoPrompt = buildEvoLinkPrompt(conti, baseConditions);
   if (!isEvoLinkPromptWithinLimit(evoPrompt)) {
     throw new Error(`EvoLink 프롬프트 길이 초과 (${evoPrompt.length}자)`);
   }

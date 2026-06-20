@@ -36,6 +36,7 @@ import {
   PUNCHLINE_MIN_DURATION_SEC,
   SHOT_CONTENT_MIN_CHARS,
 } from './conti-validation.js';
+import { findRealNamesInShots, buildCharacterNameToLabelMap } from './character-labels.js';
 import { normalizeMultiShotConti, normalizeSingleShotConti, buildEvoLinkPrompt, getDefaultShotAction } from './evolink.js';
 import { EVOLINK_PROMPT_LENGTH_GUIDANCE } from './prompt-length.js';
 import { getShotCountBounds } from './shot-timing.js';
@@ -180,7 +181,7 @@ ${situationLine}- 감정곡선: ${conditions.emotionCurve}
 - duration: ${conditions.duration}초
 ${charBlock}
 ${config.serviceConstraints}
-${cutRuleBlock}${pastBlock}${feedbackBlock}
+${config.hookTypeGuidance?.trim() ? `\n펀치라인·연출 원칙 (선택 메커니즘과 별도 — action/dialogue에 반영, 단 카메라 직시 등 금지 규칙은 반드시 준수):\n${config.hookTypeGuidance.trim()}\n` : ''}${cutRuleBlock}${pastBlock}${feedbackBlock}
 
 창작 지침:
 "이번 영상은 ${storyAxis}의 인물들이 등장하고, 새로 창작한 장소/시간에서 벌어지는 [${conditions.emotionCurve}] 흐름의 이야기.
@@ -195,7 +196,7 @@ JSON 스키마:
 {
   "locationKeyword": "string",
   "timeOfDay": "string",
-  "characters": [{"label":"A","name":"민수(선택)","age":"30대","gender":"여","hair":"...","outfit":"...","shoes":"..."}],
+  "characters": [{"label":"A","name":"하은","age":"20대","gender":"여","hair":"...","outfit":"...","shoes":"..."},{"label":"B","name":"준형","age":"30대","gender":"남","hair":"...","outfit":"...","shoes":"..."}],
   "location": "구체적 장소 묘사",
   "lighting": "조명",
   "timeOfDayVisual": "시각적 시간대",
@@ -234,7 +235,7 @@ function buildShotsPrompt(ctx: PromptContext, foundation: ContiFoundation): stri
       : '';
 
   return `한국어 숏폼 영상 콘티 2단계 — 1단계 설정을 바탕으로 샷별 camera/action/dialogue만 JSON으로 작성하라.
-${cutTypeNote}
+${cutTypeNote}action·dialogue 본문에는 A/B 라벨만 사용. 실명은 characters[].name에만 두고 action/dialogue에 쓰지 말 것.
 1단계 설정 (변경 금지):
 ${JSON.stringify(foundation, null, 2)}
 ${feedbackBlock}
@@ -609,6 +610,14 @@ export async function generateConti(params: PromptContext): Promise<ContiGenerat
   if (!nameCheck.ok) {
     contentWarnings.push(
       `등장인물 이름 불일치 감지(콘티는 통과): ${nameCheck.unregisteredNames.join(', ')} — 검토 권장`,
+    );
+  }
+
+  const nameToLabel = buildCharacterNameToLabelMap(conti);
+  const leakedNames = findRealNamesInShots(conti, nameToLabel);
+  if (leakedNames.length) {
+    contentWarnings.push(
+      `샷 본문 실명 사용(${leakedNames.join(', ')}) — EvoLink 프롬프트는 A/B로 자동 치환. 이후 생성은 action·dialogue에 A/B만 쓰도록 권장`,
     );
   }
 

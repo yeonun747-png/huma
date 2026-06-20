@@ -1,4 +1,5 @@
 import type { Workspace } from '@huma/shared';
+import { sanitizeHookTypeOptions, splitHookTypeGuidanceFromOptions } from '@huma/shared';
 import { supabase } from '../../middleware/auth.js';
 import {
   DEFAULT_VIDEO_PERSONAS,
@@ -45,7 +46,7 @@ export function pickHookType(
   config: VideoPersonaConfig,
   recentHooks: string[],
 ): string {
-  const options = config.hookTypes;
+  const options = sanitizeHookTypeOptions(config.hookTypes);
   if (!options.length) return '';
 
   const forceRandom = Math.random() >= 0.85;
@@ -72,11 +73,8 @@ export function pickHookType(
   return candidates[candidates.length - 1]!;
 }
 
-export function pickCutType(recentCutTypes: string[]): 'single_shot' | 'multi_shot' {
-  const recent = recentCutTypes.filter(Boolean);
-  const noSingle = recent.length >= 5 && !recent.some((c) => c === 'single_shot');
-  const singleWeight = noSingle ? 0.3 : 0.25;
-  return Math.random() < singleWeight ? 'single_shot' : 'multi_shot';
+export function pickCutType(_recentCutTypes: string[]): 'single_shot' | 'multi_shot' {
+  return 'multi_shot';
 }
 
 export function pickDuration(recentDurations: number[]): number {
@@ -107,19 +105,25 @@ export function resolveVideoPersona(
   const defaults = DEFAULT_VIDEO_PERSONAS[workspace];
   const custom = personaJson?.videoPersona as Partial<VideoPersonaConfig> | undefined;
   if (!custom) return defaults;
+
+  const hookSplit = splitHookTypeGuidanceFromOptions(
+    custom.hookTypes?.length ? custom.hookTypes : defaults.hookTypes,
+    custom.hookTypeGuidance ?? defaults.hookTypeGuidance,
+  );
+  const hookTypes = hookSplit.hookTypes.length ? hookSplit.hookTypes : defaults.hookTypes;
+
   return {
     ...defaults,
     ...custom,
     relationshipAxes: custom.relationshipAxes?.length ? custom.relationshipAxes : defaults.relationshipAxes,
     situationAxes: custom.situationAxes?.length ? custom.situationAxes : defaults.situationAxes,
     emotionCurves: custom.emotionCurves?.length ? custom.emotionCurves : defaults.emotionCurves,
-    hookTypes: custom.hookTypes?.length ? custom.hookTypes : defaults.hookTypes,
+    hookTypes: sanitizeHookTypeOptions(hookTypes),
+    hookTypeGuidance: hookSplit.hookTypeGuidance || defaults.hookTypeGuidance,
     hookTypeMaxWeight: custom.hookTypeMaxWeight ?? defaults.hookTypeMaxWeight,
     cutTypeRule: custom.cutTypeRule?.trim() ? custom.cutTypeRule : defaults.cutTypeRule,
     shotStructure: custom.shotStructure?.trim() ? custom.shotStructure : defaults.shotStructure,
-    singleShotStructure: custom.singleShotStructure?.trim()
-      ? custom.singleShotStructure
-      : defaults.singleShotStructure,
+    singleShotStructure: custom.singleShotStructure?.trim() || undefined,
     serviceConstraints: custom.serviceConstraints?.trim()
       ? custom.serviceConstraints
       : defaults.serviceConstraints,

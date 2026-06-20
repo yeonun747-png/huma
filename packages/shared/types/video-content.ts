@@ -54,6 +54,8 @@ export interface VideoPersonaConfig {
   emotionCurves: string[];
   hookTypes: string[];
   hookTypeMaxWeight?: Record<string, number>;
+  /** 펀치라인 섹션의 서술형 원칙 — hookTypes 선택값과 분리 */
+  hookTypeGuidance?: string;
   cutTypeRule?: string;
   shotStructure?: string;
   singleShotStructure?: string;

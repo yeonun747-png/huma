@@ -2,13 +2,7 @@ import type { Workspace } from '@huma/shared';
 import { EVOLINK_PROMPT_LENGTH_GUIDANCE } from './prompt-length.js';
 import { DEFAULT_MULTI_SHOT_COMPOSITION } from './shot-timing.js';
 
-const DEFAULT_CUT_TYPE_RULE = `multi_shot 70~80% / single_shot 20~30% 선택 비율 (생성 시 cut_type 필드 따름).
-직전 5건 cut_type 회피(0.85 확률 예외).`;
-
-const DEFAULT_SINGLE_SHOT_STRUCTURE = `싱글샷 전용 (cut_type=single_shot일 때만 적용):
-- shots JSON 배열 요소 1개, 컷/카메라 전환 없음
-- 시간 전개(4~5비트)는 action 문장 속 [0~3초]… 형태로만 표현
-- camera 라벨 1개(예: 고정 미디엄)`;
+const DEFAULT_CUT_TYPE_RULE = `항상 multi_shot. 여러 컷(샷)으로 구성하고, 샷 개수는 ## 샷 구조 원칙에 맞게 4~6개 중 선택.`;
 
 const DEFAULT_SHOT_STRUCTURE = `${DEFAULT_MULTI_SHOT_COMPOSITION}
 
@@ -22,10 +16,12 @@ export interface VideoPersonaConfig {
   hookTypes: string[];
   /** hook_type → 최대 선택 비율 (0~1). 미설정 시 제한 없음 */
   hookTypeMaxWeight?: Record<string, number>;
+  /** 펀치라인 섹션 서술형 원칙 — hookTypes 선택값과 분리 */
+  hookTypeGuidance?: string;
   cutTypeRule?: string;
   /** multi_shot 전용 — single_shot 생성 시 사용하지 않음 */
   shotStructure?: string;
-  /** single_shot 전용 — multi_shot 생성 시 사용하지 않음 */
+  /** @deprecated single_shot 미사용 — 하위 호환용 */
   singleShotStructure?: string;
   serviceConstraints: string;
   extraPromptNotes?: string;
@@ -135,7 +131,6 @@ export const DEFAULT_VIDEO_PERSONAS: Record<Workspace, VideoPersonaConfig> = {
 - 캐릭터 비노출: 매번 새로운 일반인만 등장`,
     cutTypeRule: DEFAULT_CUT_TYPE_RULE,
     shotStructure: DEFAULT_SHOT_STRUCTURE,
-    singleShotStructure: DEFAULT_SINGLE_SHOT_STRUCTURE,
   },
   quizoasis: {
     relationshipAxes: [
@@ -168,7 +163,6 @@ export const DEFAULT_VIDEO_PERSONAS: Record<Workspace, VideoPersonaConfig> = {
 - 매번 새로운 일반인 등장인물만 사용`,
     cutTypeRule: DEFAULT_CUT_TYPE_RULE,
     shotStructure: DEFAULT_SHOT_STRUCTURE,
-    singleShotStructure: DEFAULT_SINGLE_SHOT_STRUCTURE,
   },
   panana: {
     relationshipAxes: [
@@ -207,7 +201,6 @@ export const DEFAULT_VIDEO_PERSONAS: Record<Workspace, VideoPersonaConfig> = {
 - 실제 파나나 캐릭터가 영상에 직접 등장`,
     cutTypeRule: DEFAULT_CUT_TYPE_RULE,
     shotStructure: DEFAULT_SHOT_STRUCTURE,
-    singleShotStructure: DEFAULT_SINGLE_SHOT_STRUCTURE,
   },
 };
 

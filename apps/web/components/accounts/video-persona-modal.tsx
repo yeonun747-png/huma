@@ -142,6 +142,11 @@ export function VideoPersonaModal({ account, open, onClose }: VideoPersonaModalP
               {ws === 'panana'
                 ? '파나나: 7개 섹션(상황축 포함).'
                 : '연운·퀴즈오아시스: 6개 섹션 필수. 상황축은 선택(입력 시 저장만).'}
+              <br />
+              <span className="text-huma-t4">
+                ## 펀치라인 메커니즘 — A./B. 같은 짧은 선택지만. 원칙 문장(정곡찌르기·카메라 금지 등)은 빈 줄 뒤에
+                작성(선택값으로 취급되지 않음).
+              </span>
             </p>
 
             <textarea

@@ -61,12 +61,96 @@ function linesToArray(body: string): string[] {
     .filter(Boolean);
 }
 
+/** 서술형 가이드 — 펀치라인 선택 옵션이 아님 */
+function looksLikeHookTypeGuidanceLine(line: string): boolean {
+  if (line.length > 36) return true;
+  if (/[.?!…]/.test(line) && line.length > 14) return true;
+  if (
+    /(?:한다|합니다|세요|금지|기본으로|원칙|절대|해야|하지\s*말|보며|직시|카메라|전달|간접|정곡)/u.test(line)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function normalizeHookTypeOptionLine(line: string): string {
+  const letterBullet = line.match(/^(?:[A-Za-z]|[0-9]+)[.)]\s*(.+)$/);
+  if (letterBullet) return letterBullet[1]!.trim();
+  const dashBullet = line.match(/^[-*•]\s*(.+)$/);
+  if (dashBullet) return dashBullet[1]!.trim();
+  return line;
+}
+
+/** 펀치라인 메커니즘 섹션 — 짧은 선택지 vs 서술형 원칙 분리 */
+export function parseHookTypeSection(body: string): {
+  hookTypes: string[];
+  hookTypeGuidance: string;
+} {
+  const hookTypes: string[] = [];
+  const guidanceLines: string[] = [];
+
+  for (const line of linesToArray(body)) {
+    const letterBullet = /^(?:[A-Za-z]|[0-9]+)[.)]\s*\S/.test(line);
+    const dashBullet = /^[-*•]\s*\S/.test(line) && line.length <= 48;
+    const plainOption = line.length <= 28 && !looksLikeHookTypeGuidanceLine(line);
+
+    if (letterBullet || (dashBullet && !looksLikeHookTypeGuidanceLine(line)) || plainOption) {
+      hookTypes.push(normalizeHookTypeOptionLine(line));
+    } else {
+      guidanceLines.push(line);
+    }
+  }
+
+  return { hookTypes, hookTypeGuidance: guidanceLines.join('\n') };
+}
+
+/** 저장된 hookTypes 배열에 섞인 가이드 문장 제거 (재저장 없이 런타임 방어) */
+export function sanitizeHookTypeOptions(hookTypes: string[] | undefined): string[] {
+  if (!hookTypes?.length) return [];
+  return hookTypes
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => {
+      const letterBullet = /^(?:[A-Za-z]|[0-9]+)[.)]\s*\S/.test(line);
+      const dashBullet = /^[-*•]\s*\S/.test(line) && line.length <= 48;
+      const plainOption = line.length <= 28 && !looksLikeHookTypeGuidanceLine(line);
+      return letterBullet || (dashBullet && !looksLikeHookTypeGuidanceLine(line)) || plainOption;
+    })
+    .map(normalizeHookTypeOptionLine);
+}
+
+export function splitHookTypeGuidanceFromOptions(
+  hookTypes: string[] | undefined,
+  hookTypeGuidance?: string,
+): { hookTypes: string[]; hookTypeGuidance: string } {
+  const guidanceParts: string[] = [];
+  if (hookTypeGuidance?.trim()) guidanceParts.push(hookTypeGuidance.trim());
+
+  const options: string[] = [];
+  for (const line of hookTypes ?? []) {
+    const t = line.trim();
+    if (!t) continue;
+    if (looksLikeHookTypeGuidanceLine(t) && !/^(?:[A-Za-z]|[0-9]+)[.)]\s*/.test(t)) {
+      guidanceParts.push(t);
+    } else {
+      options.push(normalizeHookTypeOptionLine(t));
+    }
+  }
+
+  const sanitized = sanitizeHookTypeOptions(options);
+  return {
+    hookTypes: sanitized.length ? sanitized : options.filter((l) => l.length <= 28),
+    hookTypeGuidance: guidanceParts.join('\n'),
+  };
+}
+
 function emptyConfig(): VideoPersonaConfig {
   return {
     relationshipAxes: [],
     situationAxes: [],
     emotionCurves: [],
     hookTypes: [],
+    hookTypeGuidance: '',
     cutTypeRule: '',
     shotStructure: '',
     singleShotStructure: '',
@@ -112,9 +196,12 @@ function applyKnownSection(config: VideoPersonaConfig, header: VideoPersonaKnown
     case '감정곡선':
       config.emotionCurves = linesToArray(body);
       break;
-    case '펀치라인 메커니즘':
-      config.hookTypes = linesToArray(body);
+    case '펀치라인 메커니즘': {
+      const parsed = parseHookTypeSection(body);
+      config.hookTypes = parsed.hookTypes;
+      config.hookTypeGuidance = parsed.hookTypeGuidance;
       break;
+    }
     case '컷 구성':
       config.cutTypeRule = body;
       break;
@@ -155,7 +242,9 @@ export function parseVideoPersonaText(
     const isEmpty =
       header === '컷 구성' || header === '샷 구조' || header === '서비스 제약'
         ? !body.trim()
-        : linesToArray(body).length === 0;
+        : header === '펀치라인 메커니즘'
+          ? parseHookTypeSection(body).hookTypes.length === 0
+          : linesToArray(body).length === 0;
     if (isEmpty) missingSections.push(header);
   }
 
@@ -172,7 +261,11 @@ export function serializeVideoPersonaText(cfg: Partial<VideoPersonaConfig>, work
 
   blocks.push(
     ['## 감정곡선', ...(cfg.emotionCurves ?? [])],
-    ['## 펀치라인 메커니즘', ...(cfg.hookTypes ?? [])],
+    [
+      '## 펀치라인 메커니즘',
+      ...(cfg.hookTypes ?? []),
+      ...(cfg.hookTypeGuidance?.trim() ? ['', cfg.hookTypeGuidance.trim()] : []),
+    ],
     ['## 컷 구성', cfg.cutTypeRule ?? ''],
     ['## 샷 구조', cfg.shotStructure ?? ''],
     ...(cfg.singleShotStructure?.trim()
@@ -191,6 +284,7 @@ export function hasStoredVideoPersona(cfg: Partial<VideoPersonaConfig> | null | 
     (cfg.situationAxes?.length ?? 0) > 0 ||
     (cfg.emotionCurves?.length ?? 0) > 0 ||
     (cfg.hookTypes?.length ?? 0) > 0 ||
+    Boolean(cfg.hookTypeGuidance?.trim()) ||
     Boolean(cfg.cutTypeRule?.trim()) ||
     Boolean(cfg.shotStructure?.trim()) ||
     Boolean(cfg.singleShotStructure?.trim()) ||

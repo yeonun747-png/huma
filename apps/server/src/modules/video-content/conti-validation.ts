@@ -190,9 +190,10 @@ export function buildSingleShotGuide(duration: number, personaGuide?: string): s
 
 export function buildCharacterNamingRule(): string {
   return (
-    '등장인물은 A, B(또는 인물1, 인물2)로 지칭하거나, 혹은 시나리오 시작 시점에 이름을 부여하려면 등장인물 설정 섹션에 그 이름을 함께 기재해야 한다. ' +
-    '등장인물 설정 섹션에 없는 이름이 샷 본문에서 갑자기 등장해서는 안 된다. ' +
-    '한번 이름을 정했다면 첫 등장 샷부터 마지막 샷까지 동일한 이름을 일관되게 사용해야 한다.'
+    '등장인물 실명은 characters[].name과 시나리오 요약에만 쓴다. ' +
+    '샷 action·dialogue 본문에서는 A/B 라벨만 사용하고 실명(하은, 준형 등)을 쓰지 않는다 — 영상 생성 API 혼동 방지. ' +
+    'dialogue 형식: A: "대사" (「B: "…"」 등 실명·괄호 혼합 표기 금지). ' +
+    '등장인물 설정에 없는 이름 금지. A=첫 번째 인물, B=두 번째 인물 순서를 지킨다.'
   );
 }
 
