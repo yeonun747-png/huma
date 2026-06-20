@@ -367,6 +367,13 @@ export async function runContiGeneration(accountId: string): Promise<string> {
       conditions.timeOfDay = generated.timeOfDay;
       conti = generated;
 
+      if (generated.contentWarnings?.length) {
+        await notifyTelegram(
+          `⚠️ 콘티 샷 자동 보완\n계정: ${accountName} (${accountId})\n${generated.contentWarnings.join('\n')}`,
+          workspace,
+        );
+      }
+
       embedding = embedText(conti.fullText || conti.scenarioSummary);
       const pastEmb = await loadPastEmbeddings(accountId, historyId);
       const sim = computeSimilarityScores(embedding, pastEmb);

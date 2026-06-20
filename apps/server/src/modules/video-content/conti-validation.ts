@@ -23,11 +23,16 @@ export class ContiValidationError extends Error {
 
 export const DEFAULT_CONTI_VALIDATION_MAX_ATTEMPTS = 3;
 export const MAX_SHOT_DURATION_REGENERATION_ATTEMPTS = 2;
-export const MAX_EMPTY_CONTENT_REGENERATION_ATTEMPTS = 2;
+export const MAX_EMPTY_CONTENT_REGENERATION_ATTEMPTS = 1;
 export const SHOT_MIN_DURATION_SEC = 1.5;
-export const SHOT_CONTENT_MIN_CHARS = 20;
+export const SHOT_CONTENT_MIN_CHARS = 10;
 
-/** 6샷 콘티 JSON(인물·장소·6샷 camera/action/dialogue·fullText) 출력 여유 */
+/** 1단계: 시나리오·인물·장소 / 2단계: 샷·대사 / 보완: 빈 샷만 */
+export const CONTI_FOUNDATION_MAX_TOKENS = 4096;
+export const CONTI_SHOTS_MAX_TOKENS = 4096;
+export const CONTI_SHOT_FILL_MAX_TOKENS = 2048;
+
+/** @deprecated 2단계 분리 전 단일 호출용 — 신규 코드는 FOUNDATION+SHOTS 사용 */
 export const CONTI_GENERATION_MAX_TOKENS = 8192;
 
 /** 자리표시자 — 정확 일치(대소문자 무시) 시 무효 */
@@ -133,6 +138,34 @@ export function validateShotContent(
     return { ok: false, feedback: buildEmptyShotContentFeedback(shotNumber) };
   }
   return { ok: true };
+}
+
+/** LLM이 실제 반환한 샷만 검사 — normalize 전 (빈 슬롯 채우기로 인한 오탐 방지) */
+export function validateRawShotsContent(
+  conti: VideoConti,
+): { ok: true } | { ok: false; feedback: string; shotNumber: number } {
+  for (let i = 0; i < conti.shots.length; i++) {
+    const check = validateShotContent(conti.shots[i]!, i + 1);
+    if (!check.ok) return { ok: false, feedback: check.feedback, shotNumber: i + 1 };
+  }
+  return { ok: true };
+}
+
+/** 무효 raw 샷 인덱스 (0-based) */
+export function findInvalidRawShotIndices(conti: VideoConti): number[] {
+  const invalid: number[] = [];
+  for (let i = 0; i < conti.shots.length; i++) {
+    const check = validateShotContent(conti.shots[i]!, i + 1);
+    if (!check.ok) invalid.push(i);
+  }
+  return invalid;
+}
+
+export function buildShotFillPrompt(shotNumbers: number[]): string {
+  return (
+    `샷 ${shotNumbers.join(', ')}의 camera/action/dialogue만 작성해서 채워달라. ` +
+    '다른 샷은 변경하지 말 것. action은 구체적 카메라·행동 묘사 필수.'
+  );
 }
 
 /** normalize·펀치라인 보정 이후 — 모든 샷 액션/대사 실질 내용 검사 */

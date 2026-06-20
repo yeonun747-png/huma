@@ -6,26 +6,85 @@ import {
   validateCutTypeMatchesRawShots,
   validatePunchlineShotMinDuration,
   validateAllShotsMinDuration,
-  validateAllShotsContent,
+  findInvalidRawShotIndices,
   buildMinShotDurationRule,
-  buildDurationShotCountGuide,
   buildShotContentRule,
+  buildEmptyShotContentFeedback,
+  buildShotFillPrompt,
   ContiValidationError,
-  CONTI_GENERATION_MAX_TOKENS,
+  CONTI_FOUNDATION_MAX_TOKENS,
+  CONTI_SHOTS_MAX_TOKENS,
+  CONTI_SHOT_FILL_MAX_TOKENS,
   MAX_SHOT_DURATION_REGENERATION_ATTEMPTS,
   MAX_EMPTY_CONTENT_REGENERATION_ATTEMPTS,
   PUNCHLINE_MIN_DURATION_SEC,
+  SHOT_CONTENT_MIN_CHARS,
 } from './conti-validation.js';
-import { normalizeMultiShotConti, buildEvoLinkPrompt } from './evolink.js';
+import { normalizeMultiShotConti, buildEvoLinkPrompt, getDefaultShotAction } from './evolink.js';
 import { EVOLINK_PROMPT_LENGTH_GUIDANCE } from './prompt-length.js';
 import { buildSixShotTimeline } from './shot-timing.js';
-import type { GenerationConditions, VideoConti, VideoPersonaConfig } from './types.js';
+import type { GenerationConditions, VideoConti, VideoContiShot, VideoPersonaConfig } from './types.js';
+
+export interface ContiGenerationResult extends VideoConti {
+  locationKeyword: string;
+  timeOfDay: string;
+  /** 기본 action 대체 등 — 콘티는 완성되나 운영자 경고용 */
+  contentWarnings?: string[];
+}
+
+interface ContiFoundation {
+  locationKeyword: string;
+  timeOfDay: string;
+  characters: VideoConti['characters'];
+  location: string;
+  lighting: string;
+  timeOfDayVisual: string;
+  scenarioSummary: string;
+  fullText: string;
+}
+
+interface PromptContext {
+  workspace: Workspace;
+  config: VideoPersonaConfig;
+  conditions: GenerationConditions;
+  feedback?: string;
+  pastSummaries?: string[];
+}
 
 function parseJsonBlock(raw: string): unknown {
   const trimmed = raw.trim();
   const fence = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
   const body = fence ? fence[1]!.trim() : trimmed;
   return JSON.parse(body);
+}
+
+async function callClaudeJson(params: {
+  model: string;
+  max_tokens: number;
+  prompt: string;
+  retryHint?: string;
+}): Promise<Record<string, unknown>> {
+  let lastErr: Error | null = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const prompt =
+      attempt === 0 || !params.retryHint
+        ? params.prompt
+        : `${params.prompt}\n\n⚠️ JSON 파싱 실패. 유효한 JSON만 출력하고 대사 속 따옴표는 \\" 로 이스케이프하라.\n${params.retryHint}`;
+    try {
+      const raw = await askClaudeWithModel({ model: params.model, max_tokens: params.max_tokens, prompt });
+      if (!raw) throw new Error('LLM 응답 없음');
+      return parseJsonBlock(raw) as Record<string, unknown>;
+    } catch (err) {
+      lastErr = err instanceof Error ? err : new Error(String(err));
+      const retryable =
+        err instanceof SyntaxError ||
+        lastErr.message.includes('JSON') ||
+        lastErr.message.includes('Unexpected');
+      if (attempt === 0 && retryable) continue;
+      throw lastErr;
+    }
+  }
+  throw lastErr ?? new Error('JSON 파싱 실패');
 }
 
 function formatTimelineGuide(duration: number): string {
@@ -35,18 +94,19 @@ function formatTimelineGuide(duration: number): string {
     .join(' → ');
 }
 
-function buildContiPrompt(params: {
-  workspace: Workspace;
-  config: VideoPersonaConfig;
-  conditions: GenerationConditions;
-  feedback?: string;
-  pastSummaries?: string[];
-}): string {
-  const { conditions, config, feedback, pastSummaries } = params;
+function buildSharedContext(ctx: PromptContext): {
+  charBlock: string;
+  pastBlock: string;
+  feedbackBlock: string;
+  cutRuleBlock: string;
+  situationLine: string;
+  storyAxis: string;
+} {
+  const { conditions, config, feedback, pastSummaries, workspace } = ctx;
   const charBlock =
-    params.workspace === 'panana' && conditions.characterDescription
+    workspace === 'panana' && conditions.characterDescription
       ? `\n파나나 캐릭터 "${conditions.characterName}" 외형/톤/말버릇 (고정):\n${conditions.characterDescription}\n`
-      : params.workspace === 'panana'
+      : workspace === 'panana'
         ? ''
         : '\n등장인물은 매번 새로운 일반인으로 창작. 서비스 캐릭터 비등장.\n';
 
@@ -55,51 +115,27 @@ function buildContiPrompt(params: {
       `\n과거 시나리오 (겹치지 말 것):\n${pastSummaries.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n`
     : '';
 
-  const feedbackBlock = feedback ? `\n⚠️ 재작성 요청: ${feedback}\n` : '';
-
-  const punchlineDurationRule = `펀치라인이 들어가는 샷(마지막 또는 마지막 직전)은 대사를 끝까지 전달할 수 있도록 최소 ${PUNCHLINE_MIN_DURATION_SEC}초를 확보하라. 영상이 ${conditions.duration}초로 짧아도 이 최소 시간은 반드시 지켜라.`;
-
-  const minShotDurationRule = buildMinShotDurationRule(conditions.duration);
-  const shotCountGuide = buildDurationShotCountGuide(conditions.duration);
-  const shotContentRule = buildShotContentRule();
-
-  const defaultMultiShotGuide = `${shotCountGuide}
-${minShotDurationRule}
-${shotContentRule}
-
-6샷 멀티샷 (${conditions.duration}초) — EvoLink용 정규 타임라인: ${formatTimelineGuide(conditions.duration)}
-shots 배열은 ${conditions.duration <= 9 ? '4~5개' : conditions.duration <= 11 ? '4~6개' : '5~6개'} 권장. startSec/endSec 합이 ${conditions.duration}과 일치.
-짧은 영상에서 샷 개수를 무리하게 늘리지 말 것. 각 샷 구간은 최소 1.5초 이상.
-최소 4샷(권장: 샷1,3,4,5)에 대사. 샷3은 행동+대사+디테일 밀도 높게(가장 긴 구간 중 하나).
-펀치라인은 샷5 후반부에서 터지도록. 말하는 샷과 보여주는 샷 교차.
-${punchlineDurationRule}
-${EVOLINK_PROMPT_LENGTH_GUIDANCE}`;
-
-  const defaultSingleShotGuide = `싱글샷 연속 (${conditions.duration}초, 4~5 시간 비트로 대사/행동 순차 전개, 컷 전환 없음).
-shots 배열은 1개만 — 컷 전환·다중 샷 금지.
-${minShotDurationRule}
-${shotContentRule}
-${punchlineDurationRule}
-${EVOLINK_PROMPT_LENGTH_GUIDANCE}`;
-
-  const shotGuide =
-    config.shotStructure?.trim() ??
-    (conditions.cutType === 'multi_shot' ? defaultMultiShotGuide : defaultSingleShotGuide);
+  const feedbackBlock = feedback ? `\n⚠️ 재작성/보완 요청: ${feedback}\n` : '';
 
   const cutRuleBlock = config.cutTypeRule?.trim()
     ? `\n컷 구성 규칙 (페르소나):\n${config.cutTypeRule.trim()}\n`
     : '';
 
-  const situationLine = conditions.situationAxis
-    ? `- 상황축: ${conditions.situationAxis}\n`
-    : '';
-
+  const situationLine = conditions.situationAxis ? `- 상황축: ${conditions.situationAxis}\n` : '';
   const storyAxis =
     conditions.situationAxis != null
       ? `[${conditions.relationshipAxis}] 관계 · [${conditions.situationAxis}] 상황`
       : `[${conditions.relationshipAxis}] 관계`;
 
-  return `한국어 숏폼 영상 콘티를 JSON으로 작성하라.
+  return { charBlock, pastBlock, feedbackBlock, cutRuleBlock, situationLine, storyAxis };
+}
+
+function buildFoundationPrompt(ctx: PromptContext): string {
+  const { conditions, config } = ctx;
+  const { charBlock, pastBlock, feedbackBlock, cutRuleBlock, situationLine, storyAxis } =
+    buildSharedContext(ctx);
+
+  return `한국어 숏폼 영상 콘티 1단계 — 시나리오·등장인물·장소만 JSON으로 작성하라 (샷/shots 없음).
 
 이번 영상 조건:
 - 관계축: ${conditions.relationshipAxis}
@@ -113,15 +149,11 @@ ${cutRuleBlock}${pastBlock}${feedbackBlock}
 
 창작 지침:
 "이번 영상은 ${storyAxis}의 인물들이 등장하고, 새로 창작한 장소/시간에서 벌어지는 [${conditions.emotionCurve}] 흐름의 이야기.
-등장인물 이름·외형·구체적 상황·대사는 전부 새로 창작. 과거 시나리오와 겹치지 않게.
-[${conditions.hookType}] 방식의 펀치라인이 샷5 후반(멀티샷) 또는 마지막 비트(싱글샷)에 터지도록.
-location_keyword와 time_of_day도 새로 창작해서 JSON에 포함."
+등장인물 이름·외형·구체적 상황은 전부 새로 창작. 과거 시나리오와 겹치지 않게.
+[${conditions.hookType}] 방식의 펀치라인이 터지도록 이야기를 설계.
+location_keyword와 time_of_day도 새로 창작."
 
-${shotGuide}
-
-영상 1건 내 등장인물 외형·장소·조명·시간대는 절대 변경 금지.
-
-JSON 스키마 (반드시 준수):
+JSON 스키마:
 {
   "locationKeyword": "string",
   "timeOfDay": "string",
@@ -129,44 +161,224 @@ JSON 스키마 (반드시 준수):
   "location": "구체적 장소 묘사",
   "lighting": "조명",
   "timeOfDayVisual": "시각적 시간대",
-  "shots": [{"shotNumber":1,"startSec":0,"endSec":3,"camera":"와이드","action":"...","dialogue":"..."}],
   "scenarioSummary": "2~3문장 요약",
-  "fullText": "등장인물 설정+시나리오+전체 대사를 하나의 텍스트로"
+  "fullText": "등장인물 설정+시나리오 개요(샷 대사는 2단계에서 추가)"
 }`;
 }
 
-export async function generateConti(params: {
-  workspace: Workspace;
-  config: VideoPersonaConfig;
-  conditions: GenerationConditions;
-  feedback?: string;
-  pastSummaries?: string[];
-}): Promise<VideoConti & { locationKeyword: string; timeOfDay: string }> {
-  const model = (await getMainClaudeModel()) || 'claude-sonnet-4-6';
-  const prompt = buildContiPrompt(params);
-  const raw = await askClaudeWithModel({
-    model,
-    max_tokens: CONTI_GENERATION_MAX_TOKENS,
-    prompt,
+function buildShotsPrompt(ctx: PromptContext, foundation: ContiFoundation): string {
+  const { conditions, config } = ctx;
+  const { feedbackBlock } = buildSharedContext(ctx);
+  const minShotDurationRule = buildMinShotDurationRule(conditions.duration);
+  const shotContentRule = buildShotContentRule();
+  const punchlineDurationRule = `펀치라인이 들어가는 샷(마지막 또는 마지막 직전)은 대사를 끝까지 전달할 수 있도록 최소 ${PUNCHLINE_MIN_DURATION_SEC}초를 확보하라.`;
+
+  const shotGuide =
+    config.shotStructure?.trim() ??
+    (conditions.cutType === 'multi_shot'
+      ? `${minShotDurationRule}
+${shotContentRule}
+
+6샷 멀티샷 (${conditions.duration}초) — 타임라인: ${formatTimelineGuide(conditions.duration)}
+shots 배열은 정확히 6개. 각 샷 action ${SHOT_CONTENT_MIN_CHARS}자 이상, startSec/endSec 합 = ${conditions.duration}.
+펀치라인은 샷5 후반. 샷6은 와이드 여운 마무리.
+${punchlineDurationRule}
+${EVOLINK_PROMPT_LENGTH_GUIDANCE}`
+      : `싱글샷 (${conditions.duration}초). shots 배열 1개만.
+${minShotDurationRule}
+${shotContentRule}
+${punchlineDurationRule}
+${EVOLINK_PROMPT_LENGTH_GUIDANCE}`);
+
+  return `한국어 숏폼 영상 콘티 2단계 — 1단계 설정을 바탕으로 샷별 camera/action/dialogue만 JSON으로 작성하라.
+
+1단계 설정 (변경 금지):
+${JSON.stringify(foundation, null, 2)}
+${feedbackBlock}
+
+샷 구성 규칙:
+${shotGuide}
+
+JSON 스키마:
+{
+  "shots": [{"shotNumber":1,"startSec":0,"endSec":3,"camera":"와이드","action":"...","dialogue":"..."}],
+  "fullText": "1단계 fullText + 전체 대사를 합친 최종 텍스트 (선택)"
+}`;
+}
+
+function buildShotPatchPrompt(
+  ctx: PromptContext,
+  foundation: ContiFoundation,
+  conti: VideoConti,
+  invalidIndices: number[],
+): string {
+  const shotNumbers = invalidIndices.map((i) => i + 1);
+  const existing = invalidIndices.map((i) => {
+    const s = conti.shots[i]!;
+    return `샷${i + 1}: camera=${s.camera ?? ''}, action=${s.action ?? ''}, dialogue=${s.dialogue ?? ''}`;
   });
-  if (!raw) throw new Error('콘티 LLM 응답 없음');
 
-  const parsed = parseJsonBlock(raw) as Record<string, unknown>;
-  let shots = (parsed.shots as VideoConti['shots']) ?? [];
+  return `다음 영상 설정과 기존 콘티에서 비어 있거나 부실한 샷만 보완하라.
 
-  let conti: VideoConti = {
+설정:
+${JSON.stringify(foundation, null, 2)}
+
+보완 대상:
+${existing.join('\n')}
+
+${buildShotFillPrompt(shotNumbers)}
+
+JSON:
+{
+  "patches": [{"shotNumber": ${shotNumbers[0]}, "camera": "...", "action": "... (${SHOT_CONTENT_MIN_CHARS}자 이상)", "dialogue": "..."}]
+}`;
+}
+
+function parseFoundation(parsed: Record<string, unknown>): ContiFoundation {
+  return {
+    locationKeyword: String(parsed.locationKeyword ?? ''),
+    timeOfDay: String(parsed.timeOfDay ?? ''),
     characters: (parsed.characters as VideoConti['characters']) ?? [],
     location: String(parsed.location ?? ''),
     lighting: String(parsed.lighting ?? ''),
-    timeOfDay: String(parsed.timeOfDayVisual ?? parsed.timeOfDay ?? ''),
-    cutType: params.conditions.cutType,
-    duration: params.conditions.duration,
-    shots,
+    timeOfDayVisual: String(parsed.timeOfDayVisual ?? parsed.timeOfDay ?? ''),
     scenarioSummary: String(parsed.scenarioSummary ?? ''),
     fullText: String(parsed.fullText ?? parsed.scenarioSummary ?? ''),
   };
+}
 
-  const cutCheck = validateCutTypeMatchesRawShots(params.conditions.cutType, shots);
+function assembleConti(
+  foundation: ContiFoundation,
+  shots: VideoContiShot[],
+  conditions: GenerationConditions,
+  fullTextOverride?: string,
+): VideoConti {
+  return {
+    characters: foundation.characters,
+    location: foundation.location,
+    lighting: foundation.lighting,
+    timeOfDay: foundation.timeOfDayVisual || foundation.timeOfDay,
+    cutType: conditions.cutType,
+    duration: conditions.duration,
+    shots,
+    scenarioSummary: foundation.scenarioSummary,
+    fullText: fullTextOverride?.trim() || foundation.fullText,
+  };
+}
+
+function applyDefaultToRawShots(conti: VideoConti, indices: number[]): VideoConti {
+  const shots = conti.shots.map((s, i) => {
+    if (!indices.includes(i)) return s;
+    return {
+      ...s,
+      shotNumber: s.shotNumber || i + 1,
+      camera: s.camera?.trim() || (i === 0 || i === conti.shots.length - 1 ? '와이드' : '미디엄'),
+      action: getDefaultShotAction(i),
+    };
+  });
+  return { ...conti, shots };
+}
+
+function mergeShotPatches(conti: VideoConti, patches: VideoContiShot[]): VideoConti {
+  const byNumber = new Map(patches.map((p) => [p.shotNumber, p]));
+  const shots = conti.shots.map((s, i) => {
+    const patch = byNumber.get(s.shotNumber) ?? byNumber.get(i + 1);
+    if (!patch) return s;
+    return {
+      ...s,
+      camera: patch.camera?.trim() || s.camera,
+      action: patch.action?.trim() || s.action,
+      dialogue: patch.dialogue?.trim() || s.dialogue,
+    };
+  });
+  return { ...conti, shots };
+}
+
+async function generateFoundation(ctx: PromptContext, model: string): Promise<ContiFoundation> {
+  const parsed = await callClaudeJson({
+    model,
+    max_tokens: CONTI_FOUNDATION_MAX_TOKENS,
+    prompt: buildFoundationPrompt(ctx),
+  });
+  return parseFoundation(parsed);
+}
+
+async function generateShots(
+  ctx: PromptContext,
+  foundation: ContiFoundation,
+  model: string,
+): Promise<{ shots: VideoContiShot[]; fullText?: string }> {
+  const parsed = await callClaudeJson({
+    model,
+    max_tokens: CONTI_SHOTS_MAX_TOKENS,
+    prompt: buildShotsPrompt(ctx, foundation),
+  });
+  const shots = (parsed.shots as VideoContiShot[]) ?? [];
+  const fullText = parsed.fullText ? String(parsed.fullText) : undefined;
+  return { shots, fullText };
+}
+
+async function fillSpecificShots(
+  ctx: PromptContext,
+  foundation: ContiFoundation,
+  conti: VideoConti,
+  invalidIndices: number[],
+  model: string,
+): Promise<VideoConti> {
+  const parsed = await callClaudeJson({
+    model,
+    max_tokens: CONTI_SHOT_FILL_MAX_TOKENS,
+    prompt: buildShotPatchPrompt(ctx, foundation, conti, invalidIndices),
+  });
+  const patches = (parsed.patches as VideoContiShot[]) ?? [];
+  return mergeShotPatches(conti, patches);
+}
+
+async function recoverRawShotContent(
+  ctx: PromptContext,
+  foundation: ContiFoundation,
+  conti: VideoConti,
+  model: string,
+): Promise<{ conti: VideoConti; warnings: string[] }> {
+  const warnings: string[] = [];
+  let current = conti;
+  let fullRetries = 0;
+
+  while (findInvalidRawShotIndices(current).length > 0) {
+    const invalid = findInvalidRawShotIndices(current);
+
+    if (fullRetries < MAX_EMPTY_CONTENT_REGENERATION_ATTEMPTS) {
+      fullRetries += 1;
+      const shotsFeedback = buildEmptyShotContentFeedback(invalid[0]! + 1);
+      const { shots, fullText } = await generateShots({ ...ctx, feedback: shotsFeedback }, foundation, model);
+      current = assembleConti(foundation, shots, ctx.conditions, fullText ?? current.fullText);
+      continue;
+    }
+
+    current = await fillSpecificShots(ctx, foundation, current, invalid, model);
+    const stillInvalid = findInvalidRawShotIndices(current);
+    if (stillInvalid.length === 0) break;
+
+    current = applyDefaultToRawShots(current, stillInvalid);
+    const nums = stillInvalid.map((i) => i + 1).join(', ');
+    warnings.push(
+      `샷 ${nums}에 LLM 보완 실패 — 기본 action으로 대체했습니다. 콘티 검토 후 필요 시 재생성하세요.`,
+    );
+    break;
+  }
+
+  return { conti: current, warnings };
+}
+
+export async function generateConti(params: PromptContext): Promise<ContiGenerationResult> {
+  const model = (await getMainClaudeModel()) || 'claude-sonnet-4-6';
+  const foundation = await generateFoundation(params, model);
+  const { shots, fullText } = await generateShots(params, foundation, model);
+
+  let conti = assembleConti(foundation, shots, params.conditions, fullText);
+  const contentWarnings: string[] = [];
+
+  const cutCheck = validateCutTypeMatchesRawShots(params.conditions.cutType, conti.shots);
   if (!cutCheck.ok) {
     throw new ContiValidationError(cutCheck.feedback);
   }
@@ -177,6 +389,10 @@ export async function generateConti(params: {
       conti.shots[0] = { ...s, shotNumber: 1, startSec: 0, endSec: params.conditions.duration };
     }
   }
+
+  const recovered = await recoverRawShotContent(params, foundation, conti, model);
+  conti = recovered.conti;
+  contentWarnings.push(...recovered.warnings);
 
   if (params.conditions.cutType === 'multi_shot') {
     conti = normalizeMultiShotConti(conti, params.conditions.duration);
@@ -197,19 +413,11 @@ export async function generateConti(params: {
     });
   }
 
-  const contentCheck = validateAllShotsContent(conti);
-  if (!contentCheck.ok) {
-    throw new ContiValidationError(contentCheck.feedback, {
-      maxAttempts: MAX_EMPTY_CONTENT_REGENERATION_ATTEMPTS,
-      holdOnFailure: true,
-      holdReason: 'empty_content',
-    });
-  }
-
   return {
     ...conti,
-    locationKeyword: String(parsed.locationKeyword ?? params.conditions.locationKeyword),
+    locationKeyword: foundation.locationKeyword,
     timeOfDay: conti.timeOfDay,
+    contentWarnings: contentWarnings.length ? contentWarnings : undefined,
   };
 }
 
