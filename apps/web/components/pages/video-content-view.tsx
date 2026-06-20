@@ -12,6 +12,7 @@ import {
   VIDEO_CONTENT_TAB_LABEL,
   countByVideoContentTab,
   filterByVideoContentTab,
+  isDeletableVideoContent,
   parseContiPreview,
   videoContentTabOf,
   type VideoContentTab,
@@ -55,10 +56,14 @@ function statusTone(status: string): 'ok' | 'warn' | 'err' | 'idle' {
 function CompletedDetail({
   item,
   accountName,
+  deleting,
+  onDelete,
   onRefresh,
 }: {
   item: HumaVideoContentHistory;
   accountName?: string;
+  deleting: boolean;
+  onDelete: () => void;
   onRefresh: () => void;
 }) {
   const [tab, setTab] = useState('youtube');
@@ -75,7 +80,19 @@ function CompletedDetail({
 
   return (
     <div className="space-y-3">
-      <div className="text-[13px] font-semibold text-huma-t">{accountName ?? item.account_id.slice(0, 8)}</div>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="text-[13px] font-semibold text-huma-t">{accountName ?? item.account_id.slice(0, 8)}</div>
+        {isDeletableVideoContent(item.status) ? (
+          <button
+            type="button"
+            className="btn-ghost btn-sm text-huma-err"
+            disabled={deleting}
+            onClick={onDelete}
+          >
+            {deleting ? '삭제 중…' : '삭제'}
+          </button>
+        ) : null}
+      </div>
       {videoUrl ? (
         <video src={videoUrl} controls className="max-h-[360px] w-full rounded bg-black" playsInline />
       ) : (
@@ -133,7 +150,9 @@ function DetailPanel({
   accountName,
   loadingDetail,
   rendering,
+  deleting,
   onRender,
+  onDelete,
   onRefresh,
 }: {
   item: HumaVideoContentHistory;
@@ -141,7 +160,9 @@ function DetailPanel({
   accountName?: string;
   loadingDetail: boolean;
   rendering: boolean;
+  deleting: boolean;
   onRender: () => void;
+  onDelete: () => void;
   onRefresh: () => void;
 }) {
   const full = detail ?? item;
@@ -152,7 +173,15 @@ function DetailPanel({
   }
 
   if (item.status === 'completed') {
-    return <CompletedDetail item={full} accountName={accountName} onRefresh={onRefresh} />;
+    return (
+      <CompletedDetail
+        item={full}
+        accountName={accountName}
+        deleting={deleting}
+        onDelete={onDelete}
+        onRefresh={onRefresh}
+      />
+    );
   }
 
   if (item.status === 'conti_generating' || item.status === 'rendering' || item.status === 'generating') {
@@ -171,10 +200,24 @@ function DetailPanel({
     );
   }
 
+  const deletable = isDeletableVideoContent(item.status);
+
   if (item.status === 'failed') {
     return (
       <div className="space-y-3">
-        <p className="text-[12px] text-huma-err">{item.error_message ?? '생성 실패'}</p>
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <p className="text-[12px] text-huma-err">{item.error_message ?? '생성 실패'}</p>
+          {deletable ? (
+            <button
+              type="button"
+              className="btn-ghost btn-sm text-huma-err"
+              disabled={deleting}
+              onClick={onDelete}
+            >
+              {deleting ? '삭제 중…' : '삭제'}
+            </button>
+          ) : null}
+        </div>
         {conti ? <ContiPreview conti={conti} /> : null}
       </div>
     );
@@ -190,11 +233,23 @@ function DetailPanel({
             {item.similarity_score != null ? ` · 유사도 ${Number(item.similarity_score).toFixed(3)}` : ''}
           </div>
         </div>
-        {item.status === 'conti_ready' ? (
-          <button type="button" className="btn-primary btn-sm" disabled={rendering} onClick={onRender}>
-            {rendering ? '요청 중…' : '숏폼 생성'}
-          </button>
-        ) : null}
+        <div className="flex flex-wrap gap-2">
+          {deletable ? (
+            <button
+              type="button"
+              className="btn-ghost btn-sm text-huma-err"
+              disabled={deleting}
+              onClick={onDelete}
+            >
+              {deleting ? '삭제 중…' : '삭제'}
+            </button>
+          ) : null}
+          {item.status === 'conti_ready' ? (
+            <button type="button" className="btn-primary btn-sm" disabled={rendering} onClick={onRender}>
+              {rendering ? '요청 중…' : '숏폼 생성'}
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {item.status === 'on_hold' ? (
@@ -225,6 +280,7 @@ export function VideoContentView() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [creatingConti, setCreatingConti] = useState(false);
   const [rendering, setRendering] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     const [accs, list] = await Promise.all([
@@ -304,6 +360,31 @@ export function VideoContentView() {
     }
   };
 
+  const handleDelete = async () => {
+    if (!selectedId || !selectedItem) return;
+    if (!isDeletableVideoContent(selectedItem.status)) return;
+    const name = accountMap.get(selectedItem.account_id) ?? selectedItem.account_id.slice(0, 8);
+    const label = VIDEO_CONTENT_STATUS_LABEL[selectedItem.status] ?? selectedItem.status;
+    if (
+      !window.confirm(
+        `${name} · ${label}\n\n이 작업 기록을 삭제합니다. 콘티·영상 파일이 모두 제거되며 되돌릴 수 없습니다.`,
+      )
+    ) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      await api.deleteVideoContent(selectedId);
+      setSelectedId(null);
+      setDetail(null);
+      await load();
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : '삭제 실패');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const handleRender = async () => {
     if (!selectedId) return;
     if (!window.confirm('검토한 콘티로 숏폼 영상을 제작합니다. 수 분 소요될 수 있습니다.')) return;
@@ -355,9 +436,9 @@ export function VideoContentView() {
         </MPanel>
       </MGrid>
 
-      <div className="flex min-h-[520px] gap-3">
+      <div className="flex min-h-[520px] items-stretch gap-3">
         {/* 좌: 작업 목록 */}
-        <div className="flex w-[280px] shrink-0 flex-col rounded-lg border border-huma-bdr bg-huma-bg2">
+        <div className="flex min-h-0 w-[280px] shrink-0 flex-col rounded-lg border border-huma-bdr bg-huma-bg2">
           <div className="space-y-2 border-b border-huma-bdr p-3">
             <select
               className="m-model-select w-full"
@@ -460,24 +541,28 @@ export function VideoContentView() {
         </div>
 
         {/* 우: 상세 패널 */}
-        <MPanel title="📄 작업 상세" className="min-w-0 flex-1">
-          {selectedItem ? (
-            <DetailPanel
-              item={selectedItem}
-              detail={detail}
-              accountName={accountMap.get(selectedItem.account_id)}
-              loadingDetail={loadingDetail}
-              rendering={rendering}
-              onRender={() => void handleRender()}
-              onRefresh={() => void load()}
-            />
-          ) : (
-            <div className="py-16 text-center text-[12px] text-huma-t3">
-              왼쪽에서 작업을 선택하거나
-              <br />
-              계정을 고른 뒤 「콘티 생성」을 누르세요.
-            </div>
-          )}
+        <MPanel title="📄 작업 상세" className="m-panel-fill min-h-0 min-w-0 flex-1">
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {selectedItem ? (
+              <DetailPanel
+                item={selectedItem}
+                detail={detail}
+                accountName={accountMap.get(selectedItem.account_id)}
+                loadingDetail={loadingDetail}
+                rendering={rendering}
+                deleting={deleting}
+                onRender={() => void handleRender()}
+                onDelete={() => void handleDelete()}
+                onRefresh={() => void load()}
+              />
+            ) : (
+              <div className="py-16 text-center text-[12px] text-huma-t3">
+                왼쪽에서 작업을 선택하거나
+                <br />
+                계정을 고른 뒤 「콘티 생성」을 누르세요.
+              </div>
+            )}
+          </div>
         </MPanel>
       </div>
     </div>

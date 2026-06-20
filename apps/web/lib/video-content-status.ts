@@ -40,6 +40,12 @@ export function countByVideoContentTab(items: HumaVideoContentHistory[]): Record
   };
 }
 
+const DELETABLE_STATUSES = ['conti_ready', 'completed', 'failed', 'on_hold'] as const;
+
+export function isDeletableVideoContent(status: string): boolean {
+  return (DELETABLE_STATUSES as readonly string[]).includes(status);
+}
+
 export const VIDEO_CONTENT_STATUS_LABEL: Record<string, string> = {
   conti_generating: '콘티 작성 중',
   conti_ready: '검토 대기',

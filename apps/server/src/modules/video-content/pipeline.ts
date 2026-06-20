@@ -7,6 +7,7 @@ import { getPipelineModelSettings } from '../../lib/pipeline-settings.js';
 import { notifyTelegram } from '../watcher/telegram.js';
 import { generatePlatformCaptions } from './captions.js';
 import { generateConti } from './conti-generator.js';
+import { ContiValidationError } from './conti-validation.js';
 import {
   buildEvoLinkPrompt,
   createEvoLinkVideoTask,
@@ -22,7 +23,8 @@ import {
 } from './prompt-length.js';
 import {
   embedText,
-  maxSimilarityToHistory,
+  computeSimilarityScores,
+  parseEmbeddingVector,
   MAX_REGENERATION_ATTEMPTS,
   SIMILARITY_THRESHOLD,
 } from './embedding.js';
@@ -48,17 +50,71 @@ async function loadPastSummaries(accountId: string): Promise<string[]> {
   return (data ?? []).map((r) => String(r.scenario_summary ?? '')).filter(Boolean);
 }
 
-async function loadPastEmbeddings(accountId: string): Promise<number[][]> {
-  const { data } = await supabase
+async function loadPastEmbeddings(accountId: string, excludeHistoryId?: string): Promise<number[][]> {
+  let query = supabase
     .from('huma_video_content_history')
-    .select('embedding_vector')
+    .select('id, embedding_vector')
     .eq('account_id', accountId)
     .not('embedding_vector', 'is', null)
     .order('created_at', { ascending: false })
     .limit(10);
-  return (data ?? [])
-    .map((r) => r.embedding_vector as number[] | null)
-    .filter((v): v is number[] => Array.isArray(v) && v.length > 0);
+
+  if (excludeHistoryId) query = query.neq('id', excludeHistoryId);
+
+  const { data } = await query;
+  const out: number[][] = [];
+  let parseFailed = 0;
+  for (const row of data ?? []) {
+    const vec = parseEmbeddingVector(row.embedding_vector);
+    if (vec) out.push(vec);
+    else parseFailed += 1;
+  }
+
+  if (parseFailed > 0) {
+    await logOperation({
+      level: 'warn',
+      message: `[video-content] embedding_vector 파싱 실패 ${parseFailed}건 — JSONB 형식 점검`,
+      account_id: accountId,
+    });
+  }
+
+  return out;
+}
+
+async function logContiSimilarityDebug(params: {
+  accountId: string;
+  historyId: string;
+  workspace: Workspace;
+  pastEmbCount: number;
+  scores: number[];
+  maxScore: number;
+  textLen: number;
+}): Promise<void> {
+  const topScores = [...params.scores]
+    .sort((a, b) => b - a)
+    .slice(0, 3)
+    .map((s) => s.toFixed(4))
+    .join(', ');
+
+  await logOperation({
+    level: 'info',
+    message:
+      `[video-content] 유사도 검사 — past=${params.pastEmbCount}건 max=${params.maxScore.toFixed(4)} ` +
+      `top3=[${topScores || '—'}] textLen=${params.textLen} history=${params.historyId}`,
+    workspace: params.workspace,
+    account_id: params.accountId,
+  });
+
+  if (params.pastEmbCount >= 5 && params.maxScore === 0) {
+    await logOperation({
+      level: 'warn',
+      message:
+        `[video-content] 유사도 0 지속 — 과거 ${params.pastEmbCount}건과 비교했으나 max=0. ` +
+        'embedding_vector 저장·파싱 또는 fullText 중복 여부를 점검하라.',
+      workspace: params.workspace,
+      account_id: params.accountId,
+    });
+  }
 }
 
 async function loadRecentCaptions(accountId: string): Promise<string[]> {
@@ -260,21 +316,51 @@ export async function runContiGeneration(accountId: string): Promise<string> {
         timeOfDay: '',
       };
 
-      const generated = await generateConti({
-        workspace,
-        config: ctx.personaConfig,
-        conditions,
-        feedback,
-        pastSummaries,
-      });
+      let generated: Awaited<ReturnType<typeof generateConti>>;
+      try {
+        generated = await generateConti({
+          workspace,
+          config: ctx.personaConfig,
+          conditions,
+          feedback,
+          pastSummaries,
+        });
+      } catch (err) {
+        if (err instanceof ContiValidationError) {
+          feedback = err.message;
+          if (attempt === MAX_REGENERATION_ATTEMPTS) {
+            await supabase
+              .from('huma_video_content_history')
+              .update({
+                status: 'failed',
+                error_message: err.message.slice(0, 500),
+              })
+              .eq('id', historyId);
+            throw err;
+          }
+          continue;
+        }
+        throw err;
+      }
 
       conditions.locationKeyword = generated.locationKeyword;
       conditions.timeOfDay = generated.timeOfDay;
       conti = generated;
 
       embedding = embedText(conti.fullText || conti.scenarioSummary);
-      const pastEmb = await loadPastEmbeddings(accountId);
-      similarityScore = maxSimilarityToHistory(embedding, pastEmb);
+      const pastEmb = await loadPastEmbeddings(accountId, historyId);
+      const sim = computeSimilarityScores(embedding, pastEmb);
+      similarityScore = sim.max;
+
+      await logContiSimilarityDebug({
+        accountId,
+        historyId,
+        workspace,
+        pastEmbCount: pastEmb.length,
+        scores: sim.scores,
+        maxScore: sim.max,
+        textLen: (conti.fullText || conti.scenarioSummary).length,
+      });
 
       if (similarityScore < SIMILARITY_THRESHOLD) break;
 
@@ -342,6 +428,18 @@ export async function runContiGeneration(accountId: string): Promise<string> {
 
       conti = regenerated;
       embedding = embedText(conti.fullText || conti.scenarioSummary);
+      const pastEmbAfterLength = await loadPastEmbeddings(accountId, historyId);
+      const simAfterLength = computeSimilarityScores(embedding, pastEmbAfterLength);
+      similarityScore = simAfterLength.max;
+      await logContiSimilarityDebug({
+        accountId,
+        historyId,
+        workspace,
+        pastEmbCount: pastEmbAfterLength.length,
+        scores: simAfterLength.scores,
+        maxScore: simAfterLength.max,
+        textLen: (conti.fullText || conti.scenarioSummary).length,
+      });
     }
 
     await supabase

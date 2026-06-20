@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { createReadStream, existsSync } from 'fs';
+import { rm, unlink } from 'fs/promises';
+import { join } from 'path';
 import { authMiddleware, getWorkspaceFilter, supabase } from '../middleware/auth.js';
 import { mapAccountDbError } from '../lib/account-errors.js';
 import { enqueueJob } from '../modules/queue/producer.js';
@@ -25,6 +27,22 @@ async function assertAccountAccess(
     return { ok: false, status: 403, error: '워크스페이스 접근 권한 없음' };
   }
   return { ok: true, workspace: data.workspace };
+}
+
+const IN_PROGRESS_STATUSES = ['conti_generating', 'rendering', 'generating'] as const;
+
+async function removeVideoContentFiles(historyId: string, videoFilePath: string | null): Promise<void> {
+  if (videoFilePath && existsSync(videoFilePath)) {
+    await unlink(videoFilePath).catch(() => {});
+  }
+  const defaultPath = join(process.cwd(), 'data', 'video-content', `${historyId}.mp4`);
+  if (existsSync(defaultPath)) {
+    await unlink(defaultPath).catch(() => {});
+  }
+  const tmpDir = join(process.cwd(), 'tmp', 'video-content', historyId);
+  if (existsSync(tmpDir)) {
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 export async function registerVideoContentRoutes(app: FastifyInstance) {
@@ -93,6 +111,27 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
     reply.header('Content-Type', 'video/mp4');
     reply.header('Content-Disposition', `attachment; filename="huma-video-${id}.mp4"`);
     return reply.send(createReadStream(data.video_file_path));
+  });
+
+  app.delete('/api/video-content/:id', { preHandler: authMiddleware }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const allowed = getWorkspaceFilter(request);
+    const { data: existing } = await supabase
+      .from('huma_video_content_history')
+      .select('workspace, status, video_file_path')
+      .eq('id', id)
+      .maybeSingle();
+    if (!existing) return reply.code(404).send({ error: '없음' });
+    if (!allowed.includes(existing.workspace)) return reply.code(403).send({ error: '권한 없음' });
+    if (IN_PROGRESS_STATUSES.includes(existing.status as (typeof IN_PROGRESS_STATUSES)[number])) {
+      return reply.code(409).send({ error: '진행 중인 작업은 삭제할 수 없습니다' });
+    }
+
+    await removeVideoContentFiles(id, existing.video_file_path);
+
+    const { error } = await supabase.from('huma_video_content_history').delete().eq('id', id);
+    if (error) return reply.code(400).send({ error: error.message });
+    return { ok: true };
   });
 
   app.patch('/api/video-content/:id', { preHandler: authMiddleware }, async (request, reply) => {

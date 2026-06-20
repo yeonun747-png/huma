@@ -55,8 +55,35 @@ export function maxSimilarityToHistory(
   embedding: number[],
   historyEmbeddings: number[][],
 ): number {
-  if (!historyEmbeddings.length) return 0;
-  return Math.max(...historyEmbeddings.map((h) => cosineSimilarity(embedding, h)));
+  return computeSimilarityScores(embedding, historyEmbeddings).max;
+}
+
+/** 디버그용 — 각 과거 임베딩과의 코사인 유사도 */
+export function computeSimilarityScores(
+  embedding: number[],
+  historyEmbeddings: number[][],
+): { max: number; scores: number[] } {
+  if (!historyEmbeddings.length) return { max: 0, scores: [] };
+  const scores = historyEmbeddings.map((h) => cosineSimilarity(embedding, h));
+  return { max: Math.max(...scores), scores };
+}
+
+/** Supabase JSONB embedding_vector → number[] */
+export function parseEmbeddingVector(raw: unknown): number[] | null {
+  if (Array.isArray(raw) && raw.length > 0 && typeof raw[0] === 'number') {
+    return raw as number[];
+  }
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === 'number') {
+        return parsed as number[];
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return null;
 }
 
 export const SIMILARITY_THRESHOLD = 0.85;

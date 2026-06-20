@@ -1,6 +1,13 @@
 import type { Workspace } from '@huma/shared';
 import { askClaudeWithModel } from '../../lib/anthropic-client.js';
 import { getMainClaudeModel } from '../../lib/ai-engine.js';
+import {
+  enforcePunchlineShotMinDuration,
+  validateCutTypeMatchesRawShots,
+  validatePunchlineShotMinDuration,
+  ContiValidationError,
+  PUNCHLINE_MIN_DURATION_SEC,
+} from './conti-validation.js';
 import { normalizeMultiShotConti, buildEvoLinkPrompt } from './evolink.js';
 import { EVOLINK_PROMPT_LENGTH_GUIDANCE } from './prompt-length.js';
 import { buildSixShotTimeline, MULTI_SHOT_TEMPLATE_15S } from './shot-timing.js';
@@ -42,6 +49,8 @@ function buildContiPrompt(params: {
 
   const feedbackBlock = feedback ? `\n⚠️ 재작성 요청: ${feedback}\n` : '';
 
+  const punchlineDurationRule = `펀치라인이 들어가는 샷(마지막 또는 마지막 직전)은 대사를 끝까지 전달할 수 있도록 최소 ${PUNCHLINE_MIN_DURATION_SEC}초를 확보하라. 영상이 ${conditions.duration}초로 짧아도 이 최소 시간은 반드시 지켜라.`;
+
   const defaultMultiShotGuide = `6샷 멀티샷 (${conditions.duration}초, 6개 샷 길이 합 = ${conditions.duration}초):
 ${MULTI_SHOT_TEMPLATE_15S}
 
@@ -49,9 +58,12 @@ ${MULTI_SHOT_TEMPLATE_15S}
 shots 배열은 정확히 6개. startSec/endSec 합이 ${conditions.duration}과 일치.
 최소 4샷(권장: 샷1,3,4,5)에 대사. 샷3은 행동+대사+디테일 밀도 높게(가장 긴 구간 중 하나).
 펀치라인은 샷5 후반부에서 터지도록. 말하는 샷과 보여주는 샷 교차.
+${punchlineDurationRule}
 ${EVOLINK_PROMPT_LENGTH_GUIDANCE}`;
 
   const defaultSingleShotGuide = `싱글샷 연속 (${conditions.duration}초, 4~5 시간 비트로 대사/행동 순차 전개, 컷 전환 없음).
+shots 배열은 1개만 — 컷 전환·다중 샷 금지.
+${punchlineDurationRule}
 ${EVOLINK_PROMPT_LENGTH_GUIDANCE}`;
 
   const shotGuide =
@@ -134,8 +146,26 @@ export async function generateConti(params: {
     fullText: String(parsed.fullText ?? parsed.scenarioSummary ?? ''),
   };
 
+  const cutCheck = validateCutTypeMatchesRawShots(params.conditions.cutType, shots);
+  if (!cutCheck.ok) {
+    throw new ContiValidationError(cutCheck.feedback);
+  }
+
+  if (params.conditions.cutType === 'single_shot' && conti.shots.length === 1) {
+    const s = conti.shots[0]!;
+    if (s.endSec <= s.startSec) {
+      conti.shots[0] = { ...s, shotNumber: 1, startSec: 0, endSec: params.conditions.duration };
+    }
+  }
+
   if (params.conditions.cutType === 'multi_shot') {
     conti = normalizeMultiShotConti(conti, params.conditions.duration);
+  }
+
+  conti = enforcePunchlineShotMinDuration(conti);
+  const punchCheck = validatePunchlineShotMinDuration(conti);
+  if (!punchCheck.ok) {
+    throw new ContiValidationError(punchCheck.feedback);
   }
 
   return {

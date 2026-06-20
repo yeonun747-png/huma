@@ -424,6 +424,8 @@ export const api = {
     }),
   updateVideoContentUpload: (id: string, body: Record<string, boolean>) =>
     request(`/api/video-content/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteVideoContent: (id: string) =>
+    request<{ ok: boolean }>(`/api/video-content/${id}`, { method: 'DELETE' }),
   fetchVideoContentBlob: async (id: string): Promise<Blob> => {
     const token = getToken();
     const res = await fetch(`${API_BASE}/api/video-content/${id}/stream`, {
