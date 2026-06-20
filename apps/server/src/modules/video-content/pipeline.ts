@@ -39,6 +39,12 @@ import {
 import { burnSubtitles } from './subtitle.js';
 import { videoContentFinalPath, videoContentSourcePath } from './paths.js';
 import { generateVideoContentThumbnails } from './thumbnail.js';
+import {
+  assessContiHumor,
+  HUMOR_REGENERATION_FEEDBACK,
+  MAX_HUMOR_REGENERATION_ATTEMPTS,
+  type SelfAssessedHumor,
+} from './humor-assessment.js';
 import type { GenerationConditions, VideoConti } from './types.js';
 
 const WEB_BASE = process.env.HUMA_WEB_URL?.trim() || 'http://localhost:3000';
@@ -707,6 +713,131 @@ export async function runContiGeneration(accountId: string): Promise<string> {
       });
     }
 
+    let selfAssessedHumor: SelfAssessedHumor = 'dull';
+    let retryCountForHumor = 0;
+
+    for (let humorEval = 0; humorEval <= MAX_HUMOR_REGENERATION_ATTEMPTS; humorEval++) {
+      await logOperation({
+        level: 'info',
+        message: `[video-content] 유머 평가 ${humorEval + 1}/${MAX_HUMOR_REGENERATION_ATTEMPTS + 1} — history=${historyId}`,
+        workspace,
+        account_id: accountId,
+      });
+
+      selfAssessedHumor = await assessContiHumor(conti!);
+
+      if (selfAssessedHumor === 'funny') {
+        await logOperation({
+          level: 'info',
+          message: `[video-content] 유머 평가 funny — history=${historyId}`,
+          workspace,
+          account_id: accountId,
+        });
+        break;
+      }
+
+      if (humorEval >= MAX_HUMOR_REGENERATION_ATTEMPTS) {
+        await logOperation({
+          level: 'warn',
+          message: `[video-content] 유머 평가 dull (${MAX_HUMOR_REGENERATION_ATTEMPTS}회 재생성 후 통과) — history=${historyId}`,
+          workspace,
+          account_id: accountId,
+        });
+        break;
+      }
+
+      retryCountForHumor += 1;
+      await logOperation({
+        level: 'info',
+        message: `[video-content] 유머 dull → Sonnet 재생성 ${retryCountForHumor}/${MAX_HUMOR_REGENERATION_ATTEMPTS} — history=${historyId}`,
+        workspace,
+        account_id: accountId,
+      });
+
+      try {
+        const regenerated = await generateConti({
+          workspace,
+          config: ctx.personaConfig,
+          conditions: {
+            ...baseConditions,
+            locationKeyword: conti!.locationKeyword,
+            timeOfDay: conti!.timeOfDay,
+          },
+          feedback: HUMOR_REGENERATION_FEEDBACK,
+          pastSummaries,
+          onStage: async (stage) => {
+            await logOperation({
+              level: 'info',
+              message: `[video-content] ${stage}`,
+              workspace,
+              account_id: accountId,
+            });
+          },
+        });
+
+        conti = regenerated;
+        embedding = embedText(conti.fullText || conti.scenarioSummary);
+        const pastEmbAfterHumor = await loadPastEmbeddings(accountId, historyId);
+        const simAfterHumor = computeSimilarityScores(embedding, pastEmbAfterHumor);
+        similarityScore = simAfterHumor.max;
+        await logContiSimilarityDebug({
+          accountId,
+          historyId,
+          workspace,
+          pastEmbCount: pastEmbAfterHumor.length,
+          scores: simAfterHumor.scores,
+          maxScore: simAfterHumor.max,
+          textLen: (conti.fullText || conti.scenarioSummary).length,
+        });
+
+        if (similarityScore >= SIMILARITY_THRESHOLD) {
+          await logOperation({
+            level: 'warn',
+            message:
+              `[video-content] 유머 재생성 후 유사도 ${similarityScore.toFixed(4)} — 재평가 계속 (history=${historyId})`,
+            workspace,
+            account_id: accountId,
+          });
+        }
+      } catch (humorErr) {
+        if (humorErr instanceof ContiValidationError) {
+          await logOperation({
+            level: 'warn',
+            message: `[video-content] 유머 재생성 검증 실패 — 이전 콘티 dull 유지: ${humorErr.message.slice(0, 200)}`,
+            workspace,
+            account_id: accountId,
+          });
+          break;
+        }
+        throw humorErr;
+      }
+    }
+
+    evoPrompt = buildEvoLinkPrompt(conti!, baseConditions);
+    if (!isEvoLinkPromptWithinLimit(evoPrompt)) {
+      await supabase
+        .from('huma_video_content_history')
+        .update({
+          status: 'on_hold',
+          similarity_score: similarityScore,
+          scenario_summary: conti!.scenarioSummary,
+          location_keyword: conti!.locationKeyword,
+          time_of_day: conti!.timeOfDay,
+          conti_json: { ...conti, evolinkPrompt: evoPrompt, evolinkPromptLength: evoPrompt.length },
+          embedding_vector: embedding,
+          self_assessed_humor: selfAssessedHumor,
+          retry_count_for_humor: retryCountForHumor,
+          error_message: `유머 재생성 후 프롬프트 길이 초과 (${evoPrompt.length}자 / 최대 ${EVOLINK_PROMPT_MAX_LENGTH}자)`,
+        })
+        .eq('id', historyId);
+
+      await notifyTelegram(
+        `영상 콘티 프롬프트 길이 초과(유머 재생성 후) — 계정: ${accountId}, ${evoPrompt.length}자`,
+        workspace,
+      );
+      throw new Error('프롬프트 길이 초과');
+    }
+
     const storedCharacterNames = extractCharacterNamesForStorage(conti!, baseConditions.characterName);
 
     await supabase
@@ -719,6 +850,8 @@ export async function runContiGeneration(accountId: string): Promise<string> {
         conti_json: { ...conti, evolinkPrompt: evoPrompt },
         embedding_vector: embedding,
         similarity_score: similarityScore,
+        self_assessed_humor: selfAssessedHumor,
+        retry_count_for_humor: retryCountForHumor,
         character_names: storedCharacterNames.length ? storedCharacterNames : null,
         error_message: null,
       })
@@ -739,7 +872,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
     }
 
     await notifyTelegram(
-      `📝 콘티 검토 대기\n계정: ${accountName}\n${WEB_BASE}/video-content?id=${historyId}`,
+      `📝 콘티 검토 대기\n계정: ${accountName}${selfAssessedHumor === 'dull' ? ' · ⚠ 유머 dull' : ''}\n${WEB_BASE}/video-content?id=${historyId}`,
       workspace,
     );
 

@@ -62,6 +62,16 @@ export const VIDEO_CONTENT_STATUS_LABEL: Record<string, string> = {
   on_hold: '보류',
 };
 
+export function formatSelfAssessedHumor(humor?: string | null): string {
+  if (humor === 'funny') return 'funny';
+  if (humor === 'dull') return 'dull';
+  return '—';
+}
+
+export function isDullHumorAssessment(humor?: string | null): boolean {
+  return humor === 'dull';
+}
+
 export interface ContiPreviewData {
   scenarioSummary?: string;
   location?: string;

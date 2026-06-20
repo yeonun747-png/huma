@@ -4,7 +4,7 @@ import type { Workspace } from '@huma/shared';
 import { supabase } from '../../middleware/auth.js';
 import { logOperation } from '../../lib/log-emitter.js';
 import { getSetting, updateSetting } from '../../lib/settings.js';
-import { videoContentFinalPath, videoContentSourcePath } from './paths.js';
+import { videoContentFinalPath, videoContentSourcePath, resolveStoredVideoPath } from './paths.js';
 import { removeVideoContentThumb } from './thumbnail.js';
 
 export const VIDEO_CONTENT_STORAGE_SETTING_KEY = 'video_content_storage';
@@ -133,8 +133,8 @@ function resolveFileState(row: HistoryRow): {
   sourceBytes: number;
 } {
   const id = String(row.id);
-  const subtitledPath = String(row.video_file_path ?? videoContentFinalPath(id));
-  const sourcePath = String(row.source_video_path ?? videoContentSourcePath(id));
+  const subtitledPath = resolveStoredVideoPath(id, row.video_file_path as string | null | undefined, 'final');
+  const sourcePath = resolveStoredVideoPath(id, row.source_video_path as string | null | undefined, 'source');
   const subtitledBytes = fileSizeBytes(subtitledPath);
   const sourceBytes = fileSizeBytes(sourcePath);
   return {

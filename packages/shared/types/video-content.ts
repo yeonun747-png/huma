@@ -21,6 +21,10 @@ export interface HumaVideoContentHistory {
   scenario_summary?: string | null;
   conti_json?: Record<string, unknown> | null;
   similarity_score?: number | null;
+  /** Haiku 별도 호출 유머 평가 — funny | dull */
+  self_assessed_humor?: 'funny' | 'dull' | string | null;
+  /** 유머 dull 재생성 시도 횟수 (0~2) */
+  retry_count_for_humor?: number | null;
   cut_type?: string | null;
   duration?: number | null;
   character_used?: string | null;

@@ -27,6 +27,7 @@ import {
 } from '@/lib/video-content-targets';
 import { ShortformVideoModelSettings } from '@/components/settings/shortform-video-model-settings';
 import { ContiPreview } from '@/components/video/conti-preview';
+import { VideoContentHumorBadge } from '@/components/video/video-content-humor-badge';
 import { VideoContentStoragePanel } from '@/components/video/video-content-storage-panel';
 import { MGrid, MPanel, MTag } from '@/components/mockup/primitives';
 
@@ -139,6 +140,7 @@ function CompletedDetail({
     <div className="space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="text-[13px] font-semibold text-huma-t">{accountName ?? item.account_id.slice(0, 8)}</div>
+        <VideoContentHumorBadge humor={item.self_assessed_humor} />
         {isDeletableVideoContent(item.status) ? (
           <button
             type="button"
@@ -200,7 +202,7 @@ function CompletedDetail({
       <div className="flex flex-wrap gap-2">
         {conti ? (
           <button type="button" className="btn-ghost btn-sm" onClick={() => setShowConti((v) => !v)}>
-            {showConti ? '콘티 닫기' : '콘티 보기'}
+            {showConti ? '📝 콘티 닫기' : '📝 콘티 보기'}
           </button>
         ) : null}
         <button
@@ -210,7 +212,7 @@ function CompletedDetail({
           title={hasSource ? undefined : '원본이 보관된 작업만 가능 (신규 생성분부터)'}
           onClick={onReburn}
         >
-          {reburning ? '자막 입히는 중…' : '자막만 다시 입히기'}
+          {reburning ? '💬 자막 입히는 중…' : '💬 자막만 다시 입히기'}
         </button>
         <button
           type="button"
@@ -218,10 +220,10 @@ function CompletedDetail({
           disabled={videoVariant === 'source' ? !hasSource : !hasSubtitled}
           onClick={() => void api.downloadVideoContent(item.id, videoVariant === 'source' ? 'source' : undefined)}
         >
-          {videoVariant === 'source' ? '원본 다운로드' : '자막본 다운로드'}
+          {videoVariant === 'source' ? '⬇️ 원본 다운로드' : '⬇️ 자막본 다운로드'}
         </button>
         <button type="button" className="btn-ghost btn-sm" onClick={() => void copyText(captionText)}>
-          캡션 복사
+          📋 캡션 복사
         </button>
         {firstComment ? (
           <button type="button" className="btn-ghost btn-sm" onClick={() => void copyText(firstComment)}>
@@ -338,7 +340,9 @@ function DetailPanel({
           <div className="mt-0.5 text-[10px] text-huma-t3">
             {item.relationship_axis} · {item.emotion_curve} · {item.hook_type} · {item.duration}s
             {item.similarity_score != null ? ` · 유사도 ${Number(item.similarity_score).toFixed(3)}` : ''}
+            {item.retry_count_for_humor ? ` · 유머 재시도 ${item.retry_count_for_humor}회` : ''}
           </div>
+          <VideoContentHumorBadge humor={item.self_assessed_humor} className="mt-1" />
         </div>
         <div className="flex flex-wrap gap-2">
           {deletable ? (
@@ -397,6 +401,7 @@ export function VideoContentView() {
   const [storageRefreshToken, setStorageRefreshToken] = useState(0);
   const [deleting, setDeleting] = useState(false);
   const selectedStatusRef = useRef<string | null>(null);
+  const hadProgressRef = useRef(false);
 
   const load = useCallback(async () => {
     const [accs, list] = await Promise.all([
@@ -415,6 +420,17 @@ export function VideoContentView() {
     [items],
   );
 
+  const bumpStorageRefresh = useCallback(() => {
+    setStorageRefreshToken((t) => t + 1);
+  }, []);
+
+  useEffect(() => {
+    if (hadProgressRef.current && !hasProgressItems) {
+      bumpStorageRefresh();
+    }
+    hadProgressRef.current = hasProgressItems;
+  }, [hasProgressItems, bumpStorageRefresh]);
+
   useEffect(() => {
     void load().catch(() => {});
     const pollMs = hasProgressItems ? 2_000 : 10_000;
@@ -428,6 +444,9 @@ export function VideoContentView() {
     const onLog = (payload: { message?: string }) => {
       const msg = payload?.message ?? '';
       if (!msg.includes('[video-content]')) return;
+      if (msg.includes('생성 완료') || msg.includes('자막 재입히기 완료')) {
+        bumpStorageRefresh();
+      }
       if (debounce) clearTimeout(debounce);
       debounce = setTimeout(() => {
         void load().catch(() => {});
@@ -440,7 +459,7 @@ export function VideoContentView() {
       if (debounce) clearTimeout(debounce);
       socket.off('log', onLog);
     };
-  }, [load]);
+  }, [load, bumpStorageRefresh]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -477,6 +496,9 @@ export function VideoContentView() {
     const prev = selectedStatusRef.current;
     if (prev && prev !== item.status) {
       setActiveTab(videoContentTabOf(item.status));
+      if (item.status === 'completed') {
+        bumpStorageRefresh();
+      }
       void api
         .videoContentGet(selectedId)
         .then((row) => {
@@ -487,7 +509,7 @@ export function VideoContentView() {
     } else if (!prev) {
       selectedStatusRef.current = item.status;
     }
-  }, [items, selectedId]);
+  }, [items, selectedId, bumpStorageRefresh]);
 
   const contiTargetOptions = useMemo(
     () => buildContiTargetOptions(accounts, filterWorkspace),
@@ -513,7 +535,7 @@ export function VideoContentView() {
 
   const refreshSelectedDetail = useCallback(async () => {
     const list = await load();
-    setStorageRefreshToken((t) => t + 1);
+    bumpStorageRefresh();
     if (!selectedId) return list;
     try {
       const row = await api.videoContentGet(selectedId);
@@ -524,7 +546,7 @@ export function VideoContentView() {
       if (row) setDetail(row as HumaVideoContentHistory);
     }
     return list;
-  }, [load, selectedId]);
+  }, [load, selectedId, bumpStorageRefresh]);
 
   const selectedItem = selectedId ? items.find((i) => i.id === selectedId) ?? null : null;
 
@@ -728,12 +750,15 @@ export function VideoContentView() {
                         <span className="truncate text-[11px] font-semibold text-huma-t">
                           {videoContentDisplayName(item.account_id, accounts)}
                         </span>
-                        <MTag
-                          tone={statusTone(item.status)}
-                          className={`shrink-0 text-[9px] ${isVideoProgressStatus(item.status) ? 'animate-pulse' : ''}`}
-                        >
-                          {VIDEO_CONTENT_STATUS_LABEL[item.status] ?? item.status}
-                        </MTag>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <VideoContentHumorBadge humor={item.self_assessed_humor} />
+                          <MTag
+                            tone={statusTone(item.status)}
+                            className={`text-[9px] ${isVideoProgressStatus(item.status) ? 'animate-pulse' : ''}`}
+                          >
+                            {VIDEO_CONTENT_STATUS_LABEL[item.status] ?? item.status}
+                          </MTag>
+                        </div>
                       </div>
                       <div className="mt-0.5 truncate text-[10px] text-huma-t3">
                         {item.scenario_summary || '—'}

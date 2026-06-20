@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { HumaAccount, HumaVideoContentHistory, VideoPersonaConfig, Workspace } from '@huma/shared';
 import { hasStoredVideoPersona, getVideoPersonaSectionGuide, serializeVideoPersonaText } from '@huma/shared';
 import { api } from '@/lib/api';
+import { VideoContentHumorTableCell } from '@/components/video/video-content-humor-badge';
 
 interface VideoPersonaModalProps {
   account: HumaAccount;
@@ -206,6 +207,7 @@ export function VideoPersonaModal({ account, open, onClose }: VideoPersonaModalP
                       <tr>
                         <th className="p-1 text-left">일시</th>
                         <th className="p-1 text-left">상태</th>
+                        <th className="p-1 text-left">유머</th>
                         <th className="p-1 text-left">유사도</th>
                         <th className="p-1 text-left">컷/길이</th>
                       </tr>
@@ -215,6 +217,9 @@ export function VideoPersonaModal({ account, open, onClose }: VideoPersonaModalP
                         <tr key={h.id} className="border-t border-huma-bdr2">
                           <td className="p-1">{new Date(h.created_at).toLocaleDateString('ko-KR')}</td>
                           <td className="p-1">{h.status}</td>
+                          <td className="p-1">
+                            <VideoContentHumorTableCell humor={h.self_assessed_humor} />
+                          </td>
                           <td className="p-1">{h.similarity_score?.toFixed?.(3) ?? '—'}</td>
                           <td className="p-1">
                             {h.cut_type}/{h.duration}s

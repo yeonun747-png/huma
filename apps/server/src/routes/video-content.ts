@@ -12,7 +12,7 @@ import {
   syncActiveVideoRenderStatuses,
 } from '../modules/video-content/pipeline.js';
 import { hasEvoLinkApiKey } from '../modules/video-content/evolink.js';
-import { videoContentFinalPath, videoContentSourcePath } from '../modules/video-content/paths.js';
+import { videoContentFinalPath, videoContentSourcePath, resolveStoredVideoPath } from '../modules/video-content/paths.js';
 import { ensureVideoThumbnail, removeVideoContentThumb } from '../modules/video-content/thumbnail.js';
 import {
   bulkDeleteVideoContentFiles,
@@ -75,16 +75,6 @@ async function removeVideoContentFiles(
   }
 }
 
-function resolveStoredVideoPath(
-  historyId: string,
-  storedPath: string | null | undefined,
-  kind: 'final' | 'source',
-): string {
-  if (storedPath && existsSync(storedPath)) return storedPath;
-  const fallback = kind === 'final' ? videoContentFinalPath(historyId) : videoContentSourcePath(historyId);
-  return fallback;
-}
-
 export async function registerVideoContentRoutes(app: FastifyInstance) {
   app.get('/api/video-content', { preHandler: authMiddleware }, async (request) => {
     const allowed = getWorkspaceFilter(request);
@@ -94,7 +84,7 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
     let query = supabase
       .from('huma_video_content_history')
       .select(
-        'id, account_id, workspace, status, relationship_axis, emotion_curve, hook_type, cut_type, duration, scenario_summary, similarity_score, character_used, caption_youtube, caption_tiktok, caption_instagram, caption_threads, caption_x, first_comment_threads, first_comment_x, uploaded_youtube, uploaded_youtube_at, uploaded_tiktok, uploaded_tiktok_at, uploaded_instagram, uploaded_instagram_at, uploaded_threads, uploaded_threads_at, uploaded_x, uploaded_x_at, video_file_path, source_video_path, error_message, created_at',
+        'id, account_id, workspace, status, relationship_axis, emotion_curve, hook_type, cut_type, duration, scenario_summary, similarity_score, self_assessed_humor, retry_count_for_humor, character_used, caption_youtube, caption_tiktok, caption_instagram, caption_threads, caption_x, first_comment_threads, first_comment_x, uploaded_youtube, uploaded_youtube_at, uploaded_tiktok, uploaded_tiktok_at, uploaded_instagram, uploaded_instagram_at, uploaded_threads, uploaded_threads_at, uploaded_x, uploaded_x_at, video_file_path, source_video_path, error_message, created_at',
       )
       .in('workspace', allowed)
       .order('created_at', { ascending: false })
@@ -279,7 +269,7 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
     const { data } = await supabase
       .from('huma_video_content_history')
       .select(
-        'id, scenario_summary, similarity_score, cut_type, duration, relationship_axis, emotion_curve, hook_type, status, created_at',
+        'id, scenario_summary, similarity_score, self_assessed_humor, retry_count_for_humor, cut_type, duration, relationship_axis, emotion_curve, hook_type, status, created_at',
       )
       .eq('account_id', id)
       .order('created_at', { ascending: false })

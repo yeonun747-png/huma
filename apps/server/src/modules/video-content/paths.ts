@@ -1,3 +1,4 @@
+import { existsSync } from 'fs';
 import { join } from 'path';
 
 const DATA_DIR = join(process.cwd(), 'data', 'video-content');
@@ -8,6 +9,15 @@ export function videoContentFinalPath(historyId: string): string {
 
 export function videoContentSourcePath(historyId: string): string {
   return join(DATA_DIR, `${historyId}_source.mp4`);
+}
+
+export function resolveStoredVideoPath(
+  historyId: string,
+  storedPath: string | null | undefined,
+  kind: 'final' | 'source',
+): string {
+  if (storedPath && existsSync(storedPath)) return storedPath;
+  return kind === 'final' ? videoContentFinalPath(historyId) : videoContentSourcePath(historyId);
 }
 
 export function videoContentFinalThumbPath(historyId: string): string {
