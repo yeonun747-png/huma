@@ -8,7 +8,7 @@ import { NAV_BADGES_REFRESH } from '@/lib/nav-badge-events';
 
 const BADGE_POLL_MS = 4_000;
 const FAST_POLL_MS = 2_500;
-const FAST_ROUTES = new Set(['/queue', '/monitor', '/watcher']);
+const FAST_ROUTES = new Set(['/queue', '/video-content', '/monitor', '/watcher']);
 
 export function useSidebarBadges(workspace: Workspace, activePath: string) {
   const [badges, setBadges] = useState({ queue: 0, video: 0, watcher: 0, seo: 0, scenario: 0 });

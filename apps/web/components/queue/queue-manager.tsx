@@ -6,6 +6,7 @@ import { isCaptchaDrillJob, isContentFullPipelineShell } from '@huma/shared';
 import { api } from '@/lib/api';
 import { WS_LABEL } from '@/lib/constants';
 import { useWorkspace } from '@/components/dashboard/workspace-context';
+import { PostingImageModelSettings } from '@/components/settings/posting-image-model-settings';
 import { MGrid, MPanel, MQueueItem, MStat, MTag } from '@/components/mockup/primitives';
 import { useRegisterPageAction } from '@/components/dashboard/page-action-context';
 import { PostViewerModal } from '@/components/viewer/post-viewer-modal';
@@ -24,6 +25,7 @@ import {
 } from '@/lib/queue-job-eligibility';
 import { CaptchaCompleteModal } from './captcha-complete-modal';
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import type { QueuePrefill } from '@/lib/queue-prefill';
 
 const QUEUE_PAGE_SIZE_KEY = 'huma_queue_page_size';
@@ -121,7 +123,9 @@ function jobSub(job: HumaJob): string {
       else parts.push('생성 중');
     } else if (job.status === 'pending' || job.status === 'scheduled') parts.push('생성 대기');
     else if (job.status === 'paused') parts.push('클릭하여 수정');
-  } else if (job.content_type) parts.push(`타입 ${job.content_type}`);
+  } else if (job.content_type === 'B') {
+    parts.push('레거시 · 영상 포함');
+  } else if (job.content_type) parts.push('네이버 포스팅');
   else if (job.link_url) parts.push('AI 생성');
 
   parts.push(queueScopeLabel(job));
@@ -417,8 +421,8 @@ export function QueueManager() {
       title: values.title.trim(),
       source_url: values.source_url.trim(),
       synopsis: values.synopsis.trim() || undefined,
-      content_type: values.content_type === 'auto' ? undefined : values.content_type,
-      content_type_auto: values.content_type === 'auto',
+      content_type: 'A',
+      content_type_auto: false,
       auto_schedule: values.auto_schedule,
       schedule_time: values.schedule_time,
       uploaded_images,
@@ -445,8 +449,8 @@ export function QueueManager() {
         title: values.title.trim(),
         link_url: values.source_url.trim(),
         content: values.synopsis.trim() || undefined,
-        content_type: values.content_type === 'auto' ? 'A' : values.content_type,
-        content_type_auto: values.content_type === 'auto',
+        content_type: 'A',
+        content_type_auto: false,
         auto_scheduled: values.auto_schedule,
         scheduled_at: scheduledAt,
       };
@@ -474,8 +478,8 @@ export function QueueManager() {
         title: values.title.trim(),
         source_url: values.source_url.trim(),
         synopsis: values.synopsis.trim() || undefined,
-        content_type: values.content_type === 'auto' ? undefined : values.content_type,
-        content_type_auto: values.content_type === 'auto',
+        content_type: 'A',
+        content_type_auto: false,
         auto_schedule: values.auto_schedule,
         schedule_time: values.schedule_time,
         uploaded_images,
@@ -495,6 +499,14 @@ export function QueueManager() {
 
   return (
     <div className="animate-fadeIn">
+      <p className="mb-3 text-[12px] leading-relaxed text-huma-t3">
+        Claude 글 작성 · Imagen 대표 이미지 생성 · 네이버 블로그 자동 발행 큐입니다. 숏폼 영상 생성·업로드는{' '}
+        <Link href="/video-content" className="text-huma-acc hover:underline">
+          숏폼 영상 관리
+        </Link>
+        를 사용하세요.
+      </p>
+
       <CrankJobDetailModal
         job={crankJob}
         onClose={() => setCrankJob(null)}
@@ -526,11 +538,23 @@ export function QueueManager() {
         />
       ) : null}
 
+      <MGrid cols={2} className="mb-4">
+        <PostingImageModelSettings />
+        <MPanel title="📋 포스팅 큐 안내">
+          <ul className="space-y-2 font-mono text-[11px] leading-relaxed text-huma-t3">
+            <li>① Claude Sonnet — 블로그 본문·SEO·해시태그 작성</li>
+            <li>② Imagen 4 — 대표 이미지 생성 (직접 업로드 시 생략)</li>
+            <li>③ Playwright — 휴먼 엔진 타이핑으로 네이버 발행</li>
+            <li className="text-huma-t2">검증 미리보기로 생성 결과 확인 후 포스팅 큐 등록 가능</li>
+          </ul>
+        </MPanel>
+      </MGrid>
+
       <MGrid cols={4}>
         <MStat label="총 대기" value={stats.pending} />
         <MStat label="진행중" value={stats.running} tone="warn" />
         <MStat label="오늘 완료" value={stats.doneToday} tone="ok" />
-        <MStat label="완료 전체" value={stats.doneAll} sub="큐에 남은 건" />
+        <MStat label="완료 전체" value={stats.doneAll} sub="포스팅 큐 잔여" />
       </MGrid>
 
       <QueueAutoContentModal
@@ -547,12 +571,12 @@ export function QueueManager() {
       />
 
       <MPanel
-        title="발행 큐"
+        title="포스팅 큐"
         action={
           <div className="flex items-center gap-2">
             {legend}
             <button type="button" className="btn-primary btn-sm px-2 py-1" onClick={() => setShowModal(true)}>
-              + 작업 추가
+              + 포스팅 추가
             </button>
           </div>
         }
@@ -573,7 +597,7 @@ export function QueueManager() {
                     disabled={deletableJobs.length === 0}
                     onChange={toggleSelectAll}
                   />
-                  큐 전체
+                  포스팅 큐
                   {visibleDeletableJobs.length > 0 ? ` (${visibleDeletableJobs.length})` : ''}
                 </label>
                 {staleFailedJobs.length > 0 ? (

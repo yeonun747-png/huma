@@ -9,7 +9,6 @@ import {
   autoDecideWithCredits,
   resolveNaverBlogScheduledAt,
   resolvePlatformScheduledAt,
-  selectImageModel,
   type PlatformSchedule,
 } from '../../claude/auto-decide.js';
 import { generateImage, type ImageModel } from '../../higgsfield/image.js';
@@ -472,7 +471,8 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
     }
   } else {
     const imagenStart = Date.now();
-    imageModel = selectImageModel(input.workspace);
+    const pipelineModels = await getPipelineModelSettings(input.workspace);
+    imageModel = pipelineModels.imageModel ?? 'auto';
     imagenUrl = await generateImage({
       prompt: generated.image_prompt,
       model: imageModel as ImageModel,

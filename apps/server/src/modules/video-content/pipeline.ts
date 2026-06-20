@@ -78,13 +78,95 @@ async function loadRecentCaptions(accountId: string): Promise<string[]> {
   return out;
 }
 
+interface VideoAccountContext {
+  accountId: string;
+  accountName: string;
+  workspace: Workspace;
+  personaConfig: ReturnType<typeof resolveVideoPersona>;
+  baseConditions: GenerationConditions;
+}
+
+async function loadVideoAccountContext(accountId: string): Promise<VideoAccountContext> {
+  const { data: account, error: accErr } = await supabase
+    .from('huma_accounts')
+    .select('id, name, workspace, persona')
+    .eq('id', accountId)
+    .maybeSingle();
+
+  if (accErr || !account) throw new Error('계정 없음');
+  const workspace = account.workspace as Workspace;
+  const personaConfig = resolveVideoPersona(workspace, account.persona as Record<string, unknown>);
+
+  let characterId: string | undefined;
+  let characterName: string | undefined;
+  let characterDescription: string | undefined;
+
+  if (workspace === 'panana') {
+    const ch = await pickPananaCharacter(accountId);
+    if (ch) {
+      characterId = ch.id;
+      characterName = ch.name;
+      characterDescription = ch.description ?? undefined;
+    }
+  }
+
+  const baseConditions = await buildGenerationConditions({
+    accountId,
+    workspace,
+    personaConfig,
+    characterId,
+    characterName,
+    characterDescription,
+  });
+
+  return {
+    accountId,
+    accountName: account.name,
+    workspace,
+    personaConfig,
+    baseConditions,
+  };
+}
+
+function conditionsFromHistoryRow(
+  row: Record<string, unknown>,
+  characterId?: string | null,
+): GenerationConditions {
+  return {
+    relationshipAxis: String(row.relationship_axis ?? ''),
+    situationAxis: row.situation_axis ? String(row.situation_axis) : undefined,
+    emotionCurve: String(row.emotion_curve ?? ''),
+    hookType: String(row.hook_type ?? ''),
+    locationKeyword: String(row.location_keyword ?? ''),
+    timeOfDay: String(row.time_of_day ?? ''),
+    cutType: (row.cut_type === 'single_shot' ? 'single_shot' : 'multi_shot') as 'single_shot' | 'multi_shot',
+    duration: Number(row.duration) > 0 ? Number(row.duration) : 15,
+    characterId: characterId ?? undefined,
+  };
+}
+
+function parseContiFromJson(raw: unknown): VideoConti {
+  const obj = (raw ?? {}) as Record<string, unknown>;
+  return {
+    characters: (obj.characters as VideoConti['characters']) ?? [],
+    location: String(obj.location ?? ''),
+    lighting: String(obj.lighting ?? ''),
+    timeOfDay: String(obj.timeOfDay ?? ''),
+    cutType: obj.cutType === 'single_shot' ? 'single_shot' : 'multi_shot',
+    duration: Number(obj.duration) > 0 ? Number(obj.duration) : 15,
+    shots: (obj.shots as VideoConti['shots']) ?? [],
+    scenarioSummary: String(obj.scenarioSummary ?? ''),
+    fullText: String(obj.fullText ?? obj.scenarioSummary ?? ''),
+  };
+}
+
 async function finalizeVideoContent(params: {
   historyId: string;
   accountId: string;
   accountName: string;
   workspace: Workspace;
   conti: VideoConti;
-  baseConditions: Omit<GenerationConditions, 'locationKeyword' | 'timeOfDay'>;
+  baseConditions: GenerationConditions;
   sourcePath: string;
 }): Promise<void> {
   const { historyId, accountId, workspace, accountName, conti, baseConditions, sourcePath } = params;
@@ -139,56 +221,24 @@ async function finalizeVideoContent(params: {
   });
 }
 
-export async function runVideoContentGeneration(accountId: string): Promise<string> {
-  if (!process.env.EVOLINK_API_KEY?.trim()) {
-    throw new Error('EVOLINK_API_KEY 없음');
-  }
-
-  const { data: account, error: accErr } = await supabase
-    .from('huma_accounts')
-    .select('id, name, workspace, persona')
-    .eq('id', accountId)
-    .maybeSingle();
-
-  if (accErr || !account) throw new Error('계정 없음');
-  const workspace = account.workspace as Workspace;
-  const personaConfig = resolveVideoPersona(workspace, account.persona as Record<string, unknown>);
-
-  let characterId: string | undefined;
-  let characterName: string | undefined;
-  let characterDescription: string | undefined;
-
-  if (workspace === 'panana') {
-    const ch = await pickPananaCharacter(accountId);
-    if (ch) {
-      characterId = ch.id;
-      characterName = ch.name;
-      characterDescription = ch.description ?? undefined;
-    }
-  }
-
-  const baseConditions = await buildGenerationConditions({
-    accountId,
-    workspace,
-    personaConfig,
-    characterId,
-    characterName,
-    characterDescription,
-  });
+/** 1단계 — Sonnet 콘티 생성 (관리자 검토 후 영상 제작) */
+export async function runContiGeneration(accountId: string): Promise<string> {
+  const ctx = await loadVideoAccountContext(accountId);
+  const { baseConditions, workspace, accountName } = ctx;
 
   const { data: historyRow, error: insertErr } = await supabase
     .from('huma_video_content_history')
     .insert({
       account_id: accountId,
       workspace,
-      status: 'generating',
+      status: 'conti_generating',
       relationship_axis: baseConditions.relationshipAxis,
       situation_axis: baseConditions.situationAxis ?? null,
       emotion_curve: baseConditions.emotionCurve,
       hook_type: baseConditions.hookType,
       cut_type: baseConditions.cutType,
       duration: baseConditions.duration,
-      character_used: characterId ?? null,
+      character_used: baseConditions.characterId ?? null,
     })
     .select('id')
     .single();
@@ -212,7 +262,7 @@ export async function runVideoContentGeneration(accountId: string): Promise<stri
 
       const generated = await generateConti({
         workspace,
-        config: personaConfig,
+        config: ctx.personaConfig,
         conditions,
         feedback,
         pastSummaries,
@@ -241,7 +291,7 @@ export async function runVideoContentGeneration(accountId: string): Promise<stri
           .eq('id', historyId);
 
         await notifyTelegram(
-          `⚠️ 영상 콘티 생성 실패 — 유사도 기준 미통과\n계정: ${account.name} (${accountId})`,
+          `⚠️ 영상 콘티 생성 실패 — 유사도 기준 미통과\n계정: ${accountName} (${accountId})`,
           workspace,
         );
         throw new Error('유사도 기준 미통과');
@@ -280,7 +330,7 @@ export async function runVideoContentGeneration(accountId: string): Promise<stri
       const lengthFeedback = `${PROMPT_LENGTH_REGENERATION_FEEDBACK} (현재 변환 프롬프트 ${evoPrompt.length}자)`;
       const regenerated = await generateConti({
         workspace,
-        config: personaConfig,
+        config: ctx.personaConfig,
         conditions: {
           ...baseConditions,
           locationKeyword: conti!.locationKeyword,
@@ -297,15 +347,79 @@ export async function runVideoContentGeneration(accountId: string): Promise<stri
     await supabase
       .from('huma_video_content_history')
       .update({
+        status: 'conti_ready',
         location_keyword: conti!.locationKeyword,
         time_of_day: conti!.timeOfDay,
         scenario_summary: conti!.scenarioSummary,
         conti_json: { ...conti, evolinkPrompt: evoPrompt },
         embedding_vector: embedding,
         similarity_score: similarityScore,
+        error_message: null,
       })
       .eq('id', historyId);
 
+    await notifyTelegram(
+      `📝 콘티 검토 대기\n계정: ${accountName}\n${WEB_BASE}/video-content?id=${historyId}`,
+      workspace,
+    );
+
+    return historyId;
+  } catch (err) {
+    const msg = (err as Error).message;
+    if (msg !== '유사도 기준 미통과' && msg !== '프롬프트 길이 초과') {
+      await supabase
+        .from('huma_video_content_history')
+        .update({ status: 'failed', error_message: msg })
+        .eq('id', historyId);
+    }
+    throw err;
+  }
+}
+
+/** 2단계 — 검토된 콘티 → EvoLink 영상 제작 */
+export async function runVideoProduction(historyId: string): Promise<string> {
+  if (!process.env.EVOLINK_API_KEY?.trim()) {
+    throw new Error('EVOLINK_API_KEY 없음');
+  }
+
+  const { data: history, error: histErr } = await supabase
+    .from('huma_video_content_history')
+    .select('*')
+    .eq('id', historyId)
+    .maybeSingle();
+
+  if (histErr || !history) throw new Error('히스토리 없음');
+  if (history.status !== 'conti_ready') {
+    throw new Error(`영상 제작 불가 상태: ${history.status}`);
+  }
+  if (!history.conti_json) throw new Error('콘티 데이터 없음');
+
+  const accountId = history.account_id as string;
+  const { data: account } = await supabase
+    .from('huma_accounts')
+    .select('id, name, workspace')
+    .eq('id', accountId)
+    .maybeSingle();
+  if (!account) throw new Error('계정 없음');
+
+  const workspace = account.workspace as Workspace;
+  const conti = parseContiFromJson(history.conti_json);
+  const baseConditions = conditionsFromHistoryRow(history, history.character_used as string | null);
+  const contiJson = history.conti_json as Record<string, unknown>;
+  let evoPrompt = String(contiJson.evolinkPrompt ?? '');
+  if (!evoPrompt) {
+    evoPrompt = buildEvoLinkPrompt(conti, baseConditions);
+  }
+  if (!isEvoLinkPromptWithinLimit(evoPrompt)) {
+    throw new Error(`EvoLink 프롬프트 길이 초과 (${evoPrompt.length}자)`);
+  }
+
+  await supabase
+    .from('huma_video_content_history')
+    .update({ status: 'rendering', error_message: null })
+    .eq('id', historyId);
+
+  try {
     const { videoQuality } = await getPipelineModelSettings(workspace);
 
     const taskId = await createEvoLinkVideoTask({
@@ -317,7 +431,7 @@ export async function runVideoContentGeneration(accountId: string): Promise<stri
     await supabase
       .from('huma_video_content_history')
       .update({
-        conti_json: { ...conti, evolinkPrompt: evoPrompt, evolinkTaskId: taskId },
+        conti_json: { ...contiJson, ...conti, evolinkPrompt: evoPrompt, evolinkTaskId: taskId },
       })
       .eq('id', historyId);
 
@@ -346,7 +460,7 @@ export async function runVideoContentGeneration(accountId: string): Promise<stri
       accountId,
       accountName: account.name,
       workspace,
-      conti: conti!,
+      conti,
       baseConditions,
       sourcePath,
     });
@@ -354,11 +468,7 @@ export async function runVideoContentGeneration(accountId: string): Promise<stri
     return historyId;
   } catch (err) {
     const msg = (err as Error).message;
-    if (
-      msg !== '유사도 기준 미통과' &&
-      msg !== '프롬프트 길이 초과' &&
-      !msg.includes('EvoLink')
-    ) {
+    if (!msg.includes('EvoLink')) {
       await supabase
         .from('huma_video_content_history')
         .update({ status: 'failed', error_message: msg })
@@ -368,8 +478,17 @@ export async function runVideoContentGeneration(accountId: string): Promise<stri
   }
 }
 
+/** @deprecated 레거시 큐 — 콘티 생성만 수행 */
+export async function runVideoContentGeneration(accountId: string): Promise<string> {
+  return runContiGeneration(accountId);
+}
+
 export async function executeVideoContentGenerate(payload: { historyId?: string; accountId: string }) {
-  await runVideoContentGeneration(payload.accountId);
+  if (payload.historyId) {
+    await runVideoProduction(payload.historyId);
+    return;
+  }
+  await runContiGeneration(payload.accountId);
 }
 
 export { finalizeVideoContent };

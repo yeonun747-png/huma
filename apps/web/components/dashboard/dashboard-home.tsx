@@ -204,13 +204,13 @@ export function DashboardHome() {
           sub: stats.pananaStats.errorAccounts > 0 ? '세션 확인 필요' : '정상',
           tone: stats.pananaStats.errorAccounts > 0 ? ('err' as const) : undefined,
         },
-        { label: '영상 파이프라인', value: '—', sub: '영상 메뉴 참조' },
+        { label: '숏폼 영상', value: '—', sub: '숏폼 영상 관리 참조' },
       ]
     : [
         { label: '오늘 발행', value: '0', sub: '—' },
         { label: '활성 채널', value: '0', sub: '—' },
         { label: '오류 계정', value: '0', sub: '—' },
-        { label: '영상 파이프라인', value: '—', sub: '—' },
+        { label: '숏폼 영상', value: '—', sub: '—' },
       ];
 
   const accountStats = periodStats;
@@ -249,7 +249,7 @@ export function DashboardHome() {
 
       <MGrid cols={4}>
         <MStat label="오늘 총 발행" value={periodStats.todayPublish} sub={periodStats.todayPublishSub} tone="ok" />
-        <MStat label="큐 대기" value={periodStats.queuePending} sub={periodStats.queueSub} />
+        <MStat label="포스팅 대기" value={periodStats.queuePending} sub={periodStats.queueSub} />
         <MStat label="오류" value={periodStats.errors} tone="err" sub={periodStats.errorsSub} />
         <Link href="/accounts" className="block transition hover:opacity-90">
           <MStat

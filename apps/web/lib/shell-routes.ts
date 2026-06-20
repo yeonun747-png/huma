@@ -12,7 +12,7 @@ export const SHELL_VIEW_LOADERS: Record<string, ShellViewLoader> = {
   '/oplog': () => import('@/components/pages/oplog-view').then((m) => ({ default: m.OplogView })),
   '/accounts': () => import('@/components/pages/accounts-view').then((m) => ({ default: m.AccountsView })),
   '/video-pipeline': () =>
-    import('@/components/pages/video-view').then((m) => ({ default: m.VideoPipelineView })),
+    import('@/components/pages/video-pipeline-redirect').then((m) => ({ default: m.VideoPipelineRedirect })),
   '/video-content': () =>
     import('@/components/pages/video-content-view').then((m) => ({ default: m.VideoContentView })),
   '/seo-keywords': () =>

@@ -1,8 +1,17 @@
+export type VideoContentStatus =
+  | 'conti_generating'
+  | 'conti_ready'
+  | 'rendering'
+  | 'generating'
+  | 'completed'
+  | 'failed'
+  | 'on_hold';
+
 export interface HumaVideoContentHistory {
   id: string;
   account_id: string;
   workspace: string;
-  status: 'generating' | 'completed' | 'failed' | string;
+  status: VideoContentStatus | string;
   relationship_axis?: string | null;
   situation_axis?: string | null;
   location_keyword?: string | null;
@@ -10,6 +19,7 @@ export interface HumaVideoContentHistory {
   emotion_curve?: string | null;
   hook_type?: string | null;
   scenario_summary?: string | null;
+  conti_json?: Record<string, unknown> | null;
   similarity_score?: number | null;
   cut_type?: string | null;
   duration?: number | null;

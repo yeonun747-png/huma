@@ -448,7 +448,7 @@ export function HumanEngineSettings() {
           <HeToggle label="EXIF GPS 랜덤 주입" hint="GPS 좌표를 무작위로 넣어 항상 같은 위치에서 촬영한 패턴을 방지합니다." value={image.gps_randomize} onChange={(v) => { setImage((img) => { const next = { ...img, gps_randomize: v }; imageRef.current = next; saveNow(humanRef.current, next, mediaRef.current); return next; }); }} />
           <HeStaticRow label="JPEG 품질 범위" value="90~96%" hint="매 업로드마다 90~96% 사이에서 품질을 랜덤 선택합니다." />
           <HeToggle label="중복 이미지 차단" hint="이미 사용한 이미지 해시는 다시 업로드하지 않습니다." value={image.block_duplicate} onChange={(v) => { setImage((img) => { const next = { ...img, block_duplicate: v }; imageRef.current = next; saveNow(humanRef.current, next, mediaRef.current); return next; }); }} />
-          <HeStaticRow label="기본 이미지 모델" value={HUMAN_ENGINE_IMAGE_LABEL} hint="블로그·영상 파이프라인에서 기본으로 쓰는 Imagen 모델입니다." />
+          <HeStaticRow label="기본 이미지 모델" value={HUMAN_ENGINE_IMAGE_LABEL} hint="포스팅 큐에서 Imagen 모델을 설정합니다." />
           <div className="he-chart-caption">v3.26 · Imagen 4 + Kling 3.0 내장 오디오 (TTS 기본 미사용)</div>
           <HeStaticRow label="영상 해상도" value={`${FIXED_VIDEO_DIMENSIONS} · ${FIXED_VIDEO_RESOLUTION} 고정`} hint="Shorts·릴스 업로드용 9:16 세로 해상도입니다." />
           <HeToggle

@@ -17,7 +17,7 @@ export function BgmLibraryView() {
               <li>Pixabay · Supabase · Suno BGM 연동 없음</li>
             </ul>
             <p className="text-[11px] text-huma-t3">
-              영상 생성은 <span className="text-huma-t">영상 파이프라인</span> 메뉴에서 진행하세요.
+              숏폼 영상 생성은 <span className="text-huma-t">숏폼 영상 관리</span> 메뉴에서 진행하세요.
             </p>
           </div>
         </MPanel>

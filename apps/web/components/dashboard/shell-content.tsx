@@ -36,7 +36,7 @@ export function ShellContent({ fallback }: { fallback?: ReactNode }) {
   const page = <View key={shellPath} />;
 
   if (shellPath === '/queue') {
-    return <Suspense fallback={<ShellPageSkeleton title="큐 관리" />}>{page}</Suspense>;
+    return <Suspense fallback={<ShellPageSkeleton title="포스팅 큐 관리" />}>{page}</Suspense>;
   }
 
   return page;

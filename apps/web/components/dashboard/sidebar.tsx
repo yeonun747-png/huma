@@ -181,7 +181,7 @@ export function Sidebar() {
           <div className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-huma-ok" />
           <div>
             <div className="text-[12px] font-semibold text-huma-t2">시스템 정상</div>
-            <div className="text-[10.5px] text-huma-t3">큐 활성 · {pendingJobs}개 대기</div>
+            <div className="text-[10.5px] text-huma-t3">포스팅 큐 · {pendingJobs}개 대기</div>
           </div>
         </div>
       </div>

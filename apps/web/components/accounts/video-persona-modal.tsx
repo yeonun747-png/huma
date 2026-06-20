@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { HumaAccount, HumaVideoContentHistory, VideoPersonaConfig, Workspace } from '@huma/shared';
 import { hasStoredVideoPersona, getVideoPersonaSectionGuide, serializeVideoPersonaText } from '@huma/shared';
 import { api } from '@/lib/api';
-import Link from 'next/link';
 
 interface VideoPersonaModalProps {
   account: HumaAccount;
@@ -16,7 +15,6 @@ export function VideoPersonaModal({ account, open, onClose }: VideoPersonaModalP
   const ws = account.workspace as Workspace;
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [generating, setGenerating] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState('');
   const [toast, setToast] = useState<string | null>(null);
@@ -88,23 +86,6 @@ export function VideoPersonaModal({ account, open, onClose }: VideoPersonaModalP
       return { ok: false, missingSections: [] };
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleGenerate = async () => {
-    if (!window.confirm(`${account.name} 계정으로 영상 1건을 생성합니다. 수 분 소요될 수 있습니다.`)) return;
-    setGenerating(true);
-    setError('');
-    try {
-      const saved = await handleSave();
-      if (!saved.ok) return;
-      await api.generateVideoContent(account.id);
-      window.alert('영상 생성 작업이 큐에 등록되었습니다. 완료 시 Telegram 알림이 발송됩니다.');
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '생성 요청 실패');
-    } finally {
-      setGenerating(false);
     }
   };
 
@@ -244,15 +225,9 @@ export function VideoPersonaModal({ account, open, onClose }: VideoPersonaModalP
             </div>
 
             <div className="m-modal-foot mt-3 flex-wrap gap-2">
-              <button type="button" className="btn-primary flex-[2] py-2" onClick={() => void handleGenerate()} disabled={generating || saving}>
-                {generating ? '요청 중…' : '영상 생성'}
-              </button>
-              <button type="button" className="btn-ghost flex-1 py-2" onClick={() => void handleSave()} disabled={saving}>
+              <button type="button" className="btn-primary flex-[2] py-2" onClick={() => void handleSave()} disabled={saving}>
                 {saving ? '저장 중…' : '설정 저장'}
               </button>
-              <Link href="/video-content" className="btn-ghost flex-1 py-2 text-center" onClick={onClose}>
-                영상 목록
-              </Link>
               <button type="button" className="btn-ghost flex-1 py-2" onClick={onClose}>
                 닫기
               </button>

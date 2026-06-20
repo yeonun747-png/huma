@@ -409,8 +409,17 @@ export const api = {
         body: JSON.stringify(body),
       },
     ),
+  generateConti: (accountId: string) =>
+    request<{ ok: boolean; message?: string }>(`/api/accounts/${accountId}/generate-conti`, {
+      method: 'POST',
+    }),
+  renderVideoContent: (historyId: string) =>
+    request<{ ok: boolean; message?: string }>(`/api/video-content/${historyId}/render-video`, {
+      method: 'POST',
+    }),
+  /** @deprecated generateConti 사용 */
   generateVideoContent: (accountId: string) =>
-    request<{ ok: boolean; message?: string }>(`/api/accounts/${accountId}/generate-video`, {
+    request<{ ok: boolean; message?: string }>(`/api/accounts/${accountId}/generate-conti`, {
       method: 'POST',
     }),
   updateVideoContentUpload: (id: string, body: Record<string, boolean>) =>

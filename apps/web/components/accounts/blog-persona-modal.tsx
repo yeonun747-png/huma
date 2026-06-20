@@ -71,10 +71,10 @@ function BlogPersonaForm({
           disabled={saving || !text.trim()}
           onClick={() => void onSave(text)}
         >
-          {saving ? '저장 중…' : '저장'}
+          {saving ? '저장 중…' : '설정 저장'}
         </button>
         <button type="button" className="btn-ghost flex-1 py-2" onClick={onClose} disabled={saving}>
-          취소
+          닫기
         </button>
       </div>
     </>

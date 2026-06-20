@@ -193,8 +193,8 @@ export async function handleEvoLinkDownloadFailure(params: {
     account_id: params.accountId,
   });
   await enqueueJob({
-    type: 'video_content_generate',
-    payload: { accountId: params.accountId, retryOf: params.historyId },
+    type: 'video_content_render',
+    payload: { historyId: params.historyId },
   });
 }
 

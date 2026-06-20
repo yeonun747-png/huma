@@ -31,13 +31,13 @@ const NO_ACTION = { action: '—', actionType: 'none' as const };
 
 export const PAGE_META: Record<string, PageMeta> = {
   '/dashboard': { title: '대시보드', showPeriod: true, ...NO_ACTION },
-  '/queue': { title: '큐 관리', ...NO_ACTION },
+  '/queue': { title: '포스팅 큐 관리', ...NO_ACTION },
   '/calendar': { title: '스케줄 캘린더', ...NO_ACTION },
   '/monitor': { title: '발행 모니터', ...NO_ACTION },
   '/oplog': { title: 'Operation Log', ...NO_ACTION },
   '/accounts': { title: '계정 관리', contentClass: 'accounts-page-main', ...NO_ACTION },
-  '/video-pipeline': { title: '영상 파이프라인', ...NO_ACTION },
-  '/video-content': { title: '영상 콘텐츠', ...NO_ACTION },
+  '/video-pipeline': { title: '숏폼 영상 관리', ...NO_ACTION },
+  '/video-content': { title: '숏폼 영상 관리', ...NO_ACTION },
   '/watcher': { title: 'Layer4 Watcher', ...NO_ACTION },
   '/human-engine': { title: '휴먼 엔진 설정', contentClass: 'px-[18px] py-4', ...NO_ACTION },
   '/bgm-library': { title: '오디오 정책', ...NO_ACTION },
@@ -53,4 +53,4 @@ export const PAGE_META: Record<string, PageMeta> = {
 export function getPageMeta(pathname: string): PageMeta {
   return PAGE_META[pathname] ?? { title: 'HUMA', ...NO_ACTION };
 }
-
+

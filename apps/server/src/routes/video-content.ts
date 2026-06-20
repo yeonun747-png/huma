@@ -144,27 +144,83 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
     return data ?? [];
   });
 
+  app.post('/api/accounts/:id/generate-conti', { preHandler: authMiddleware }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const access = await assertAccountAccess(id, getWorkspaceFilter(request));
+    if (!access.ok) return reply.code(access.status).send({ error: access.error });
+
+    const { data: busy } = await supabase
+      .from('huma_video_content_history')
+      .select('id')
+      .eq('account_id', id)
+      .in('status', ['conti_generating', 'rendering', 'generating'])
+      .limit(1);
+    if (busy?.length) {
+      return reply.code(409).send({ error: '이미 진행 중인 콘티·영상 작업이 있습니다' });
+    }
+
+    await enqueueJob({
+      type: 'video_content_conti',
+      payload: { accountId: id },
+    });
+
+    return { ok: true, message: '콘티 생성 작업이 큐에 등록되었습니다' };
+  });
+
+  app.post('/api/video-content/:id/render-video', { preHandler: authMiddleware }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const allowed = getWorkspaceFilter(request);
+    const { data: row } = await supabase
+      .from('huma_video_content_history')
+      .select('workspace, status, account_id')
+      .eq('id', id)
+      .maybeSingle();
+    if (!row) return reply.code(404).send({ error: '없음' });
+    if (!allowed.includes(row.workspace)) return reply.code(403).send({ error: '권한 없음' });
+    if (row.status !== 'conti_ready') {
+      return reply.code(409).send({ error: `영상 제작 불가 상태: ${row.status}` });
+    }
+
+    const { data: busy } = await supabase
+      .from('huma_video_content_history')
+      .select('id')
+      .eq('account_id', row.account_id)
+      .in('status', ['conti_generating', 'rendering', 'generating'])
+      .limit(1);
+    if (busy?.length) {
+      return reply.code(409).send({ error: '이미 진행 중인 콘티·영상 작업이 있습니다' });
+    }
+
+    await enqueueJob({
+      type: 'video_content_render',
+      payload: { historyId: id },
+    });
+
+    return { ok: true, message: '숏폼 영상 제작이 시작되었습니다' };
+  });
+
+  /** @deprecated generate-conti 사용 */
   app.post('/api/accounts/:id/generate-video', { preHandler: authMiddleware }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const access = await assertAccountAccess(id, getWorkspaceFilter(request));
     if (!access.ok) return reply.code(access.status).send({ error: access.error });
 
-    const { data: generating } = await supabase
+    const { data: busy } = await supabase
       .from('huma_video_content_history')
       .select('id')
       .eq('account_id', id)
-      .eq('status', 'generating')
+      .in('status', ['conti_generating', 'rendering', 'generating'])
       .limit(1);
-    if (generating?.length) {
-      return reply.code(409).send({ error: '이미 생성 중인 영상이 있습니다' });
+    if (busy?.length) {
+      return reply.code(409).send({ error: '이미 진행 중인 작업이 있습니다' });
     }
 
     await enqueueJob({
-      type: 'video_content_generate',
+      type: 'video_content_conti',
       payload: { accountId: id },
     });
 
-    return { ok: true, message: '영상 생성 작업이 큐에 등록되었습니다' };
+    return { ok: true, message: '콘티 생성 작업이 큐에 등록되었습니다' };
   });
 
   app.get('/api/panana-characters', { preHandler: authMiddleware }, async (request) => {
@@ -205,7 +261,7 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
       const { data: rows } = await supabase
         .from('huma_video_content_history')
         .select('id, conti_json')
-        .eq('status', 'generating');
+        .eq('status', 'rendering');
       const row = (rows ?? []).find(
         (r) => (r.conti_json as Record<string, unknown> | null)?.evolinkTaskId === body.id,
       );
