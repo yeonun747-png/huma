@@ -44,6 +44,43 @@ import type { GenerationConditions, VideoConti } from './types.js';
 const WEB_BASE = process.env.HUMA_WEB_URL?.trim() || 'http://localhost:3000';
 const STALE_VIDEO_CONTENT_MS = 15 * 60 * 1000;
 
+/** EvoLink task 없이 rendering에 고착된 row — worker/route 상태 불일치 복구 */
+export async function recoverStuckVideoRender(historyId: string): Promise<boolean> {
+  const { data: row } = await supabase
+    .from('huma_video_content_history')
+    .select('id, status, conti_json')
+    .eq('id', historyId)
+    .maybeSingle();
+  if (!row || row.status !== 'rendering') return false;
+  const taskId = (row.conti_json as Record<string, unknown> | null)?.evolinkTaskId;
+  if (taskId) return false;
+
+  await supabase
+    .from('huma_video_content_history')
+    .update({
+      status: 'conti_ready',
+      error_message: '이전 영상 제작 요청이 중단되어 검토 대기로 복구됨',
+    })
+    .eq('id', historyId);
+  return true;
+}
+
+export async function recoverStuckVideoRendersForWorkspaces(workspaces: string[]): Promise<number> {
+  const { data: rows } = await supabase
+    .from('huma_video_content_history')
+    .select('id, conti_json')
+    .in('workspace', workspaces)
+    .eq('status', 'rendering');
+
+  let recovered = 0;
+  for (const row of rows ?? []) {
+    if ((row.conti_json as Record<string, unknown> | null)?.evolinkTaskId) continue;
+    const ok = await recoverStuckVideoRender(String(row.id));
+    if (ok) recovered += 1;
+  }
+  return recovered;
+}
+
 /** 오래 conti_generating 등에 머문 row — 재시도 막힘 방지 */
 export async function failStaleVideoContentJobs(accountId: string): Promise<number> {
   const cutoff = new Date(Date.now() - STALE_VIDEO_CONTENT_MS).toISOString();
@@ -734,34 +771,41 @@ export async function runVideoProduction(historyId: string): Promise<string> {
     .maybeSingle();
 
   if (histErr || !history) throw new Error('히스토리 없음');
-  if (history.status !== 'conti_ready') {
-    throw new Error(`영상 제작 불가 상태: ${history.status}`);
-  }
-  if (!history.conti_json) throw new Error('콘티 데이터 없음');
 
   const accountId = history.account_id as string;
-  const { data: account } = await supabase
-    .from('huma_accounts')
-    .select('id, name, workspace')
-    .eq('id', accountId)
-    .maybeSingle();
-  if (!account) throw new Error('계정 없음');
-
-  const workspace = account.workspace as Workspace;
-  const conti = parseContiFromJson(history.conti_json);
-  const baseConditions = conditionsFromHistoryRow(history, history.character_used as string | null);
-  const contiJson = history.conti_json as Record<string, unknown>;
-  const evoPrompt = buildEvoLinkPrompt(conti, baseConditions);
-  if (!isEvoLinkPromptWithinLimit(evoPrompt)) {
-    throw new Error(`EvoLink 프롬프트 길이 초과 (${evoPrompt.length}자)`);
-  }
-
-  await supabase
-    .from('huma_video_content_history')
-    .update({ status: 'rendering', error_message: null })
-    .eq('id', historyId);
+  let accountName = accountId.slice(0, 8);
+  let workspace: Workspace = history.workspace as Workspace;
 
   try {
+    if (!['conti_ready', 'rendering'].includes(String(history.status))) {
+      throw new Error(`영상 제작 불가 상태: ${history.status}`);
+    }
+    if (!history.conti_json) throw new Error('콘티 데이터 없음');
+
+    const { data: account } = await supabase
+      .from('huma_accounts')
+      .select('id, name, workspace')
+      .eq('id', accountId)
+      .maybeSingle();
+    if (!account) throw new Error('계정 없음');
+    accountName = account.name;
+    workspace = account.workspace as Workspace;
+
+    const conti = parseContiFromJson(history.conti_json);
+    const baseConditions = conditionsFromHistoryRow(history, history.character_used as string | null);
+    const contiJson = history.conti_json as Record<string, unknown>;
+    const evoPrompt = buildEvoLinkPrompt(conti, baseConditions);
+    if (!isEvoLinkPromptWithinLimit(evoPrompt)) {
+      throw new Error(`EvoLink 프롬프트 길이 초과 (${evoPrompt.length}자)`);
+    }
+
+    if (history.status === 'conti_ready') {
+      await supabase
+        .from('huma_video_content_history')
+        .update({ status: 'rendering', error_message: null })
+        .eq('id', historyId);
+    }
+
     const { videoQuality } = await getPipelineModelSettings(workspace);
 
     await logOperation({
@@ -810,7 +854,7 @@ export async function runVideoProduction(historyId: string): Promise<string> {
       await handleEvoLinkDownloadFailure({
         accountId,
         workspace,
-        accountName: account.name,
+        accountName,
         historyId,
         error: msg,
       });
@@ -820,7 +864,7 @@ export async function runVideoProduction(historyId: string): Promise<string> {
     await finalizeVideoContent({
       historyId,
       accountId,
-      accountName: account.name,
+      accountName,
       workspace,
       conti,
       baseConditions,

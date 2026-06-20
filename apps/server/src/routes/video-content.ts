@@ -5,7 +5,12 @@ import { join } from 'path';
 import { authMiddleware, getWorkspaceFilter, supabase } from '../middleware/auth.js';
 import { mapAccountDbError } from '../lib/account-errors.js';
 import { enqueueJob } from '../modules/queue/producer.js';
-import { failStaleVideoContentJobs, runSubtitleReburn } from '../modules/video-content/pipeline.js';
+import {
+  failStaleVideoContentJobs,
+  recoverStuckVideoRender,
+  recoverStuckVideoRendersForWorkspaces,
+  runSubtitleReburn,
+} from '../modules/video-content/pipeline.js';
 import { hasEvoLinkApiKey } from '../modules/video-content/evolink.js';
 import { videoContentFinalPath, videoContentSourcePath } from '../modules/video-content/paths.js';
 import { ensureVideoThumbnail, removeVideoContentThumb } from '../modules/video-content/thumbnail.js';
@@ -85,6 +90,7 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
     const allowed = getWorkspaceFilter(request);
     const { account_id, workspace } = request.query as { account_id?: string; workspace?: string };
 
+    await recoverStuckVideoRendersForWorkspaces(allowed);
     let query = supabase
       .from('huma_video_content_history')
       .select(
@@ -300,13 +306,28 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
   app.post('/api/video-content/:id/render-video', { preHandler: authMiddleware }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const allowed = getWorkspaceFilter(request);
-    const { data: row } = await supabase
+    let { data: row } = await supabase
       .from('huma_video_content_history')
-      .select('workspace, status, account_id')
+      .select('workspace, status, account_id, conti_json')
       .eq('id', id)
       .maybeSingle();
     if (!row) return reply.code(404).send({ error: '없음' });
     if (!allowed.includes(row.workspace)) return reply.code(403).send({ error: '권한 없음' });
+
+    await recoverStuckVideoRender(id);
+    await failStaleVideoContentJobs(row.account_id as string);
+
+    ({ data: row } = await supabase
+      .from('huma_video_content_history')
+      .select('workspace, status, account_id, conti_json')
+      .eq('id', id)
+      .maybeSingle());
+    if (!row) return reply.code(404).send({ error: '없음' });
+
+    const evolinkTaskId = (row.conti_json as Record<string, unknown> | null)?.evolinkTaskId;
+    if (row.status === 'rendering' && evolinkTaskId) {
+      return reply.code(409).send({ error: 'EvoLink 영상 제작이 이미 진행 중입니다' });
+    }
     if (row.status !== 'conti_ready') {
       return reply.code(409).send({ error: `영상 제작 불가 상태: ${row.status}` });
     }
@@ -315,6 +336,7 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
       .from('huma_video_content_history')
       .select('id')
       .eq('account_id', row.account_id)
+      .neq('id', id)
       .in('status', ['conti_generating', 'rendering', 'generating'])
       .limit(1);
     if (busy?.length) {

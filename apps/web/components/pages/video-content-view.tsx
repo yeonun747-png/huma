@@ -561,8 +561,8 @@ export function VideoContentView() {
     const label = VIDEO_CONTENT_STATUS_LABEL[selectedItem.status] ?? selectedItem.status;
     if (
       !(await appConfirm(
-        `${name} · ${label}\n\n이 작업 기록을 삭제합니다. 콘티·영상 파일이 모두 제거되며 되돌릴 수 없습니다.`,
-        { destructive: true },
+        `${name} · ${label}\n\n정말 삭제하시겠습니까?\n콘티·영상 파일이 모두 제거되며 되돌릴 수 없습니다.`,
+        { title: '작업 삭제', destructive: true, confirmLabel: '삭제' },
       ))
     ) {
       return;
@@ -651,17 +651,6 @@ export function VideoContentView() {
           </div>
         </MPanel>
       </MGrid>
-
-      <VideoContentStoragePanel
-        filterWorkspace={filterWorkspace}
-        accounts={accounts}
-        refreshToken={storageRefreshToken}
-        onRefresh={() => void refreshSelectedDetail()}
-        onOpenItem={(id) => {
-          setSelectedId(id);
-          setActiveTab('done');
-        }}
-      />
 
       <div className="flex min-h-[520px] items-stretch gap-3">
         {/* 좌: 작업 목록 */}
@@ -793,6 +782,17 @@ export function VideoContentView() {
           </div>
         </MPanel>
       </div>
+
+      <VideoContentStoragePanel
+        filterWorkspace={filterWorkspace}
+        accounts={accounts}
+        refreshToken={storageRefreshToken}
+        onRefresh={() => void refreshSelectedDetail()}
+        onOpenItem={(id) => {
+          setSelectedId(id);
+          setActiveTab('done');
+        }}
+      />
     </div>
   );
 }
