@@ -337,8 +337,14 @@ export async function runContiGeneration(accountId: string): Promise<string> {
                   error_message: err.message.slice(0, 500),
                 })
                 .eq('id', historyId);
+              const holdLabel =
+                err.holdReason === 'empty_content'
+                  ? '빈 액션/대사 검증 실패'
+                  : err.holdReason === 'shot_duration'
+                    ? '샷 길이 검증 실패'
+                    : '콘티 검증 실패';
               await notifyTelegram(
-                `⚠️ 영상 콘티 보류 — 샷 길이 검증 실패\n계정: ${accountName} (${accountId})\n${err.message}`,
+                `⚠️ 영상 콘티 보류 — ${holdLabel}\n계정: ${accountName} (${accountId})\n${err.message}`,
                 workspace,
               );
             } else {

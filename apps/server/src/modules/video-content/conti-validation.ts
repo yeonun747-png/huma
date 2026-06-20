@@ -3,21 +3,45 @@ import type { VideoConti, VideoContiShot } from './types.js';
 export class ContiValidationError extends Error {
   readonly maxAttempts: number;
   readonly holdOnFailure: boolean;
+  readonly holdReason?: 'shot_duration' | 'empty_content';
 
   constructor(
     message: string,
-    options?: { maxAttempts?: number; holdOnFailure?: boolean },
+    options?: {
+      maxAttempts?: number;
+      holdOnFailure?: boolean;
+      holdReason?: 'shot_duration' | 'empty_content';
+    },
   ) {
     super(message);
     this.name = 'ContiValidationError';
     this.maxAttempts = options?.maxAttempts ?? DEFAULT_CONTI_VALIDATION_MAX_ATTEMPTS;
     this.holdOnFailure = options?.holdOnFailure ?? false;
+    this.holdReason = options?.holdReason;
   }
 }
 
 export const DEFAULT_CONTI_VALIDATION_MAX_ATTEMPTS = 3;
 export const MAX_SHOT_DURATION_REGENERATION_ATTEMPTS = 2;
+export const MAX_EMPTY_CONTENT_REGENERATION_ATTEMPTS = 2;
 export const SHOT_MIN_DURATION_SEC = 1.5;
+export const SHOT_CONTENT_MIN_CHARS = 20;
+
+/** 6샷 콘티 JSON(인물·장소·6샷 camera/action/dialogue·fullText) 출력 여유 */
+export const CONTI_GENERATION_MAX_TOKENS = 8192;
+
+/** 자리표시자 — 정확 일치(대소문자 무시) 시 무효 */
+export const SHOT_CONTENT_PLACEHOLDERS = [
+  '장면 전개',
+  '내용 추가 필요',
+  '내용 없음',
+  '내용 미정',
+  'TBD',
+  'TODO',
+  'N/A',
+  '미정',
+  '추후 작성',
+] as const;
 
 export const SINGLE_SHOT_CUT_MISMATCH_FEEDBACK =
   'single_shot은 컷 전환이 전혀 없는 한 화면 구성이어야 한다. 현재 결과는 여러 컷으로 나뉘어 있어 single_shot 정의에 맞지 않는다, 컷을 하나로 통합해서 다시 작성하라.';
@@ -67,6 +91,66 @@ export function buildMinShotDurationRule(duration: number): string {
   return (
     `모든 개별 샷은 최소 ${SHOT_MIN_DURATION_SEC}초 이상이어야 한다. ` +
     `0초 또는 1초 미만의 샷 금지. ${buildDurationShotCountGuide(duration)}`
+  );
+}
+
+function trimField(text: string | undefined | null): string {
+  return (text ?? '').trim();
+}
+
+export function isShotContentPlaceholder(text: string): boolean {
+  const t = trimField(text);
+  if (!t) return true;
+  const lower = t.toLowerCase();
+  return SHOT_CONTENT_PLACEHOLDERS.some((p) => t === p || lower === p.toLowerCase());
+}
+
+/** 액션 필수. 대사는 비어 있어도 됨(반응 샷), 있으면 동일 기준 적용 */
+export function isInvalidShotContentField(text: string | undefined | null): boolean {
+  const t = trimField(text);
+  if (!t) return true;
+  if (t.length < SHOT_CONTENT_MIN_CHARS) return true;
+  if (isShotContentPlaceholder(t)) return true;
+  return false;
+}
+
+export function buildEmptyShotContentFeedback(shotNumber: number): string {
+  return (
+    `생성된 콘티의 샷 ${shotNumber}에 실제 액션/대사 내용이 없다, ` +
+    '모든 샷에 구체적인 카메라 디렉션과 액션/대사를 빠짐없이 작성해서 다시 생성하라.'
+  );
+}
+
+export function validateShotContent(
+  shot: VideoContiShot,
+  shotNumber: number,
+): { ok: true } | { ok: false; feedback: string } {
+  if (isInvalidShotContentField(shot.action)) {
+    return { ok: false, feedback: buildEmptyShotContentFeedback(shotNumber) };
+  }
+  const dialogue = trimField(shot.dialogue);
+  if (dialogue && isInvalidShotContentField(dialogue)) {
+    return { ok: false, feedback: buildEmptyShotContentFeedback(shotNumber) };
+  }
+  return { ok: true };
+}
+
+/** normalize·펀치라인 보정 이후 — 모든 샷 액션/대사 실질 내용 검사 */
+export function validateAllShotsContent(
+  conti: VideoConti,
+): { ok: true } | { ok: false; feedback: string } {
+  for (let i = 0; i < conti.shots.length; i++) {
+    const check = validateShotContent(conti.shots[i]!, i + 1);
+    if (!check.ok) return check;
+  }
+  return { ok: true };
+}
+
+export function buildShotContentRule(): string {
+  return (
+    `모든 샷의 action 필드는 ${SHOT_CONTENT_MIN_CHARS}자 이상의 구체적 카메라·행동 묘사 필수. ` +
+    `대사가 있는 샷은 dialogue도 ${SHOT_CONTENT_MIN_CHARS}자 이상. ` +
+    `"장면 전개", "내용 없음", "TBD" 등 자리표시자 금지.`
   );
 }
 

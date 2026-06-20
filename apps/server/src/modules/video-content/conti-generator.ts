@@ -6,10 +6,14 @@ import {
   validateCutTypeMatchesRawShots,
   validatePunchlineShotMinDuration,
   validateAllShotsMinDuration,
+  validateAllShotsContent,
   buildMinShotDurationRule,
   buildDurationShotCountGuide,
+  buildShotContentRule,
   ContiValidationError,
+  CONTI_GENERATION_MAX_TOKENS,
   MAX_SHOT_DURATION_REGENERATION_ATTEMPTS,
+  MAX_EMPTY_CONTENT_REGENERATION_ATTEMPTS,
   PUNCHLINE_MIN_DURATION_SEC,
 } from './conti-validation.js';
 import { normalizeMultiShotConti, buildEvoLinkPrompt } from './evolink.js';
@@ -57,9 +61,11 @@ function buildContiPrompt(params: {
 
   const minShotDurationRule = buildMinShotDurationRule(conditions.duration);
   const shotCountGuide = buildDurationShotCountGuide(conditions.duration);
+  const shotContentRule = buildShotContentRule();
 
   const defaultMultiShotGuide = `${shotCountGuide}
 ${minShotDurationRule}
+${shotContentRule}
 
 6샷 멀티샷 (${conditions.duration}초) — EvoLink용 정규 타임라인: ${formatTimelineGuide(conditions.duration)}
 shots 배열은 ${conditions.duration <= 9 ? '4~5개' : conditions.duration <= 11 ? '4~6개' : '5~6개'} 권장. startSec/endSec 합이 ${conditions.duration}과 일치.
@@ -72,6 +78,7 @@ ${EVOLINK_PROMPT_LENGTH_GUIDANCE}`;
   const defaultSingleShotGuide = `싱글샷 연속 (${conditions.duration}초, 4~5 시간 비트로 대사/행동 순차 전개, 컷 전환 없음).
 shots 배열은 1개만 — 컷 전환·다중 샷 금지.
 ${minShotDurationRule}
+${shotContentRule}
 ${punchlineDurationRule}
 ${EVOLINK_PROMPT_LENGTH_GUIDANCE}`;
 
@@ -137,7 +144,11 @@ export async function generateConti(params: {
 }): Promise<VideoConti & { locationKeyword: string; timeOfDay: string }> {
   const model = (await getMainClaudeModel()) || 'claude-sonnet-4-6';
   const prompt = buildContiPrompt(params);
-  const raw = await askClaudeWithModel({ model, max_tokens: 4096, prompt });
+  const raw = await askClaudeWithModel({
+    model,
+    max_tokens: CONTI_GENERATION_MAX_TOKENS,
+    prompt,
+  });
   if (!raw) throw new Error('콘티 LLM 응답 없음');
 
   const parsed = parseJsonBlock(raw) as Record<string, unknown>;
@@ -182,6 +193,16 @@ export async function generateConti(params: {
     throw new ContiValidationError(shotDurCheck.feedback, {
       maxAttempts: MAX_SHOT_DURATION_REGENERATION_ATTEMPTS,
       holdOnFailure: true,
+      holdReason: 'shot_duration',
+    });
+  }
+
+  const contentCheck = validateAllShotsContent(conti);
+  if (!contentCheck.ok) {
+    throw new ContiValidationError(contentCheck.feedback, {
+      maxAttempts: MAX_EMPTY_CONTENT_REGENERATION_ATTEMPTS,
+      holdOnFailure: true,
+      holdReason: 'empty_content',
     });
   }
 
