@@ -70,8 +70,24 @@ export function normalizePananaApiResponse(data: unknown): PananaApiCharacter[] 
   return out;
 }
 
+const PANANA_CHARACTER_API_DEFAULT_URL = 'https://panana.kr/api/huma/characters';
+
+function resolvePananaCharacterApiUrl(): string | null {
+  let apiUrl = process.env.PANANA_CHARACTER_API_URL?.trim();
+  if (!apiUrl) return null;
+  if (/panana\.app/i.test(apiUrl)) {
+    apiUrl = apiUrl.replace(/panana\.app/gi, 'panana.kr');
+  }
+  return apiUrl;
+}
+
+function pananaApiTimeoutMs(): number {
+  const raw = Number(process.env.PANANA_CHARACTER_API_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw >= 5_000 ? raw : 60_000;
+}
+
 function pananaApiRequestConfig(): { url: string; config: AxiosRequestConfig } | null {
-  const apiUrl = process.env.PANANA_CHARACTER_API_URL?.trim();
+  const apiUrl = resolvePananaCharacterApiUrl();
   if (!apiUrl) return null;
 
   const headers: Record<string, string> = { Accept: 'application/json' };
@@ -83,15 +99,32 @@ function pananaApiRequestConfig(): { url: string; config: AxiosRequestConfig } |
 
   return {
     url: apiUrl,
-    config: { timeout: 30_000, headers, validateStatus: () => true },
+    config: { timeout: pananaApiTimeoutMs(), headers, validateStatus: () => true },
   };
+}
+
+function formatPananaApiFetchError(err: unknown): string {
+  const ax = err as { code?: string; message?: string };
+  const msg = ax.message ?? String(err);
+  if (ax.code === 'ECONNABORTED' || /timeout/i.test(msg)) {
+    return `파나나 캐릭터 API 타임아웃 — URL을 ${PANANA_CHARACTER_API_DEFAULT_URL} 로 설정했는지 확인 (panana.app 는 연결 불가)`;
+  }
+  if (ax.code === 'ENOTFOUND' || ax.code === 'EAI_AGAIN') {
+    return `파나나 캐릭터 API DNS 실패 — ${PANANA_CHARACTER_API_DEFAULT_URL} 권장`;
+  }
+  return msg;
 }
 
 export async function fetchPananaCharactersFromApi(): Promise<PananaApiCharacter[]> {
   const req = pananaApiRequestConfig();
   if (!req) throw new Error('PANANA_CHARACTER_API_URL 미설정');
 
-  const res = await axios.get<unknown>(req.url, req.config);
+  let res;
+  try {
+    res = await axios.get<unknown>(req.url, req.config);
+  } catch (err) {
+    throw new Error(formatPananaApiFetchError(err));
+  }
   if (res.status >= 400) {
     const snippet =
       typeof res.data === 'string'

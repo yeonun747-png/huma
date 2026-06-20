@@ -4,7 +4,7 @@
  *
  * 사용:
  *   cd apps/server
- *   PANANA_CHARACTER_API_URL=https://panana.app/api/huma/characters \
+ *   PANANA_CHARACTER_API_URL=https://panana.kr/api/huma/characters \
  *   PANANA_CHARACTER_API_KEY=your_key \
  *   node scripts/probe-panana-characters.mjs
  *
