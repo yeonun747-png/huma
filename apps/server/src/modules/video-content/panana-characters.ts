@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { type AxiosRequestConfig } from 'axios';
 import { supabase } from '../../middleware/auth.js';
 import { notifyTelegram } from '../watcher/telegram.js';
 import { logOperation } from '../../lib/log-emitter.js';
@@ -12,53 +12,173 @@ export interface PananaCharacterRow {
   synced_at: string;
 }
 
-export async function syncPananaCharacters(): Promise<{ synced: number; error?: string }> {
+/** 외부 파나나 API 단일 캐릭터 (정규화 후) */
+export interface PananaApiCharacter {
+  id: string;
+  name: string;
+  description?: string | null;
+  status?: string;
+}
+
+/** API 응답 형태 차이 대응 — 배열 / { characters } / { data } / 필드명 별칭 */
+export function normalizePananaApiResponse(data: unknown): PananaApiCharacter[] {
+  if (data == null) return [];
+
+  let rows: unknown[] = [];
+  if (Array.isArray(data)) {
+    rows = data;
+  } else if (typeof data === 'object') {
+    const obj = data as Record<string, unknown>;
+    const nested = obj.characters ?? obj.data ?? obj.items ?? obj.results;
+    if (Array.isArray(nested)) rows = nested;
+  }
+
+  const out: PananaApiCharacter[] = [];
+  for (const raw of rows) {
+    if (!raw || typeof raw !== 'object') continue;
+    const row = raw as Record<string, unknown>;
+
+    const id =
+      row.id ??
+      row.panana_character_id ??
+      row.character_id ??
+      row.characterId ??
+      row.slug;
+    const name = row.name ?? row.title ?? row.character_name;
+    if (id == null || name == null) continue;
+
+    const description =
+      row.description ??
+      row.tagline ??
+      row.bio ??
+      row.intro ??
+      row.personalitySummary ??
+      null;
+
+    let status = 'active';
+    if (row.status === 'inactive' || row.active === false) status = 'inactive';
+    else if (row.status === 'active' || row.active === true) status = 'active';
+    else if (typeof row.status === 'string' && row.status.trim()) status = row.status.trim();
+
+    out.push({
+      id: String(id),
+      name: String(name),
+      description: description != null ? String(description) : null,
+      status,
+    });
+  }
+  return out;
+}
+
+function pananaApiRequestConfig(): { url: string; config: AxiosRequestConfig } | null {
   const apiUrl = process.env.PANANA_CHARACTER_API_URL?.trim();
-  if (!apiUrl) {
+  if (!apiUrl) return null;
+
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  const apiKey = process.env.PANANA_CHARACTER_API_KEY?.trim();
+  if (apiKey) {
+    headers.Authorization = `Bearer ${apiKey}`;
+    headers['x-api-key'] = apiKey;
+  }
+
+  return {
+    url: apiUrl,
+    config: { timeout: 30_000, headers, validateStatus: () => true },
+  };
+}
+
+export async function fetchPananaCharactersFromApi(): Promise<PananaApiCharacter[]> {
+  const req = pananaApiRequestConfig();
+  if (!req) throw new Error('PANANA_CHARACTER_API_URL 미설정');
+
+  const res = await axios.get<unknown>(req.url, req.config);
+  if (res.status >= 400) {
+    const snippet =
+      typeof res.data === 'string'
+        ? res.data.slice(0, 200)
+        : JSON.stringify(res.data ?? '').slice(0, 200);
+    throw new Error(`파나나 캐릭터 API HTTP ${res.status}${snippet ? ` — ${snippet}` : ''}`);
+  }
+
+  const normalized = normalizePananaApiResponse(res.data);
+  if (!normalized.length && res.data != null) {
+    await logOperation({
+      level: 'warn',
+      message: '[panana-sync] API 응답 파싱 결과 0건 — 스펙·adapter 확인 (probe-panana-characters.mjs)',
+      workspace: 'panana',
+    });
+  }
+  return normalized;
+}
+
+/** 최근 N건 빈도 기반 가중 랜덤 (적게 등장한 항목 가중치 ↑) */
+export function pickWeightedByCounts<T extends { id: string }>(
+  items: T[],
+  counts: Map<string, number>,
+): T | null {
+  if (!items.length) return null;
+
+  const maxCount = Math.max(...items.map((ch) => counts.get(ch.id) ?? 0), 0);
+  const weights = items.map((ch) => maxCount - (counts.get(ch.id) ?? 0) + 1);
+  const total = weights.reduce((a, b) => a + b, 0);
+  let r = Math.random() * total;
+  for (let i = 0; i < items.length; i++) {
+    r -= weights[i]!;
+    if (r <= 0) return items[i]!;
+  }
+  return items[0] ?? null;
+}
+
+export async function syncPananaCharacters(): Promise<{ synced: number; error?: string }> {
+  if (!process.env.PANANA_CHARACTER_API_URL?.trim()) {
+    await logOperation({
+      level: 'warn',
+      message: '[panana-sync] PANANA_CHARACTER_API_URL 미설정 — 캐시 동기화 스킵',
+      workspace: 'panana',
+    });
     return { synced: 0, error: 'PANANA_CHARACTER_API_URL 미설정' };
   }
 
   try {
-    const { data } = await axios.get<
-      Array<{ id: string; name: string; description?: string; status?: string; updated_at?: string }>
-    >(apiUrl, { timeout: 30_000 });
-
-    const rows = Array.isArray(data) ? data : [];
+    const rows = await fetchPananaCharactersFromApi();
     let synced = 0;
+    const now = new Date().toISOString();
 
     for (const ch of rows) {
       const status = ch.status === 'inactive' ? 'inactive' : 'active';
       const { error } = await supabase.from('huma_panana_characters_cache').upsert(
         {
-          panana_character_id: String(ch.id),
+          panana_character_id: ch.id,
           name: ch.name,
           description: ch.description ?? null,
           status,
-          synced_at: new Date().toISOString(),
+          synced_at: now,
         },
         { onConflict: 'panana_character_id' },
       );
       if (!error) synced++;
     }
 
-    const responseIds = new Set(rows.map((r) => String(r.id)));
+    const responseIds = new Set(rows.map((r) => r.id));
     const { data: cached } = await supabase
       .from('huma_panana_characters_cache')
       .select('id, panana_character_id')
       .eq('status', 'active');
 
+    let deactivated = 0;
     for (const row of cached ?? []) {
       if (!responseIds.has(row.panana_character_id)) {
         await supabase
           .from('huma_panana_characters_cache')
-          .update({ status: 'inactive', synced_at: new Date().toISOString() })
+          .update({ status: 'inactive', synced_at: now })
           .eq('id', row.id);
+        deactivated++;
       }
     }
 
     await logOperation({
       level: 'info',
-      message: `[panana-sync] 캐릭터 ${synced}건 동기화 완료`,
+      message: `[panana-sync] 캐릭터 ${synced}건 동기화 완료${deactivated ? `, 비활성 ${deactivated}건` : ''}`,
       workspace: 'panana',
     });
     return { synced };
@@ -68,6 +188,11 @@ export async function syncPananaCharacters(): Promise<{ synced: number; error?: 
       `⚠️ 파나나 캐릭터 동기화 실패 — 최근 캐시 데이터로 계속 운영됨\n${msg}`,
       'panana',
     );
+    await logOperation({
+      level: 'warn',
+      message: `[panana-sync] 동기화 실패: ${msg}`,
+      workspace: 'panana',
+    });
     return { synced: 0, error: msg };
   }
 }
@@ -83,7 +208,14 @@ export async function listActivePananaCharacters(): Promise<PananaCharacterRow[]
 
 export async function pickPananaCharacter(accountId: string): Promise<PananaCharacterRow | null> {
   const active = await listActivePananaCharacters();
-  if (!active.length) return null;
+  if (!active.length) {
+    await logOperation({
+      level: 'warn',
+      message: `[panana-pick] 활성 캐릭터 0건 (account=${accountId}) — 동기화 또는 PANANA_CHARACTER_API_URL 확인`,
+      workspace: 'panana',
+    });
+    return null;
+  }
 
   const { data: recent } = await supabase
     .from('huma_video_content_history')
@@ -100,18 +232,7 @@ export async function pickPananaCharacter(accountId: string): Promise<PananaChar
     if (id && counts.has(id)) counts.set(id, (counts.get(id) ?? 0) + 1);
   }
 
-  const maxCount = Math.max(...counts.values(), 0);
-  const weights = active.map((ch) => {
-    const c = counts.get(ch.id) ?? 0;
-    return maxCount - c + 1;
-  });
-  const total = weights.reduce((a, b) => a + b, 0);
-  let r = Math.random() * total;
-  for (let i = 0; i < active.length; i++) {
-    r -= weights[i]!;
-    if (r <= 0) return active[i]!;
-  }
-  return active[0] ?? null;
+  return pickWeightedByCounts(active, counts);
 }
 
 export async function getCharacterAppearanceCounts(

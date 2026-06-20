@@ -110,8 +110,14 @@ export function VideoPersonaModal({ account, open, onClose }: VideoPersonaModalP
 
   const handlePananaSync = async () => {
     setSyncing(true);
+    setError('');
     try {
-      await api.syncPananaCharacters();
+      const result = await api.syncPananaCharacters();
+      if (result.error) {
+        setError(`동기화 실패: ${result.error}`);
+      } else {
+        showToast(`캐릭터 ${result.synced}건 동기화 완료`);
+      }
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : '동기화 실패');
