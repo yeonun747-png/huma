@@ -229,7 +229,7 @@ function defaultSlotAction(slotIndex: number, src: VideoContiShot[] = []): strin
 
 /** 검증 실패 시 최후 폴백 action (conti-generator에서 사용) */
 export function getDefaultShotAction(slotIndex: number): string {
-  return defaultSlotAction(shotIndex);
+  return defaultSlotAction(slotIndex);
 }
 
 /** LLM 샷 수 < 6이어도 비율 매핑 + 기본 action으로 6샷 채움 (장면 전개 금지) */
