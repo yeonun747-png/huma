@@ -412,9 +412,11 @@ export function buildSentenceCompleteRule(): string {
 
 export function buildPunchlineClarityRule(): string {
   return (
-    '펀치라인(마지막 1~2샷)은 반전·놀람·웃음의 이유가 시청자에게 명확히 전달되어야 한다. ' +
-    '마지막 샷이 표정·동작만으로 끝나고 직전 샷들의 시각적 단서만으로는 "그래서 뭐가 반전이었지?"가 헷갈린다면, ' +
-    '마지막 또는 직전 샷에 짧은 대사를 넣어 반전 의미를 명확히 설명하라 (예: "어? 이 슬리퍼 내 거 아닌데?").'
+    '펀치라인(마지막 1~2샷)은 반전·말장난·놀람의 이유가 **대사만으로도** 시청자에게 즉시 전달되어야 한다. ' +
+    '번호표·스케치북 숫자·라벨·문서 글자 등 action에 적힌 시각 정보에만 의존하면 "그래서 뭐?"가 남는다 — 대사로 양쪽 의미·오해·반전을 말로 풀어라. ' +
+    '말장난이면 setup 샷에서 한쪽 뜻을, 펀치 샷 대사에서 다른 쪽 뜻(또는 오해 해소)을 드러내라. ' +
+    '펀치에 필요한 숫자·소품은 앞 샷에서 깔고, 갑자기 꺼내 action 숫자만 보여주지 말 것. ' +
+    '표정·동작·여운만으로 끝나면 안 되며, 마지막 또는 직전 샷 대사로 한 문장에 이해되게 (예: "그거 줄 선 대기표예요. 나 밥 먹으러 앉은 건데.").'
   );
 }
 
@@ -547,12 +549,12 @@ function isSilentPunchlineAction(action: string): boolean {
 export function buildPunchlineClarityFeedback(lastShotNumber: number, prevShotNumber?: number): string {
   const prevHint =
     prevShotNumber != null
-      ? `직전 샷 ${prevShotNumber}의 시각적 단서만으로는 반전 의미가 불분명하다. `
+      ? `직전 샷 ${prevShotNumber}의 action 숫자·라벨·소품만으로는 반전·말장난이 전달되지 않는다. `
       : '';
   return (
-    `${prevHint}샷 ${lastShotNumber}(펀치라인)이 표정·동작만으로 끝나 반전 의미가 명확하지 않다. ` +
-    '시청자가 "그래서 뭐가 반전이었지?"라고 헷갈리지 않도록, 마지막 또는 직전 샷에 짧은 대사를 추가해 반전을 직접 설명하라. ' +
-    '예: "어? 이 슬리퍼 내 거 아닌데, ○○ 거잖아."'
+    `${prevHint}샷 ${lastShotNumber}(펀치라인)을 끝까지 봐도 "그래서 뭐?"가 남거나, 대사 없이 표정·동작·화면 속 글자·숫자에만 의존한다. ` +
+    '말장난·오해·반전은 **대사로** 양쪽 의미가 드러나게 다시 쓰라. action의 번호표·스케치북 숫자 등은 보조일 뿐, 이해의 핵심은 dialogue여야 한다. ' +
+    '예: A "번호 그려도 돼요?" → B "그거 줄 서서 받은 대기표예요. 나 그냥 밥 먹으러 앉은 건데." — ❌ action에만 47·48 적고 대사 "…48번이요?"만.'
   );
 }
 
