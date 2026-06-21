@@ -40,6 +40,12 @@ export function normalizeDialogueBody(dialogue: string): string {
     .trim();
 }
 
+export function extractDialogueSpeaker(dialogue: string): 'A' | 'B' | null {
+  const m = trimField(dialogue).match(/^([AB]):\s*/i);
+  if (!m) return null;
+  return m[1]!.toUpperCase() as 'A' | 'B';
+}
+
 export function dialogueCharsPerSec(dialogue: string, durationSec: number): number {
   if (durationSec <= 0) return Infinity;
   return countDialogueQuotedChars(dialogue) / durationSec;

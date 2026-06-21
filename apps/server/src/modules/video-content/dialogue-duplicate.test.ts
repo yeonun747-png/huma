@@ -3,6 +3,7 @@ import {
   dialoguesTooSimilar,
   findDialogueDuplicateIssue,
   hasDialogueDuplicate,
+  isSemanticDialogueRepeat,
 } from './dialogue-duplicate.js';
 import { findRawShotQualityIssues } from './conti-validation.js';
 import type { VideoConti } from './types.js';
@@ -14,6 +15,18 @@ describe('dialoguesTooSimilar', () => {
 
   it('passes clearly different lines', () => {
     expect(dialoguesTooSimilar('A: "저도 목 일간인데요."', 'B: "로또 당첨 주의?"')).toBe(false);
+  });
+});
+
+describe('isSemanticDialogueRepeat', () => {
+  it('flags truncated stutter of the same line', () => {
+    expect(
+      isSemanticDialogueRepeat('A: "이거… 언제 뺀 거야?"', 'A: "이거… 언제…?"'),
+    ).toBe(true);
+  });
+
+  it('passes distinct consecutive lines from same speaker', () => {
+    expect(isSemanticDialogueRepeat('A: "지금 나가면 후회해."', 'A: "이거… 언제 뺀 거야?"')).toBe(false);
   });
 });
 
@@ -120,5 +133,64 @@ describe('findDialogueDuplicateIssue', () => {
     };
 
     expect(findDialogueDuplicateIssue(conti)).toBeNull();
+  });
+
+  it('flags adjacent same-speaker stutter repeat (연운 사물함 케이스)', () => {
+    const conti: VideoConti = {
+      ...baseConti,
+      duration: 11,
+      shots: [
+        {
+          shotNumber: 1,
+          startSec: 0,
+          endSec: 2.5,
+          camera: '미디엄',
+          action: 'A가 폰을 본다.',
+          dialogue: 'A: "관운, 아직 아니네."',
+        },
+        {
+          shotNumber: 2,
+          startSec: 2.5,
+          endSec: 4.5,
+          camera: '미디엄',
+          action: 'A가 B를 본다.',
+          dialogue: 'A: "지금 나가면 후회해."',
+        },
+        {
+          shotNumber: 3,
+          startSec: 4.5,
+          endSec: 6.5,
+          camera: '미디엄',
+          action: 'B가 사물함을 연다.',
+          dialogue: 'A: "이거… 언제 뺀 거야?"',
+        },
+        {
+          shotNumber: 4,
+          startSec: 6.5,
+          endSec: 8.5,
+          camera: '클로즈업',
+          action: 'A 표정이 굳는다.',
+          dialogue: 'A: "이거… 언제…?"',
+        },
+        {
+          shotNumber: 5,
+          startSec: 8.5,
+          endSec: 11,
+          camera: '미디엄',
+          action: 'B가 박스를 든다.',
+          dialogue: 'B: "지난주요. 환불 되나요?"',
+        },
+      ],
+    };
+
+    const issue = findDialogueDuplicateIssue(conti);
+    expect(issue).not.toBeNull();
+    expect(issue!.index).toBe(3);
+    expect(issue!.priorIndex).toBe(2);
+    expect(issue!.feedback).toContain('dialogue는 비우고');
+    expect(hasDialogueDuplicate(conti)).toBe(true);
+
+    const qualityIssues = findRawShotQualityIssues(conti);
+    expect(qualityIssues.some((i) => i.kind === 'dialogue_duplicate' && i.index === 3)).toBe(true);
   });
 });

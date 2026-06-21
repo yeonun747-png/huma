@@ -1,8 +1,14 @@
 import type { VideoConti, VideoContiShot } from './types.js';
-import { normalizeDialogueBody } from './dialogue-timing.js';
+import { extractDialogueSpeaker, normalizeDialogueBody } from './dialogue-timing.js';
 
-/** 전 샷 대사 본문 유사도 — ADJACENT_SHOT_SIMILARITY_THRESHOLD 와 동일 */
+/** 전 샷 대사 본문 유사도 — 거의 동일 문장 */
 export const DIALOGUE_DUPLICATE_SIMILARITY_THRESHOLD = 0.9;
+
+/** 연속 샷·동일 화자 — 의미상 되풀이(줄임·망설임 포함) */
+export const ADJACENT_SAME_SPEAKER_DIALOGUE_SIMILARITY_THRESHOLD = 0.72;
+
+const ADJACENT_SHARED_PREFIX_MIN_CHARS = 4;
+const ADJACENT_PREFIX_SIMILARITY_THRESHOLD = 0.55;
 
 function trimField(text: string | undefined | null): string {
   return (text ?? '').trim();
@@ -31,7 +37,7 @@ function levenshteinDistance(a: string, b: string): number {
   return row[n]!;
 }
 
-function dialogueBodySimilarity(a: string, b: string): number {
+export function dialogueBodySimilarity(a: string, b: string): number {
   const na = normalizeCompareText(a);
   const nb = normalizeCompareText(b);
   if (!na || !nb) return 0;
@@ -40,6 +46,32 @@ function dialogueBodySimilarity(a: string, b: string): number {
   const shorter = na.length >= nb.length ? nb : na;
   const dist = levenshteinDistance(longer, shorter);
   return 1 - dist / longer.length;
+}
+
+function stripTrailingPunctuation(text: string): string {
+  return text.replace(/[.…?!,]+$/g, '').trim();
+}
+
+/** 줄임·망설임·접두사 공유 등 의미상 같은 대사 반복 */
+export function isSemanticDialogueRepeat(a: string | undefined | null, b: string | undefined | null): boolean {
+  const bodyA = normalizeDialogueBody(trimField(a ?? ''));
+  const bodyB = normalizeDialogueBody(trimField(b ?? ''));
+  if (!bodyA || !bodyB) return false;
+  if (bodyA === bodyB) return true;
+  if (dialogueBodySimilarity(bodyA, bodyB) >= DIALOGUE_DUPLICATE_SIMILARITY_THRESHOLD) return true;
+
+  const [shorter, longer] = bodyA.length <= bodyB.length ? [bodyA, bodyB] : [bodyB, bodyA];
+  const stem = stripTrailingPunctuation(shorter);
+  if (stem.length >= 3 && longer.startsWith(stem)) return true;
+
+  let prefixLen = 0;
+  const minLen = Math.min(bodyA.length, bodyB.length);
+  while (prefixLen < minLen && bodyA[prefixLen] === bodyB[prefixLen]) prefixLen++;
+  if (prefixLen >= ADJACENT_SHARED_PREFIX_MIN_CHARS) {
+    if (dialogueBodySimilarity(bodyA, bodyB) >= ADJACENT_PREFIX_SIMILARITY_THRESHOLD) return true;
+  }
+
+  return dialogueBodySimilarity(bodyA, bodyB) >= ADJACENT_SAME_SPEAKER_DIALOGUE_SIMILARITY_THRESHOLD;
 }
 
 export function dialoguesTooSimilar(a: string | undefined | null, b: string | undefined | null): boolean {
@@ -63,6 +95,9 @@ export function findPunchlineShotIndexForDialogue(shots: VideoContiShot[]): numb
 export function buildDialogueDistinctRule(): string {
   return (
     '전 샷 dialogue 본문이 서로 동일하거나 거의 같으면 안 된다(화자 A/B만 바꾼 재탕 금지). ' +
+    '3a 이야기를 샷으로 나눌 때, 하나의 감정 반응이나 대사를 여러 샷에 걸쳐 비슷한 말로 두 번 우려내지 않는다. ' +
+    '같은 화자(A/B)가 연속된 두 샷 모두에서 대사를 말하면 안 되는 경우: 두 번째 대사가 첫 번째의 줄임·망설임·표현만 바꾼 되풀이(예: "이거… 언제 뺀 거야?" → "이거… 언제…?"). ' +
+    '반응이 여러 샷에 걸쳐 필요하면 대사는 한 샷에만 두고, 다음 샷은 dialogue를 비우고 action만으로 표정·행동 진행(놀람→더 깊은 충격)을 묘사한다. ' +
     '특히 펀치라인(마지막 1~2샷) 대사는 이전 샷 대사를 그대로 반복하지 말고, ' +
     '우연·반전을 알게 된 뒤의 새로운 반응이나 한 단계 더 나간 대사로 작성한다.'
   );
@@ -76,14 +111,52 @@ export function buildDialogueDuplicateFeedback(shotNumber: number, priorShotNumb
   );
 }
 
+export function buildAdjacentSameSpeakerDialogueRepeatFeedback(
+  shotNumber: number,
+  priorShotNumber: number,
+): string {
+  return (
+    `샷 ${shotNumber}과 직전 샷 ${priorShotNumber}은 같은 화자가 유사한 의미의 대사를 연속으로 말한다. ` +
+    '한 번의 감정 반응을 비슷한 말로 두 샷에 나누지 말 것. ' +
+    `직전 샷에 대사가 있으면 샷 ${shotNumber}의 dialogue는 비우고 action만으로 표정·행동 진행(놀람→더 깊은 충격 등)을 묘사하라. ` +
+    '줄임·망설임 버전으로 같은 말을 되풀이하는 것도 금지.'
+  );
+}
+
 export interface DialogueDuplicateIssue {
   index: number;
   priorIndex: number;
   feedback: string;
 }
 
+function findAdjacentSameSpeakerDialogueRepeat(conti: VideoConti): DialogueDuplicateIssue | null {
+  const shots = conti.shots;
+  for (let j = 1; j < shots.length; j++) {
+    const prev = shots[j - 1]!;
+    const curr = shots[j]!;
+    const dialoguePrev = trimField(prev.dialogue);
+    const dialogueCurr = trimField(curr.dialogue);
+    if (!dialoguePrev || !dialogueCurr) continue;
+
+    const speakerPrev = extractDialogueSpeaker(dialoguePrev);
+    const speakerCurr = extractDialogueSpeaker(dialogueCurr);
+    if (!speakerPrev || speakerPrev !== speakerCurr) continue;
+    if (!isSemanticDialogueRepeat(dialoguePrev, dialogueCurr)) continue;
+
+    return {
+      index: j,
+      priorIndex: j - 1,
+      feedback: buildAdjacentSameSpeakerDialogueRepeatFeedback(j + 1, j),
+    };
+  }
+  return null;
+}
+
 /** 펀치라인 샷이 이전 샷 대사를 재사용하면 펀치라인 샷 패치 대상 */
 export function findDialogueDuplicateIssue(conti: VideoConti): DialogueDuplicateIssue | null {
+  const adjacentSameSpeaker = findAdjacentSameSpeakerDialogueRepeat(conti);
+  if (adjacentSameSpeaker) return adjacentSameSpeaker;
+
   const shots = conti.shots;
   if (shots.length < 2) return null;
 

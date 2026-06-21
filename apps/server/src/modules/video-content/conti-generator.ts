@@ -354,6 +354,9 @@ ${feedbackBlock}
 샷 구성 규칙 (형식 — 내용 변경 없이 적용):
 ${shotGuide}
 
+대사 분배:
+${buildDialogueDistinctRule()}
+
 JSON 스키마:
 ${buildShotsJsonSchema(ctx.conditions)}${materialBlock}${metadataBlock}`;
 }
