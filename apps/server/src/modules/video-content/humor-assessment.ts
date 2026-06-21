@@ -7,8 +7,8 @@ export const MAX_HUMOR_REGENERATION_ATTEMPTS = 2;
 
 export const HUMOR_REGENERATION_FEEDBACK =
   '이 콘티는 보고 나서 웃기거나 놀랍거나 흥미롭다는 느낌이 부족하다고 평가됐다. ' +
-  '펀치라인 아이디어(punchline_idea)는 고정 — 1~2단계 재실행 금지. ' +
-  '3단계 콘티만 재작성하며, foundation(등장인물·장소·시나리오 요약)은 유지하고 shots(action/dialogue)만 개선하라. ' +
+  '펀치라인 아이디어(punchline_idea)와 3a단계 이야기(storyDraft)는 고정 — 1~2단계·3a 재실행 금지. ' +
+  '3b단계 형식 변환만 다시 하며, shots(action/dialogue)의 재미·펀치 강도를 높이되 3a 서술의 사건 순서·결말은 유지하라. ' +
   '앞 샷 setup은 최대한 유지하고 마지막 펀치라인·마지막 대사가 시청자 입에서 실제로 웃음이나 감탄이 나올 만큼 더 재미있고 의외의 방향으로 터지도록 다시 설계하라.';
 
 export type SelfAssessedHumor = 'funny' | 'dull';

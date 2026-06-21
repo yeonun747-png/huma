@@ -3,10 +3,11 @@ import type { VideoConti } from './types.js';
 import { askClaudeWithModel } from '../../lib/anthropic-client.js';
 import { getMainClaudeModel, getSubClaudeModel } from '../../lib/ai-engine.js';
 import {
-  contiToFoundation,
   generateContiFromPunchline,
   type ContiGenerationResult,
+  type Stage3RegenMode,
 } from './conti-generator.js';
+import { contiToStoryDraft, type StoryDraft } from './story-draft.js';
 import {
   filterFilmableMustIncludeProps,
   type CoreMaterialPlacement,
@@ -17,7 +18,10 @@ import { buildHookTypePromptBlock } from './persona-axis.js';
 function parseJsonBlock(raw: string): unknown {
   const trimmed = raw.trim();
   const fence = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const body = fence ? fence[1]!.trim() : trimmed;
+  let body = fence ? fence[1]!.trim() : trimmed;
+  if (!fence && body.startsWith('```')) {
+    body = body.replace(/^```(?:json)?\s*/i, '').trim();
+  }
   return JSON.parse(body);
 }
 
@@ -26,9 +30,23 @@ async function callClaudeJson(params: {
   max_tokens: number;
   prompt: string;
 }): Promise<Record<string, unknown>> {
-  const raw = await askClaudeWithModel(params);
-  if (!raw) throw new Error('LLM 응답 없음');
-  return parseJsonBlock(raw) as Record<string, unknown>;
+  let lastErr: Error | null = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const raw = await askClaudeWithModel(params);
+      if (!raw) throw new Error('LLM 응답 없음');
+      return parseJsonBlock(raw) as Record<string, unknown>;
+    } catch (err) {
+      lastErr = err instanceof Error ? err : new Error(String(err));
+      const retryable =
+        err instanceof SyntaxError ||
+        lastErr.message.includes('JSON') ||
+        lastErr.message.includes('Unexpected');
+      if (attempt === 0 && retryable) continue;
+      throw lastErr;
+    }
+  }
+  throw lastErr ?? new Error('JSON 파싱 실패');
 }
 
 export interface PunchlineSelection {
@@ -180,9 +198,9 @@ export interface PunchlinePipelineResult {
   conti: ContiGenerationResult;
 }
 
-export type Stage3RegenMode = 'full' | 'shots_only';
+export type { Stage3RegenMode } from './conti-generator.js';
 
-/** punchlineIdea 고정 — 1~2단계 스킵, 3단계만 재생성 */
+/** punchlineIdea 고정 — 1~2단계 스킵, 3단계(3a/3b)만 재생성 */
 export async function runPunchlineContiStage3Only(params: {
   workspace: Workspace;
   plan: PreGenerationPlan;
@@ -209,14 +227,19 @@ export async function runPunchlineContiStage3Only(params: {
 
   const regenMode = params.regenMode ?? 'full';
   if (params.isInitial) {
-    await params.onStage?.('3단계 펀치라인 고정 콘티 생성');
+    await params.onStage?.('3단계 펀치라인 고정 콘티 생성 (3a→3b)');
   } else {
     await params.onStage?.(
-      regenMode === 'shots_only'
-        ? '3단계만 재생성 (1~2단계·foundation 유지)'
-        : '3단계만 재생성 (1~2단계 유지)',
+      regenMode === 'format_only'
+        ? '3b만 재생성 (3a·1~2단계 유지)'
+        : '3단계 재생성 (1~2단계 유지)',
     );
   }
+
+  const existingStoryDraft =
+    regenMode === 'format_only' && params.existingConti
+      ? contiToStoryDraft(params.existingConti as VideoConti & { storyDraft?: StoryDraft })
+      : undefined;
 
   const conti = await generateContiFromPunchline({
     workspace: params.workspace,
@@ -225,10 +248,8 @@ export async function runPunchlineContiStage3Only(params: {
     mustIncludeProps,
     pastSummaries: params.pastSummaries,
     feedback: params.feedback,
-    existingFoundation:
-      regenMode === 'shots_only' && params.existingConti
-        ? contiToFoundation(params.existingConti)
-        : undefined,
+    existingStoryDraft,
+    regenMode,
     onStage: params.onStage,
   });
 

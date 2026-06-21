@@ -612,7 +612,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
 
       if (similarityScore < SIMILARITY_THRESHOLD) break;
 
-      feedback = `직전 시나리오와 코사인 유사도 ${similarityScore.toFixed(3)}으로 겹침. 펀치라인 "${punchlineIdea}"는 유지하고, 인물·장소·전개·대사만 완전히 다르게 3단계 콘티만 재작성하라.`;
+      feedback = `직전 시나리오와 코사인 유사도 ${similarityScore.toFixed(3)}으로 겹침. 펀치라인 "${punchlineIdea}"는 유지하고, 3a·3b를 다시 실행해 인물·장소·전개·대사를 완전히 다르게 작성하라.`;
       if (attempt === MAX_REGENERATION_ATTEMPTS) {
         await supabase
           .from('huma_video_content_history')
@@ -738,7 +738,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
           punchlineIdea,
           mustIncludeProps,
           existingConti: conti!,
-          regenMode: 'shots_only',
+          regenMode: 'format_only',
           feedback: HUMOR_REGENERATION_FEEDBACK,
           onStage: logStage,
         });
@@ -817,7 +817,13 @@ export async function runContiGeneration(accountId: string): Promise<string> {
         scenario_summary: conti!.scenarioSummary,
         punchline_idea: punchlineIdea,
         hook_subtype: baseConditions.hookSubtype,
-        conti_json: { ...conti, evolinkPrompt: evoPrompt, punchlineIdea, mustIncludeProps },
+        conti_json: {
+          ...conti,
+          evolinkPrompt: evoPrompt,
+          punchlineIdea,
+          mustIncludeProps,
+          storyDraft: conti!.storyDraft,
+        },
         embedding_vector: embedding,
         similarity_score: similarityScore,
         self_assessed_humor: selfAssessedHumor,

@@ -67,8 +67,27 @@ HUMA가 호출하는 **단일 엔드포인트**를 퀴즈오아시스(Next.js/Ve
 ### 2.1 `GET /api/huma/quizzes`
 
 **권장 URL:** `https://myquizoasis.com/api/huma/quizzes`  
-**인증 (선택):** `Authorization: Bearer {QUIZOASIS_CONTENT_API_KEY}` 또는 `x-api-key` 헤더  
-HUMA `.env`의 `QUIZOASIS_CONTENT_API_KEY`와 **동일 값**을 퀴즈오아시스 Vercel env에 설정.
+**인증 (필수):** `Authorization: Bearer {QUIZOASIS_CONTENT_API_KEY}` 또는 `x-api-key` 헤더  
+HUMA i7 `.env`의 `QUIZOASIS_CONTENT_API_KEY` ↔ 퀴즈오아시스 Vercel `QUIZOASIS_HUMA_API_KEY` **동일 값** (파나나 `PANANA_HUMA_API_KEY` / `PANANA_CHARACTER_API_KEY` 패턴).
+
+**401 Unauthorized 진단**
+
+| 증상 | 조치 |
+|------|------|
+| 키 미설정 | i7 `apps/server/.env` → `QUIZOASIS_CONTENT_API_KEY=...` → `pm2 restart huma-server` |
+| 키 불일치 | Vercel `QUIZOASIS_HUMA_API_KEY` 재확인 후 i7와 문자열 완전 일치 |
+| 로컬 검증 | `cd apps/server && node scripts/probe-quiz-content.mjs` |
+
+퀴즈오아시스 route 인증 예시 (Next.js):
+
+```typescript
+const expected = process.env.QUIZOASIS_HUMA_API_KEY?.trim();
+const auth = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '').trim();
+const apiKey = request.headers.get('x-api-key')?.trim();
+if (!expected || (auth !== expected && apiKey !== expected)) {
+  return Response.json({ error: 'Unauthorized' }, { status: 401 });
+}
+```
 
 **응답 형식 (둘 중 하나)**
 

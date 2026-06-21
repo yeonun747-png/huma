@@ -68,9 +68,8 @@ describe('runPunchlineContiStage3Only contract', () => {
       getSubClaudeModel: vi.fn(async () => 'claude-haiku-test'),
     }));
     vi.doMock('./conti-generator.js', () => ({
-      contiToFoundation: vi.fn(),
-      generateContiFromPunchline: vi.fn(async (params: { onStage?: (s: string) => void }) => {
-        await params.onStage?.('3단계 shots LLM');
+      generateContiFromPunchline: vi.fn(async (params: { onStage?: (s: string) => void; regenMode?: string }) => {
+        await params.onStage?.('3b단계 형식 변환 (샷 분배)');
         return {
           characters: [],
           location: '카페',
@@ -81,6 +80,7 @@ describe('runPunchlineContiStage3Only contract', () => {
           scenarioSummary: '테스트',
           fullText: '테스트',
           shots: [],
+          storyDraft: { narrativeProse: '고정 이야기', locationKeyword: '', timeOfDay: '오후', characters: [], location: '카페', lighting: '따뜻', timeOfDayVisual: '오후', scenarioSummary: '테스트' },
         };
       }),
     }));
@@ -108,6 +108,6 @@ describe('runPunchlineContiStage3Only contract', () => {
 
     expect(stages.some((s) => s.startsWith('1단계'))).toBe(false);
     expect(stages.some((s) => s.startsWith('2단계'))).toBe(false);
-    expect(stages.some((s) => s.includes('3단계'))).toBe(true);
+    expect(stages.some((s) => s.includes('3b') || s.includes('3단계'))).toBe(true);
   });
 });

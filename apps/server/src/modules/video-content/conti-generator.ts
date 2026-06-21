@@ -62,6 +62,18 @@ import {
   parseCoreMaterialTagsFromResponse,
   validateCoreMaterials,
 } from './punchline-material.js';
+import {
+  buildFormatConversionIntro,
+  buildStoryDraftPrompt,
+  MAX_STORY_REGEN_ON_FORMAT_FAIL,
+  parseStoryDraft,
+  STORY_DRAFT_MAX_TOKENS,
+  storyDraftToFoundation,
+  type ContiFoundation,
+  type StoryDraft,
+} from './story-draft.js';
+
+export type { ContiFoundation, StoryDraft };
 
 export interface ContiGenerationResult extends VideoConti {
   locationKeyword: string;
@@ -72,20 +84,9 @@ export interface ContiGenerationResult extends VideoConti {
   lastShotIncompleteDetected?: boolean;
   /** A/B 라벨 제외 실제 부여 이름 — history.character_names 저장용 */
   characterNames?: string[];
+  /** 3a단계 자유 서술 — 3b-only 재생성·검토용 */
+  storyDraft?: StoryDraft;
 }
-
-interface ContiFoundation {
-  locationKeyword: string;
-  timeOfDay: string;
-  characters: VideoConti['characters'];
-  location: string;
-  lighting: string;
-  timeOfDayVisual: string;
-  scenarioSummary: string;
-  fullText: string;
-}
-
-export type { ContiFoundation };
 
 interface PromptContext {
   workspace: Workspace;
@@ -101,6 +102,7 @@ interface PromptContext {
   quizContentContext?: string;
   expectedMetadata?: ContiMetadataTags;
   mustIncludeProps?: string[];
+  storyDraft?: StoryDraft;
 }
 
 async function reportStage(ctx: PromptContext, stage: string): Promise<void> {
@@ -110,7 +112,10 @@ async function reportStage(ctx: PromptContext, stage: string): Promise<void> {
 function parseJsonBlock(raw: string): unknown {
   const trimmed = raw.trim();
   const fence = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const body = fence ? fence[1]!.trim() : trimmed;
+  let body = fence ? fence[1]!.trim() : trimmed;
+  if (!fence && body.startsWith('```')) {
+    body = body.replace(/^```(?:json)?\s*/i, '').trim();
+  }
   return JSON.parse(body);
 }
 
@@ -333,13 +338,20 @@ function buildShotsPrompt(ctx: PromptContext, foundation: ContiFoundation): stri
     ? `\n${buildCoreMaterialShotsInstruction(ctx.mustIncludeProps)}\n`
     : '';
 
-  return `한국어 숏폼 영상 콘티 2단계 — 1단계 설정을 바탕으로 샷별 camera/action/dialogue만 JSON으로 작성하라.
+  const storySource = ctx.storyDraft
+    ? `${buildFormatConversionIntro(ctx.storyDraft)}
+
+⚠️ 3b단계 — 위 3a 이야기를 그대로 유지하고 camera/action/dialogue JSON으로 **형식만** 분배한다.
+펀치라인·사건 순서·대사 **의미**를 새로 바꾸거나 약화하지 말 것.`
+    : `1단계 설정 (변경 금지):
+${JSON.stringify(foundation, null, 2)}`;
+
+  return `한국어 숏폼 영상 콘티 3b단계 — 확정 이야기를 샷별 camera/action/dialogue JSON으로 변환하라.
 ${cutTypeNote}action·dialogue 본문에는 A/B 라벨만 사용. 실명은 characters[].name에만 두고 action/dialogue에 쓰지 말 것.
-1단계 설정 (변경 금지):
-${JSON.stringify(foundation, null, 2)}
+${storySource}
 ${feedbackBlock}
 
-샷 구성 규칙:
+샷 구성 규칙 (형식 — 내용 변경 없이 적용):
 ${shotGuide}
 
 JSON 스키마:
@@ -449,6 +461,28 @@ function mergeShotPatches(conti: VideoConti, patches: VideoContiShot[]): VideoCo
   return { ...conti, shots };
 }
 
+async function generateStoryDraft(ctx: PromptContext, model: string): Promise<StoryDraft> {
+  const { parsed } = await callClaudeJson({
+    model,
+    max_tokens: STORY_DRAFT_MAX_TOKENS,
+    prompt: buildStoryDraftPrompt({
+      workspace: ctx.workspace,
+      conditions: ctx.conditions,
+      personaText: ctx.personaText,
+      serviceConstraintsFallback: ctx.config.serviceConstraints,
+      punchlineIdea: ctx.punchlineIdea ?? '',
+      mustIncludeProps: ctx.mustIncludeProps,
+      yeonunProductContext: ctx.yeonunProductContext,
+      quizContentContext: ctx.quizContentContext,
+      pastSummaries: ctx.pastSummaries,
+      charBlock: buildSharedContext(ctx).charBlock,
+      feedback: ctx.feedback,
+    }),
+  });
+  return parseStoryDraft(parsed);
+}
+
+/** @deprecated 3a story-draft 경로 사용 — legacy fallback */
 async function generateFoundation(ctx: PromptContext, model: string): Promise<ContiFoundation> {
   const { parsed } = await callClaudeJson({
     model,
@@ -800,7 +834,7 @@ async function generateContiShotsFromFoundation(params: {
   for (let metaAttempt = 0; metaAttempt <= MAX_METADATA_TAG_RETRIES; metaAttempt++) {
     await reportStage(
       ctx,
-      `3단계 shots LLM${metaAttempt ? ` (메타 재시도 ${metaAttempt})` : ''}${materialRetries ? ` (소재 재시도 ${materialRetries})` : ''}`,
+      `3b단계 형식 변환${metaAttempt ? ` (메타 재시도 ${metaAttempt})` : ''}${materialRetries ? ` (소재 재시도 ${materialRetries})` : ''}`,
     );
     const shotCtx = shotsFeedback ? { ...ctx, feedback: shotsFeedback } : ctx;
     const { shots, fullText, raw } = await generateShots(shotCtx, foundation, model);
@@ -851,6 +885,8 @@ async function generateContiShotsFromFoundation(params: {
   return conti!;
 }
 
+export type Stage3RegenMode = 'full' | 'format_only';
+
 export async function generateContiFromPunchline(params: {
   workspace: Workspace;
   plan: PreGenerationPlan;
@@ -858,30 +894,64 @@ export async function generateContiFromPunchline(params: {
   mustIncludeProps?: string[];
   pastSummaries?: string[];
   feedback?: string;
-  /** dull 유머 재생성 — foundation LLM 스킵 */
-  existingFoundation?: ContiFoundation;
+  /** dull·형식 재시도 — 3a 스킵, 3b만 */
+  existingStoryDraft?: StoryDraft;
+  regenMode?: Stage3RegenMode;
   onStage?: (stage: string) => void | Promise<void>;
 }): Promise<ContiGenerationResult> {
   const model = (await getMainClaudeModel()) || 'claude-sonnet-4-6';
   const ctx = buildPunchlinePromptContext(params);
+  const regenMode = params.regenMode ?? 'full';
 
-  const foundation =
-    params.existingFoundation ??
-    (await (async () => {
-      await reportStage(ctx, '3단계 foundation LLM');
-      return generateFoundation(ctx, model);
-    })());
+  let storyDraft: StoryDraft | undefined =
+    regenMode === 'format_only' ? params.existingStoryDraft : undefined;
 
-  if (params.existingFoundation) {
-    await reportStage(ctx, '3단계 shots LLM (foundation 유지 — 1~2단계 유지)');
+  if (regenMode === 'format_only' && !storyDraft) {
+    throw new Error('3b-only 재생성 — existingStoryDraft(storyDraft)가 필요합니다');
   }
 
-  return generateContiShotsFromFoundation({
-    ctx,
-    foundation,
-    model,
-    initialFeedback: params.feedback,
-  });
+  let lastErr: unknown;
+
+  for (let storyAttempt = 0; storyAttempt <= MAX_STORY_REGEN_ON_FORMAT_FAIL; storyAttempt++) {
+    if (!storyDraft) {
+      await reportStage(ctx, '3a단계 자유 서술 (재미)');
+      storyDraft = await generateStoryDraft(ctx, model);
+    } else if (storyAttempt > 0) {
+      await reportStage(ctx, '3a단계 재생성 (3b 형식 변환 반복 실패)');
+      storyDraft = await generateStoryDraft(
+        {
+          ...ctx,
+          feedback:
+            (ctx.feedback ? `${ctx.feedback} ` : '') +
+            '이전 이야기는 짧은 영상 샷·시간 형식에 맞지 않았다. 같은 펀치라인으로 더 압축된 흐름으로 다시 서술하라.',
+        },
+        model,
+      );
+    }
+
+    const foundation = storyDraftToFoundation(storyDraft);
+    const shotCtx: PromptContext = { ...ctx, storyDraft, feedback: params.feedback };
+
+    try {
+      await reportStage(shotCtx, '3b단계 형식 변환 (샷 분배)');
+      const conti = await generateContiShotsFromFoundation({
+        ctx: shotCtx,
+        foundation,
+        model,
+        initialFeedback: params.feedback,
+      });
+      return { ...conti, storyDraft };
+    } catch (err) {
+      lastErr = err;
+      if (err instanceof ContiValidationError && storyAttempt < MAX_STORY_REGEN_ON_FORMAT_FAIL) {
+        storyDraft = undefined;
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw lastErr instanceof Error ? lastErr : new Error('3단계 콘티 생성 실패');
 }
 
 export { buildEvoLinkPrompt as buildKlingPrompt };

@@ -69,12 +69,34 @@ function resolveQuizContentApiUrl(): string | null {
   return process.env.QUIZOASIS_CONTENT_API_URL?.trim() || null;
 }
 
-function quizApiRequestConfig(): { url: string; config: AxiosRequestConfig } | null {
+/** i7 .env — 퀴즈오아시스 Vercel QUIZOASIS_HUMA_API_KEY 와 동일 값 */
+export function resolveQuizContentApiKey(): string | null {
+  return (
+    process.env.QUIZOASIS_CONTENT_API_KEY?.trim() ||
+    process.env.QUIZOASIS_HUMA_API_KEY?.trim() ||
+    null
+  );
+}
+
+function formatQuizApiAuthHint(hasKey: boolean): string {
+  if (!hasKey) {
+    return (
+      'QUIZOASIS_CONTENT_API_KEY 미설정 — i7 apps/server/.env 에 키 추가 후 pm2 restart. ' +
+      '퀴즈오아시스 Vercel QUIZOASIS_HUMA_API_KEY 와 동일 값 (파나나 PANANA_HUMA_API_KEY 패턴).'
+    );
+  }
+  return (
+    'QUIZOASIS_CONTENT_API_KEY 값이 퀴즈오아시스 Vercel QUIZOASIS_HUMA_API_KEY 와 일치하는지 확인. ' +
+    '헤더: Authorization: Bearer {key} 또는 x-api-key: {key}'
+  );
+}
+
+function quizApiRequestConfig(): { url: string; config: AxiosRequestConfig; hasKey: boolean } | null {
   const apiUrl = resolveQuizContentApiUrl();
   if (!apiUrl) return null;
 
   const headers: Record<string, string> = { Accept: 'application/json' };
-  const apiKey = process.env.QUIZOASIS_CONTENT_API_KEY?.trim();
+  const apiKey = resolveQuizContentApiKey();
   if (apiKey) {
     headers.Authorization = `Bearer ${apiKey}`;
     headers['x-api-key'] = apiKey;
@@ -83,12 +105,15 @@ function quizApiRequestConfig(): { url: string; config: AxiosRequestConfig } | n
   const timeoutRaw = Number(process.env.QUIZOASIS_CONTENT_API_TIMEOUT_MS);
   const timeout = Number.isFinite(timeoutRaw) && timeoutRaw >= 5_000 ? timeoutRaw : 60_000;
 
-  return { url: apiUrl, config: { timeout, headers, validateStatus: () => true } };
+  return { url: apiUrl, config: { timeout, headers, validateStatus: () => true }, hasKey: Boolean(apiKey) };
 }
 
 export async function fetchQuizContentFromApi(): Promise<QuizApiItem[]> {
   const req = quizApiRequestConfig();
   if (!req) throw new Error('QUIZOASIS_CONTENT_API_URL 미설정');
+  if (!req.hasKey) {
+    throw new Error(`퀴즈 API 인증 키 없음 — ${formatQuizApiAuthHint(false)}`);
+  }
 
   let res;
   try {
@@ -96,6 +121,10 @@ export async function fetchQuizContentFromApi(): Promise<QuizApiItem[]> {
   } catch (err) {
     const msg = (err as Error).message ?? String(err);
     throw new Error(`퀴즈 API 요청 실패 — ${QUIZ_CONTENT_API_DEFAULT_URL} 권장: ${msg}`);
+  }
+
+  if (res.status === 401) {
+    throw new Error(`퀴즈 API HTTP 401 — ${formatQuizApiAuthHint(true)}`);
   }
 
   if (res.status >= 400) {
@@ -140,6 +169,16 @@ export async function syncQuizContentCache(): Promise<{ synced: number; error?: 
       workspace: 'quizoasis',
     });
     return { synced: 0, error: 'QUIZOASIS_CONTENT_API_URL 미설정' };
+  }
+
+  if (!resolveQuizContentApiKey()) {
+    const hint = formatQuizApiAuthHint(false);
+    await logOperation({
+      level: 'warn',
+      message: `[quiz-sync] ${hint}`,
+      workspace: 'quizoasis',
+    });
+    return { synced: 0, error: hint };
   }
 
   try {
