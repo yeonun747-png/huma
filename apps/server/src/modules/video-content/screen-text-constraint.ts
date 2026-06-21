@@ -33,9 +33,11 @@ function trimField(text: string | undefined | null): string {
 }
 
 const TEXT_VISIBILITY =
-  /(?:글자|문구|글씨|텍스트|제목|내용|단어|문장).{0,24}(?:보인|적혀|쓰여|선명|잡힌|보여|나타|확인|읽히)/u;
+  /(?:글자|문구|글씨|텍스트|제목|내용|단어|문장|페이지|결과).{0,24}(?:보인|적혀|적힌|쓰여|선명|잡힌|보여|나타|확인|읽히|노출)/u;
 const TEXT_VISIBILITY_REV =
-  /(?:보인|적혀|쓰여|선명하게?\s*잡힌|선명히|보여|나타).{0,28}(?:글자|문구|글씨|텍스트|제목)/u;
+  /(?:보인|적혀|적힌|쓰여|선명하게?\s*잡힌|선명히|보여|나타|노출).{0,28}(?:글자|문구|글씨|텍스트|제목|페이지|결과)/u;
+const APP_OR_RESULT_PAGE =
+  /(?:앱|사주|운세).{0,12}(?:결과\s*페이지|화면|페이지).{0,16}(?:보|노출|켜|표시)/u;
 const QUOTED_APPLIED_TO_SURFACE =
   /["'「『""'']([^"'」』""'']{3,})["'」』""''].{0,20}(?:라는|이라는|이라고|라고).{0,8}(?:적혀|쓰여|보인|표시)/u;
 const SURFACE_THEN_QUOTED_APPLIED =
@@ -43,7 +45,7 @@ const SURFACE_THEN_QUOTED_APPLIED =
 const QUOTED_BEFORE_SURFACE =
   /["'「『""''][^"'」』""'']{3,}["'」』""''].{0,28}((?:화면|문서|종이|메모|간판|표지|스마트폰|앱\s*화면)).{0,20}(?:보인|적혀|쓰여|선명|잡힌|보여|나타|글자|문구)/u;
 const READABLE_NAME_OR_LABEL =
-  /(?:이름|명칭|직함|호칭|글자|문구).{0,12}(?:적혀|쓰여|새겨|인쇄|표시|붙)/u;
+  /(?:이름|명칭|직함|호칭|글자|문구).{0,12}(?:적혀|적힌|쓰여|새겨|인쇄|표시|붙)/u;
 const LABELED_OBJECT =
   /(?:스티커|명찰|라벨|딱지|표지(?:판)?|간판|영수증|택|배지).{0,28}(?:적혀|쓰여|새겨|인쇄|붙|표시)/u;
 const OBJECT_WITH_READABLE_NAME =
@@ -64,6 +66,7 @@ export function actionDescribesOnScreenText(action: string | undefined | null): 
   if (LABELED_OBJECT.test(text)) return true;
   if (OBJECT_WITH_READABLE_NAME.test(text)) return true;
   if (READ_TO_UNDERSTAND.test(text)) return true;
+  if (APP_OR_RESULT_PAGE.test(text)) return true;
 
   return false;
 }

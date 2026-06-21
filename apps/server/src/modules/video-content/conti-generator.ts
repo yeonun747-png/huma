@@ -56,6 +56,12 @@ import { getShotCountBounds } from './shot-timing.js';
 import type { GenerationConditions, VideoConti, VideoContiShot, VideoPersonaConfig } from './types.js';
 import { DEFAULT_VIDEO_PERSONAS } from './types.js';
 import type { PreGenerationPlan } from './pre-generation-plan.js';
+import {
+  buildCoreMaterialShotsInstruction,
+  MAX_CORE_MATERIAL_RETRIES,
+  parseCoreMaterialTagsFromResponse,
+  validateCoreMaterials,
+} from './punchline-material.js';
 
 export interface ContiGenerationResult extends VideoConti {
   locationKeyword: string;
@@ -91,6 +97,7 @@ interface PromptContext {
   punchlineIdea?: string;
   yeonunProductContext?: string;
   expectedMetadata?: ContiMetadataTags;
+  mustIncludeProps?: string[];
 }
 
 async function reportStage(ctx: PromptContext, stage: string): Promise<void> {
@@ -206,6 +213,9 @@ function buildFoundationPrompt(ctx: PromptContext): string {
     : '';
 
   const productBlock = ctx.yeonunProductContext ? `\n${ctx.yeonunProductContext}\n` : '';
+  const mustIncludeBlock = ctx.mustIncludeProps?.length
+    ? `\n반드시 샷에 포함할 핵심 소재(must_include — 3단계에서 각각 최소 1샷): ${ctx.mustIncludeProps.join(', ')}\n`
+    : '';
 
   if (ctx.personaText) {
     const hookSubtypeLine = conditions.cutType === 'multi_shot' && 'hookSubtype' in conditions
@@ -223,7 +233,7 @@ ${situationLine}- 감정곡선: ${conditions.emotionCurve}
 - 펀치라인 메커니즘(hook_type): ${conditions.hookType}
 ${hookSubtypeLine}- cut_type: multi_shot
 - duration: ${conditions.duration}초
-${punchlineBlock}${productBlock}${charBlock}${cutRuleBlock}${pastBlock}${feedbackBlock}
+${punchlineBlock}${productBlock}${mustIncludeBlock}${charBlock}${cutRuleBlock}${pastBlock}${feedbackBlock}
 
 창작 지침:
 "이번 영상은 ${storyAxis}의 인물들이 등장하고, 새로 창작한 장소/시간에서 벌어지는 [${conditions.emotionCurve}] 흐름의 이야기.
@@ -313,6 +323,10 @@ function buildShotsPrompt(ctx: PromptContext, foundation: ContiFoundation): stri
     ? `\n${buildMetadataTagInstruction(ctx.expectedMetadata)}\n`
     : '';
 
+  const materialBlock = ctx.mustIncludeProps?.length
+    ? `\n${buildCoreMaterialShotsInstruction(ctx.mustIncludeProps)}\n`
+    : '';
+
   return `한국어 숏폼 영상 콘티 2단계 — 1단계 설정을 바탕으로 샷별 camera/action/dialogue만 JSON으로 작성하라.
 ${cutTypeNote}action·dialogue 본문에는 A/B 라벨만 사용. 실명은 characters[].name에만 두고 action/dialogue에 쓰지 말 것.
 1단계 설정 (변경 금지):
@@ -323,7 +337,7 @@ ${feedbackBlock}
 ${shotGuide}
 
 JSON 스키마:
-${buildShotsJsonSchema(ctx.conditions)}${metadataBlock}`;
+${buildShotsJsonSchema(ctx.conditions)}${materialBlock}${metadataBlock}`;
 }
 
 function buildShotPatchPrompt(
@@ -740,12 +754,14 @@ export async function generateContiFromPunchline(params: {
   workspace: Workspace;
   plan: PreGenerationPlan;
   punchlineIdea: string;
+  mustIncludeProps?: string[];
   pastSummaries?: string[];
   feedback?: string;
   onStage?: (stage: string) => void | Promise<void>;
 }): Promise<ContiGenerationResult> {
   const model = (await getMainClaudeModel()) || 'claude-sonnet-4-6';
   const { plan, punchlineIdea } = params;
+  const mustIncludeProps = params.mustIncludeProps ?? [];
   const expectedMetadata = metadataTagsFromConditions(plan.conditions);
 
   const ctx: PromptContext = {
@@ -754,6 +770,7 @@ export async function generateContiFromPunchline(params: {
     conditions: plan.conditions,
     personaText: plan.personaText,
     punchlineIdea,
+    mustIncludeProps,
     yeonunProductContext: plan.yeonunProduct?.contextText,
     expectedMetadata,
     feedback: params.feedback,
@@ -766,9 +783,13 @@ export async function generateContiFromPunchline(params: {
 
   let shotsFeedback = params.feedback;
   let conti!: ContiGenerationResult;
+  let materialRetries = 0;
 
   for (let metaAttempt = 0; metaAttempt <= MAX_METADATA_TAG_RETRIES; metaAttempt++) {
-    await reportStage(ctx, `3단계 shots LLM${metaAttempt ? ` (메타 태그 재시도 ${metaAttempt})` : ''}`);
+    await reportStage(
+      ctx,
+      `3단계 shots LLM${metaAttempt ? ` (메타 재시도 ${metaAttempt})` : ''}${materialRetries ? ` (소재 재시도 ${materialRetries})` : ''}`,
+    );
     const shotCtx = shotsFeedback ? { ...ctx, feedback: shotsFeedback } : ctx;
     const { shots, fullText, raw } = await generateShots(shotCtx, foundation, model);
 
@@ -788,6 +809,27 @@ export async function generateContiFromPunchline(params: {
       }
       shotsFeedback = metaCheck.message;
       continue;
+    }
+
+    if (mustIncludeProps.length && raw) {
+      const placements = parseCoreMaterialTagsFromResponse(raw);
+      const materialCheck = validateCoreMaterials({
+        mustIncludeProps,
+        placements,
+        shots,
+      });
+      if (!materialCheck.ok) {
+        if (materialRetries >= MAX_CORE_MATERIAL_RETRIES) {
+          await reportStage(
+            ctx,
+            `핵심 소재 검증 ${MAX_CORE_MATERIAL_RETRIES}회 실패 — 유머 평가 단계로 진행`,
+          );
+        } else {
+          materialRetries += 1;
+          shotsFeedback = materialCheck.message;
+          continue;
+        }
+      }
     }
 
     conti = await finalizeContiFromParts(shotCtx, foundation, shots, fullText, model);

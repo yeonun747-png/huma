@@ -5,6 +5,10 @@ import {
   generateContiFromPunchline,
   type ContiGenerationResult,
 } from './conti-generator.js';
+import {
+  filterFilmableMustIncludeProps,
+  type CoreMaterialPlacement,
+} from './punchline-material.js';
 import type { PreGenerationPlan } from './pre-generation-plan.js';
 
 function parseJsonBlock(raw: string): unknown {
@@ -22,6 +26,11 @@ async function callClaudeJson(params: {
   const raw = await askClaudeWithModel(params);
   if (!raw) throw new Error('LLM 응답 없음');
   return parseJsonBlock(raw) as Record<string, unknown>;
+}
+
+export interface PunchlineSelection {
+  punchlineIdea: string;
+  mustIncludeProps: string[];
 }
 
 function buildStage1Prompt(params: {
@@ -64,6 +73,7 @@ ${charBlock}${productBlock}${pastBlock}
 규칙:
 - 정확히 8개. 각 1~2문장, 마지막 대사/상황이 펀치라인이 되도록.
 - 8개 모두 hook_subtype "${conditions.hookSubtype}" 각도로 설계.
+- 펀치라인에 촬영 가능한 구체적 소재(소지품·증거 사물)를 1~2개 포함하면 좋다. (앱 화면 글자·문서 내용은 소재로 쓰지 말 것)
 - 서로 다른 인물·장소·사건. 과거 시나리오와 겹치지 않게.
 - 설명 없이 JSON만.
 
@@ -80,8 +90,24 @@ function buildStage2Prompt(ideas: string[]): string {
 ${numbered}
 
 기준: 반전 강도, 대사 임팩트, 클리셰 회피, 15초 내 전달 가능성.
+
+must_include_props 규칙:
+- 선택한 아이디어의 펀치라인을 성립시키는 촬영 가능한 구체적 소품·사물 2~4개
+- 스마트폰·반지 케이스·서류봉투·우산 등 OK
+- "사주 결과 페이지", "앱 화면 글자", "이름이 적힌 …" 등 읽어야 하는 화면/문서는 제외
+- dialogue로 전달할 정보는 props에 넣지 말 것
+
 JSON만 출력:
-{ "index": 0, "reason": "한 줄 이유" }`;
+{
+  "index": 0,
+  "reason": "한 줄 이유",
+  "must_include_props": ["반지 케이스", "스마트폰"]
+}`;
+}
+
+function parseMustIncludeProps(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return filterFilmableMustIncludeProps(raw.map((v) => String(v)));
 }
 
 export async function generatePunchlineIdeas(params: {
@@ -103,23 +129,42 @@ export async function generatePunchlineIdeas(params: {
   return ideas.slice(0, 8);
 }
 
-export async function selectPunchlineIdea(ideas: string[]): Promise<string> {
+export async function selectPunchlineIdea(ideas: string[]): Promise<PunchlineSelection> {
   const model = (await getSubClaudeModel()) || 'claude-haiku-4-5-20251001';
   const parsed = await callClaudeJson({
     model,
-    max_tokens: 256,
+    max_tokens: 384,
     prompt: buildStage2Prompt(ideas),
   });
 
   const index = Number(parsed.index);
-  if (!Number.isInteger(index) || index < 0 || index >= ideas.length) {
-    return ideas[0]!;
-  }
-  return ideas[index]!;
+  const idea =
+    Number.isInteger(index) && index >= 0 && index < ideas.length ? ideas[index]! : ideas[0]!;
+  const mustIncludeProps = parseMustIncludeProps(parsed.must_include_props);
+
+  return { punchlineIdea: idea, mustIncludeProps };
+}
+
+export async function inferMustIncludePropsFromIdea(punchlineIdea: string): Promise<string[]> {
+  const model = (await getSubClaudeModel()) || 'claude-haiku-4-5-20251001';
+  const parsed = await callClaudeJson({
+    model,
+    max_tokens: 256,
+    prompt: `아래 펀치라인 아이디어를 13초 영상으로 만들 때 반드시 샷에 보여야 할 촬영 가능한 소품·사물 2~4개를 JSON으로 추출하라.
+읽어야 하는 앱 화면·문서 글자·이름 표시는 제외.
+
+펀치라인:
+${punchlineIdea}
+
+JSON:
+{ "must_include_props": ["...", "..."] }`,
+  });
+  return parseMustIncludeProps(parsed.must_include_props);
 }
 
 export interface PunchlinePipelineResult {
   punchlineIdea: string;
+  mustIncludeProps: string[];
   conti: ContiGenerationResult;
 }
 
@@ -127,12 +172,13 @@ export async function runPunchlineContiPipeline(params: {
   workspace: Workspace;
   plan: PreGenerationPlan;
   pastSummaries: string[];
-  /** 있으면 1~2단계 생략 (유머/유사도 재생성) */
   punchlineIdea?: string;
+  mustIncludeProps?: string[];
   feedback?: string;
   onStage?: (stage: string) => void | Promise<void>;
 }): Promise<PunchlinePipelineResult> {
   let punchlineIdea = params.punchlineIdea?.trim() ?? '';
+  let mustIncludeProps = params.mustIncludeProps ?? [];
 
   if (!punchlineIdea) {
     await params.onStage?.('1단계 펀치라인 아이디어 8개 발산');
@@ -142,8 +188,13 @@ export async function runPunchlineContiPipeline(params: {
       pastSummaries: params.pastSummaries,
     });
 
-    await params.onStage?.('2단계 Haiku 펀치라인 1개 선택');
-    punchlineIdea = await selectPunchlineIdea(ideas);
+    await params.onStage?.('2단계 Haiku 펀치라인 1개 선택 + must_include_props');
+    const selected = await selectPunchlineIdea(ideas);
+    punchlineIdea = selected.punchlineIdea;
+    mustIncludeProps = selected.mustIncludeProps;
+  } else if (!mustIncludeProps.length) {
+    await params.onStage?.('must_include_props 추론');
+    mustIncludeProps = await inferMustIncludePropsFromIdea(punchlineIdea);
   }
 
   await params.onStage?.('3단계 펀치라인 고정 콘티 생성');
@@ -151,10 +202,11 @@ export async function runPunchlineContiPipeline(params: {
     workspace: params.workspace,
     plan: params.plan,
     punchlineIdea,
+    mustIncludeProps,
     pastSummaries: params.pastSummaries,
     feedback: params.feedback,
     onStage: params.onStage,
   });
 
-  return { punchlineIdea, conti };
+  return { punchlineIdea, mustIncludeProps, conti };
 }

@@ -38,6 +38,14 @@ describe('actionDescribesOnScreenText', () => {
   it('detects readable name badge in action', () => {
     expect(actionDescribesOnScreenText('가슴 명찰에 파트장이라고 적혀 보인다.')).toBe(true);
   });
+
+  it('detects yeonun app result page with name on screen', () => {
+    expect(
+      actionDescribesOnScreenText(
+        '스마트폰 화면에 앱이 켜진 채 B 이름이 적힌 사주 결과 페이지가 노출된다.',
+      ),
+    ).toBe(true);
+  });
 });
 
 describe('ensureScreenTextRenderingInConstraints', () => {

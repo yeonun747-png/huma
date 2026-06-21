@@ -511,6 +511,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
     const pastSummaries = await loadPastSummaries(accountId);
     let conti!: VideoConti & { locationKeyword: string; timeOfDay: string };
     let punchlineIdea = '';
+    let mustIncludeProps: string[] = [];
     let embedding: number[] = [];
     let similarityScore = 0;
     let feedback: string | undefined;
@@ -531,6 +532,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
           pastSummaries,
           feedback,
           punchlineIdea: punchlineIdea || undefined,
+          mustIncludeProps: mustIncludeProps.length ? mustIncludeProps : undefined,
           onStage: logStage,
         });
       } catch (err) {
@@ -572,6 +574,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
       }
 
       punchlineIdea = generated.punchlineIdea;
+      mustIncludeProps = generated.mustIncludeProps;
       conti = generated.conti;
 
       if (generated.conti.contentWarnings?.length) {
@@ -664,6 +667,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
         plan,
         pastSummaries,
         punchlineIdea,
+        mustIncludeProps,
         feedback: lengthFeedback,
         onStage: logStage,
       });
@@ -731,6 +735,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
           plan,
           pastSummaries,
           punchlineIdea,
+          mustIncludeProps,
           feedback: HUMOR_REGENERATION_FEEDBACK,
           onStage: logStage,
         });
@@ -809,7 +814,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
         scenario_summary: conti!.scenarioSummary,
         punchline_idea: punchlineIdea,
         hook_subtype: baseConditions.hookSubtype,
-        conti_json: { ...conti, evolinkPrompt: evoPrompt, punchlineIdea },
+        conti_json: { ...conti, evolinkPrompt: evoPrompt, punchlineIdea, mustIncludeProps },
         embedding_vector: embedding,
         similarity_score: similarityScore,
         self_assessed_humor: selfAssessedHumor,
