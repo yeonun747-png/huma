@@ -2,6 +2,20 @@ import type { HumaVideoContentHistory } from '@huma/shared';
 
 export type VideoContentTab = 'review' | 'progress' | 'done' | 'failed';
 
+export const VIDEO_CONTENT_LIST_PAGE_SIZE = 10;
+
+export function paginateList<T>(items: T[], page: number, pageSize = VIDEO_CONTENT_LIST_PAGE_SIZE): T[] {
+  if (pageSize <= 0 || !items.length) return [];
+  const safePage = Math.max(1, page);
+  const start = (safePage - 1) * pageSize;
+  return items.slice(start, start + pageSize);
+}
+
+export function listTotalPages(count: number, pageSize = VIDEO_CONTENT_LIST_PAGE_SIZE): number {
+  if (pageSize <= 0) return 1;
+  return Math.max(1, Math.ceil(count / pageSize));
+}
+
 export const VIDEO_CONTENT_TAB_LABEL: Record<VideoContentTab, string> = {
   review: '검토 대기',
   progress: '진행 중',

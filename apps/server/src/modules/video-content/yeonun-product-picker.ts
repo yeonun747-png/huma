@@ -1,5 +1,8 @@
 import { supabase } from '../../middleware/auth.js';
-import type { YeonunProductRow } from '../content/yeonun-context.js';
+import {
+  buildYeonunProductContextForVideo,
+  type YeonunProductRow,
+} from '../content/yeonun-context.js';
 
 export type YeonunProductPick = {
   slug: string;
@@ -7,7 +10,7 @@ export type YeonunProductPick = {
   contextText: string;
 };
 
-function formatProductContext(data: YeonunProductRow): string {
+function formatProductContextFallback(data: YeonunProductRow): string {
   const tags = Array.isArray(data.tags) ? data.tags.join(', ') : '';
   return `[연운 상품]
 상품명: ${data.title ?? data.slug}
@@ -60,18 +63,24 @@ export async function pickYeonunProduct(): Promise<YeonunProductPick | null> {
   for (const entry of weights) {
     r -= entry.weight;
     if (r <= 0) {
+      const contextText =
+        (await buildYeonunProductContextForVideo(entry.product.slug)) ??
+        formatProductContextFallback(entry.product);
       return {
         slug: entry.product.slug,
         title: entry.product.title,
-        contextText: formatProductContext(entry.product),
+        contextText,
       };
     }
   }
 
   const fallback = products[0]!;
+  const contextText =
+    (await buildYeonunProductContextForVideo(fallback.slug)) ??
+    formatProductContextFallback(fallback);
   return {
     slug: fallback.slug,
     title: fallback.title,
-    contextText: formatProductContext(fallback),
+    contextText,
   };
 }

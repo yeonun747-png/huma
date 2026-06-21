@@ -1,4 +1,4 @@
-import type { HumaJob, HumaAccount, HumaModem, HumaVideoQueue, HumaVideoContentHistory, VideoPersonaConfig } from '@huma/shared';
+import type { HumaJob, HumaAccount, HumaModem, HumaVideoQueue, HumaVideoContentHistory } from '@huma/shared';
 import { cachedFetch, invalidateApiCache } from '@/lib/api-cache';
 import { refreshNavBadges } from '@/lib/nav-badge-events';
 
@@ -397,25 +397,9 @@ export const api = {
   videoContentGet: (id: string) => request<HumaVideoContentHistory>(`/api/video-content/${id}`),
   videoContentHistory: (accountId: string) =>
     request<HumaVideoContentHistory[]>(`/api/accounts/${accountId}/video-content-history`),
-  getAccountVideoPersona: (accountId: string) =>
-    request<{
-      workspace: string;
-      personaText: string;
-      requiredHeaders: string[];
-      videoPersona: VideoPersonaConfig | null;
-      defaults: VideoPersonaConfig;
-    }>(`/api/accounts/${accountId}/video-persona`),
   getWorkspaceVideoPersona: (workspace: string) =>
     request<{ workspace: string; personaText: string; requiredHeaders: string[] }>(
       `/api/workspaces/${workspace}/video-persona`,
-    ),
-  updateAccountVideoPersona: (accountId: string, body: { rawText: string }) =>
-    request<{ ok: boolean; missingSections: string[]; unknownSections: string[] }>(
-      `/api/accounts/${accountId}/video-persona`,
-      {
-        method: 'PATCH',
-        body: JSON.stringify(body),
-      },
     ),
   updateWorkspaceVideoPersona: (workspace: string, body: { personaText: string }) =>
     request<{ ok: boolean; missingSections: string[] }>(`/api/workspaces/${workspace}/video-persona`, {
@@ -525,6 +509,21 @@ export const api = {
   },
   syncPananaCharacters: () =>
     request<{ synced: number; error?: string }>('/api/panana-characters/sync', { method: 'POST' }),
+  quizContent: () =>
+    request<{
+      quizzes: Array<{
+        id: string;
+        quiz_external_id: string;
+        slug: string | null;
+        title: string;
+        description: string | null;
+        status: string;
+        usageCount?: number;
+      }>;
+      lastSyncedAt: string | null;
+    }>('/api/quiz-content'),
+  syncQuizContent: () =>
+    request<{ synced: number; error?: string }>('/api/quiz-content/sync', { method: 'POST' }),
   settings: () => request<Array<{ key: string; value: unknown }>>('/api/settings'),
   getSetting: (key: string) => request<Record<string, unknown>>(`/api/settings/${key}`),
   updateSetting: (key: string, value: unknown) =>

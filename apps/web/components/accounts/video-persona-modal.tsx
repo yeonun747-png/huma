@@ -24,6 +24,16 @@ export function VideoPersonaModal({ account, open, onClose }: VideoPersonaModalP
   const [pananaChars, setPananaChars] = useState<
     Array<{ id: string; name: string; description?: string | null; appearanceCount?: number }>
   >([]);
+  const [quizItems, setQuizItems] = useState<
+    Array<{
+      id: string;
+      quiz_external_id: string;
+      slug: string | null;
+      title: string;
+      description: string | null;
+      usageCount?: number;
+    }>
+  >([]);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -48,6 +58,12 @@ export function VideoPersonaModal({ account, open, onClose }: VideoPersonaModalP
         const pan = await api.pananaCharacters(account.id);
         setPananaChars(pan.characters ?? []);
         setLastSyncedAt(pan.lastSyncedAt ?? null);
+      } else if (ws === 'quizoasis') {
+        const quiz = await api.quizContent();
+        setQuizItems(quiz.quizzes ?? []);
+        setLastSyncedAt(quiz.lastSyncedAt ?? null);
+      } else {
+        setLastSyncedAt(null);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : '로드 실패');
@@ -91,6 +107,24 @@ export function VideoPersonaModal({ account, open, onClose }: VideoPersonaModalP
         setError(`동기화 실패: ${result.error}`);
       } else {
         showToast(`캐릭터 ${result.synced}건 동기화 완료`);
+      }
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '동기화 실패');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleQuizSync = async () => {
+    setSyncing(true);
+    setError('');
+    try {
+      const result = await api.syncQuizContent();
+      if (result.error) {
+        setError(`동기화 실패: ${result.error}`);
+      } else {
+        showToast(`퀴즈 ${result.synced}건 동기화 완료`);
       }
       await load();
     } catch (e) {
@@ -180,6 +214,36 @@ export function VideoPersonaModal({ account, open, onClose }: VideoPersonaModalP
                   </ul>
                 ) : (
                   <p className="text-[11px] text-huma-t3">활성 캐릭터 없음 — PANANA_CHARACTER_API_URL 확인</p>
+                )}
+              </div>
+            ) : null}
+
+            {ws === 'quizoasis' ? (
+              <div className="m-panel mb-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-[12px] font-semibold text-huma-t">퀴즈오아시스 퀴즈 캐시</div>
+                  <button type="button" className="btn-ghost btn-sm" onClick={() => void handleQuizSync()} disabled={syncing}>
+                    {syncing ? '동기화 중…' : '지금 동기화'}
+                  </button>
+                </div>
+                <p className="text-[10px] text-huma-t3">
+                  마지막 동기화: {lastSyncedAt ? new Date(lastSyncedAt).toLocaleString('ko-KR') : '—'}
+                </p>
+                {quizItems.length ? (
+                  <ul className="max-h-[120px] space-y-1 overflow-y-auto text-[11px]">
+                    {quizItems.map((q) => (
+                      <li key={q.id} className="rounded border border-huma-bdr px-2 py-1">
+                        <span className="font-semibold">{q.title}</span>
+                        <span className="ml-2 text-huma-t3">최근 20건 {q.usageCount ?? 0}회</span>
+                        {q.slug ? <span className="ml-2 font-mono text-huma-t4">{q.slug}</span> : null}
+                        {q.description ? (
+                          <div className="truncate text-huma-t3">{q.description.slice(0, 80)}…</div>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-[11px] text-huma-t3">활성 퀴즈 없음 — QUIZOASIS_CONTENT_API_URL 확인</p>
                 )}
               </div>
             ) : null}

@@ -85,6 +85,8 @@ interface ContiFoundation {
   fullText: string;
 }
 
+export type { ContiFoundation };
+
 interface PromptContext {
   workspace: Workspace;
   config: VideoPersonaConfig;
@@ -96,6 +98,7 @@ interface PromptContext {
   personaText?: string;
   punchlineIdea?: string;
   yeonunProductContext?: string;
+  quizContentContext?: string;
   expectedMetadata?: ContiMetadataTags;
   mustIncludeProps?: string[];
 }
@@ -213,6 +216,7 @@ function buildFoundationPrompt(ctx: PromptContext): string {
     : '';
 
   const productBlock = ctx.yeonunProductContext ? `\n${ctx.yeonunProductContext}\n` : '';
+  const quizBlock = ctx.quizContentContext ? `\n${ctx.quizContentContext}\n` : '';
   const mustIncludeBlock = ctx.mustIncludeProps?.length
     ? `\n반드시 샷에 포함할 핵심 소재(must_include — 3단계에서 각각 최소 1샷): ${ctx.mustIncludeProps.join(', ')}\n`
     : '';
@@ -234,7 +238,7 @@ ${situationLine}- 감정곡선: ${conditions.emotionCurve}
 - 펀치라인 메커니즘(hook_type): ${conditions.hookType}
 ${hookSubtypeLine}- cut_type: multi_shot
 - duration: ${conditions.duration}초
-${hookTypeBlock}${punchlineBlock}${productBlock}${mustIncludeBlock}${charBlock}${cutRuleBlock}${pastBlock}${feedbackBlock}
+${hookTypeBlock}${punchlineBlock}${productBlock}${quizBlock}${mustIncludeBlock}${charBlock}${cutRuleBlock}${pastBlock}${feedbackBlock}
 
 창작 지침:
 "이번 영상은 ${storyAxis}의 인물들이 등장하고, 새로 창작한 장소/시간에서 벌어지는 [${conditions.emotionCurve}] 흐름의 이야기.
@@ -661,14 +665,17 @@ async function ensureCutTypeMatches(
   }
 }
 
-export async function generateConti(params: PromptContext): Promise<ContiGenerationResult> {
-  const model = (await getMainClaudeModel()) || 'claude-sonnet-4-6';
-  await reportStage(params, '1단계 foundation LLM');
-  const foundation = await generateFoundation(params, model);
-  await reportStage(params, '2단계 shots LLM');
-  const { shots, fullText } = await generateShots(params, foundation, model);
-
-  return finalizeContiFromParts(params, foundation, shots, fullText, model);
+export function contiToFoundation(conti: VideoConti & { locationKeyword?: string }): ContiFoundation {
+  return {
+    locationKeyword: String(conti.locationKeyword ?? ''),
+    timeOfDay: String(conti.timeOfDay ?? ''),
+    characters: conti.characters,
+    location: conti.location,
+    lighting: conti.lighting,
+    timeOfDayVisual: conti.timeOfDay,
+    scenarioSummary: conti.scenarioSummary,
+    fullText: conti.fullText || conti.scenarioSummary,
+  };
 }
 
 async function finalizeContiFromParts(
@@ -752,7 +759,7 @@ async function finalizeContiFromParts(
 
 const MAX_METADATA_TAG_RETRIES = 2;
 
-export async function generateContiFromPunchline(params: {
+function buildPunchlinePromptContext(params: {
   workspace: Workspace;
   plan: PreGenerationPlan;
   punchlineIdea: string;
@@ -760,30 +767,33 @@ export async function generateContiFromPunchline(params: {
   pastSummaries?: string[];
   feedback?: string;
   onStage?: (stage: string) => void | Promise<void>;
-}): Promise<ContiGenerationResult> {
-  const model = (await getMainClaudeModel()) || 'claude-sonnet-4-6';
+}): PromptContext {
   const { plan, punchlineIdea } = params;
-  const mustIncludeProps = params.mustIncludeProps ?? [];
-  const expectedMetadata = metadataTagsFromConditions(plan.conditions);
-
-  const ctx: PromptContext = {
+  return {
     workspace: params.workspace,
     config: DEFAULT_VIDEO_PERSONAS[params.workspace],
     conditions: plan.conditions,
     personaText: plan.personaText,
     punchlineIdea,
-    mustIncludeProps,
+    mustIncludeProps: params.mustIncludeProps ?? [],
     yeonunProductContext: plan.yeonunProduct?.contextText,
-    expectedMetadata,
+    quizContentContext: plan.quizContent?.contextText,
+    expectedMetadata: metadataTagsFromConditions(plan.conditions),
     feedback: params.feedback,
     pastSummaries: params.pastSummaries,
     onStage: params.onStage,
   };
+}
 
-  await reportStage(ctx, '3단계 foundation LLM');
-  const foundation = await generateFoundation(ctx, model);
-
-  let shotsFeedback = params.feedback;
+async function generateContiShotsFromFoundation(params: {
+  ctx: PromptContext;
+  foundation: ContiFoundation;
+  model: string;
+  initialFeedback?: string;
+}): Promise<ContiGenerationResult> {
+  const { ctx, foundation, model } = params;
+  const mustIncludeProps = ctx.mustIncludeProps ?? [];
+  let shotsFeedback = params.initialFeedback;
   let conti!: ContiGenerationResult;
   let materialRetries = 0;
 
@@ -804,7 +814,7 @@ export async function generateContiFromPunchline(params: {
       continue;
     }
 
-    const metaCheck = validateContiMetadataTags(parsedMeta, expectedMetadata);
+    const metaCheck = validateContiMetadataTags(parsedMeta, ctx.expectedMetadata!);
     if (!metaCheck.ok) {
       if (metaAttempt >= MAX_METADATA_TAG_RETRIES) {
         throw new ContiValidationError(metaCheck.message);
@@ -839,6 +849,39 @@ export async function generateContiFromPunchline(params: {
   }
 
   return conti!;
+}
+
+export async function generateContiFromPunchline(params: {
+  workspace: Workspace;
+  plan: PreGenerationPlan;
+  punchlineIdea: string;
+  mustIncludeProps?: string[];
+  pastSummaries?: string[];
+  feedback?: string;
+  /** dull 유머 재생성 — foundation LLM 스킵 */
+  existingFoundation?: ContiFoundation;
+  onStage?: (stage: string) => void | Promise<void>;
+}): Promise<ContiGenerationResult> {
+  const model = (await getMainClaudeModel()) || 'claude-sonnet-4-6';
+  const ctx = buildPunchlinePromptContext(params);
+
+  const foundation =
+    params.existingFoundation ??
+    (await (async () => {
+      await reportStage(ctx, '3단계 foundation LLM');
+      return generateFoundation(ctx, model);
+    })());
+
+  if (params.existingFoundation) {
+    await reportStage(ctx, '3단계 shots LLM (foundation 유지 — 1~2단계 유지)');
+  }
+
+  return generateContiShotsFromFoundation({
+    ctx,
+    foundation,
+    model,
+    initialFeedback: params.feedback,
+  });
 }
 
 export { buildEvoLinkPrompt as buildKlingPrompt };

@@ -19,19 +19,7 @@ import {
   resolvePostingProxyPortForCreate,
 } from '../lib/posting-proxy.js';
 import { mergeBlogWritingPersonaField } from '../lib/account-persona.js';
-import {
-  type VideoPersonaConfig,
-  type Workspace,
-} from '@huma/shared';
-import { DEFAULT_VIDEO_PERSONAS } from '../modules/video-content/types.js';
-import {
-  loadVideoPersonaText,
-  saveVideoPersonaText,
-} from '../modules/video-content/video-persona-store.js';
-import {
-  PERSONA_REQUIRED_HEADERS,
-  validatePersonaTextHeaders,
-} from '../modules/video-content/persona-axis.js';
+import { type Workspace } from '@huma/shared';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -249,60 +237,6 @@ export async function registerAccountRoutes(app: FastifyInstance) {
       request.log.error(err, 'blog-persona patch failed');
       return reply.code(500).send({ error: (err as Error).message ?? '페르소나 저장 실패' });
     }
-  });
-
-  app.get('/api/accounts/:id/video-persona', { preHandler: authMiddleware }, async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const allowedWorkspaces = getWorkspaceFilter(request);
-    const { data: account, loadError } = await loadAccountRow(id);
-
-    if (loadError === 'INVALID_ID') {
-      return reply.code(400).send({ error: `잘못된 계정 id (${id})` });
-    }
-    if (!account) return reply.code(404).send({ error: '계정 없음' });
-    if (!assertAccountMutateAccess(account, allowedWorkspaces)) {
-      return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
-    }
-
-    const ws = (account.workspace as Workspace) ?? 'yeonun';
-    const personaText = await loadVideoPersonaText(ws);
-
-    return {
-      workspace: ws,
-      personaText,
-      requiredHeaders: PERSONA_REQUIRED_HEADERS[ws],
-      /** @deprecated — 서비스 personaText 사용 */
-      videoPersona: null,
-      defaults: DEFAULT_VIDEO_PERSONAS[ws] ?? DEFAULT_VIDEO_PERSONAS.yeonun,
-    };
-  });
-
-  app.patch('/api/accounts/:id/video-persona', { preHandler: authMiddleware }, async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const allowedWorkspaces = getWorkspaceFilter(request);
-    const { data: existing, loadError } = await loadAccountRow(id);
-
-    if (loadError === 'INVALID_ID') {
-      return reply.code(400).send({ error: `잘못된 계정 id (${id})` });
-    }
-    if (!existing) return reply.code(404).send({ error: '계정 없음' });
-    if (!assertAccountMutateAccess(existing, allowedWorkspaces)) {
-      return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
-    }
-
-    const body = request.body as { rawText?: string; personaText?: string; videoPersona?: VideoPersonaConfig };
-    const ws = (existing.workspace as Workspace) ?? 'yeonun';
-
-    const text = typeof body.personaText === 'string' ? body.personaText : body.rawText;
-    if (typeof text !== 'string') {
-      return reply.code(400).send({ error: 'personaText 또는 rawText가 필요합니다' });
-    }
-
-    const validation = validatePersonaTextHeaders(text, PERSONA_REQUIRED_HEADERS[ws]);
-    const missingSections = validation.ok ? [] : validation.missing;
-
-    await saveVideoPersonaText(ws, text);
-    return { ok: true, missingSections, unknownSections: [] as string[] };
   });
 
   app.patch('/api/accounts/:id', { preHandler: authMiddleware }, async (request, reply) => {

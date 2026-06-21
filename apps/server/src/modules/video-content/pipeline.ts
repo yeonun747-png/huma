@@ -29,7 +29,7 @@ import {
   SIMILARITY_THRESHOLD,
 } from './embedding.js';
 import { buildPreGenerationPlan, type PreGenerationPlan } from './pre-generation-plan.js';
-import { runPunchlineContiPipeline } from './punchline-pipeline.js';
+import { runPunchlineContiPipeline, runPunchlineContiStage3Only } from './punchline-pipeline.js';
 import {
   pickSubtitleStyle,
   saveSubtitleStyleHistory,
@@ -477,6 +477,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
       duration: baseConditions.duration,
       character_used: baseConditions.characterId ?? null,
       used_product: plan.yeonunProduct?.slug ?? null,
+      used_quiz_id: plan.quizContent?.quizExternalId ?? null,
     })
     .select('id')
     .single();
@@ -662,7 +663,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
       }
 
       const lengthFeedback = `${PROMPT_LENGTH_REGENERATION_FEEDBACK} (현재 변환 프롬프트 ${evoPrompt.length}자)`;
-      const regenerated = await runPunchlineContiPipeline({
+      const regenerated = await runPunchlineContiStage3Only({
         workspace,
         plan,
         pastSummaries,
@@ -730,12 +731,14 @@ export async function runContiGeneration(accountId: string): Promise<string> {
       });
 
       try {
-        const regenerated = await runPunchlineContiPipeline({
+        const regenerated = await runPunchlineContiStage3Only({
           workspace,
           plan,
           pastSummaries,
           punchlineIdea,
           mustIncludeProps,
+          existingConti: conti!,
+          regenMode: 'shots_only',
           feedback: HUMOR_REGENERATION_FEEDBACK,
           onStage: logStage,
         });

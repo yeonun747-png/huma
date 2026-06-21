@@ -6,7 +6,10 @@ import type { VideoConti } from './types.js';
 export const MAX_HUMOR_REGENERATION_ATTEMPTS = 2;
 
 export const HUMOR_REGENERATION_FEEDBACK =
-  '이 콘티는 보고 나서 웃기거나 놀랍거나 흥미롭다는 느낌이 부족하다고 평가됐다. 같은 시나리오 조건(관계축, 감정곡선, 장소)은 유지하되, 앞 샷 setup은 최대한 유지하고 마지막 펀치라인·마지막 대사가 시청자 입에서 실제로 웃음이나 감탄이 나올 만큼 더 재미있고 의외의 방향으로 터지도록 다시 설계하라. 단순히 반전 구조를 따르는 것보다 실제로 웃기거나 놀라운 내용 자체가 더 중요하다.';
+  '이 콘티는 보고 나서 웃기거나 놀랍거나 흥미롭다는 느낌이 부족하다고 평가됐다. ' +
+  '펀치라인 아이디어(punchline_idea)는 고정 — 1~2단계 재실행 금지. ' +
+  '3단계 콘티만 재작성하며, foundation(등장인물·장소·시나리오 요약)은 유지하고 shots(action/dialogue)만 개선하라. ' +
+  '앞 샷 setup은 최대한 유지하고 마지막 펀치라인·마지막 대사가 시청자 입에서 실제로 웃음이나 감탄이 나올 만큼 더 재미있고 의외의 방향으로 터지도록 다시 설계하라.';
 
 export type SelfAssessedHumor = 'funny' | 'dull';
 

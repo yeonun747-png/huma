@@ -1,7 +1,9 @@
 import type { Workspace } from '@huma/shared';
+import type { VideoConti } from './types.js';
 import { askClaudeWithModel } from '../../lib/anthropic-client.js';
 import { getMainClaudeModel, getSubClaudeModel } from '../../lib/ai-engine.js';
 import {
+  contiToFoundation,
   generateContiFromPunchline,
   type ContiGenerationResult,
 } from './conti-generator.js';
@@ -40,7 +42,7 @@ function buildStage1Prompt(params: {
   pastSummaries: string[];
 }): string {
   const { plan, pastSummaries, workspace } = params;
-  const { conditions, personaText, yeonunProduct } = plan;
+  const { conditions, personaText, yeonunProduct, quizContent } = plan;
 
   const charBlock =
     workspace === 'panana' && conditions.characterDescription
@@ -56,6 +58,7 @@ function buildStage1Prompt(params: {
 
   const situationLine = conditions.situationAxis ? `- 상황축: ${conditions.situationAxis}\n` : '';
   const productBlock = yeonunProduct ? `\n${yeonunProduct.contextText}\n(이번 영상에 자연스럽게 녹일 상품)\n` : '';
+  const quizBlock = quizContent ? `\n${quizContent.contextText}\n(이번 영상에 자연스럽게 녹일 테스트)\n` : '';
   const hookTypeBlock = buildHookTypePromptBlock(personaText, conditions.hookType);
 
   return `한국어 숏폼 영상 — 펀치라인(결말) 아이디어 8개 발산.
@@ -70,7 +73,7 @@ ${situationLine}- 감정곡선: ${conditions.emotionCurve}
 - hook_subtype (이번 발산 각도): ${conditions.hookSubtype}
 - duration: ${conditions.duration}초
 - cut_type: multi_shot
-${hookTypeBlock}${charBlock}${productBlock}${pastBlock}
+${hookTypeBlock}${charBlock}${productBlock}${quizBlock}${pastBlock}
 
 규칙:
 - 정확히 8개. 각 1~2문장, 마지막 대사/상황이 펀치라인이 되도록.
@@ -177,6 +180,61 @@ export interface PunchlinePipelineResult {
   conti: ContiGenerationResult;
 }
 
+export type Stage3RegenMode = 'full' | 'shots_only';
+
+/** punchlineIdea 고정 — 1~2단계 스킵, 3단계만 재생성 */
+export async function runPunchlineContiStage3Only(params: {
+  workspace: Workspace;
+  plan: PreGenerationPlan;
+  punchlineIdea: string;
+  mustIncludeProps?: string[];
+  existingConti?: VideoConti;
+  regenMode?: Stage3RegenMode;
+  pastSummaries?: string[];
+  feedback?: string;
+  /** 최초 생성(1~2단계 직후) — 로그 라벨 구분 */
+  isInitial?: boolean;
+  onStage?: (stage: string) => void | Promise<void>;
+}): Promise<PunchlinePipelineResult> {
+  const punchlineIdea = params.punchlineIdea.trim();
+  if (!punchlineIdea) {
+    throw new Error('3단계만 재생성 — punchlineIdea가 필요합니다 (1~2단계 유지)');
+  }
+
+  let mustIncludeProps = params.mustIncludeProps ?? [];
+  if (!mustIncludeProps.length) {
+    await params.onStage?.('must_include_props 추론');
+    mustIncludeProps = await inferMustIncludePropsFromIdea(punchlineIdea);
+  }
+
+  const regenMode = params.regenMode ?? 'full';
+  if (params.isInitial) {
+    await params.onStage?.('3단계 펀치라인 고정 콘티 생성');
+  } else {
+    await params.onStage?.(
+      regenMode === 'shots_only'
+        ? '3단계만 재생성 (1~2단계·foundation 유지)'
+        : '3단계만 재생성 (1~2단계 유지)',
+    );
+  }
+
+  const conti = await generateContiFromPunchline({
+    workspace: params.workspace,
+    plan: params.plan,
+    punchlineIdea,
+    mustIncludeProps,
+    pastSummaries: params.pastSummaries,
+    feedback: params.feedback,
+    existingFoundation:
+      regenMode === 'shots_only' && params.existingConti
+        ? contiToFoundation(params.existingConti)
+        : undefined,
+    onStage: params.onStage,
+  });
+
+  return { punchlineIdea, mustIncludeProps, conti };
+}
+
 export async function runPunchlineContiPipeline(params: {
   workspace: Workspace;
   plan: PreGenerationPlan;
@@ -188,6 +246,7 @@ export async function runPunchlineContiPipeline(params: {
 }): Promise<PunchlinePipelineResult> {
   let punchlineIdea = params.punchlineIdea?.trim() ?? '';
   let mustIncludeProps = params.mustIncludeProps ?? [];
+  const isInitial = !params.punchlineIdea?.trim();
 
   if (!punchlineIdea) {
     await params.onStage?.('1단계 펀치라인 아이디어 8개 발산');
@@ -206,16 +265,14 @@ export async function runPunchlineContiPipeline(params: {
     mustIncludeProps = await inferMustIncludePropsFromIdea(punchlineIdea);
   }
 
-  await params.onStage?.('3단계 펀치라인 고정 콘티 생성');
-  const conti = await generateContiFromPunchline({
+  return runPunchlineContiStage3Only({
     workspace: params.workspace,
     plan: params.plan,
     punchlineIdea,
     mustIncludeProps,
     pastSummaries: params.pastSummaries,
     feedback: params.feedback,
+    isInitial,
     onStage: params.onStage,
   });
-
-  return { punchlineIdea, mustIncludeProps, conti };
 }

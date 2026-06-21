@@ -54,6 +54,7 @@ import { registerBlogCheckRoutes } from './routes/blog-check.js';
 import { registerVideoContentRoutes } from './routes/video-content.js';
 import { startBlogCheckScheduler } from './modules/blog-check/service.js';
 import { startPananaCharacterSyncScheduler } from './lib/panana-character-scheduler.js';
+import { startQuizContentSyncScheduler } from './lib/quiz-content-scheduler.js';
 import { startVideoContentStorageScheduler } from './lib/video-content-storage-scheduler.js';
 import { assertSecretsConfigured } from './lib/secrets.js';
 
@@ -227,8 +228,9 @@ async function main() {
     startCafeActivityScheduler();
     startBlogCheckScheduler();
     startPananaCharacterSyncScheduler();
+    startQuizContentSyncScheduler();
     startVideoContentStorageScheduler();
-    app.log.info('BullMQ worker + crank scheduler + cafe activity + blog-check + panana-sync + video-storage scheduler started');
+    app.log.info('BullMQ worker + crank scheduler + cafe activity + blog-check + panana-sync + quiz-sync + video-storage scheduler started');
 
     registerGracefulShutdown(app, worker);
 

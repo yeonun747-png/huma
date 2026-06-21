@@ -32,6 +32,12 @@ import {
   syncPananaCharacters,
 } from '../modules/video-content/panana-characters.js';
 import {
+  getQuizContentLastSyncTime,
+  getQuizUsageCounts,
+  listActiveQuizContent,
+  syncQuizContentCache,
+} from '../modules/video-content/quiz-content-cache.js';
+import {
   loadVideoPersonaText,
   saveVideoPersonaText,
 } from '../modules/video-content/video-persona-store.js';
@@ -534,6 +540,30 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
     const allowed = getWorkspaceFilter(request);
     if (!allowed.includes('panana')) return reply.code(403).send({ error: '권한 없음' });
     const result = await syncPananaCharacters();
+    if (result.error && result.synced === 0) return reply.code(502).send(result);
+    return result;
+  });
+
+  app.get('/api/quiz-content', { preHandler: authMiddleware }, async (request) => {
+    const allowed = getWorkspaceFilter(request);
+    if (!allowed.includes('quizoasis')) return { quizzes: [], lastSyncedAt: null };
+
+    const quizzes = await listActiveQuizContent();
+    const counts = await getQuizUsageCounts();
+    const lastSyncedAt = await getQuizContentLastSyncTime();
+    return {
+      quizzes: quizzes.map((q) => ({
+        ...q,
+        usageCount: counts.get(q.quiz_external_id) ?? 0,
+      })),
+      lastSyncedAt,
+    };
+  });
+
+  app.post('/api/quiz-content/sync', { preHandler: authMiddleware }, async (request, reply) => {
+    const allowed = getWorkspaceFilter(request);
+    if (!allowed.includes('quizoasis')) return reply.code(403).send({ error: '권한 없음' });
+    const result = await syncQuizContentCache();
     if (result.error && result.synced === 0) return reply.code(502).send(result);
     return result;
   });

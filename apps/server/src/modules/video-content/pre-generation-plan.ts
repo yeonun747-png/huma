@@ -9,6 +9,7 @@ import { pickFromOptions, pickFromOptionsWithFallback, pickDuration } from './se
 import { loadVideoPersonaText } from './video-persona-store.js';
 import { pickYeonunProduct, type YeonunProductPick } from './yeonun-product-picker.js';
 import { pickPananaCharacter } from './panana-characters.js';
+import { pickQuizContent, type QuizContentPick } from './quiz-content-cache.js';
 import type { GenerationConditions } from './types.js';
 
 type HistoryRow = {
@@ -24,6 +25,7 @@ export interface PreGenerationPlan {
   personaText: string;
   conditions: GenerationConditions & { hookSubtype: string };
   yeonunProduct?: YeonunProductPick;
+  quizContent?: QuizContentPick;
 }
 
 async function loadRecentHistoryByWorkspace(workspace: Workspace, limit: number): Promise<HistoryRow[]> {
@@ -91,6 +93,11 @@ export async function buildPreGenerationPlan(params: {
     yeonunProduct = (await pickYeonunProduct()) ?? undefined;
   }
 
+  let quizContent: QuizContentPick | undefined;
+  if (params.workspace === 'quizoasis') {
+    quizContent = (await pickQuizContent()) ?? undefined;
+  }
+
   const relationshipAxis = pickFromOptionsWithFallback(relationshipOptions, recentAxes, relationshipOptions);
   const emotionCurve = pickFromOptionsWithFallback(emotionOptions, recentEmotions, emotionOptions);
   const hookType = pickFromOptionsWithFallback(hookMechanisms, recentHooks, hookMechanisms);
@@ -115,7 +122,7 @@ export async function buildPreGenerationPlan(params: {
     characterDescription,
   };
 
-  return { personaText, conditions, yeonunProduct };
+  return { personaText, conditions, yeonunProduct, quizContent };
 }
 
 export { pickFromOptions };

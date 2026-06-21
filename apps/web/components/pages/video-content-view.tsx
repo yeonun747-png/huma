@@ -10,12 +10,15 @@ import { getAccessibleBusinessUnits } from '@/lib/admin-scope';
 import { WORKSPACES } from '@/lib/constants';
 import { getLogSocket } from '@/lib/socket';
 import {
+  VIDEO_CONTENT_LIST_PAGE_SIZE,
   VIDEO_CONTENT_STATUS_LABEL,
   VIDEO_CONTENT_TAB_LABEL,
   countByVideoContentTab,
   filterByVideoContentTab,
   isDeletableVideoContent,
   isVideoProgressStatus,
+  listTotalPages,
+  paginateList,
   parseContiPreview,
   videoContentTabOf,
   type VideoContentTab,
@@ -391,6 +394,7 @@ export function VideoContentView() {
   const [filterWorkspace, setFilterWorkspace] = useState('');
   const [contiTarget, setContiTarget] = useState('');
   const [activeTab, setActiveTab] = useState<VideoContentTab>('review');
+  const [listPage, setListPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<HumaVideoContentHistory | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -523,6 +527,21 @@ export function VideoContentView() {
 
   const tabCounts = useMemo(() => countByVideoContentTab(items), [items]);
   const filteredItems = useMemo(() => filterByVideoContentTab(items, activeTab), [items, activeTab]);
+  const listTotal = filteredItems.length;
+  const listPageCount = listTotalPages(listTotal);
+  const pagedItems = useMemo(
+    () => paginateList(filteredItems, listPage),
+    [filteredItems, listPage],
+  );
+  const showListPagination = listTotal > VIDEO_CONTENT_LIST_PAGE_SIZE;
+
+  useEffect(() => {
+    setListPage(1);
+  }, [activeTab, filterWorkspace]);
+
+  useEffect(() => {
+    if (listPage > listPageCount) setListPage(listPageCount);
+  }, [listPage, listPageCount]);
 
   useEffect(() => {
     if (selectedId && items.some((i) => i.id === selectedId)) return;
@@ -668,7 +687,10 @@ export function VideoContentView() {
                 className={`rounded border px-1 py-1.5 text-center transition-colors ${
                   activeTab === tab ? 'border-huma-acc bg-huma-glow' : 'border-huma-bdr bg-huma-bg2'
                 }`}
-                onClick={() => setActiveTab(tab)}
+                onClick={() => {
+                  setActiveTab(tab);
+                  setListPage(1);
+                }}
               >
                 <div className="text-[15px] font-bold leading-tight text-huma-t">{tabCounts[tab]}</div>
                 <div className="text-[8.5px] leading-tight text-huma-t3">{VIDEO_CONTENT_TAB_LABEL[tab]}</div>
@@ -724,7 +746,10 @@ export function VideoContentView() {
                 key={tab}
                 type="button"
                 className={`flex-1 px-1 py-2 text-[9px] ${activeTab === tab ? 'bg-huma-glow text-huma-acc' : 'text-huma-t3'}`}
-                onClick={() => setActiveTab(tab)}
+                onClick={() => {
+                  setActiveTab(tab);
+                  setListPage(1);
+                }}
               >
                 {VIDEO_CONTENT_TAB_LABEL[tab]}
                 {tabCounts[tab] > 0 ? ` (${tabCounts[tab]})` : ''}
@@ -732,10 +757,11 @@ export function VideoContentView() {
             ))}
           </div>
 
-          <div className="flex-1 overflow-y-auto p-2">
-            {filteredItems.length ? (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="min-h-0 flex-1 overflow-y-auto p-2">
+            {pagedItems.length ? (
               <ul className="space-y-1">
-                {filteredItems.map((item) => (
+                {pagedItems.map((item) => (
                   <li key={item.id}>
                     <button
                       type="button"
@@ -780,6 +806,37 @@ export function VideoContentView() {
                 {activeTab === 'review' ? '검토할 콘티가 없습니다' : '항목 없음'}
               </p>
             )}
+            </div>
+            <div className="flex shrink-0 items-center justify-center gap-2 border-t border-huma-bdr px-2 py-2">
+              {showListPagination ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn-ghost btn-sm px-2"
+                    disabled={listPage <= 1}
+                    onClick={() => setListPage((p) => Math.max(1, p - 1))}
+                  >
+                    ◀
+                  </button>
+                  <span className="font-mono text-[10px] text-huma-t3">
+                    {listPage} / {listPageCount}
+                    <span className="ml-1 text-huma-t4">· {listTotal}건</span>
+                  </span>
+                  <button
+                    type="button"
+                    className="btn-ghost btn-sm px-2"
+                    disabled={listPage >= listPageCount}
+                    onClick={() => setListPage((p) => Math.min(listPageCount, p + 1))}
+                  >
+                    ▶
+                  </button>
+                </>
+              ) : (
+                <span className="font-mono text-[10px] text-huma-t4">
+                  {listTotal > 0 ? `전체 ${listTotal}건` : ''}
+                </span>
+              )}
+            </div>
           </div>
         </div>
 

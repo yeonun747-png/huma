@@ -137,6 +137,13 @@ export async function buildYeonunContext(sourceUrl: string): Promise<string> {
   return formatProductContext(product);
 }
 
+/** 영상 콘티 — slug 기준 풍부한 상품 컨텍스트 (캐릭터·말투 포함) */
+export async function buildYeonunProductContextForVideo(slug: string): Promise<string | null> {
+  const product = await fetchProductBySlug(slug);
+  if (!product) return null;
+  return formatProductContext(product);
+}
+
 /** 캐릭터 포스팅 톤(character_mode_prompts) 포함 — character_key는 slug가 아님 */
 export async function buildYeonunContextWithPrompt(sourceUrl: string): Promise<string> {
   const slug = extractFortuneSlug(sourceUrl);
