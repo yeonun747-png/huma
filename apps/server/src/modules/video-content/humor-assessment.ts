@@ -48,7 +48,7 @@ funny 또는 dull 중 하나의 단어로만 답하라.`;
 }
 
 export function parseHumorVerdict(raw: string | null | undefined): SelfAssessedHumor {
-  if (!raw) return 'dull';
+  if (!raw?.trim()) return 'dull';
   const normalized = raw.trim().toLowerCase();
   const word = normalized.split(/\s+/)[0]?.replace(/[^a-z]/g, '') ?? '';
   if (word === 'funny') return 'funny';

@@ -571,6 +571,22 @@ export async function runContiGeneration(accountId: string): Promise<string> {
           }
           continue;
         }
+        const msg = err instanceof Error ? err.message : String(err);
+        const jsonFail =
+          err instanceof SyntaxError ||
+          msg.includes('JSON') ||
+          msg.includes("Expected ','") ||
+          msg.includes('Unexpected token');
+        if (jsonFail && attempt < MAX_REGENERATION_ATTEMPTS) {
+          feedback = `JSON 형식 오류 — ${msg.slice(0, 180)}. 대사 속 따옴표 이스케이프 후 다시 생성.`;
+          await logOperation({
+            level: 'warn',
+            message: `[video-content] JSON 파싱 실패 → 재시도 ${attempt}/${MAX_REGENERATION_ATTEMPTS}: ${msg.slice(0, 120)}`,
+            workspace,
+            account_id: accountId,
+          });
+          continue;
+        }
         throw err;
       }
 
@@ -595,7 +611,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
         });
       }
 
-      embedding = embedText(conti.fullText || conti.scenarioSummary);
+      embedding = embedText(conti.fullText || conti.scenarioSummary || '');
       const pastEmb = await loadPastEmbeddings(accountId, historyId);
       const sim = computeSimilarityScores(embedding, pastEmb);
       similarityScore = sim.max;
@@ -607,7 +623,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
         pastEmbCount: pastEmb.length,
         scores: sim.scores,
         maxScore: sim.max,
-        textLen: (conti.fullText || conti.scenarioSummary).length,
+        textLen: (conti.fullText || conti.scenarioSummary || '').length,
       });
 
       if (similarityScore < SIMILARITY_THRESHOLD) break;
@@ -674,7 +690,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
       });
 
       conti = regenerated.conti;
-      embedding = embedText(conti.fullText || conti.scenarioSummary);
+      embedding = embedText(conti.fullText || conti.scenarioSummary || '');
       const pastEmbAfterLength = await loadPastEmbeddings(accountId, historyId);
       const simAfterLength = computeSimilarityScores(embedding, pastEmbAfterLength);
       similarityScore = simAfterLength.max;
@@ -685,7 +701,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
         pastEmbCount: pastEmbAfterLength.length,
         scores: simAfterLength.scores,
         maxScore: simAfterLength.max,
-        textLen: (conti.fullText || conti.scenarioSummary).length,
+        textLen: (conti.fullText || conti.scenarioSummary || '').length,
       });
     }
 
@@ -744,7 +760,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
         });
 
         conti = regenerated.conti;
-        embedding = embedText(conti.fullText || conti.scenarioSummary);
+        embedding = embedText(conti.fullText || conti.scenarioSummary || '');
         const pastEmbAfterHumor = await loadPastEmbeddings(accountId, historyId);
         const simAfterHumor = computeSimilarityScores(embedding, pastEmbAfterHumor);
         similarityScore = simAfterHumor.max;
@@ -755,7 +771,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
           pastEmbCount: pastEmbAfterHumor.length,
           scores: simAfterHumor.scores,
           maxScore: simAfterHumor.max,
-          textLen: (conti.fullText || conti.scenarioSummary).length,
+          textLen: (conti.fullText || conti.scenarioSummary || '').length,
         });
 
         if (similarityScore >= SIMILARITY_THRESHOLD) {

@@ -29,9 +29,10 @@ function hashToIndex(token: string): number {
   return Math.abs(h) % DIM;
 }
 
-export function embedText(text: string): number[] {
+export function embedText(text: string | null | undefined): number[] {
+  const safe = (text ?? '').trim();
   const vec = new Array(DIM).fill(0);
-  const tokens = [...tokenize(text), ...trigrams(text)];
+  const tokens = [...tokenize(safe), ...trigrams(safe)];
   if (!tokens.length) return vec;
 
   for (const tok of tokens) {

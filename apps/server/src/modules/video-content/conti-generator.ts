@@ -1,5 +1,6 @@
 import type { Workspace } from '@huma/shared';
 import { askClaudeWithModel } from '../../lib/anthropic-client.js';
+import { callClaudeJsonWithRetry } from '../../lib/llm-json.js';
 import { getMainClaudeModel } from '../../lib/ai-engine.js';
 import {
   enforcePunchlineShotMinDuration,
@@ -109,43 +110,15 @@ async function reportStage(ctx: PromptContext, stage: string): Promise<void> {
   await ctx.onStage?.(stage);
 }
 
-function parseJsonBlock(raw: string): unknown {
-  const trimmed = raw.trim();
-  const fence = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
-  let body = fence ? fence[1]!.trim() : trimmed;
-  if (!fence && body.startsWith('```')) {
-    body = body.replace(/^```(?:json)?\s*/i, '').trim();
-  }
-  return JSON.parse(body);
-}
-
 async function callClaudeJson(params: {
   model: string;
   max_tokens: number;
   prompt: string;
-  retryHint?: string;
 }): Promise<{ parsed: Record<string, unknown>; raw: string }> {
-  let lastErr: Error | null = null;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const prompt =
-      attempt === 0 || !params.retryHint
-        ? params.prompt
-        : `${params.prompt}\n\n⚠️ JSON 파싱 실패. 유효한 JSON만 출력하고 대사 속 따옴표는 \\" 로 이스케이프하라.\n${params.retryHint}`;
-    try {
-      const raw = await askClaudeWithModel({ model: params.model, max_tokens: params.max_tokens, prompt });
-      if (!raw) throw new Error('LLM 응답 없음');
-      return { parsed: parseJsonBlock(raw) as Record<string, unknown>, raw };
-    } catch (err) {
-      lastErr = err instanceof Error ? err : new Error(String(err));
-      const retryable =
-        err instanceof SyntaxError ||
-        lastErr.message.includes('JSON') ||
-        lastErr.message.includes('Unexpected');
-      if (attempt === 0 && retryable) continue;
-      throw lastErr;
-    }
-  }
-  throw lastErr ?? new Error('JSON 파싱 실패');
+  return callClaudeJsonWithRetry<Record<string, unknown>>({
+    ...params,
+    ask: askClaudeWithModel,
+  });
 }
 
 function buildMultiShotGuide(ctx: PromptContext): string {

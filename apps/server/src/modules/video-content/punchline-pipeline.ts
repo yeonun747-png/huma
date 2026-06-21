@@ -1,6 +1,7 @@
 import type { Workspace } from '@huma/shared';
 import type { VideoConti } from './types.js';
 import { askClaudeWithModel } from '../../lib/anthropic-client.js';
+import { callClaudeJsonWithRetry } from '../../lib/llm-json.js';
 import { getMainClaudeModel, getSubClaudeModel } from '../../lib/ai-engine.js';
 import {
   generateContiFromPunchline,
@@ -15,38 +16,16 @@ import {
 import type { PreGenerationPlan } from './pre-generation-plan.js';
 import { buildHookTypePromptBlock } from './persona-axis.js';
 
-function parseJsonBlock(raw: string): unknown {
-  const trimmed = raw.trim();
-  const fence = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
-  let body = fence ? fence[1]!.trim() : trimmed;
-  if (!fence && body.startsWith('```')) {
-    body = body.replace(/^```(?:json)?\s*/i, '').trim();
-  }
-  return JSON.parse(body);
-}
-
 async function callClaudeJson(params: {
   model: string;
   max_tokens: number;
   prompt: string;
 }): Promise<Record<string, unknown>> {
-  let lastErr: Error | null = null;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const raw = await askClaudeWithModel(params);
-      if (!raw) throw new Error('LLM 응답 없음');
-      return parseJsonBlock(raw) as Record<string, unknown>;
-    } catch (err) {
-      lastErr = err instanceof Error ? err : new Error(String(err));
-      const retryable =
-        err instanceof SyntaxError ||
-        lastErr.message.includes('JSON') ||
-        lastErr.message.includes('Unexpected');
-      if (attempt === 0 && retryable) continue;
-      throw lastErr;
-    }
-  }
-  throw lastErr ?? new Error('JSON 파싱 실패');
+  const { parsed } = await callClaudeJsonWithRetry<Record<string, unknown>>({
+    ...params,
+    ask: askClaudeWithModel,
+  });
+  return parsed;
 }
 
 export interface PunchlineSelection {
