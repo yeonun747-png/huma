@@ -1,7 +1,8 @@
 /** Kling 등 영상 생성 모델 — 화면 속 텍스트·읽어야 하는 라벨 렌더링 회피 */
 export const VIDEO_SCREEN_TEXT_RENDERING_CONSTRAINT = `- 영상 생성 모델(Kling 등)은 화면 속 텍스트(문서, 메모, 앱 화면, 간판, 표지판, 명찰, 스티커, 라벨 등)를 정확하게 그려내지 못한다.
-- "특정 정보를 읽어야만 의미가 통하는" 시각 요소(이름, 직함, 스티커 문구, 표지판 글자 등)도 화면 텍스트와 동일하게 취급한다. action에 "이름이 적힌 스티커", "명찰 글자가 보인다"처럼 구체적 내용을 시각적으로 보여주지 않는다.
-- 그런 정보가 필요하면 반드시 등장인물 대사로 풀어 쓴다 (예: "어? 이거 내 슬리퍼 아닌데, 민지 거잖아").
+- "특정 정보를 읽어야만 의미가 통하는" 시각 요소(이름, 직함, 스티커 문구, 표지판 글자, 스탬프·날짜·취소 통보 등)도 화면 텍스트와 동일하게 취급한다. action에 "이름이 적힌 스티커", "명찰 글자가 보인다"처럼 구체적 내용을 시각적으로 보여주지 않는다.
+- "○○이 보이도록 각도를 잡는다", "문서 상단 스탬프가 선명하게 잡힌다"처럼 카메라 각도·구도로 읽히게 하려는 우회 표현도 금지한다.
+- 그런 정보가 필요하면 반드시 등장인물 대사로 풀어 쓴다 (예: "어? 이거 내 슬리퍼 아닌데, 민지 거잖아", "어젯밤에 취소 팩스 왔어요").
 - 문서·종이·스마트폰·스티커·명찰 등 사물 자체는 보여줄 수 있으나, 그 안의 구체적 문구·이름·라벨 내용은 action에서 렌더링하려 하지 않는다.`;
 
 const CONSTRAINT_MARKER = '화면 속 텍스트';
@@ -15,16 +16,18 @@ export function ensureScreenTextRenderingInConstraints(constraints: string): str
 
 export function buildScreenTextRenderingRule(): string {
   return (
-    '화면 속 구체적 텍스트·이름·라벨·스티커·명찰·간판 문구를 action에서 직접 렌더링하려 하지 말고, ' +
+    '화면 속 구체적 텍스트·이름·라벨·스티커·명찰·간판·스탬프·날짜 문구를 action에서 직접 렌더링하려 하지 말고, ' +
+    '"보이도록 각도를 잡음", "상단 스탬프가 선명하게 잡힘" 같은 우회 표현도 금지한다. ' +
     '해당 정보는 dialogue로 풀어서 전달한다. 사물 자체(종이·스마트폰·슬리퍼·명찰 등)는 묘사 가능.'
   );
 }
 
 export function buildOnScreenTextFeedback(shotNumber: number): string {
   return (
-    `샷 ${shotNumber}에서 화면 속 텍스트·이름·라벨·스티커 등 "읽어야 의미가 통하는" 정보를 직접 보여주려 하고 있다. ` +
+    `샷 ${shotNumber}에서 화면 속 텍스트·이름·라벨·스티커·스탬프·날짜 등 "읽어야 의미가 통하는" 정보를 직접 보여주려 하고 있다. ` +
+    '"보이도록 각도를 잡음" 같은 우회 표현도 동일하게 금지된다. ' +
     '영상 생성 모델이 글자·이름·라벨을 정확히 그리지 못하므로, 해당 정보를 인물 대사로 풀어서 전달하도록 action을 다시 작성하라. ' +
-    '예: "어? 이 슬리퍼 내 거 아닌데, ○○ 거잖아"처럼 dialogue로 반전을 설명한다.'
+    '예: "어? 이 슬리퍼 내 거 아닌데, ○○ 거잖아", "어젯밤에 취소 팩스 왔어요"처럼 dialogue로 반전을 설명한다.'
   );
 }
 
@@ -52,6 +55,15 @@ const OBJECT_WITH_READABLE_NAME =
   /(?:스티커|명찰|라벨|슬리퍼|바닥|유니폼|옷|소매|가방).{0,36}(?:이름|다른\s*\S+\s*이름).{0,12}(?:적혀|쓰여|붙|새겨)/u;
 const READ_TO_UNDERSTAND =
   /(?:읽어야|읽으면|글자를\s*읽|이름을\s*읽|적혀\s*있(?:는|고|어)|쓰여\s*있(?:는|고|어)).{0,32}(?:스티커|명찰|라벨|표지|간판|슬리퍼|바닥|유니폼)/u;
+/** 카메라 각도·구도로 읽히게 하려는 우회 (예: "보이도록 각도를 잡음") */
+const FRAMING_FOR_READABLE_DETAIL =
+  /(?:보이(?:도록|게)|드러나(?:도록|게)|선명(?:하게?)?(?:\s*잡)?|잡히(?:도록|게)).{0,20}각도/u;
+const ANGLE_TO_SHOW_READABLE_DETAIL =
+  /각도(?:를)?\s*잡(?:아|음).{0,28}(?:보이|드러|선명|스탬프|날짜|글자|문구|확인|통보|취소|내용|스탬프)/u;
+const READABLE_DETAIL_THEN_VISIBILITY =
+  /(?:스탬프|도장|날짜|확인(?:서|증)?|통보|취소|내용|상단|하단|모서리|끝).{0,24}(?:보이(?:도록|게)|드러|선명|잡|노출)/u;
+const DOCUMENT_PART_VISIBILITY =
+  /(?:문서|종이|서류|팩스|확인(?:서|증)?).{0,16}(?:상단|하단|모서리|끝|표면).{0,20}(?:보이|잡|드러|노출)/u;
 
 /** action 필드 — 읽어야 의미가 통하는 화면 텍스트·라벨 직접 렌더링 여부 */
 export function actionDescribesOnScreenText(action: string | undefined | null): boolean {
@@ -67,6 +79,10 @@ export function actionDescribesOnScreenText(action: string | undefined | null): 
   if (OBJECT_WITH_READABLE_NAME.test(text)) return true;
   if (READ_TO_UNDERSTAND.test(text)) return true;
   if (APP_OR_RESULT_PAGE.test(text)) return true;
+  if (FRAMING_FOR_READABLE_DETAIL.test(text)) return true;
+  if (ANGLE_TO_SHOW_READABLE_DETAIL.test(text)) return true;
+  if (READABLE_DETAIL_THEN_VISIBILITY.test(text)) return true;
+  if (DOCUMENT_PART_VISIBILITY.test(text)) return true;
 
   return false;
 }

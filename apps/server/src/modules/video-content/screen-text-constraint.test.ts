@@ -46,6 +46,24 @@ describe('actionDescribesOnScreenText', () => {
       ),
     ).toBe(true);
   });
+
+  it('detects framing circumlocution for fax stamp', () => {
+    expect(
+      actionDescribesOnScreenText(
+        'B가 숨기고 있던 문서를 A 앞으로 조심스럽게 내밀며 눈을 살짝 찡그리고 말한다. 문서 상단의 팩스 수신 스탬프가 보이도록 각도를 잡음.',
+      ),
+    ).toBe(true);
+  });
+
+  it('detects angle-to-show readable detail phrasing', () => {
+    expect(actionDescribesOnScreenText('확인서 날짜가 선명하게 잡히도록 카메라 각도를 잡는다.')).toBe(true);
+  });
+
+  it('allows handing document without readable detail framing', () => {
+    expect(
+      actionDescribesOnScreenText('B가 종이를 A 앞으로 조심스럽게 내밀며 눈을 살짝 찡그린다.'),
+    ).toBe(false);
+  });
 });
 
 describe('ensureScreenTextRenderingInConstraints', () => {

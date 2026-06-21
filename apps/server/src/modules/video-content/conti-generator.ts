@@ -49,7 +49,7 @@ import {
   validateContiMetadataTags,
   type ContiMetadataTags,
 } from './conti-metadata.js';
-import { extractSectionBody } from './persona-axis.js';
+import { extractSectionBody, buildHookTypePromptBlock } from './persona-axis.js';
 import { normalizeMultiShotConti, normalizeSingleShotConti, buildEvoLinkPrompt, getDefaultShotAction } from './evolink.js';
 import { EVOLINK_PROMPT_LENGTH_GUIDANCE } from './prompt-length.js';
 import { getShotCountBounds } from './shot-timing.js';
@@ -221,6 +221,7 @@ function buildFoundationPrompt(ctx: PromptContext): string {
     const hookSubtypeLine = conditions.cutType === 'multi_shot' && 'hookSubtype' in conditions
       ? `- hook_subtype: ${(conditions as GenerationConditions & { hookSubtype?: string }).hookSubtype ?? ''}\n`
       : '';
+    const hookTypeBlock = buildHookTypePromptBlock(ctx.personaText, conditions.hookType);
 
     return `한국어 숏폼 영상 콘티 1단계 — 시나리오·등장인물·장소만 JSON으로 작성하라 (샷/shots 없음).
 
@@ -233,11 +234,12 @@ ${situationLine}- 감정곡선: ${conditions.emotionCurve}
 - 펀치라인 메커니즘(hook_type): ${conditions.hookType}
 ${hookSubtypeLine}- cut_type: multi_shot
 - duration: ${conditions.duration}초
-${punchlineBlock}${productBlock}${mustIncludeBlock}${charBlock}${cutRuleBlock}${pastBlock}${feedbackBlock}
+${hookTypeBlock}${punchlineBlock}${productBlock}${mustIncludeBlock}${charBlock}${cutRuleBlock}${pastBlock}${feedbackBlock}
 
 창작 지침:
 "이번 영상은 ${storyAxis}의 인물들이 등장하고, 새로 창작한 장소/시간에서 벌어지는 [${conditions.emotionCurve}] 흐름의 이야기.
 등장인물 이름·외형·구체적 상황은 전부 새로 창작. 과거 시나리오와 겹치지 않게.
+[${conditions.hookType}] 메커니즘의 펀치라인이 터지도록 이야기를 설계.
 location_keyword와 time_of_day도 새로 창작."
 
 등장인물 이름 규칙:

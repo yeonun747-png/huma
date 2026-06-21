@@ -10,6 +10,7 @@ import {
   type CoreMaterialPlacement,
 } from './punchline-material.js';
 import type { PreGenerationPlan } from './pre-generation-plan.js';
+import { buildHookTypePromptBlock } from './persona-axis.js';
 
 function parseJsonBlock(raw: string): unknown {
   const trimmed = raw.trim();
@@ -55,6 +56,7 @@ function buildStage1Prompt(params: {
 
   const situationLine = conditions.situationAxis ? `- 상황축: ${conditions.situationAxis}\n` : '';
   const productBlock = yeonunProduct ? `\n${yeonunProduct.contextText}\n(이번 영상에 자연스럽게 녹일 상품)\n` : '';
+  const hookTypeBlock = buildHookTypePromptBlock(personaText, conditions.hookType);
 
   return `한국어 숏폼 영상 — 펀치라인(결말) 아이디어 8개 발산.
 
@@ -68,10 +70,11 @@ ${situationLine}- 감정곡선: ${conditions.emotionCurve}
 - hook_subtype (이번 발산 각도): ${conditions.hookSubtype}
 - duration: ${conditions.duration}초
 - cut_type: multi_shot
-${charBlock}${productBlock}${pastBlock}
+${hookTypeBlock}${charBlock}${productBlock}${pastBlock}
 
 규칙:
 - 정확히 8개. 각 1~2문장, 마지막 대사/상황이 펀치라인이 되도록.
+- 8개 모두 hook_type "${conditions.hookType}" 메커니즘으로 설계. 다른 메커니즘(반전·정곡찌르기 등)처럼 보이는 아이디어 금지.
 - 8개 모두 hook_subtype "${conditions.hookSubtype}" 각도로 설계.
 - 펀치라인에 촬영 가능한 구체적 소재(소지품·증거 사물)를 1~2개 포함하면 좋다. (앱 화면 글자·문서 내용은 소재로 쓰지 말 것)
 - 서로 다른 인물·장소·사건. 과거 시나리오와 겹치지 않게.
@@ -83,13 +86,19 @@ JSON:
 }`;
 }
 
-function buildStage2Prompt(ideas: string[]): string {
+function buildStage2Prompt(ideas: string[], hookType: string): string {
   const numbered = ideas.map((idea, i) => `${i + 1}. ${idea}`).join('\n');
   return `아래 8개 숏폼 펀치라인 아이디어 중 시청자가 "피식/헐" 할 가능성이 가장 높은 1개를 고른다.
 
+고정 hook_type: ${hookType}
+
 ${numbered}
 
-기준: 반전 강도, 대사 임팩트, 클리셰 회피, 15초 내 전달 가능성.
+기준 (우선순):
+1. hook_type "${hookType}" 메커니즘 부합 (필수 — 부합하지 않으면 선택 금지)
+2. 반전 강도, 대사 임팩트, 클리셰 회피, 15초 내 전달 가능성
+
+부합하는 아이디어가 여러 개면 2번 기준으로 최고를 고른다.
 
 must_include_props 규칙:
 - 선택한 아이디어의 펀치라인을 성립시키는 촬영 가능한 구체적 소품·사물 2~4개
@@ -129,12 +138,12 @@ export async function generatePunchlineIdeas(params: {
   return ideas.slice(0, 8);
 }
 
-export async function selectPunchlineIdea(ideas: string[]): Promise<PunchlineSelection> {
+export async function selectPunchlineIdea(ideas: string[], hookType: string): Promise<PunchlineSelection> {
   const model = (await getSubClaudeModel()) || 'claude-haiku-4-5-20251001';
   const parsed = await callClaudeJson({
     model,
     max_tokens: 384,
-    prompt: buildStage2Prompt(ideas),
+    prompt: buildStage2Prompt(ideas, hookType),
   });
 
   const index = Number(parsed.index);
@@ -189,7 +198,7 @@ export async function runPunchlineContiPipeline(params: {
     });
 
     await params.onStage?.('2단계 Haiku 펀치라인 1개 선택 + must_include_props');
-    const selected = await selectPunchlineIdea(ideas);
+    const selected = await selectPunchlineIdea(ideas, params.plan.conditions.hookType);
     punchlineIdea = selected.punchlineIdea;
     mustIncludeProps = selected.mustIncludeProps;
   } else if (!mustIncludeProps.length) {
