@@ -12,7 +12,6 @@ function shotDurationSec(shot: VideoContiShot): number {
   return d > 0 ? d : 0;
 }
 
-/** dialogue 필드 — 인용부호 안 본문 글자 수(공백 제외) */
 export function countDialogueQuotedChars(dialogue: string): number {
   const trimmed = trimField(dialogue);
   if (!trimmed) return 0;
@@ -31,6 +30,14 @@ export function countDialogueQuotedChars(dialogue: string): number {
   }
 
   return afterLabel.replace(/^["'「]|["'」]$/g, '').replace(/\s/g, '').length;
+}
+
+/** dialogue — A/B 라벨·인용부호 제거 본문 (비교·유사도용) */
+export function normalizeDialogueBody(dialogue: string): string {
+  return trimField(dialogue)
+    .replace(/^[AB]:\s*/i, '')
+    .replace(/^["「『]|["」』]$/g, '')
+    .trim();
 }
 
 export function dialogueCharsPerSec(dialogue: string, durationSec: number): number {

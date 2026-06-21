@@ -3,7 +3,12 @@ import {
   buildDialogueLengthRule,
   findDialogueTooLongIssue,
   minShotDurationForDialogue,
+  normalizeDialogueBody,
 } from './dialogue-timing.js';
+import {
+  buildDialogueDistinctRule,
+  findDialogueDuplicateIssue,
+} from './dialogue-duplicate.js';
 import {
   actionDescribesOnScreenText,
   buildOnScreenTextFeedback,
@@ -34,7 +39,17 @@ export {
   buildDialogueTooLongFeedback,
   findDialogueTooLongIssue,
   minShotDurationForDialogue,
+  normalizeDialogueBody,
 } from './dialogue-timing.js';
+
+export {
+  DIALOGUE_DUPLICATE_SIMILARITY_THRESHOLD,
+  dialoguesTooSimilar,
+  buildDialogueDistinctRule,
+  buildDialogueDuplicateFeedback,
+  findDialogueDuplicateIssue,
+  hasDialogueDuplicate,
+} from './dialogue-duplicate.js';
 
 export class ContiValidationError extends Error {
   readonly maxAttempts: number;
@@ -405,6 +420,7 @@ export function buildShotContentRule(): string {
     `"장면 전개", "내용 없음", "TBD" 등 자리표시자 금지. ` +
     `${buildScreenTextRenderingRule()} ` +
     `${buildDialogueLengthRule()} ` +
+    `${buildDialogueDistinctRule()} ` +
     `${buildPunchlineClarityRule()} ` +
     `${buildAdjacentShotDistinctRule()} ${buildSentenceCompleteRule()} ${buildCameraActionNoRepeatRule()} ${buildCharacterNamingRule()}`
   );
@@ -496,19 +512,13 @@ export type RawShotQualityKind =
   | 'camera_in_action'
   | 'on_screen_text'
   | 'dialogue_too_long'
+  | 'dialogue_duplicate'
   | 'punchline_clarity';
 
 export interface RawShotQualityIssue {
   index: number;
   kind: RawShotQualityKind;
   feedback: string;
-}
-
-function normalizeDialogueBody(dialogue: string): string {
-  return trimField(dialogue)
-    .replace(/^[AB]:\s*/, '')
-    .replace(/^["「『]|["」』]$/g, '')
-    .trim();
 }
 
 function isSubstantiveTwistDialogue(dialogue: string): boolean {
@@ -617,6 +627,18 @@ export function findRawShotQualityIssues(conti: VideoConti): RawShotQualityIssue
   const punchlineIssue = findPunchlineClarityIssue(conti);
   if (punchlineIssue && !issues.some((issue) => issue.kind === 'punchline_clarity')) {
     issues.push(punchlineIssue);
+  }
+
+  const dialogueDuplicate = findDialogueDuplicateIssue(conti);
+  if (
+    dialogueDuplicate &&
+    !issues.some((issue) => issue.kind === 'dialogue_duplicate' && issue.index === dialogueDuplicate.index)
+  ) {
+    issues.push({
+      index: dialogueDuplicate.index,
+      kind: 'dialogue_duplicate',
+      feedback: dialogueDuplicate.feedback,
+    });
   }
 
   return issues;

@@ -16,6 +16,7 @@ import {
   buildShotContentRule,
   buildScreenTextRenderingRule,
   buildDialogueLengthRule,
+  buildDialogueDistinctRule,
   buildPunchlineClarityRule,
   buildSingleShotFoundationCutRule,
   buildMultiShotFoundationCutRule,
@@ -282,6 +283,7 @@ ${existing.join('\n')}
 ${buildShotFillPrompt(shotNumbers)}
 ${buildScreenTextRenderingRule()}
 ${buildDialogueLengthRule()}
+${buildDialogueDistinctRule()}
 ${buildPunchlineClarityRule()}
 ${buildSentenceCompleteRule()}
 ${buildCameraActionNoRepeatRule()}
@@ -459,13 +461,20 @@ async function recoverShotQualityIssues(
     if (duplicates.length > 0) {
       patchIdx = duplicates[0]!;
       feedback = buildAdjacentDuplicateFeedback(patchIdx + 1);
-    } else if (nonEmptyQuality.length > 0) {
-      const issue = nonEmptyQuality[0]!;
-      patchIdx = issue.index;
-      feedback = issue.feedback;
     } else {
-      patchIdx = emptyIssues[0]!.index;
-      feedback = emptyIssues[0]!.feedback;
+      const dialogueDupIssues = nonEmptyQuality.filter((issue) => issue.kind === 'dialogue_duplicate');
+      if (dialogueDupIssues.length > 0) {
+        const issue = dialogueDupIssues[0]!;
+        patchIdx = issue.index;
+        feedback = issue.feedback;
+      } else if (nonEmptyQuality.length > 0) {
+        const issue = nonEmptyQuality[0]!;
+        patchIdx = issue.index;
+        feedback = issue.feedback;
+      } else {
+        patchIdx = emptyIssues[0]!.index;
+        feedback = emptyIssues[0]!.feedback;
+      }
     }
 
     if (narrowPatchAttempts < maxNarrow) {

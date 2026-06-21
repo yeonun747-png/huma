@@ -1,5 +1,6 @@
 import { askClaudeWithModel } from '../../lib/anthropic-client.js';
 import { getSubClaudeModel } from '../../lib/ai-engine.js';
+import { hasDialogueDuplicate } from './dialogue-duplicate.js';
 import type { VideoConti } from './types.js';
 
 export const MAX_HUMOR_REGENERATION_ATTEMPTS = 2;
@@ -37,6 +38,9 @@ ${contiText}
 추가 기준: 이 콘티의 펀치라인이 왜 재미있거나 놀라운지, 그 이유가 콘티 안의 정보만으로 명확히 설명되는가?
 시청자가 "그래서 뭐가 반전이었다는 거지?"라고 헷갈릴 만한 부분(마지막 샷이 표정·동작만으로 끝나거나, 읽어야만 알 수 있는 라벨·스티커·명찰에만 의존하는 경우)이 있다면 dull로 판정한다.
 
+추가 기준: 콘티 전체 샷 대사를 비교했을 때, 펀치라인 대사가 이전 샷 대사를 그대로 반복하거나 거의 동일한 경우(화자 A/B만 바꾼 재탕)가 있는가?
+그렇다면 그 자체로 dull로 판정한다. 반전이 아니라 단순 재탕이기 때문이다.
+
 funny 또는 dull 중 하나의 단어로만 답하라.`;
 }
 
@@ -49,6 +53,8 @@ export function parseHumorVerdict(raw: string | null | undefined): SelfAssessedH
 }
 
 export async function assessContiHumor(conti: VideoConti): Promise<SelfAssessedHumor> {
+  if (hasDialogueDuplicate(conti)) return 'dull';
+
   const model = (await getSubClaudeModel()) || HAIKU_FALLBACK;
   const prompt = buildHumorAssessmentPrompt(formatContiForHumorAssessment(conti));
   const raw = await askClaudeWithModel({
