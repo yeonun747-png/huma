@@ -7,7 +7,6 @@ import { logOperation } from '../../lib/log-emitter.js';
 import { getPipelineModelSettings } from '../../lib/pipeline-settings.js';
 import { notifyTelegram } from '../watcher/telegram.js';
 import { generatePlatformCaptions } from './captions.js';
-import { generateConti } from './conti-generator.js';
 import { ContiValidationError, extractCharacterNamesForStorage, formatContiTokenSettingsLog } from './conti-validation.js';
 import {
   buildEvoLinkPrompt,
@@ -29,11 +28,10 @@ import {
   MAX_REGENERATION_ATTEMPTS,
   SIMILARITY_THRESHOLD,
 } from './embedding.js';
-import { pickPananaCharacter } from './panana-characters.js';
+import { buildPreGenerationPlan, type PreGenerationPlan } from './pre-generation-plan.js';
+import { runPunchlineContiPipeline } from './punchline-pipeline.js';
 import {
-  buildGenerationConditions,
   pickSubtitleStyle,
-  resolveVideoPersona,
   saveSubtitleStyleHistory,
 } from './selection.js';
 import { burnSubtitles } from './subtitle.js';
@@ -235,49 +233,25 @@ interface VideoAccountContext {
   accountId: string;
   accountName: string;
   workspace: Workspace;
-  personaConfig: ReturnType<typeof resolveVideoPersona>;
-  baseConditions: GenerationConditions;
+  plan: PreGenerationPlan;
 }
 
 async function loadVideoAccountContext(accountId: string): Promise<VideoAccountContext> {
   const { data: account, error: accErr } = await supabase
     .from('huma_accounts')
-    .select('id, name, workspace, persona')
+    .select('id, name, workspace')
     .eq('id', accountId)
     .maybeSingle();
 
   if (accErr || !account) throw new Error('계정 없음');
   const workspace = account.workspace as Workspace;
-  const personaConfig = resolveVideoPersona(workspace, account.persona as Record<string, unknown>);
-
-  let characterId: string | undefined;
-  let characterName: string | undefined;
-  let characterDescription: string | undefined;
-
-  if (workspace === 'panana') {
-    const ch = await pickPananaCharacter(accountId);
-    if (ch) {
-      characterId = ch.id;
-      characterName = ch.name;
-      characterDescription = ch.description ?? undefined;
-    }
-  }
-
-  const baseConditions = await buildGenerationConditions({
-    accountId,
-    workspace,
-    personaConfig,
-    characterId,
-    characterName,
-    characterDescription,
-  });
+  const plan = await buildPreGenerationPlan({ workspace, accountId });
 
   return {
     accountId,
     accountName: account.name,
     workspace,
-    personaConfig,
-    baseConditions,
+    plan,
   };
 }
 
@@ -485,7 +459,8 @@ export async function runSubtitleReburn(historyId: string): Promise<void> {
 export async function runContiGeneration(accountId: string): Promise<string> {
   await failStaleVideoContentJobs(accountId);
   const ctx = await loadVideoAccountContext(accountId);
-  const { baseConditions, workspace, accountName } = ctx;
+  const { plan, workspace, accountName } = ctx;
+  const baseConditions = plan.conditions;
 
   const { data: historyRow, error: insertErr } = await supabase
     .from('huma_video_content_history')
@@ -497,15 +472,26 @@ export async function runContiGeneration(accountId: string): Promise<string> {
       situation_axis: baseConditions.situationAxis ?? null,
       emotion_curve: baseConditions.emotionCurve,
       hook_type: baseConditions.hookType,
+      hook_subtype: baseConditions.hookSubtype,
       cut_type: baseConditions.cutType,
       duration: baseConditions.duration,
       character_used: baseConditions.characterId ?? null,
+      used_product: plan.yeonunProduct?.slug ?? null,
     })
     .select('id')
     .single();
 
   if (insertErr || !historyRow) throw new Error(insertErr?.message ?? '히스토리 생성 실패');
   const historyId = historyRow.id as string;
+
+  const logStage = async (stage: string) => {
+    await logOperation({
+      level: 'info',
+      message: `[video-content] ${stage}`,
+      workspace,
+      account_id: accountId,
+    });
+  };
 
   try {
     await logOperation({
@@ -524,40 +510,28 @@ export async function runContiGeneration(accountId: string): Promise<string> {
 
     const pastSummaries = await loadPastSummaries(accountId);
     let conti!: VideoConti & { locationKeyword: string; timeOfDay: string };
+    let punchlineIdea = '';
     let embedding: number[] = [];
     let similarityScore = 0;
     let feedback: string | undefined;
 
     for (let attempt = 1; attempt <= MAX_REGENERATION_ATTEMPTS; attempt++) {
-      const conditions: GenerationConditions = {
-        ...baseConditions,
-        locationKeyword: '',
-        timeOfDay: '',
-      };
-
       await logOperation({
         level: 'info',
-        message: `[video-content] 콘티 LLM 시도 ${attempt}/${MAX_REGENERATION_ATTEMPTS} — cut=${conditions.cutType} ${conditions.duration}초`,
+        message: `[video-content] 콘티 LLM 시도 ${attempt}/${MAX_REGENERATION_ATTEMPTS} — cut=${baseConditions.cutType} ${baseConditions.duration}초`,
         workspace,
         account_id: accountId,
       });
 
-      let generated: Awaited<ReturnType<typeof generateConti>>;
+      let generated: Awaited<ReturnType<typeof runPunchlineContiPipeline>>;
       try {
-        generated = await generateConti({
+        generated = await runPunchlineContiPipeline({
           workspace,
-          config: ctx.personaConfig,
-          conditions,
-          feedback,
+          plan,
           pastSummaries,
-          onStage: async (stage) => {
-            await logOperation({
-              level: 'info',
-              message: `[video-content] ${stage}`,
-              workspace,
-              account_id: accountId,
-            });
-          },
+          feedback,
+          punchlineIdea: punchlineIdea || undefined,
+          onStage: logStage,
         });
       } catch (err) {
         if (err instanceof ContiValidationError) {
@@ -597,18 +571,17 @@ export async function runContiGeneration(accountId: string): Promise<string> {
         throw err;
       }
 
-      conditions.locationKeyword = generated.locationKeyword;
-      conditions.timeOfDay = generated.timeOfDay;
-      conti = generated;
+      punchlineIdea = generated.punchlineIdea;
+      conti = generated.conti;
 
-      if (generated.contentWarnings?.length) {
+      if (generated.conti.contentWarnings?.length) {
         await notifyTelegram(
-          `⚠️ 콘티 샷 자동 보완\n계정: ${accountName} (${accountId})\n${generated.contentWarnings.join('\n')}`,
+          `⚠️ 콘티 샷 자동 보완\n계정: ${accountName} (${accountId})\n${generated.conti.contentWarnings.join('\n')}`,
           workspace,
         );
       }
 
-      if (generated.lastShotIncompleteDetected) {
+      if (generated.conti.lastShotIncompleteDetected) {
         await logOperation({
           level: 'warn',
           message:
@@ -635,7 +608,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
 
       if (similarityScore < SIMILARITY_THRESHOLD) break;
 
-      feedback = `직전 시나리오와 코사인 유사도 ${similarityScore.toFixed(3)}으로 겹침. 완전히 다른 인물·장소·사건·대사로 재작성하라.`;
+      feedback = `직전 시나리오와 코사인 유사도 ${similarityScore.toFixed(3)}으로 겹침. 펀치라인 "${punchlineIdea}"는 유지하고, 인물·장소·전개·대사만 완전히 다르게 3단계 콘티만 재작성하라.`;
       if (attempt === MAX_REGENERATION_ATTEMPTS) {
         await supabase
           .from('huma_video_content_history')
@@ -643,6 +616,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
             status: 'failed',
             similarity_score: similarityScore,
             scenario_summary: conti.scenarioSummary,
+            punchline_idea: punchlineIdea,
             error_message: '유사도 기준 미통과 (3회)',
           })
           .eq('id', historyId);
@@ -685,19 +659,16 @@ export async function runContiGeneration(accountId: string): Promise<string> {
       }
 
       const lengthFeedback = `${PROMPT_LENGTH_REGENERATION_FEEDBACK} (현재 변환 프롬프트 ${evoPrompt.length}자)`;
-      const regenerated = await generateConti({
+      const regenerated = await runPunchlineContiPipeline({
         workspace,
-        config: ctx.personaConfig,
-        conditions: {
-          ...baseConditions,
-          locationKeyword: conti!.locationKeyword,
-          timeOfDay: conti!.timeOfDay,
-        },
-        feedback: lengthFeedback,
+        plan,
         pastSummaries,
+        punchlineIdea,
+        feedback: lengthFeedback,
+        onStage: logStage,
       });
 
-      conti = regenerated;
+      conti = regenerated.conti;
       embedding = embedText(conti.fullText || conti.scenarioSummary);
       const pastEmbAfterLength = await loadPastEmbeddings(accountId, historyId);
       const simAfterLength = computeSimilarityScores(embedding, pastEmbAfterLength);
@@ -755,27 +726,16 @@ export async function runContiGeneration(accountId: string): Promise<string> {
       });
 
       try {
-        const regenerated = await generateConti({
+        const regenerated = await runPunchlineContiPipeline({
           workspace,
-          config: ctx.personaConfig,
-          conditions: {
-            ...baseConditions,
-            locationKeyword: conti!.locationKeyword,
-            timeOfDay: conti!.timeOfDay,
-          },
-          feedback: HUMOR_REGENERATION_FEEDBACK,
+          plan,
           pastSummaries,
-          onStage: async (stage) => {
-            await logOperation({
-              level: 'info',
-              message: `[video-content] ${stage}`,
-              workspace,
-              account_id: accountId,
-            });
-          },
+          punchlineIdea,
+          feedback: HUMOR_REGENERATION_FEEDBACK,
+          onStage: logStage,
         });
 
-        conti = regenerated;
+        conti = regenerated.conti;
         embedding = embedText(conti.fullText || conti.scenarioSummary);
         const pastEmbAfterHumor = await loadPastEmbeddings(accountId, historyId);
         const simAfterHumor = computeSimilarityScores(embedding, pastEmbAfterHumor);
@@ -847,7 +807,9 @@ export async function runContiGeneration(accountId: string): Promise<string> {
         location_keyword: conti!.locationKeyword,
         time_of_day: conti!.timeOfDay,
         scenario_summary: conti!.scenarioSummary,
-        conti_json: { ...conti, evolinkPrompt: evoPrompt },
+        punchline_idea: punchlineIdea,
+        hook_subtype: baseConditions.hookSubtype,
+        conti_json: { ...conti, evolinkPrompt: evoPrompt, punchlineIdea },
         embedding_vector: embedding,
         similarity_score: similarityScore,
         self_assessed_humor: selfAssessedHumor,

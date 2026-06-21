@@ -7,6 +7,7 @@ export const VIDEO_PERSONA_KNOWN_HEADERS = [
   '상황축',
   '감정곡선',
   '펀치라인 메커니즘',
+  'hook_subtype',
   '컷 구성',
   '샷 구조',
   '싱글샷 구조',
@@ -56,8 +57,8 @@ export function getVideoPersonaRequiredSections(workspace: Workspace): VideoPers
 export function getVideoPersonaSectionGuide(workspace: Workspace): string {
   const sections =
     workspace === 'panana'
-      ? '## 관계축 / ## 상황축 / ## 감정곡선 / ## 펀치라인 메커니즘 / ## 컷 구성 / ## 샷 구조 / ## 서비스 제약'
-      : '## 관계축 / ## 감정곡선 / ## 펀치라인 메커니즘 / ## 컷 구성 / ## 샷 구조 / ## 서비스 제약';
+      ? '## 관계축 / ## 상황축 / ## 감정곡선 / ## 펀치라인 메커니즘 / ## hook_subtype / ## 컷 구성 / ## 샷 구조 / ## 서비스 제약'
+      : '## 관계축 / ## 감정곡선 / ## 펀치라인 메커니즘 / ## hook_subtype / ## 컷 구성 / ## 샷 구조 / ## 서비스 제약';
   return sections;
 }
 

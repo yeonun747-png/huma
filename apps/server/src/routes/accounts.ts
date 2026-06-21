@@ -20,12 +20,18 @@ import {
 } from '../lib/posting-proxy.js';
 import { mergeBlogWritingPersonaField } from '../lib/account-persona.js';
 import {
-  hasStoredVideoPersona,
-  parseVideoPersonaText,
   type VideoPersonaConfig,
   type Workspace,
 } from '@huma/shared';
 import { DEFAULT_VIDEO_PERSONAS } from '../modules/video-content/types.js';
+import {
+  loadVideoPersonaText,
+  saveVideoPersonaText,
+} from '../modules/video-content/video-persona-store.js';
+import {
+  PERSONA_REQUIRED_HEADERS,
+  validatePersonaTextHeaders,
+} from '../modules/video-content/persona-axis.js';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -259,14 +265,15 @@ export async function registerAccountRoutes(app: FastifyInstance) {
     }
 
     const ws = (account.workspace as Workspace) ?? 'yeonun';
-    const defaults = DEFAULT_VIDEO_PERSONAS[ws] ?? DEFAULT_VIDEO_PERSONAS.yeonun;
-    const stored = (account.persona as Record<string, unknown> | null)?.videoPersona as
-      | Partial<VideoPersonaConfig>
-      | undefined;
+    const personaText = await loadVideoPersonaText(ws);
 
     return {
-      videoPersona: hasStoredVideoPersona(stored) ? stored : null,
-      defaults,
+      workspace: ws,
+      personaText,
+      requiredHeaders: PERSONA_REQUIRED_HEADERS[ws],
+      /** @deprecated — 서비스 personaText 사용 */
+      videoPersona: null,
+      defaults: DEFAULT_VIDEO_PERSONAS[ws] ?? DEFAULT_VIDEO_PERSONAS.yeonun,
     };
   });
 
@@ -283,42 +290,19 @@ export async function registerAccountRoutes(app: FastifyInstance) {
       return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
     }
 
-    const body = request.body as { rawText?: string; videoPersona?: VideoPersonaConfig };
+    const body = request.body as { rawText?: string; personaText?: string; videoPersona?: VideoPersonaConfig };
     const ws = (existing.workspace as Workspace) ?? 'yeonun';
-    const defaults = DEFAULT_VIDEO_PERSONAS[ws] ?? DEFAULT_VIDEO_PERSONAS.yeonun;
 
-    let videoPersona: VideoPersonaConfig;
-    let missingSections: string[] = [];
-    let unknownSections: string[] = [];
-
-    if (typeof body.rawText === 'string') {
-      const parsed = parseVideoPersonaText(body.rawText, ws);
-      videoPersona = {
-        ...parsed.config,
-        hookTypeMaxWeight: defaults.hookTypeMaxWeight,
-      };
-      missingSections = parsed.missingSections;
-      unknownSections = parsed.unknownSections;
-    } else if (body.videoPersona) {
-      videoPersona = body.videoPersona;
-    } else {
-      return reply.code(400).send({ error: 'rawText 또는 videoPersona가 필요합니다' });
+    const text = typeof body.personaText === 'string' ? body.personaText : body.rawText;
+    if (typeof text !== 'string') {
+      return reply.code(400).send({ error: 'personaText 또는 rawText가 필요합니다' });
     }
 
-    const persona = {
-      ...(existing.persona as Record<string, unknown> | null),
-      videoPersona,
-    };
+    const validation = validatePersonaTextHeaders(text, PERSONA_REQUIRED_HEADERS[ws]);
+    const missingSections = validation.ok ? [] : validation.missing;
 
-    const { data, error } = await supabase
-      .from('huma_accounts')
-      .update({ persona, updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .select('id, persona, workspace')
-      .single();
-
-    if (error) return reply.code(400).send({ error: mapAccountDbError(error.message) });
-    return { ok: true, missingSections, unknownSections, account: stripAccountSecret(data) };
+    await saveVideoPersonaText(ws, text);
+    return { ok: true, missingSections, unknownSections: [] as string[] };
   });
 
   app.patch('/api/accounts/:id', { preHandler: authMiddleware }, async (request, reply) => {

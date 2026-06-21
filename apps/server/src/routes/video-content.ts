@@ -31,6 +31,14 @@ import {
   listActivePananaCharacters,
   syncPananaCharacters,
 } from '../modules/video-content/panana-characters.js';
+import {
+  loadVideoPersonaText,
+  saveVideoPersonaText,
+} from '../modules/video-content/video-persona-store.js';
+import {
+  PERSONA_REQUIRED_HEADERS,
+  validatePersonaTextHeaders,
+} from '../modules/video-content/persona-axis.js';
 import type { Workspace } from '@huma/shared';
 
 async function assertAccountAccess(
@@ -559,5 +567,46 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
     }
 
     return { ok: true };
+  });
+
+  app.get('/api/workspaces/:workspace/video-persona', { preHandler: authMiddleware }, async (request, reply) => {
+    const { workspace } = request.params as { workspace: string };
+    const allowed = getWorkspaceFilter(request);
+    if (!allowed.includes(workspace)) {
+      return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
+    }
+    if (!['yeonun', 'quizoasis', 'panana'].includes(workspace)) {
+      return reply.code(400).send({ error: '지원하지 않는 워크스페이스' });
+    }
+
+    const personaText = await loadVideoPersonaText(workspace as Workspace);
+    return {
+      workspace,
+      personaText,
+      requiredHeaders: PERSONA_REQUIRED_HEADERS[workspace as keyof typeof PERSONA_REQUIRED_HEADERS],
+    };
+  });
+
+  app.patch('/api/workspaces/:workspace/video-persona', { preHandler: authMiddleware }, async (request, reply) => {
+    const { workspace } = request.params as { workspace: string };
+    const allowed = getWorkspaceFilter(request);
+    if (!allowed.includes(workspace)) {
+      return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
+    }
+    if (!['yeonun', 'quizoasis', 'panana'].includes(workspace)) {
+      return reply.code(400).send({ error: '지원하지 않는 워크스페이스' });
+    }
+
+    const body = request.body as { personaText?: string };
+    if (typeof body.personaText !== 'string') {
+      return reply.code(400).send({ error: 'personaText가 필요합니다' });
+    }
+
+    const ws = workspace as Workspace;
+    const validation = validatePersonaTextHeaders(body.personaText, PERSONA_REQUIRED_HEADERS[ws]);
+    const missingSections = validation.ok ? [] : validation.missing;
+
+    await saveVideoPersonaText(ws, body.personaText);
+    return { ok: true, missingSections };
   });
 }

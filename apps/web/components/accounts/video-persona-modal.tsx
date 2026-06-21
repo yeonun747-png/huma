@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { HumaAccount, HumaVideoContentHistory, VideoPersonaConfig, Workspace } from '@huma/shared';
-import { hasStoredVideoPersona, getVideoPersonaSectionGuide, serializeVideoPersonaText } from '@huma/shared';
+import type { HumaAccount, HumaVideoContentHistory, Workspace } from '@huma/shared';
+import { getVideoPersonaSectionGuide } from '@huma/shared';
 import { api } from '@/lib/api';
 import { VideoContentHumorTableCell } from '@/components/video/video-content-humor-badge';
 
@@ -20,7 +20,6 @@ export function VideoPersonaModal({ account, open, onClose }: VideoPersonaModalP
   const [error, setError] = useState('');
   const [toast, setToast] = useState<string | null>(null);
   const [history, setHistory] = useState<HumaVideoContentHistory[]>([]);
-  const [defaults, setDefaults] = useState<VideoPersonaConfig | null>(null);
   const [personaText, setPersonaText] = useState('');
   const [pananaChars, setPananaChars] = useState<
     Array<{ id: string; name: string; description?: string | null; appearanceCount?: number }>
@@ -39,14 +38,10 @@ export function VideoPersonaModal({ account, open, onClose }: VideoPersonaModalP
     setError('');
     try {
       const [personaRes, hist] = await Promise.all([
-        api.getAccountVideoPersona(account.id),
+        api.getWorkspaceVideoPersona(ws),
         api.videoContentHistory(account.id),
       ]);
-      setDefaults(personaRes.defaults as VideoPersonaConfig);
-      const stored = personaRes.videoPersona as Partial<VideoPersonaConfig> | null;
-      setPersonaText(
-        hasStoredVideoPersona(stored) ? serializeVideoPersonaText(stored!, ws) : '',
-      );
+      setPersonaText(personaRes.personaText ?? '');
       setHistory(hist);
 
       if (ws === 'panana') {
@@ -72,13 +67,10 @@ export function VideoPersonaModal({ account, open, onClose }: VideoPersonaModalP
     setSaving(true);
     setError('');
     try {
-      const res = await api.updateAccountVideoPersona(account.id, { rawText: personaText });
+      const res = await api.updateWorkspaceVideoPersona(ws, { personaText });
       const parts: string[] = ['저장 완료'];
       if (res.missingSections.length) {
         parts.push(`비어 있는 섹션: ${res.missingSections.join(', ')}`);
-      }
-      if (res.unknownSections?.length) {
-        parts.push(`인식되지 않은 섹션: ${res.unknownSections.join(', ')}`);
       }
       showToast(parts.join(' · '));
       return { ok: true, missingSections: res.missingSections };
@@ -117,10 +109,10 @@ export function VideoPersonaModal({ account, open, onClose }: VideoPersonaModalP
         onClick={(e) => e.stopPropagation()}
         role="dialog"
       >
-        <div className="m-modal-t">🎬 영상 페르소나 · {account.name}</div>
+        <div className="m-modal-t">🎬 영상 페르소나 · {ws} (서비스 공통)</div>
         <p className="mb-3 text-[12px] text-huma-t3">
-          ## 섹션별 페르소나를 붙여넣으면 저장 시 자동 분리됩니다. 매 영상마다 LLM이 새 시나리오를
-          창작합니다.
+          {ws} 워크스페이스 전체 계정이 공유하는 영상 페르소나입니다. 포스팅 페르소나(계정별)와 별도입니다.
+          LLM에는 아래 전문이 그대로 전달됩니다.
           {ws === 'panana' ? ' 파나나는 관계축·상황축을 함께 사용합니다.' : null}
         </p>
 
@@ -141,8 +133,8 @@ export function VideoPersonaModal({ account, open, onClose }: VideoPersonaModalP
               <span className="font-mono text-huma-t2">{getVideoPersonaSectionGuide(ws)}</span>
               <br />
               {ws === 'panana'
-                ? '파나나: 7개 섹션(상황축 포함).'
-                : '연운·퀴즈오아시스: 6개 섹션 필수. 상황축은 선택(입력 시 저장만).'}
+                ? '파나나: 8개 섹션(상황축·hook_subtype 포함).'
+                : '연운·퀴즈오아시스: 7개 섹션 필수(hook_subtype 포함). 상황축은 선택(입력 시 저장만).'}
               <br />
               <span className="text-huma-t4">
                 ## 펀치라인 메커니즘 — A. 반전 형식 또는 `반전 — 설명` 4종만 옵션. 금지·예시 문장은 빈 줄 뒤(또는 긴
@@ -157,17 +149,11 @@ export function VideoPersonaModal({ account, open, onClose }: VideoPersonaModalP
               placeholder={
                 ws === 'panana'
                   ? `## 관계축\n캐릭터-일반인\n...\n\n## 상황축\n카페 대화\n...\n\n## 감정곡선\n...\n\n## 펀치라인 메커니즘\n...\n\n## 컷 구성\n...\n\n## 샷 구조\n...\n\n## 서비스 제약\n...`
-                  : `## 관계축\n연인\n...\n\n## 감정곡선\n...\n\n## 펀치라인 메커니즘\n...\n\n## 컷 구성\n...\n\n## 샷 구조\n...\n\n## 서비스 제약\n...`
+                  : `## 관계축\n연인\n...\n\n## hook_subtype\n- 정체 반전\n...\n\n## 감정곡선\n...\n\n## 펀치라인 메커니즘\n...\n\n## 컷 구성\n...\n\n## 샷 구조\n...\n\n## 서비스 제약\n...`
               }
               rows={15}
               spellCheck={false}
             />
-
-            {defaults && !personaText.trim() ? (
-              <p className="mb-3 text-[10px] text-huma-t4">
-                저장된 페르소나가 없습니다. 비워두면 워크스페이스 기본값({ws})이 생성 시 사용됩니다.
-              </p>
-            ) : null}
 
             {ws === 'panana' ? (
               <div className="m-panel mb-3 space-y-2">

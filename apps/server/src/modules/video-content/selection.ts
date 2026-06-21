@@ -48,7 +48,7 @@ export function pickFromOptions(options: string[], recentValues: string[], force
   return randomPick(pool);
 }
 
-function pickFromOptionsWithFallback(
+export function pickFromOptionsWithFallback(
   options: string[],
   recentValues: string[],
   fallback: string[],

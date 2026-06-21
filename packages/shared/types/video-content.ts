@@ -18,6 +18,10 @@ export interface HumaVideoContentHistory {
   time_of_day?: string | null;
   emotion_curve?: string | null;
   hook_type?: string | null;
+  hook_subtype?: string | null;
+  punchline_idea?: string | null;
+  used_product?: string | null;
+  used_quiz_id?: string | null;
   scenario_summary?: string | null;
   conti_json?: Record<string, unknown> | null;
   similarity_score?: number | null;

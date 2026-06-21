@@ -398,8 +398,16 @@ export const api = {
   videoContentHistory: (accountId: string) =>
     request<HumaVideoContentHistory[]>(`/api/accounts/${accountId}/video-content-history`),
   getAccountVideoPersona: (accountId: string) =>
-    request<{ videoPersona: VideoPersonaConfig | null; defaults: VideoPersonaConfig }>(
-      `/api/accounts/${accountId}/video-persona`,
+    request<{
+      workspace: string;
+      personaText: string;
+      requiredHeaders: string[];
+      videoPersona: VideoPersonaConfig | null;
+      defaults: VideoPersonaConfig;
+    }>(`/api/accounts/${accountId}/video-persona`),
+  getWorkspaceVideoPersona: (workspace: string) =>
+    request<{ workspace: string; personaText: string; requiredHeaders: string[] }>(
+      `/api/workspaces/${workspace}/video-persona`,
     ),
   updateAccountVideoPersona: (accountId: string, body: { rawText: string }) =>
     request<{ ok: boolean; missingSections: string[]; unknownSections: string[] }>(
@@ -409,6 +417,11 @@ export const api = {
         body: JSON.stringify(body),
       },
     ),
+  updateWorkspaceVideoPersona: (workspace: string, body: { personaText: string }) =>
+    request<{ ok: boolean; missingSections: string[] }>(`/api/workspaces/${workspace}/video-persona`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
   generateConti: (accountId: string) =>
     request<{ ok: boolean; message?: string }>(`/api/accounts/${accountId}/generate-conti`, {
       method: 'POST',

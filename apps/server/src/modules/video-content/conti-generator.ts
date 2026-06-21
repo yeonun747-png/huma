@@ -42,10 +42,20 @@ import {
   SHOT_CONTENT_MIN_CHARS,
 } from './conti-validation.js';
 import { findRealNamesInShots, buildCharacterNameToLabelMap } from './character-labels.js';
+import {
+  buildMetadataTagInstruction,
+  metadataTagsFromConditions,
+  parseContiMetadataTags,
+  validateContiMetadataTags,
+  type ContiMetadataTags,
+} from './conti-metadata.js';
+import { extractSectionBody } from './persona-axis.js';
 import { normalizeMultiShotConti, normalizeSingleShotConti, buildEvoLinkPrompt, getDefaultShotAction } from './evolink.js';
 import { EVOLINK_PROMPT_LENGTH_GUIDANCE } from './prompt-length.js';
 import { getShotCountBounds } from './shot-timing.js';
 import type { GenerationConditions, VideoConti, VideoContiShot, VideoPersonaConfig } from './types.js';
+import { DEFAULT_VIDEO_PERSONAS } from './types.js';
+import type { PreGenerationPlan } from './pre-generation-plan.js';
 
 export interface ContiGenerationResult extends VideoConti {
   locationKeyword: string;
@@ -76,6 +86,11 @@ interface PromptContext {
   feedback?: string;
   pastSummaries?: string[];
   onStage?: (stage: string) => void | Promise<void>;
+  /** v3.59 — 펀치라인 고정 콘티 */
+  personaText?: string;
+  punchlineIdea?: string;
+  yeonunProductContext?: string;
+  expectedMetadata?: ContiMetadataTags;
 }
 
 async function reportStage(ctx: PromptContext, stage: string): Promise<void> {
@@ -94,7 +109,7 @@ async function callClaudeJson(params: {
   max_tokens: number;
   prompt: string;
   retryHint?: string;
-}): Promise<Record<string, unknown>> {
+}): Promise<{ parsed: Record<string, unknown>; raw: string }> {
   let lastErr: Error | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     const prompt =
@@ -104,7 +119,7 @@ async function callClaudeJson(params: {
     try {
       const raw = await askClaudeWithModel({ model: params.model, max_tokens: params.max_tokens, prompt });
       if (!raw) throw new Error('LLM 응답 없음');
-      return parseJsonBlock(raw) as Record<string, unknown>;
+      return { parsed: parseJsonBlock(raw) as Record<string, unknown>, raw };
     } catch (err) {
       lastErr = err instanceof Error ? err : new Error(String(err));
       const retryable =
@@ -122,7 +137,12 @@ function buildMultiShotGuide(ctx: PromptContext): string {
   const { conditions, config } = ctx;
   const punchlineDurationRule = `펀치라인이 들어가는 샷(고정 번호 없음 — 시나리오 중후반 적절한 샷)은 대사를 끝까지 전달할 수 있도록 최소 ${PUNCHLINE_MIN_DURATION_SEC}초를 확보하라.`;
 
-  const personaGuide = config.shotStructure?.trim();
+  let personaGuide: string | undefined;
+  if (ctx.personaText) {
+    personaGuide = extractSectionBody(ctx.personaText, '샷 구조') || undefined;
+  } else {
+    personaGuide = config.shotStructure?.trim();
+  }
   const baseGuide = personaGuide ?? buildMultiShotCompositionGuide(conditions.duration);
 
   return `${baseGuide}
@@ -158,9 +178,14 @@ function buildSharedContext(ctx: PromptContext): {
   const cutRuleBlock =
     conditions.cutType === 'single_shot'
       ? `\n${buildSingleShotFoundationCutRule()}\n`
-      : config.cutTypeRule?.trim()
-        ? `\n${buildMultiShotFoundationCutRule(config.cutTypeRule.trim())}\n`
-        : `\n${buildMultiShotFoundationCutRule()}\n`;
+      : ctx.personaText
+        ? (() => {
+            const cutRule = extractSectionBody(ctx.personaText!, '컷 구성');
+            return cutRule ? `\n${buildMultiShotFoundationCutRule(cutRule)}\n` : `\n${buildMultiShotFoundationCutRule()}\n`;
+          })()
+        : config.cutTypeRule?.trim()
+          ? `\n${buildMultiShotFoundationCutRule(config.cutTypeRule.trim())}\n`
+          : `\n${buildMultiShotFoundationCutRule()}\n`;
 
   const situationLine = conditions.situationAxis ? `- 상황축: ${conditions.situationAxis}\n` : '';
   const storyAxis =
@@ -175,6 +200,51 @@ function buildFoundationPrompt(ctx: PromptContext): string {
   const { conditions, config } = ctx;
   const { charBlock, pastBlock, feedbackBlock, cutRuleBlock, situationLine, storyAxis } =
     buildSharedContext(ctx);
+
+  const punchlineBlock = ctx.punchlineIdea
+    ? `\n선택된 펀치라인(결말 고정 — 반드시 이 결말로 수렴, 변경 금지):\n${ctx.punchlineIdea}\n\n시나리오·등장인물·장소는 위 펀치라인을 뒤집어 설계하라.\n`
+    : '';
+
+  const productBlock = ctx.yeonunProductContext ? `\n${ctx.yeonunProductContext}\n` : '';
+
+  if (ctx.personaText) {
+    const hookSubtypeLine = conditions.cutType === 'multi_shot' && 'hookSubtype' in conditions
+      ? `- hook_subtype: ${(conditions as GenerationConditions & { hookSubtype?: string }).hookSubtype ?? ''}\n`
+      : '';
+
+    return `한국어 숏폼 영상 콘티 1단계 — 시나리오·등장인물·장소만 JSON으로 작성하라 (샷/shots 없음).
+
+영상 페르소나 (생성 시 반드시 준수):
+${ctx.personaText}
+
+이번 영상 사전 조건 (코드에서 확정 — 2단계 메타 태그와 일치해야 함):
+- 관계축: ${conditions.relationshipAxis}
+${situationLine}- 감정곡선: ${conditions.emotionCurve}
+- 펀치라인 메커니즘(hook_type): ${conditions.hookType}
+${hookSubtypeLine}- cut_type: multi_shot
+- duration: ${conditions.duration}초
+${punchlineBlock}${productBlock}${charBlock}${cutRuleBlock}${pastBlock}${feedbackBlock}
+
+창작 지침:
+"이번 영상은 ${storyAxis}의 인물들이 등장하고, 새로 창작한 장소/시간에서 벌어지는 [${conditions.emotionCurve}] 흐름의 이야기.
+등장인물 이름·외형·구체적 상황은 전부 새로 창작. 과거 시나리오와 겹치지 않게.
+location_keyword와 time_of_day도 새로 창작."
+
+등장인물 이름 규칙:
+${buildCharacterNamingRule()}
+
+JSON 스키마:
+{
+  "locationKeyword": "string",
+  "timeOfDay": "string",
+  "characters": [{"label":"A","name":"하은","age":"20대","gender":"여","hair":"...","outfit":"...","shoes":"..."},{"label":"B","name":"준형","age":"30대","gender":"남","hair":"...","outfit":"...","shoes":"..."}],
+  "location": "구체적 장소 묘사",
+  "lighting": "조명",
+  "timeOfDayVisual": "시각적 시간대",
+  "scenarioSummary": "2~3문장 요약",
+  "fullText": "등장인물 설정+시나리오 개요(샷 대사는 2단계에서 추가)"
+}`;
+  }
 
   return `한국어 숏폼 영상 콘티 1단계 — 시나리오·등장인물·장소만 JSON으로 작성하라 (샷/shots 없음).
 
@@ -239,6 +309,10 @@ function buildShotsPrompt(ctx: PromptContext, foundation: ContiFoundation): stri
       ? '\n⚠️ cut_type=single_shot — shots 배열은 반드시 1개만 출력.\n'
       : '';
 
+  const metadataBlock = ctx.expectedMetadata
+    ? `\n${buildMetadataTagInstruction(ctx.expectedMetadata)}\n`
+    : '';
+
   return `한국어 숏폼 영상 콘티 2단계 — 1단계 설정을 바탕으로 샷별 camera/action/dialogue만 JSON으로 작성하라.
 ${cutTypeNote}action·dialogue 본문에는 A/B 라벨만 사용. 실명은 characters[].name에만 두고 action/dialogue에 쓰지 말 것.
 1단계 설정 (변경 금지):
@@ -249,7 +323,7 @@ ${feedbackBlock}
 ${shotGuide}
 
 JSON 스키마:
-${buildShotsJsonSchema(ctx.conditions)}`;
+${buildShotsJsonSchema(ctx.conditions)}${metadataBlock}`;
 }
 
 function buildShotPatchPrompt(
@@ -356,7 +430,7 @@ function mergeShotPatches(conti: VideoConti, patches: VideoContiShot[]): VideoCo
 }
 
 async function generateFoundation(ctx: PromptContext, model: string): Promise<ContiFoundation> {
-  const parsed = await callClaudeJson({
+  const { parsed } = await callClaudeJson({
     model,
     max_tokens: CONTI_FOUNDATION_MAX_TOKENS,
     prompt: buildFoundationPrompt(ctx),
@@ -368,17 +442,17 @@ async function generateShots(
   ctx: PromptContext,
   foundation: ContiFoundation,
   model: string,
-): Promise<{ shots: VideoContiShot[]; fullText?: string }> {
+): Promise<{ shots: VideoContiShot[]; fullText?: string; raw?: string }> {
   const maxTokens =
     ctx.conditions.cutType === 'single_shot' ? CONTI_SINGLE_SHOTS_MAX_TOKENS : CONTI_SHOTS_MAX_TOKENS;
-  const parsed = await callClaudeJson({
+  const { parsed, raw } = await callClaudeJson({
     model,
     max_tokens: maxTokens,
     prompt: buildShotsPrompt(ctx, foundation),
   });
   const shots = (parsed.shots as VideoContiShot[]) ?? [];
   const fullText = parsed.fullText ? String(parsed.fullText) : undefined;
-  return { shots, fullText };
+  return { shots, fullText, raw };
 }
 
 async function regenerateShotsOnly(
@@ -399,7 +473,7 @@ async function fillSpecificShots(
   model: string,
   reason?: string,
 ): Promise<VideoConti> {
-  const parsed = await callClaudeJson({
+  const { parsed } = await callClaudeJson({
     model,
     max_tokens: CONTI_SHOT_FILL_MAX_TOKENS,
     prompt: buildShotPatchPrompt(ctx, foundation, conti, invalidIndices, reason),
@@ -578,6 +652,16 @@ export async function generateConti(params: PromptContext): Promise<ContiGenerat
   await reportStage(params, '2단계 shots LLM');
   const { shots, fullText } = await generateShots(params, foundation, model);
 
+  return finalizeContiFromParts(params, foundation, shots, fullText, model);
+}
+
+async function finalizeContiFromParts(
+  params: PromptContext,
+  foundation: ContiFoundation,
+  shots: VideoContiShot[],
+  fullText: string | undefined,
+  model: string,
+): Promise<ContiGenerationResult> {
   let conti = assembleConti(foundation, shots, params.conditions, fullText);
   const contentWarnings: string[] = [];
   let lastShotIncompleteDetected = findIncompleteLastShotIndex(conti) != null;
@@ -648,6 +732,69 @@ export async function generateConti(params: PromptContext): Promise<ContiGenerat
     lastShotIncompleteDetected: lastShotIncompleteDetected || undefined,
     characterNames: characterNames.length ? characterNames : undefined,
   };
+}
+
+const MAX_METADATA_TAG_RETRIES = 2;
+
+export async function generateContiFromPunchline(params: {
+  workspace: Workspace;
+  plan: PreGenerationPlan;
+  punchlineIdea: string;
+  pastSummaries?: string[];
+  feedback?: string;
+  onStage?: (stage: string) => void | Promise<void>;
+}): Promise<ContiGenerationResult> {
+  const model = (await getMainClaudeModel()) || 'claude-sonnet-4-6';
+  const { plan, punchlineIdea } = params;
+  const expectedMetadata = metadataTagsFromConditions(plan.conditions);
+
+  const ctx: PromptContext = {
+    workspace: params.workspace,
+    config: DEFAULT_VIDEO_PERSONAS[params.workspace],
+    conditions: plan.conditions,
+    personaText: plan.personaText,
+    punchlineIdea,
+    yeonunProductContext: plan.yeonunProduct?.contextText,
+    expectedMetadata,
+    feedback: params.feedback,
+    pastSummaries: params.pastSummaries,
+    onStage: params.onStage,
+  };
+
+  await reportStage(ctx, '3단계 foundation LLM');
+  const foundation = await generateFoundation(ctx, model);
+
+  let shotsFeedback = params.feedback;
+  let conti!: ContiGenerationResult;
+
+  for (let metaAttempt = 0; metaAttempt <= MAX_METADATA_TAG_RETRIES; metaAttempt++) {
+    await reportStage(ctx, `3단계 shots LLM${metaAttempt ? ` (메타 태그 재시도 ${metaAttempt})` : ''}`);
+    const shotCtx = shotsFeedback ? { ...ctx, feedback: shotsFeedback } : ctx;
+    const { shots, fullText, raw } = await generateShots(shotCtx, foundation, model);
+
+    const parsedMeta = raw ? parseContiMetadataTags(raw) : null;
+    if (!parsedMeta) {
+      if (metaAttempt >= MAX_METADATA_TAG_RETRIES) {
+        throw new ContiValidationError('콘티 응답 끝 메타 태그가 없습니다. 형식을 준수하도록 다시 생성하라.');
+      }
+      shotsFeedback = 'JSON 뒤 마지막 줄에 [관계축: …] [감정곡선: …] … 형식 메타 태그를 반드시 출력하라.';
+      continue;
+    }
+
+    const metaCheck = validateContiMetadataTags(parsedMeta, expectedMetadata);
+    if (!metaCheck.ok) {
+      if (metaAttempt >= MAX_METADATA_TAG_RETRIES) {
+        throw new ContiValidationError(metaCheck.message);
+      }
+      shotsFeedback = metaCheck.message;
+      continue;
+    }
+
+    conti = await finalizeContiFromParts(shotCtx, foundation, shots, fullText, model);
+    break;
+  }
+
+  return conti!;
 }
 
 export { buildEvoLinkPrompt as buildKlingPrompt };
