@@ -16,6 +16,7 @@ import {
   buildMultiShotCompositionGuide,
   buildShotContentRule,
   buildScreenTextRenderingRule,
+  buildYeonunFortuneDialogueRule,
   buildDialogueLengthRule,
   buildDialogueDistinctRule,
   buildPunchlineClarityRule,
@@ -132,9 +133,11 @@ function buildMultiShotGuide(ctx: PromptContext): string {
     personaGuide = config.shotStructure?.trim();
   }
   const baseGuide = personaGuide ?? buildMultiShotCompositionGuide(conditions.duration);
+  const yeonunFortuneBlock =
+    ctx.workspace === 'yeonun' ? `\n${buildYeonunFortuneDialogueRule()}\n` : '';
 
   return `${baseGuide}
-${buildShotContentRule()}
+${buildShotContentRule()}${yeonunFortuneBlock}
 ${punchlineDurationRule}
 shots 배열 길이는 ${getShotCountBounds(conditions.duration).min}~${getShotCountBounds(conditions.duration).max}개. startSec/endSec 합 = ${conditions.duration}. 각 action ${SHOT_CONTENT_MIN_CHARS}자 이상.
 ${EVOLINK_PROMPT_LENGTH_GUIDANCE}`;
@@ -352,6 +355,8 @@ function buildShotPatchPrompt(
   });
 
   const reasonBlock = reason ? `\n보완 사유: ${reason}\n` : ctx.feedback ? `\n${ctx.feedback}\n` : '';
+  const yeonunFortuneBlock =
+    ctx.workspace === 'yeonun' ? `\n${buildYeonunFortuneDialogueRule()}\n` : '';
 
   return `다음 영상 설정과 기존 콘티에서 지정 샷만 보완하라.
 
@@ -363,7 +368,7 @@ ${reasonBlock}
 ${existing.join('\n')}
 
 ${buildShotFillPrompt(shotNumbers)}
-${buildScreenTextRenderingRule()}
+${buildScreenTextRenderingRule()}${yeonunFortuneBlock}
 ${buildDialogueLengthRule()}
 ${buildDialogueDistinctRule()}
 ${buildPunchlineClarityRule()}

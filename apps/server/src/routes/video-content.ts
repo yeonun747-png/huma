@@ -63,7 +63,26 @@ async function assertAccountAccess(
   return { ok: true, workspace: data.workspace };
 }
 
+/** 삭제 불가 — 콘티·영상 파이프라인 전체 */
 const IN_PROGRESS_STATUSES = ['conti_generating', 'rendering', 'generating'] as const;
+/** Sonnet 콘티 생성 — 계정당 1건 */
+const CONTI_BUSY_STATUSES = ['conti_generating'] as const;
+
+async function accountHasBusyHistory(
+  accountId: string,
+  statuses: readonly string[],
+  excludeHistoryId?: string,
+): Promise<boolean> {
+  let query = supabase
+    .from('huma_video_content_history')
+    .select('id')
+    .eq('account_id', accountId)
+    .in('status', [...statuses])
+    .limit(1);
+  if (excludeHistoryId) query = query.neq('id', excludeHistoryId);
+  const { data } = await query;
+  return (data?.length ?? 0) > 0;
+}
 
 async function removeVideoContentFiles(
   historyId: string,
@@ -298,14 +317,8 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
 
     await failStaleVideoContentJobs(id);
 
-    const { data: busy } = await supabase
-      .from('huma_video_content_history')
-      .select('id')
-      .eq('account_id', id)
-      .in('status', ['conti_generating', 'rendering', 'generating'])
-      .limit(1);
-    if (busy?.length) {
-      return reply.code(409).send({ error: '이미 진행 중인 콘티·영상 작업이 있습니다' });
+    if (await accountHasBusyHistory(id, CONTI_BUSY_STATUSES)) {
+      return reply.code(409).send({ error: '이미 콘티 생성이 진행 중입니다' });
     }
 
     await enqueueJob({
@@ -343,17 +356,6 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
     }
     if (row.status !== 'conti_ready') {
       return reply.code(409).send({ error: `영상 제작 불가 상태: ${row.status}` });
-    }
-
-    const { data: busy } = await supabase
-      .from('huma_video_content_history')
-      .select('id')
-      .eq('account_id', row.account_id)
-      .neq('id', id)
-      .in('status', ['conti_generating', 'rendering', 'generating'])
-      .limit(1);
-    if (busy?.length) {
-      return reply.code(409).send({ error: '이미 진행 중인 콘티·영상 작업이 있습니다' });
     }
 
     if (!hasEvoLinkApiKey()) {
@@ -501,14 +503,8 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
 
     await failStaleVideoContentJobs(id);
 
-    const { data: busy } = await supabase
-      .from('huma_video_content_history')
-      .select('id')
-      .eq('account_id', id)
-      .in('status', ['conti_generating', 'rendering', 'generating'])
-      .limit(1);
-    if (busy?.length) {
-      return reply.code(409).send({ error: '이미 진행 중인 작업이 있습니다' });
+    if (await accountHasBusyHistory(id, CONTI_BUSY_STATUSES)) {
+      return reply.code(409).send({ error: '이미 콘티 생성이 진행 중입니다' });
     }
 
     await enqueueJob({

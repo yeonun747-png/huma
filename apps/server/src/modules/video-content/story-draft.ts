@@ -1,6 +1,7 @@
 import type { VideoConti } from './types.js';
 import { buildHookTypePromptBlock, extractSectionBody } from './persona-axis.js';
 import { buildCharacterNamingRule } from './conti-validation.js';
+import { buildYeonunFortuneDialogueRule } from './screen-text-constraint.js';
 import type { GenerationConditions } from './types.js';
 import type { Workspace } from '@huma/shared';
 
@@ -156,6 +157,7 @@ export function buildStoryDraftPrompt(params: {
   feedback?: string;
 }): string {
   const {
+    workspace,
     punchlineIdea,
     mustIncludeProps,
     yeonunProductContext,
@@ -164,6 +166,9 @@ export function buildStoryDraftPrompt(params: {
     charBlock,
     feedback,
   } = params;
+
+  const yeonunFortuneBlock =
+    workspace === 'yeonun' ? `\n${buildYeonunFortuneDialogueRule()}\n` : '';
 
   const pastBlock =
     pastSummaries?.length ?
@@ -179,8 +184,10 @@ export function buildStoryDraftPrompt(params: {
 
   return `한국어 숏폼 — 3a단계: 펀치라인을 가장 재미있게 드러내는 **이야기 흐름**만 작성한다.
 
-⚠️ 이 단계 금지: 샷 개수, 초 단위 시간 배분, 대사 글자 수 제한, camera/action/dialogue JSON, 화면 텍스트 회피 문구.
+⚠️ 이 단계 금지: 샷 개수, 초 단위 시간 배분, 대사 글자 수 제한, camera/action/dialogue JSON.
 오직 등장인물·장소·사건 전개·대사 **내용**(말할 것)에만 집중한다. 형식은 다음 3b단계에서 처리한다.
+연운·운세 setup은 narrativeProse·대사 내용에 **읽은 문구 전문**을 넣는다 (예: "윗집과 소음 갈등 주의라고? 웃기네, 빈 집인데."). 반응만("빈 집인데")으로 두지 말 것.
+${yeonunFortuneBlock}
 
 선택된 펀치라인(결말 고정 — 반드시 이 결말로 수렴, 변경 금지):
 ${punchlineIdea}

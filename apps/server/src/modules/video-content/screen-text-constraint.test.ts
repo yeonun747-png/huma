@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   actionDescribesOnScreenText,
+  dialogueCarriesReadableSetup,
   ensureScreenTextRenderingInConstraints,
+  shotNeedsFortuneSetupDialogue,
 } from './screen-text-constraint.js';
 import { findRawShotQualityIssues } from './conti-validation.js';
 import type { VideoConti } from './types.js';
@@ -64,6 +66,44 @@ describe('actionDescribesOnScreenText', () => {
       actionDescribesOnScreenText('B가 종이를 A 앞으로 조심스럽게 내밀며 눈을 살짝 찡그린다.'),
     ).toBe(false);
   });
+
+  it('detects vague "특정 문구" reference in phone scroll action', () => {
+    expect(
+      actionDescribesOnScreenText(
+        'A가 소파에 앉아 스마트폰 화면을 천천히 내려 스크롤하다 특정 문구에서 손가락을 멈추고, 입꼬리를 실룩이며 코웃음을 친 뒤 폰을 내려놓는다.',
+      ),
+    ).toBe(true);
+  });
+});
+
+describe('dialogueCarriesReadableSetup', () => {
+  it('accepts fortune phrase quoted in dialogue', () => {
+    expect(dialogueCarriesReadableSetup('A: "윗집과 소음 갈등 주의라고? 웃기네, 빈 집인데."')).toBe(true);
+  });
+
+  it('rejects reaction-only dialogue', () => {
+    expect(dialogueCarriesReadableSetup('A: "빈 집인데."')).toBe(false);
+  });
+});
+
+describe('shotNeedsFortuneSetupDialogue', () => {
+  it('detects phone scroll with vague text stop', () => {
+    expect(
+      shotNeedsFortuneSetupDialogue(
+        'A가 스마트폰을 스크롤하다 특정 문구에서 손가락을 멈춘다.',
+        '연운 이달 운세에서 윗집과 소음 갈등 주의 문구를 본다.',
+      ),
+    ).toBe(true);
+  });
+
+  it('detects phone scroll from scenarioSummary fortune warning', () => {
+    expect(
+      shotNeedsFortuneSetupDialogue(
+        'A가 소파에 앉아 스마트폰을 스크롤하며 코웃음 친다.',
+        '1층 영도가 연운 이달 운세에서 윗집과 소음 갈등 주의 문구를 보고 콧방귀를 뀌었다.',
+      ),
+    ).toBe(true);
+  });
 });
 
 describe('ensureScreenTextRenderingInConstraints', () => {
@@ -104,6 +144,62 @@ describe('findRawShotQualityIssues on_screen_text', () => {
     };
     const issues = findRawShotQualityIssues(conti);
     expect(issues.some((i) => i.kind === 'on_screen_text')).toBe(true);
+  });
+});
+
+describe('findRawShotQualityIssues fortune_setup_dialogue', () => {
+  it('flags yeonun neighbor-noise conti when dialogue omits fortune phrase', () => {
+    const conti: VideoConti = {
+      characters: [],
+      location: '빌라',
+      lighting: '형광등',
+      timeOfDay: '저녁',
+      cutType: 'multi_shot',
+      duration: 14,
+      scenarioSummary:
+        "1층 영도가 연운 이달 운세에서 '윗집과 소음 갈등 주의' 문구를 보고 콧방귀를 뀌었다.",
+      fullText: '테스트',
+      shots: [
+        {
+          shotNumber: 1,
+          startSec: 0,
+          endSec: 2.5,
+          camera: '미디엄샷',
+          action:
+            'A가 소파에 앉아 스마트폰 화면을 천천히 내려 스크롤하다 특정 문구에서 손가락을 멈추고, 입꼬리를 실룩이며 코웃음을 친 뒤 폰을 내려놓는다.',
+          dialogue: 'A: "빈 집인데."',
+        },
+      ],
+    };
+    const issues = findRawShotQualityIssues(conti);
+    expect(issues.some((i) => i.kind === 'on_screen_text' && i.index === 0)).toBe(true);
+    expect(issues.some((i) => i.kind === 'fortune_setup_dialogue' && i.index === 0)).toBe(true);
+  });
+
+  it('passes when dialogue carries full fortune phrase', () => {
+    const conti: VideoConti = {
+      characters: [],
+      location: '빌라',
+      lighting: '형광등',
+      timeOfDay: '저녁',
+      cutType: 'multi_shot',
+      duration: 14,
+      scenarioSummary:
+        "1층 영도가 연운 이달 운세에서 '윗집과 소음 갈등 주의' 문구를 보고 콧방귀를 뀌었다.",
+      fullText: '테스트',
+      shots: [
+        {
+          shotNumber: 1,
+          startSec: 0,
+          endSec: 2.5,
+          camera: '미디엄샷',
+          action: 'A가 소파에 앉아 스마트폰을 스크롤하며 코웃음 친 뒤 폰을 내려놓는다.',
+          dialogue: 'A: "윗집과 소음 갈등 주의라고? 웃기네, 빈 집인데."',
+        },
+      ],
+    };
+    const issues = findRawShotQualityIssues(conti);
+    expect(issues.some((i) => i.kind === 'fortune_setup_dialogue')).toBe(false);
   });
 });
 

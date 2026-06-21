@@ -90,7 +90,7 @@ export const PIPELINE_VIDEO_OPTIONS = [
 ] as const;
 
 export const PIPELINE_VIDEO_HINT =
-  '✓ EvoLink API · Kling 3.0 Turbo · 멀티샷 · 720p $0.106/초 · 1080p $0.133/초 · 음성 포함';
+  '✓ Kling 3.0 Turbo · 멀티샷 · 720p $0.106/초 · 1080p $0.133/초 · 음성 포함';
 
 export function normalizePipelineVideoQuality(raw?: string | null): PipelineVideoQuality {
   return raw === '1080p' ? '1080p' : '720p';

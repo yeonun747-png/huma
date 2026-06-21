@@ -12,8 +12,11 @@ import {
 } from './dialogue-duplicate.js';
 import {
   actionDescribesOnScreenText,
+  buildFortuneSetupDialogueFeedback,
   buildOnScreenTextFeedback,
   buildScreenTextRenderingRule,
+  dialogueCarriesReadableSetup,
+  shotNeedsFortuneSetupDialogue,
 } from './screen-text-constraint.js';
 import {
   EVOLINK_MAX_SHOTS,
@@ -27,6 +30,7 @@ export {
   VIDEO_SCREEN_TEXT_RENDERING_CONSTRAINT,
   ensureScreenTextRenderingInConstraints,
   buildScreenTextRenderingRule,
+  buildYeonunFortuneDialogueRule,
   actionDescribesOnScreenText,
   buildOnScreenTextFeedback,
 } from './screen-text-constraint.js';
@@ -512,6 +516,7 @@ export type RawShotQualityKind =
   | 'incomplete'
   | 'camera_in_action'
   | 'on_screen_text'
+  | 'fortune_setup_dialogue'
   | 'dialogue_too_long'
   | 'dialogue_duplicate'
   | 'punchline_clarity';
@@ -616,6 +621,17 @@ export function findRawShotQualityIssues(conti: VideoConti): RawShotQualityIssue
         index: i,
         kind: 'on_screen_text',
         feedback: buildOnScreenTextFeedback(shotNumber),
+      });
+    }
+
+    if (
+      shotNeedsFortuneSetupDialogue(shot.action, conti.scenarioSummary) &&
+      !dialogueCarriesReadableSetup(shot.dialogue)
+    ) {
+      issues.push({
+        index: i,
+        kind: 'fortune_setup_dialogue',
+        feedback: buildFortuneSetupDialogueFeedback(shotNumber),
       });
     }
 

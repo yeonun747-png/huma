@@ -4,7 +4,7 @@ import { hasDialogueDuplicate } from './dialogue-duplicate.js';
 import type { VideoConti } from './types.js';
 import { asContiShots } from './types.js';
 
-export const MAX_HUMOR_REGENERATION_ATTEMPTS = 2;
+export const MAX_HUMOR_REGENERATION_ATTEMPTS = 1;
 
 export const HUMOR_REGENERATION_FEEDBACK =
   '이 콘티는 보고 나서 웃기거나 놀랍거나 흥미롭다는 느낌이 부족하다고 평가됐다. ' +
@@ -29,21 +29,26 @@ export function formatContiForHumorAssessment(conti: VideoConti): string {
 }
 
 function buildHumorAssessmentPrompt(contiText: string): string {
-  return `다음은 15초짜리 짧은 영상 콘티 전체이다.
+  return `다음은 11~15초짜리 짧은 영상 콘티 전체이다.
 ${contiText}
 
-이 영상을 실제로 봤다고 가정하고 평가하라. 다 보고 난 시청자가 아래 중 하나의 반응을 보일 만큼 재미있는가?
-- 킥킥대며 웃을 만큼 웃긴가
-- '헐, 대박' 하고 놀랄 만큼 흥미로운가
-- '아 웃겨' 하면서 친구한테 캡처해서 보내고 싶을 만큼 재밌는가
+이 영상을 실제로 봤다고 가정하고 평가하라. dull은 "재미가 거의 없다"는 경우에만 쓴다. 기준은 관대하게 적용한다.
 
-위 세 가지 중 하나에도 해당하지 않고, 그냥 무난하게 흘러가다 끝나는 느낌이라면 funny 대신 dull로 판정한다.
+funny로 볼 수 있는 경우 (하나만 해당해도 funny):
+- 피식·킥킥·미소 정도의 가벼운 웃음
+- "헐" "오" "아 그렇구나" 같은 짧은 놀람·공감·의외성
+- 친구에게 보낼 정도는 아니어도, 끝까지 보게 만드는 호기심·펀치가 있음
+- 펀치라인/setup이 짧은 숏폼에 맞게 전달되면, 대작·바이럴급은 아니어도 funny
 
-추가 기준: 이 콘티의 펀치라인이 왜 재미있거나 놀라운지, 그 이유가 콘티 안의 정보만으로 명확히 설명되는가?
-시청자가 "그래서 뭐가 반전이었다는 거지?"라고 헷갈릴 만한 부분(마지막 샷이 표정·동작만으로 끝나거나, 읽어야만 알 수 있는 라벨·스티커·명찰에만 의존하는 경우)이 있다면 dull로 판정한다.
+dull로 판정하는 경우 (아래에 해당할 때만):
+- setup과 결말이 연결되지 않아 "그래서 뭐?"가 남음 (표정·동작만으로 끝나 반전 이유가 전혀 안 보일 때)
+- 읽어야만 알 수 있는 화면·라벨·명찰에만 의존해 숏폼만으로는 이해 불가
+- 전체가 설명·일상 나열처럼 흘러가고 펀치·반전·감정 반응이 거의 없음
 
-추가 기준: 콘티 전체 샷 대사를 비교했을 때, 펀치라인 대사가 이전 샷 대사를 그대로 반복하거나 거의 동일한 경우(화자 A/B만 바꾼 재탕)가 있는가?
-그렇다면 그 자체로 dull로 판정한다. 반전이 아니라 단순 재탕이기 때문이다.
+주의:
+- 미묘한 반전·여운·씁쓸한 유머도 funny 가능. "더 세게 웃겨야 한다"는 이유만으로 dull 금지.
+- 샷·대사가 완벽하지 않아도 펀치라인 의도가 읽히면 funny.
+- 애매하면 dull보다 funny를 선택한다.
 
 funny 또는 dull 중 하나의 단어로만 답하라.`;
 }
