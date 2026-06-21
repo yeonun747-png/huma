@@ -6,6 +6,7 @@ import { notifyTelegram } from '../watcher/telegram.js';
 import { logOperation } from '../../lib/log-emitter.js';
 import { enqueueJob } from '../queue/producer.js';
 import type { VideoConti, VideoContiShot, GenerationConditions } from './types.js';
+import { asContiShots } from './types.js';
 import {
   EVOLINK_MAX_SHOTS,
   resolveMultiShotCount,
@@ -99,7 +100,7 @@ export function buildEvoLinkMultiShotPrompt(conti: VideoConti, duration: number)
   const totalSec = normalizeVideoDurationSec(duration);
   const nameToLabel = buildCharacterNameToLabelMap(conti);
   const scene = `세로 9:16, ${conti.location}, ${conti.lighting}, ${conti.timeOfDay}. 등장인물(고정): ${formatEvoLinkCharacterBlock(conti, nameToLabel)}. 한국어 대사·자연스러운 오디오.`;
-  const shots = conti.shots.slice(0, EVOLINK_MAX_SHOTS);
+  const shots = asContiShots(conti.shots).slice(0, EVOLINK_MAX_SHOTS);
   const segmentSecs = snapShotDurationsToTotal(
     shots.map((shot) => shotDurationSec(shot)),
     totalSec,
@@ -120,7 +121,7 @@ export function buildEvoLinkMultiShotPrompt(conti: VideoConti, duration: number)
 export function buildEvoLinkSingleShotPrompt(conti: VideoConti, conditions: GenerationConditions): string {
   const nameToLabel = buildCharacterNameToLabelMap(conti);
   const charDesc = formatEvoLinkCharacterBlock(conti, nameToLabel);
-  const beats = conti.shots
+  const beats = asContiShots(conti.shots)
     .map((s) => {
       const normalized = normalizeShotForEvoLinkPrompt(s, nameToLabel);
       return `[${s.startSec}-${s.endSec}s] ${s.camera}: ${normalized.action}${normalized.dialogue ? ` — "${normalized.dialogue}"` : ''}`;
@@ -374,7 +375,8 @@ function countSubstantiveShots(src: VideoContiShot[]): number {
 
 /** LLM 샷 수(4~6)를 유지하며 타임라인·최소 길이만 정규화 — 6슬롯 강제 없음 */
 export function normalizeMultiShotConti(conti: VideoConti, duration: number): VideoConti {
-  const src = conti.shots.length > 0 ? conti.shots : [];
+  const srcShots = asContiShots(conti.shots);
+  const src = srcShots.length > 0 ? srcShots : [];
   const totalSec = normalizeVideoDurationSec(duration);
   const shotCount = resolveMultiShotCount(countSubstantiveShots(src), totalSec);
   const timeline = buildMultiShotTimeline(totalSec, shotCount);
@@ -427,7 +429,8 @@ export function normalizeSingleShotConti(
   conti: VideoConti,
   duration: number,
 ): { conti: VideoConti; merged: boolean } {
-  const src = conti.shots.length > 0 ? conti.shots : [];
+  const srcShots = asContiShots(conti.shots);
+  const src = srcShots.length > 0 ? srcShots : [];
   const merged = src.length > 1;
 
   if (src.length <= 1) {

@@ -1,4 +1,5 @@
 import type { VideoConti, VideoContiShot } from './types.js';
+import { asContiCharacters, asContiShots } from './types.js';
 
 function trimField(text: string | undefined | null): string {
   return (text ?? '').trim();
@@ -66,9 +67,10 @@ function extractNameCandidates(text: string): string[] {
 /** characters[].name + 시나리오·action 교차 등장 이름 → A/B 라벨 */
 export function buildCharacterNameToLabelMap(conti: VideoConti): Map<string, string> {
   const map = new Map<string, string>();
-  const labels = conti.characters.map((ch) => trimField(ch.label)).filter(Boolean);
+  const characters = asContiCharacters(conti.characters);
+  const labels = characters.map((ch) => trimField(ch.label)).filter(Boolean);
 
-  for (const ch of conti.characters) {
+  for (const ch of characters) {
     const label = trimField(ch.label);
     const name = trimField(ch.name);
     if (label && name) map.set(name, label);
@@ -77,7 +79,9 @@ export function buildCharacterNameToLabelMap(conti: VideoConti): Map<string, str
   if (map.size >= labels.length) return map;
 
   const fromScenario = extractNameCandidates(conti.scenarioSummary);
-  const actionText = conti.shots.map((s) => trimField(s.action)).join('\n');
+  const actionText = asContiShots(conti.shots)
+    .map((s) => trimField(s.action))
+    .join('\n');
   const fromActions = extractNameCandidates(actionText);
   const confirmed = fromScenario.filter((name) => fromActions.includes(name));
 
@@ -114,7 +118,7 @@ export function formatEvoLinkCharacterBlock(conti: VideoConti, nameToLabel: Map<
     if (!labelToName.has(label)) labelToName.set(label, name);
   }
 
-  return conti.characters
+  return asContiCharacters(conti.characters)
     .map((c) => {
       const label = trimField(c.label);
       const explicitName = trimField(c.name);
@@ -144,7 +148,7 @@ export function normalizeShotForEvoLinkPrompt(
 export function findRealNamesInShots(conti: VideoConti, nameToLabel: Map<string, string>): string[] {
   if (nameToLabel.size === 0) return [];
   const leaked = new Set<string>();
-  for (const shot of conti.shots) {
+  for (const shot of asContiShots(conti.shots)) {
     for (const field of [shot.action, shot.dialogue]) {
       const text = trimField(field);
       if (!text) continue;

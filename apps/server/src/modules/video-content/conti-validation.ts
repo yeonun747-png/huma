@@ -1,4 +1,5 @@
 import type { VideoConti, VideoContiShot } from './types.js';
+import { asContiShots } from './types.js';
 import {
   buildDialogueLengthRule,
   findDialogueTooLongIssue,
@@ -130,8 +131,8 @@ export function validateAllShotsMinDuration(
   conti: VideoConti,
   minSec = SHOT_MIN_DURATION_SEC,
 ): { ok: true } | { ok: false; feedback: string } {
-  for (let i = 0; i < conti.shots.length; i++) {
-    const dur = shotDurationSec(conti.shots[i]!);
+  for (let i = 0; i < asContiShots(conti.shots).length; i++) {
+    const dur = shotDurationSec(asContiShots(conti.shots)[i]!);
     if (dur < minSec) {
       return { ok: false, feedback: buildShotTooShortFeedback(i + 1, dur) };
     }
@@ -283,8 +284,8 @@ export function validateShotContent(
 export function validateRawShotsContent(
   conti: VideoConti,
 ): { ok: true } | { ok: false; feedback: string; shotNumber: number } {
-  for (let i = 0; i < conti.shots.length; i++) {
-    const check = validateShotContent(conti.shots[i]!, i + 1);
+  for (let i = 0; i < asContiShots(conti.shots).length; i++) {
+    const check = validateShotContent(asContiShots(conti.shots)[i]!, i + 1);
     if (!check.ok) return { ok: false, feedback: check.feedback, shotNumber: i + 1 };
   }
   return { ok: true };
@@ -293,8 +294,8 @@ export function validateRawShotsContent(
 /** 무효 raw 샷 인덱스 (0-based) */
 export function findInvalidRawShotIndices(conti: VideoConti): number[] {
   const invalid: number[] = [];
-  for (let i = 0; i < conti.shots.length; i++) {
-    const check = validateShotContent(conti.shots[i]!, i + 1);
+  for (let i = 0; i < asContiShots(conti.shots).length; i++) {
+    const check = validateShotContent(asContiShots(conti.shots)[i]!, i + 1);
     if (!check.ok) invalid.push(i);
   }
   return invalid;
@@ -371,8 +372,8 @@ export function buildAdjacentDuplicateFeedback(shotNumber: number): string {
 /** 인접 중복 — 후행 샷 인덱스(0-based) 목록 */
 export function findAdjacentDuplicateShotIndices(conti: VideoConti): number[] {
   const invalid: number[] = [];
-  for (let i = 1; i < conti.shots.length; i++) {
-    if (adjacentShotsTooSimilar(conti.shots[i - 1]!, conti.shots[i]!)) {
+  for (let i = 1; i < asContiShots(conti.shots).length; i++) {
+    if (adjacentShotsTooSimilar(asContiShots(conti.shots)[i - 1]!, asContiShots(conti.shots)[i]!)) {
       invalid.push(i);
     }
   }
@@ -383,8 +384,8 @@ export function findAdjacentDuplicateShotIndices(conti: VideoConti): number[] {
 export function validateAllShotsContent(
   conti: VideoConti,
 ): { ok: true } | { ok: false; feedback: string } {
-  for (let i = 0; i < conti.shots.length; i++) {
-    const check = validateShotContent(conti.shots[i]!, i + 1);
+  for (let i = 0; i < asContiShots(conti.shots).length; i++) {
+    const check = validateShotContent(asContiShots(conti.shots)[i]!, i + 1);
     if (!check.ok) return check;
   }
   return { ok: true };
@@ -551,7 +552,7 @@ export function buildPunchlineClarityFeedback(lastShotNumber: number, prevShotNu
 }
 
 export function findPunchlineClarityIssue(conti: VideoConti): RawShotQualityIssue | null {
-  const shots = conti.shots;
+  const shots = asContiShots(conti.shots);
   if (shots.length < 2) return null;
 
   const lastIdx = shots.length - 1;
@@ -584,8 +585,8 @@ export function findPunchlineClarityIssue(conti: VideoConti): RawShotQualityIssu
 
 export function findRawShotQualityIssues(conti: VideoConti): RawShotQualityIssue[] {
   const issues: RawShotQualityIssue[] = [];
-  for (let i = 0; i < conti.shots.length; i++) {
-    const shot = conti.shots[i]!;
+  for (let i = 0; i < asContiShots(conti.shots).length; i++) {
+    const shot = asContiShots(conti.shots)[i]!;
     const shotNumber = i + 1;
 
     const content = validateShotContent(shot, shotNumber);
@@ -645,8 +646,8 @@ export function findRawShotQualityIssues(conti: VideoConti): RawShotQualityIssue
 }
 
 export function findIncompleteLastShotIndex(conti: VideoConti): number | null {
-  if (!conti.shots.length) return null;
-  const lastIdx = conti.shots.length - 1;
+  if (!asContiShots(conti.shots).length) return null;
+  const lastIdx = asContiShots(conti.shots).length - 1;
   const issues = findRawShotQualityIssues(conti).filter(
     (issue) => issue.index === lastIdx && issue.kind === 'incomplete',
   );
@@ -792,7 +793,7 @@ export function findUnregisteredCharacterNames(
 
   const allowed = extractAllowedCharacterIdentifiers(conti, extraAllowed);
   const unregistered = new Set<string>();
-  for (const shot of conti.shots) {
+  for (const shot of asContiShots(conti.shots)) {
     const dialogue = trimField(shot.dialogue);
     if (!dialogue) continue;
     for (const name of extractPersonReferenceNames(dialogue)) {
@@ -867,9 +868,9 @@ export function findPunchlineShotIndex(shots: VideoContiShot[]): number {
 }
 
 function resolvePunchlineMinDurationSec(conti: VideoConti, fallbackSec = PUNCHLINE_MIN_DURATION_SEC): number {
-  const idx = findPunchlineShotIndex(conti.shots);
+  const idx = findPunchlineShotIndex(asContiShots(conti.shots));
   if (idx < 0) return fallbackSec;
-  const dialogue = trimField(conti.shots[idx]!.dialogue);
+  const dialogue = trimField(asContiShots(conti.shots)[idx]!.dialogue);
   if (!dialogue) return fallbackSec;
   return minShotDurationForDialogue(dialogue, fallbackSec);
 }
@@ -878,11 +879,11 @@ export function validatePunchlineShotMinDuration(
   conti: VideoConti,
   minSec = PUNCHLINE_MIN_DURATION_SEC,
 ): { ok: true } | { ok: false; feedback: string } {
-  const idx = findPunchlineShotIndex(conti.shots);
+  const idx = findPunchlineShotIndex(asContiShots(conti.shots));
   if (idx < 0) return { ok: true };
 
   const requiredSec = resolvePunchlineMinDurationSec(conti, minSec);
-  const dur = shotDurationSec(conti.shots[idx]!);
+  const dur = shotDurationSec(asContiShots(conti.shots)[idx]!);
   if (dur >= requiredSec) return { ok: true };
 
   return {
@@ -895,13 +896,13 @@ export function validatePunchlineShotMinDuration(
 
 /** 총 길이 유지 — 펀치라인 샷에 대사 길이에 맞는 최소 시간 확보 (다른 샷에서 차감) */
 export function enforcePunchlineShotMinDuration(conti: VideoConti, minSec = PUNCHLINE_MIN_DURATION_SEC): VideoConti {
-  if (!conti.shots.length) return conti;
+  if (!asContiShots(conti.shots).length) return conti;
 
-  const idx = findPunchlineShotIndex(conti.shots);
+  const idx = findPunchlineShotIndex(asContiShots(conti.shots));
   if (idx < 0) return conti;
 
   const requiredSec = resolvePunchlineMinDurationSec(conti, minSec);
-  const durations = conti.shots.map((s) => shotDurationSec(s));
+  const durations = asContiShots(conti.shots).map((s) => shotDurationSec(s));
   const total = normalizeVideoDurationSec(conti.duration);
 
   if (durations[idx]! >= requiredSec) {
@@ -929,12 +930,12 @@ export function enforcePunchlineShotMinDuration(conti: VideoConti, minSec = PUNC
 
 /** endSec 합 = 정수 targetDuration — 펀치라인 보정·LLM 타임라인 후 호출 */
 export function finalizeContiTimeline(conti: VideoConti, targetDuration: number): VideoConti {
-  if (!conti.shots.length) {
+  if (!asContiShots(conti.shots).length) {
     return { ...conti, duration: normalizeVideoDurationSec(targetDuration) };
   }
   return rebuildShotsFromDurations(
     conti,
-    conti.shots.map((s) => shotDurationSec(s)),
+    asContiShots(conti.shots).map((s) => shotDurationSec(s)),
     targetDuration,
   );
 }
@@ -947,7 +948,7 @@ function rebuildShotsFromDurations(
   const target = normalizeVideoDurationSec(totalDuration);
   const snapped = snapShotDurationsToTotal(durations, target, SHOT_MIN_DURATION_SEC);
   let cursor = 0;
-  const shots = conti.shots.map((s, i) => {
+  const shots = asContiShots(conti.shots).map((s, i) => {
     const durationSec = snapped[i] ?? SHOT_MIN_DURATION_SEC;
     const startSec = cursor;
     cursor += durationSec;

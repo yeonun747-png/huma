@@ -55,7 +55,7 @@ import { normalizeMultiShotConti, normalizeSingleShotConti, buildEvoLinkPrompt, 
 import { EVOLINK_PROMPT_LENGTH_GUIDANCE } from './prompt-length.js';
 import { getShotCountBounds } from './shot-timing.js';
 import type { GenerationConditions, VideoConti, VideoContiShot, VideoPersonaConfig } from './types.js';
-import { DEFAULT_VIDEO_PERSONAS } from './types.js';
+import { asContiCharacters, asContiShots, DEFAULT_VIDEO_PERSONAS } from './types.js';
 import type { PreGenerationPlan } from './pre-generation-plan.js';
 import {
   buildCoreMaterialShotsInstruction,
@@ -381,7 +381,7 @@ function parseFoundation(parsed: Record<string, unknown>): ContiFoundation {
   return {
     locationKeyword: String(parsed.locationKeyword ?? ''),
     timeOfDay: String(parsed.timeOfDay ?? ''),
-    characters: (parsed.characters as VideoConti['characters']) ?? [],
+    characters: asContiCharacters(parsed.characters),
     location: String(parsed.location ?? ''),
     lighting: String(parsed.lighting ?? ''),
     timeOfDayVisual: String(parsed.timeOfDayVisual ?? parsed.timeOfDay ?? ''),
@@ -392,31 +392,33 @@ function parseFoundation(parsed: Record<string, unknown>): ContiFoundation {
 
 function assembleConti(
   foundation: ContiFoundation,
-  shots: VideoContiShot[],
+  shots: VideoContiShot[] | unknown,
   conditions: GenerationConditions,
   fullTextOverride?: string,
 ): VideoConti {
+  const normalizedShots = asContiShots(shots);
   return {
-    characters: foundation.characters,
+    characters: asContiCharacters(foundation.characters),
     location: foundation.location,
     lighting: foundation.lighting,
     timeOfDay: foundation.timeOfDayVisual || foundation.timeOfDay,
     cutType: conditions.cutType,
     duration: conditions.duration,
-    shots,
+    shots: normalizedShots,
     scenarioSummary: foundation.scenarioSummary,
     fullText: fullTextOverride?.trim() || foundation.fullText,
   };
 }
 
 function applyDefaultToRawShots(conti: VideoConti, indices: number[]): VideoConti {
-  const shots = conti.shots.map((s, i) => {
+  const src = asContiShots(conti.shots);
+  const shots = src.map((s, i) => {
     if (!indices.includes(i)) return s;
     return {
       ...s,
       shotNumber: s.shotNumber || i + 1,
-      camera: s.camera?.trim() || (i === 0 || i === conti.shots.length - 1 ? '와이드' : '미디엄'),
-      action: getDefaultShotAction(i, conti.shots.length),
+      camera: s.camera?.trim() || (i === 0 || i === src.length - 1 ? '와이드' : '미디엄'),
+      action: getDefaultShotAction(i, src.length),
     };
   });
   return { ...conti, shots };
@@ -424,7 +426,7 @@ function applyDefaultToRawShots(conti: VideoConti, indices: number[]): VideoCont
 
 function mergeShotPatches(conti: VideoConti, patches: VideoContiShot[]): VideoConti {
   const byNumber = new Map(patches.map((p) => [p.shotNumber, p]));
-  const shots = conti.shots.map((s, i) => {
+  const shots = asContiShots(conti.shots).map((s, i) => {
     const patch = byNumber.get(s.shotNumber) ?? byNumber.get(i + 1);
     if (!patch) return s;
     return {
@@ -480,7 +482,7 @@ async function generateShots(
     max_tokens: maxTokens,
     prompt: buildShotsPrompt(ctx, foundation),
   });
-  const shots = (parsed.shots as VideoContiShot[]) ?? [];
+  const shots = asContiShots(parsed.shots);
   const fullText = parsed.fullText ? String(parsed.fullText) : undefined;
   return { shots, fullText, raw };
 }

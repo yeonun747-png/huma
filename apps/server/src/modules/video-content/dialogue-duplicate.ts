@@ -1,4 +1,5 @@
 import type { VideoConti, VideoContiShot } from './types.js';
+import { asContiShots } from './types.js';
 import { extractDialogueSpeaker, normalizeDialogueBody } from './dialogue-timing.js';
 
 /** 전 샷 대사 본문 유사도 — 거의 동일 문장 */
@@ -130,7 +131,7 @@ export interface DialogueDuplicateIssue {
 }
 
 function findAdjacentSameSpeakerDialogueRepeat(conti: VideoConti): DialogueDuplicateIssue | null {
-  const shots = conti.shots;
+  const shots = asContiShots(conti.shots);
   for (let j = 1; j < shots.length; j++) {
     const prev = shots[j - 1]!;
     const curr = shots[j]!;
@@ -157,7 +158,7 @@ export function findDialogueDuplicateIssue(conti: VideoConti): DialogueDuplicate
   const adjacentSameSpeaker = findAdjacentSameSpeakerDialogueRepeat(conti);
   if (adjacentSameSpeaker) return adjacentSameSpeaker;
 
-  const shots = conti.shots;
+  const shots = asContiShots(conti.shots);
   if (shots.length < 2) return null;
 
   const punchlineIdx = findPunchlineShotIndexForDialogue(shots);

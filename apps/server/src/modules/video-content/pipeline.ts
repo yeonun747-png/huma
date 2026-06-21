@@ -877,11 +877,21 @@ export async function runContiGeneration(accountId: string): Promise<string> {
 
     return historyId;
   } catch (err) {
-    const msg = (err as Error).message;
+    const msg = err instanceof Error ? err.message : String(err);
+    const stackHint =
+      err instanceof Error && err.stack
+        ? err.stack.split('\n').slice(1, 4).join(' | ')
+        : '';
+    await logOperation({
+      level: 'ERROR',
+      message: `[video-content] 콘티 생성 실패 — ${msg}${stackHint ? ` (${stackHint})` : ''}`,
+      workspace,
+      account_id: accountId,
+    });
     if (msg !== '유사도 기준 미통과' && msg !== '프롬프트 길이 초과') {
       await supabase
         .from('huma_video_content_history')
-        .update({ status: 'failed', error_message: msg })
+        .update({ status: 'failed', error_message: msg.slice(0, 500) })
         .eq('id', historyId);
     }
     throw err;

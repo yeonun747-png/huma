@@ -2,6 +2,7 @@ import { askClaudeWithModel } from '../../lib/anthropic-client.js';
 import { getSubClaudeModel } from '../../lib/ai-engine.js';
 import { hasDialogueDuplicate } from './dialogue-duplicate.js';
 import type { VideoConti } from './types.js';
+import { asContiShots } from './types.js';
 
 export const MAX_HUMOR_REGENERATION_ATTEMPTS = 2;
 
@@ -17,7 +18,7 @@ const HAIKU_FALLBACK = 'claude-haiku-4-5-20251001';
 
 export function formatContiForHumorAssessment(conti: VideoConti): string {
   const lines: string[] = [`시나리오 요약: ${conti.scenarioSummary}`, ''];
-  for (const shot of conti.shots) {
+  for (const shot of asContiShots(conti.shots)) {
     lines.push(`샷 ${shot.shotNumber} (${shot.startSec}-${shot.endSec}초)`);
     lines.push(`  카메라: ${shot.camera}`);
     lines.push(`  액션: ${shot.action}`);

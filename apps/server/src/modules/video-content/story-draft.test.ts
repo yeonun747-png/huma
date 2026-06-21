@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { contiToStoryDraft, parseStoryDraft } from './story-draft.js';
+import { buildFormatConversionIntro, contiToStoryDraft, parseStoryDraft } from './story-draft.js';
 import type { VideoConti } from './types.js';
 
 describe('parseStoryDraft', () => {
@@ -34,6 +34,16 @@ describe('contiToStoryDraft', () => {
     };
     const conti = { storyDraft: draft } as VideoConti & { storyDraft: typeof draft };
     expect(contiToStoryDraft(conti)).toEqual(draft);
+  });
+
+  it('normalizes partial embedded storyDraft (missing characters)', () => {
+    const conti = {
+      storyDraft: { narrativeProse: '3a 본문' },
+    } as VideoConti & { storyDraft: { narrativeProse: string } };
+    const draft = contiToStoryDraft(conti);
+    expect(draft.narrativeProse).toBe('3a 본문');
+    expect(draft.characters).toEqual([]);
+    expect(() => buildFormatConversionIntro(draft)).not.toThrow();
   });
 
   it('reconstructs from legacy conti fields', () => {

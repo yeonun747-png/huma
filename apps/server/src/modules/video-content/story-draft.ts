@@ -45,41 +45,64 @@ export function storyDraftToFoundation(draft: StoryDraft): ContiFoundation {
   };
 }
 
+function normalizeStoryDraftFields(
+  raw: Partial<StoryDraft> & { narrativeProse?: unknown },
+  fallbackProse?: string,
+): StoryDraft {
+  const narrativeProse =
+    String(raw.narrativeProse ?? fallbackProse ?? '').trim() ||
+    String(fallbackProse ?? '').trim() ||
+    '이전 콘티 서술';
+  return {
+    narrativeProse,
+    locationKeyword: String(raw.locationKeyword ?? ''),
+    timeOfDay: String(raw.timeOfDay ?? ''),
+    characters: Array.isArray(raw.characters) ? raw.characters : [],
+    location: String(raw.location ?? ''),
+    lighting: String(raw.lighting ?? ''),
+    timeOfDayVisual: String(raw.timeOfDayVisual ?? raw.timeOfDay ?? ''),
+    scenarioSummary: String(raw.scenarioSummary ?? narrativeProse.slice(0, 200)),
+  };
+}
+
 export function parseStoryDraft(parsed: Record<string, unknown>): StoryDraft {
   const narrativeProse = String(parsed.narrativeProse ?? parsed.narrative ?? parsed.story ?? '').trim();
   if (!narrativeProse) {
     throw new Error('3a단계 — narrativeProse(이야기 서술)가 비어 있습니다');
   }
-  return {
+  return normalizeStoryDraftFields({
     narrativeProse,
-    locationKeyword: String(parsed.locationKeyword ?? ''),
-    timeOfDay: String(parsed.timeOfDay ?? ''),
-    characters: (parsed.characters as VideoConti['characters']) ?? [],
-    location: String(parsed.location ?? ''),
-    lighting: String(parsed.lighting ?? ''),
-    timeOfDayVisual: String(parsed.timeOfDayVisual ?? parsed.timeOfDay ?? ''),
-    scenarioSummary: String(parsed.scenarioSummary ?? narrativeProse.slice(0, 200)),
-  };
+    locationKeyword: parsed.locationKeyword,
+    timeOfDay: parsed.timeOfDay,
+    characters: parsed.characters,
+    location: parsed.location,
+    lighting: parsed.lighting,
+    timeOfDayVisual: parsed.timeOfDayVisual ?? parsed.timeOfDay,
+    scenarioSummary: parsed.scenarioSummary,
+  } as Partial<StoryDraft>);
 }
 
 /** conti_json / legacy conti → 3b-only 재생성용 draft */
 export function contiToStoryDraft(
   conti: VideoConti & { storyDraft?: StoryDraft; locationKeyword?: string },
 ): StoryDraft {
-  if (conti.storyDraft?.narrativeProse?.trim()) {
-    return conti.storyDraft;
+  const embeddedProse = String(conti.storyDraft?.narrativeProse ?? '').trim();
+  if (embeddedProse) {
+    return normalizeStoryDraftFields(conti.storyDraft!, embeddedProse);
   }
   const prose = (conti.fullText || conti.scenarioSummary || '').trim();
-  return {
-    narrativeProse: prose || '이전 콘티 서술',
-    locationKeyword: String(conti.locationKeyword ?? ''),
-    timeOfDay: String(conti.timeOfDay ?? ''),
-    characters: conti.characters ?? [],
-    location: String(conti.location ?? ''),
-    lighting: String(conti.lighting ?? ''),
-    timeOfDayVisual: String(conti.timeOfDay ?? ''),
-    scenarioSummary: String(conti.scenarioSummary ?? prose.slice(0, 200)),
-  };
+  return normalizeStoryDraftFields(
+    {
+      locationKeyword: conti.locationKeyword,
+      timeOfDay: conti.timeOfDay,
+      characters: conti.characters,
+      location: conti.location,
+      lighting: conti.lighting,
+      timeOfDayVisual: conti.timeOfDay,
+      scenarioSummary: conti.scenarioSummary,
+    },
+    prose || '이전 콘티 서술',
+  );
 }
 
 function buildSlimHumorContext(params: {
@@ -183,9 +206,13 @@ JSON만 출력:
 }
 
 export function buildFormatConversionIntro(storyDraft: StoryDraft): string {
-  return `3a단계 확정 이야기 (내용·펀치라인·대사 의미 변경 금지 — ${storyDraft.narrativeProse.length}자):
+  const prose = String(storyDraft.narrativeProse ?? '').trim();
+  if (!prose) {
+    throw new Error('3b단계 — storyDraft.narrativeProse가 비어 있습니다');
+  }
+  return `3a단계 확정 이야기 (내용·펀치라인·대사 의미 변경 금지 — ${prose.length}자):
 
-${storyDraft.narrativeProse}
+${prose}
 
 ---
 등장인물·장소 (고정):

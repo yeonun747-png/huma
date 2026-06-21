@@ -62,6 +62,17 @@ export interface VideoConti {
   fullText: string;
 }
 
+export type VideoContiCharacter = VideoConti['characters'][number];
+
+/** LLM/DB JSON — shots 누락·비배열 방어 */
+export function asContiShots(shots: unknown): VideoContiShot[] {
+  return Array.isArray(shots) ? shots : [];
+}
+
+export function asContiCharacters(characters: unknown): VideoConti['characters'] {
+  return Array.isArray(characters) ? characters : [];
+}
+
 export interface GenerationConditions {
   relationshipAxis: string;
   /** 파나나 등 — situationAxes 가 있을 때만 선택 */
