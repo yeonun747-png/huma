@@ -88,5 +88,7 @@ export function parseEmbeddingVector(raw: unknown): number[] | null {
 }
 
 export const SIMILARITY_THRESHOLD = 0.85;
+/** 포스팅 큐 블로그 본문 — 직전 N건 대비 재생성 기준 */
+export const POSTING_SIMILARITY_THRESHOLD = 0.85;
 /** P0 — 유사도 재생성 없음 (1회 생성 후 경고만) */
 export const MAX_REGENERATION_ATTEMPTS = 1;
