@@ -92,7 +92,8 @@ export const SHOT_CONTENT_MIN_CHARS = 10;
 export const ADJACENT_SHOT_SIMILARITY_THRESHOLD = 0.9;
 export const MAX_ADJACENT_DUPLICATE_PATCH_ATTEMPTS = 1;
 export const MAX_SHOT_QUALITY_PATCH_ATTEMPTS = 2;
-export const MAX_GENERIC_ACTION_FULL_REGEN = 2;
+export const MAX_GENERIC_ACTION_PATCH_ATTEMPTS = 6;
+export const MAX_GENERIC_ACTION_FULL_REGEN = 3;
 
 /** 1단계: 시나리오·인물·장소 / 2단계: 샷·대사 / 보완: 빈 샷만 */
 export const CONTI_FOUNDATION_MAX_TOKENS = 4096;
@@ -289,13 +290,18 @@ export function buildGenericActionFeedback(shotNumber: number): string {
   return buildGenericActionBatchFeedback([shotNumber]);
 }
 
-export function buildGenericActionBatchFeedback(shotNumbers: number[]): string {
+export function buildGenericActionBatchFeedback(shotNumbers: number[], narrativeProse?: string): string {
   const nums = shotNumbers.join(', ');
-  return (
-    `샷 ${nums} action이 "행동과 반응이 이어지며", "상황을 소개한다", "여운 있게 마무리" 등 **빈 filler**이다. ` +
+  const forbidden = GENERIC_DEFAULT_ACTION_PHRASES.map((p) => `"${p}"`).join(', ');
+  let msg =
+    `샷 ${nums} action이 ${forbidden} 등 **빈 filler**이다. ` +
     '각 샷마다 3a narrativeProse 해당 구간의 **구체적** 사건·표정·동작·발견(폰 확인·알림·반응·표정 등)을 action에 쓸 것. ' +
-    'filler action으로 대체하거나 유지하지 말 것.'
-  );
+    'filler action으로 대체하거나 유지하지 말 것.';
+  const prose = narrativeProse?.trim();
+  if (prose) {
+    msg += `\n\n3a narrativeProse (샷 action은 아래 서술을 구간별로 구체화):\n${prose}`;
+  }
+  return msg;
 }
 
 export function buildEmptyShotContentFeedback(shotNumber: number): string {

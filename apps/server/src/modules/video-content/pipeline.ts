@@ -924,9 +924,21 @@ export async function runContiGeneration(accountId: string): Promise<string> {
       err instanceof Error && err.stack
         ? err.stack.split('\n').slice(1, 4).join(' | ')
         : '';
+    const isContiValidation = err instanceof ContiValidationError;
+    const isExpectedVideoContentOutcome =
+      isContiValidation ||
+      msg === '유사도 기준 미통과' ||
+      msg === '프롬프트 길이 초과' ||
+      msg === '유머 dull 보류';
+    const outcomeLabel =
+      isContiValidation && err.holdOnFailure
+        ? '보류'
+        : isExpectedVideoContentOutcome
+          ? '종료'
+          : '생성 실패';
     await logOperation({
-      level: 'ERROR',
-      message: `[video-content] 콘티 생성 실패 — ${msg}${stackHint ? ` (${stackHint})` : ''}`,
+      level: isExpectedVideoContentOutcome ? 'warn' : 'ERROR',
+      message: `[video-content] 콘티 ${outcomeLabel} — ${msg}${stackHint ? ` (${stackHint})` : ''}`,
       workspace,
       account_id: accountId,
     });

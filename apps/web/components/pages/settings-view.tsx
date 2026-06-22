@@ -13,6 +13,7 @@ import {
   classifyWatcherLogType,
   formatWatcherLogMessage,
   isLayer4FailSafeLog,
+  isWatcherRealtimeErrorLog,
   layer4ActionLabel,
   resolveWatcherLogService,
   watcherLogTypeTagClass,
@@ -490,8 +491,9 @@ export function WatcherView() {
 
   };
 
-  const layer4Logs = logs.filter(isLayer4FailSafeLog);
-  const otherErrors = logs.length - layer4Logs.length;
+  const watcherErrorLogs = logs.filter(isWatcherRealtimeErrorLog);
+  const layer4Logs = watcherErrorLogs.filter(isLayer4FailSafeLog);
+  const otherErrors = watcherErrorLogs.length - layer4Logs.length;
 
   const rows = layer4Logs.slice(0, 8).map((l) => {
     const type = classifyWatcherLogType(l);
@@ -660,12 +662,12 @@ export function WatcherView() {
         <MPanel title="실시간 로그 (전체 ERROR)">
 
           <p className="mb-2 text-[11px] text-huma-t3">
-            Layer4 CAPTCHA/429만 Fail-Safe 대상입니다. 동글·워밍업·타임아웃은 별도 장애입니다.
+            Layer4 CAPTCHA/429만 Fail-Safe 대상입니다. 숏폼 영상 콘티·보류 로그는 제외됩니다.
           </p>
 
           <div className="m-log-t tall">
 
-            {logs.map((l, i) => {
+            {watcherErrorLogs.map((l, i) => {
               const type = classifyWatcherLogType(l);
               const service = resolveWatcherLogService(l);
               return (

@@ -55,4 +55,9 @@ describe('findRawShotQualityIssues generic_action', () => {
     expect(msg).toContain('샷 1, 2, 5');
     expect(msg).toContain('filler');
   });
+
+  it('includes narrative prose in batch feedback', () => {
+    const msg = buildGenericActionBatchFeedback([2, 3], 'A가 폰을 본다.');
+    expect(msg).toContain('A가 폰을 본다.');
+  });
 });

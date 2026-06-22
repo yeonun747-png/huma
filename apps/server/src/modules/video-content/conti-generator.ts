@@ -45,6 +45,7 @@ import {
   MAX_ADJACENT_DUPLICATE_PATCH_ATTEMPTS,
   MAX_SHOT_QUALITY_PATCH_ATTEMPTS,
   MAX_GENERIC_ACTION_FULL_REGEN,
+  MAX_GENERIC_ACTION_PATCH_ATTEMPTS,
   PUNCHLINE_MIN_DURATION_SEC,
   SHOT_CONTENT_MIN_CHARS,
   isGenericDefaultAction,
@@ -373,6 +374,9 @@ function buildShotPatchPrompt(
   const reasonBlock = reason ? `\n보완 사유: ${reason}\n` : ctx.feedback ? `\n${ctx.feedback}\n` : '';
   const yeonunFortuneBlock =
     ctx.workspace === 'yeonun' ? `\n${buildYeonunFortuneDialogueRule()}\n` : '';
+  const storyDraftBlock = ctx.storyDraft
+    ? `\n${buildFormatConversionIntro(ctx.storyDraft)}\n`
+    : '';
 
   const patchEntries = shotNumbers
     .map(
@@ -382,7 +386,7 @@ function buildShotPatchPrompt(
     .join(', ');
 
   return `다음 영상 설정과 기존 콘티에서 지정 샷만 보완하라.
-
+${storyDraftBlock}
 설정:
 ${JSON.stringify(foundation, null, 2)}
 ${reasonBlock}
@@ -602,7 +606,9 @@ async function recoverShotQualityIssues(
   let current = conti;
   let emptyFullRetries = 0;
   let narrowPatchAttempts = 0;
+  let genericPatchAttempts = 0;
   let fullGenericRegenAttempts = 0;
+  let storyDraftGenericAttempts = 0;
   const maxNarrow =
     MAX_SHOT_QUALITY_PATCH_ATTEMPTS + MAX_ADJACENT_DUPLICATE_PATCH_ATTEMPTS + 1;
 
@@ -631,10 +637,14 @@ async function recoverShotQualityIssues(
     const genericIssues = nonEmptyQuality.filter((issue) => issue.kind === 'generic_action');
     if (genericIssues.length > 0) {
       const genericIndices = genericIssues.map((issue) => issue.index);
-      const genericFeedback = buildGenericActionBatchFeedback(genericIndices.map((i) => i + 1));
+      const narrativeProse = ctx.storyDraft?.narrativeProse;
+      const genericFeedback = buildGenericActionBatchFeedback(
+        genericIndices.map((i) => i + 1),
+        narrativeProse,
+      );
 
-      if (narrowPatchAttempts < maxNarrow) {
-        narrowPatchAttempts += 1;
+      if (genericPatchAttempts < MAX_GENERIC_ACTION_PATCH_ATTEMPTS) {
+        genericPatchAttempts += 1;
         await reportStage(ctx, `filler action 보완 — 샷 ${genericIndices.map((i) => i + 1).join(', ')}`);
         current = await patchShotIssues(ctx, foundation, current, genericIndices, genericFeedback, model);
         continue;
@@ -642,12 +652,21 @@ async function recoverShotQualityIssues(
 
       if (fullGenericRegenAttempts < MAX_GENERIC_ACTION_FULL_REGEN) {
         fullGenericRegenAttempts += 1;
-        narrowPatchAttempts = 0;
+        genericPatchAttempts = 0;
         await reportStage(
           ctx,
           `3b 전체 재생성 — filler action (${fullGenericRegenAttempts}/${MAX_GENERIC_ACTION_FULL_REGEN})`,
         );
         current = await regenerateShotsOnly({ ...ctx, feedback: genericFeedback }, foundation, model, genericFeedback);
+        continue;
+      }
+
+      if (ctx.storyDraft && storyDraftGenericAttempts < 1) {
+        storyDraftGenericAttempts += 1;
+        genericPatchAttempts = 0;
+        await reportStage(ctx, 'filler action 최종 보완 — 3a narrative 기준 일괄 패치');
+        const finalFeedback = `${genericFeedback}\n각 샷 action은 narrativeProse 해당 구간을 **한 문장 이상** 구체 동작·표정으로 작성. filler 문구 재사용 금지.`;
+        current = await patchShotIssues(ctx, foundation, current, genericIndices, finalFeedback, model);
         continue;
       }
 
