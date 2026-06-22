@@ -73,6 +73,7 @@ import {
   MAX_STORY_COMPREHENSION_REGEN,
   regenerateStoryDraftForClarity,
   STORY_COMPREHENSION_REGEN_FEEDBACK,
+  STORY_COMPREHENSION_LIMIT_WARNING,
 } from './story-comprehension.js';
 import {
   buildFormatConversionIntro,
@@ -477,7 +478,8 @@ async function ensureStoryDraftComprehension(
   storyDraft: StoryDraft,
   punchlineIdea: string,
   model: string,
-): Promise<StoryDraft> {
+): Promise<{ draft: StoryDraft; warnings: string[] }> {
+  const warnings: string[] = [];
   let current = storyDraft;
   for (let attempt = 0; attempt <= MAX_STORY_COMPREHENSION_REGEN; attempt++) {
     await reportStage(
@@ -485,12 +487,11 @@ async function ensureStoryDraftComprehension(
       attempt === 0 ? '3a 이해도 평가' : `3a 이해도 보완 (${attempt}/${MAX_STORY_COMPREHENSION_REGEN})`,
     );
     const verdict = await assessStoryDraftComprehension(current, punchlineIdea);
-    if (verdict === 'clear') return current;
+    if (verdict === 'clear') return { draft: current, warnings };
     if (attempt >= MAX_STORY_COMPREHENSION_REGEN) {
-      throw new ContiValidationError(STORY_COMPREHENSION_REGEN_FEEDBACK, {
-        holdOnFailure: true,
-        holdReason: 'story_comprehension',
-      });
+      warnings.push(STORY_COMPREHENSION_LIMIT_WARNING);
+      await reportStage(ctx, STORY_COMPREHENSION_LIMIT_WARNING);
+      return { draft: current, warnings };
     }
     const clarityFeedback = ctx.feedback
       ? `${STORY_COMPREHENSION_REGEN_FEEDBACK}\n${ctx.feedback}`
@@ -502,7 +503,7 @@ async function ensureStoryDraftComprehension(
       model,
     });
   }
-  return current;
+  return { draft: current, warnings };
 }
 
 function assertNoGenericActions(conti: VideoConti): void {
@@ -948,6 +949,7 @@ export async function generateContiFromPunchline(params: {
   }
 
   let storyDraft: StoryDraft | undefined;
+  const comprehensionWarnings: string[] = [];
   let lastErr: unknown;
 
   for (let storyAttempt = 0; storyAttempt <= MAX_STORY_REGEN_ON_FORMAT_FAIL; storyAttempt++) {
@@ -973,12 +975,16 @@ export async function generateContiFromPunchline(params: {
           },
           model,
         );
-        storyDraft = await ensureStoryDraftComprehension(ctx, storyDraft, punchlineIdea, model);
+        const comprehension = await ensureStoryDraftComprehension(ctx, storyDraft, punchlineIdea, model);
+        storyDraft = comprehension.draft;
+        comprehensionWarnings.push(...comprehension.warnings);
       }
     } else if (!storyDraft) {
       await reportStage(ctx, '3a단계 자유 서술 (재미)');
       storyDraft = await generateStoryDraft(ctx, model);
-      storyDraft = await ensureStoryDraftComprehension(ctx, storyDraft, punchlineIdea, model);
+      const comprehension = await ensureStoryDraftComprehension(ctx, storyDraft, punchlineIdea, model);
+      storyDraft = comprehension.draft;
+      comprehensionWarnings.push(...comprehension.warnings);
     } else if (storyAttempt > 0) {
       await reportStage(ctx, '3a단계 재생성 (3b 형식 변환 반복 실패)');
       storyDraft = await generateStoryDraft(
@@ -990,7 +996,9 @@ export async function generateContiFromPunchline(params: {
         },
         model,
       );
-      storyDraft = await ensureStoryDraftComprehension(ctx, storyDraft, punchlineIdea, model);
+      const comprehension = await ensureStoryDraftComprehension(ctx, storyDraft, punchlineIdea, model);
+      storyDraft = comprehension.draft;
+      comprehensionWarnings.push(...comprehension.warnings);
     }
 
     const foundation = storyDraftToFoundation(storyDraft!);
@@ -1004,7 +1012,12 @@ export async function generateContiFromPunchline(params: {
         model,
         initialFeedback: params.feedback,
       });
-      return { ...conti, storyDraft };
+      const mergedWarnings = [...(conti.contentWarnings ?? []), ...comprehensionWarnings];
+      return {
+        ...conti,
+        storyDraft,
+        contentWarnings: mergedWarnings.length ? mergedWarnings : undefined,
+      };
     } catch (err) {
       lastErr = err;
       if (

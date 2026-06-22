@@ -122,7 +122,8 @@ export async function callClaudeJsonWithRetry<T extends Record<string, unknown>>
       return { parsed: parseLlmJsonBlock(raw) as T, raw };
     } catch (err) {
       lastErr = err instanceof Error ? err : new Error(String(err));
-      if (attempt < maxAttempts - 1 && isJsonParseError(err)) continue;
+      const emptyResponse = lastErr.message === 'LLM 응답 없음';
+      if (attempt < maxAttempts - 1 && (isJsonParseError(err) || emptyResponse)) continue;
       throw lastErr;
     }
   }

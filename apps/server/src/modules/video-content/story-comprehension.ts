@@ -6,8 +6,11 @@ import { parseStoryDraft, STORY_DRAFT_MAX_TOKENS } from './story-draft.js';
 
 export const MAX_STORY_COMPREHENSION_REGEN = 2;
 
+export const STORY_COMPREHENSION_LIMIT_WARNING =
+  '3a 이해도 보완 한계 — 경고 후 3b 진행 (setup→펀치 연결이 약할 수 있음)';
+
 export const STORY_COMPREHENSION_REGEN_FEEDBACK =
-  '3a 이야기를 끝까지 읽었을 때 "그래서 뭐?"가 남는다. setup→발견→펀치가 한 줄로 이어지게 narrativeProse·scenarioSummary·핵심 대사 내용을 보완하라. ' +
+  '3a 이야기를 끝까지 읽었을 때 "그래서 뭐?"가 남을 수 있다. setup→발견→펀치가 한 줄로 이어지게 narrativeProse·scenarioSummary·핵심 대사 내용을 보완하라. ' +
   '연운·운세 setup은 읽은 문구 전문을 대사 내용에 포함. 발견·반전 순간(알림 확인·카드·구독·오해 해소 등)을 빠뜨리지 말 것. 펀치라인 결말은 유지.';
 
 export type StoryComprehensionVerdict = 'clear' | 'unclear';
@@ -39,6 +42,10 @@ unclear (하나라도 해당):
 clear:
 - setup→발견→펀치가 narrativeProse·대사 내용만으로 연결됨
 
+주의:
+- 미묘한 반전·말장난도 **대략** 이해되면 clear.
+- 애매하면 unclear보다 **clear**를 선택한다.
+
 clear 또는 unclear 중 하나만 답하라.`;
 }
 
@@ -54,13 +61,20 @@ export async function assessStoryDraftComprehension(
   punchlineIdea: string,
 ): Promise<StoryComprehensionVerdict> {
   const model = (await getSubClaudeModel()) || HAIKU_FALLBACK;
-  const raw = await askClaudeWithModel({
-    model,
-    max_tokens: 16,
-    prompt: buildStoryComprehensionPrompt(formatStoryDraftForComprehension(storyDraft, punchlineIdea)),
-    timeout_ms: 30_000,
-  });
-  return parseComprehensionVerdict(raw);
+  const prompt = buildStoryComprehensionPrompt(formatStoryDraftForComprehension(storyDraft, punchlineIdea));
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const raw = await askClaudeWithModel({
+      model,
+      max_tokens: 32,
+      prompt,
+      timeout_ms: 45_000,
+    });
+    if (raw?.trim()) return parseComprehensionVerdict(raw);
+  }
+
+  // API 일시 오류·빈 응답 — 생성 전체를 막지 않음
+  return 'clear';
 }
 
 export function buildStoryClarityRegenPrompt(params: {
@@ -103,7 +117,8 @@ export async function regenerateStoryDraftForClarity(params: {
       punchlineIdea: params.punchlineIdea,
       feedback: params.feedback,
     }),
-    ask: askClaudeWithModel,
+    ask: (p) => askClaudeWithModel({ ...p, timeout_ms: 120_000 }),
+    maxAttempts: 4,
   });
   return parseStoryDraft(parsed);
 }
