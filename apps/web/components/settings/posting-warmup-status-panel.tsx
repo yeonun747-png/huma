@@ -2,8 +2,6 @@
 
 import { cn } from '@/lib/constants';
 
-export type PostingWarmupStageId = 'initial' | 'adapt' | 'expand' | 'late' | 'complete' | 'missing';
-
 export type PostingWarmupStatusRow = {
   slot_label: string;
   warmup_day: number;
@@ -21,39 +19,6 @@ const POSTING_WARMUP_STAGES = [
   { id: 'late' as const, label: '후반', dayRange: '10~14일', cap: '4건' },
   { id: 'complete' as const, label: '완료', dayRange: '15일+', cap: '4~5건' },
 ];
-
-function resolveStageIndex(stage: string): number {
-  const idx = POSTING_WARMUP_STAGES.findIndex((s) => s.id === stage);
-  return idx >= 0 ? idx : -1;
-}
-
-function WarmupStageTrack({ stage, missing }: { stage: string; missing: boolean }) {
-  const currentIdx = missing ? -1 : resolveStageIndex(stage);
-
-  return (
-    <div className="flex items-center gap-1" aria-hidden>
-      {POSTING_WARMUP_STAGES.map((s, i) => {
-        const isCurrent = !missing && i === currentIdx;
-        const isPast = !missing && currentIdx >= 0 && i < currentIdx;
-        return (
-          <div
-            key={s.id}
-            title={`${s.label} (${s.dayRange} · ${s.cap})`}
-            className={cn(
-              'h-2.5 w-2.5 shrink-0 rounded-full border transition-transform',
-              missing && 'border-huma-bdr bg-huma-bg3 opacity-40',
-              !missing && isPast && 'border-huma-ok/60 bg-huma-ok/35',
-              !missing &&
-                isCurrent &&
-                'scale-110 border-huma-acc bg-huma-acc shadow-[0_0_0_2px_rgba(236,72,153,0.25)]',
-              !missing && !isPast && !isCurrent && 'border-huma-bdr bg-transparent opacity-35',
-            )}
-          />
-        );
-      })}
-    </div>
-  );
-}
 
 function WarmupStageTable() {
   return (
@@ -83,13 +48,16 @@ function WarmupStageTable() {
 export function PostingWarmupStatusPanel({
   rows,
   loading,
+  standalone = false,
 }: {
   rows: PostingWarmupStatusRow[];
   loading: boolean;
+  /** MPanel 제목과 함께 쓸 때 상단 구분선·중복 제목 생략 */
+  standalone?: boolean;
 }) {
   if (loading && !rows.length) {
     return (
-      <div className="mt-3 border-t border-huma-bdr pt-3 font-mono text-[11px] text-huma-t3">
+      <div className={cn('font-mono text-[11px] text-huma-t3', !standalone && 'mt-3 border-t border-huma-bdr pt-3')}>
         포스팅 워밍업 현황 불러오는 중…
       </div>
     );
@@ -98,18 +66,16 @@ export function PostingWarmupStatusPanel({
   if (!rows.length) return null;
 
   return (
-    <div className="mt-3 border-t border-huma-bdr pt-3">
-      <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.16em] text-huma-t3">
-        포스팅 워밍업 단계
-      </div>
+    <div className={cn(!standalone && 'mt-3 border-t border-huma-bdr pt-3')}>
+      {!standalone ? (
+        <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.16em] text-huma-t3">
+          포스팅 워밍업 단계
+        </div>
+      ) : null}
 
       <WarmupStageTable />
 
-      <div className="mt-2 mb-1.5 font-mono text-[10px] text-huma-t3">
-        ● 현재 단계 · ○ 미도달 · 녹색 = 지나간 단계
-      </div>
-
-      <div className="mt-2 flex flex-col gap-2">
+      <div className="mt-2 flex flex-col gap-1.5">
         {rows.map((row) => {
           const stageMeta = POSTING_WARMUP_STAGES.find((s) => s.id === row.stage);
           const stageLabel = row.missing ? '—' : (stageMeta?.label ?? row.stage);
@@ -118,7 +84,7 @@ export function PostingWarmupStatusPanel({
             <div
               key={row.slot_label}
               className={cn(
-                'rounded-md border px-2 py-1.5',
+                'flex items-center justify-between gap-2 rounded-md border px-2 py-1.5',
                 row.missing
                   ? 'border-huma-bdr/80 bg-huma-bg2/40'
                   : row.is_complete
@@ -126,45 +92,50 @@ export function PostingWarmupStatusPanel({
                     : 'border-huma-acc/25 bg-huma-acc/5',
               )}
             >
-              <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
-                <span
-                  className={cn(
-                    'font-mono text-[11px] font-bold',
-                    row.missing ? 'text-huma-t3' : 'text-huma-t1',
-                  )}
-                >
+              <span className="min-w-0 truncate font-mono text-[10.5px]">
+                <span className={cn('font-bold', row.missing ? 'text-huma-t3' : 'text-huma-t1')}>
                   {row.slot_label}
                 </span>
-                <WarmupStageTrack stage={row.stage} missing={row.missing} />
-              </div>
-              <div
-                className={cn(
-                  'mt-1 font-mono text-[10.5px]',
-                  row.missing ? 'text-huma-t3' : row.is_complete ? 'text-huma-ok' : 'text-huma-acc',
-                )}
-              >
                 {row.missing ? (
-                  '계정 없음'
+                  <span className="text-huma-t3"> · 계정 없음</span>
                 ) : (
                   <>
-                    <span className="font-bold">{stageLabel}</span>
-                    <span className="text-huma-t3"> · </span>
-                    <span>{row.warmup_day}일차</span>
+                    <span className="text-huma-t4"> · </span>
+                    <span className="text-huma-t2">
+                      <span className="font-bold tabular-nums text-huma-acc">{row.warmup_day}</span>
+                      일차
+                    </span>
                     {stageMeta ? (
                       <>
-                        <span className="text-huma-t3"> · </span>
-                        <span className="text-huma-t2">평일 {stageMeta.cap}</span>
+                        <span className="text-huma-t4"> · </span>
+                        <span className="text-huma-t3">평일 </span>
+                        <span className="font-bold tabular-nums text-huma-warn">
+                          {stageMeta.cap.replace(/건$/, '')}
+                        </span>
+                        <span className="text-huma-t3">건</span>
                       </>
                     ) : null}
                     {row.today_target != null ? (
                       <>
-                        <span className="text-huma-t3"> · </span>
-                        <span className="text-huma-t1">오늘 {row.today_target}건</span>
+                        <span className="text-huma-t4"> · </span>
+                        <span className="text-huma-t3">오늘 </span>
+                        <span className="font-bold tabular-nums text-huma-ok">{row.today_target}</span>
+                        <span className="text-huma-t3">건</span>
                       </>
                     ) : null}
                   </>
                 )}
-              </div>
+              </span>
+              <span
+                className={cn(
+                  'shrink-0 font-mono text-[11px] font-bold tracking-tight',
+                  row.missing && 'text-huma-t3',
+                  !row.missing && row.is_complete && 'text-huma-ok',
+                  !row.missing && !row.is_complete && 'text-huma-acc',
+                )}
+              >
+                {stageLabel}
+              </span>
             </div>
           );
         })}

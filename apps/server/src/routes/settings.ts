@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { authMiddleware, supabase } from '../middleware/auth.js';
+import { authMiddleware, getWorkspaceFilter, supabase } from '../middleware/auth.js';
 import { updateSetting } from '../lib/settings.js';
 import { setActivityControl, type ActivityControlState } from '../lib/activity-control.js';
 import { fetchPostingWarmupStatus } from '../lib/posting-warmup-status.js';
@@ -39,10 +39,14 @@ export async function registerSettingsRoutes(app: FastifyInstance) {
     return data ?? [];
   });
 
-  app.get('/api/posting/warmup-status', { preHandler: authMiddleware }, async (_request, reply) => {
+  app.get('/api/posting/warmup-status', { preHandler: authMiddleware }, async (request, reply) => {
     try {
-      const accounts = await fetchPostingWarmupStatus();
-      return { accounts };
+      const allowedWorkspaces = getWorkspaceFilter(request);
+      const accounts = await fetchPostingWarmupStatus(allowedWorkspaces);
+      return {
+        accounts,
+        is_super: Boolean(request.admin?.isSuper),
+      };
     } catch (err) {
       return reply.code(500).send({ error: (err as Error).message ?? '워밍업 현황 조회 실패' });
     }

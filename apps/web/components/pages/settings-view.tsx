@@ -132,6 +132,14 @@ function normalizePostingWarmup(raw: unknown): PostingWarmupSettings {
   };
 }
 
+function SettingsSectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <p className="mb-1 mt-4 border-t border-huma-bdr/60 pt-3 font-mono text-[10px] uppercase tracking-[0.16em] text-huma-t3 first:mt-0 first:border-0 first:pt-0">
+      {children}
+    </p>
+  );
+}
+
 function SettingsPercentRow({
   label,
   sub,
@@ -222,25 +230,7 @@ export function SettingsView() {
       api.getSetting('activity_control').catch(() => ({ crank_enabled: true, posting_enabled: true })),
       api.getPostingWarmupStatus().catch(() => ({ accounts: [] as PostingWarmupStatusRow[] })),
     ]).then(([a, act, warmupRes]) => {
-
       const appSettings = a as Record<string, unknown>;
-
-      const legacyMedia = Boolean(appSettings.higgsfield_api ?? appSettings.elevenlabs_tts ?? appSettings.clova_tts ?? true);
-
-      if (appSettings.claude_haiku_api === undefined) appSettings.claude_haiku_api = appSettings.claude_api ?? true;
-
-      if (appSettings.google_imagen_api === undefined) appSettings.google_imagen_api = legacyMedia;
-
-      if (appSettings.higgsfield_api === undefined) appSettings.higgsfield_api = legacyMedia;
-
-      if (appSettings.claude_api === undefined) appSettings.claude_api = true;
-
-      delete appSettings.gemini_api;
-
-      delete appSettings.elevenlabs_tts;
-
-      delete appSettings.clova_tts;
-
       setApp(appSettings);
       setPostingWarmup(normalizePostingWarmup(appSettings.posting_warmup));
 
@@ -302,7 +292,8 @@ export function SettingsView() {
 
       <MGrid cols={2}>
 
-        <MPanel title="활동">
+        <MPanel>
+          <SettingsSectionLabel>활동</SettingsSectionLabel>
           <SettingsToggle
             label="C-Rank 활동"
             sub="OFF — 스케줄·수동 C-Rank 큐 생성·실행 중지 (전체 재개와 별도)"
@@ -315,81 +306,21 @@ export function SettingsView() {
             value={activity.posting_enabled}
             onChange={(v) => patchActivity('posting_enabled', v)}
           />
-          <PostingWarmupStatusPanel rows={postingWarmupStatus} loading={postingWarmupStatusLoading} />
-        </MPanel>
 
-        <MPanel title="API 연결">
-
+          <SettingsSectionLabel>발행 제한</SettingsSectionLabel>
           <SettingsToggle
-
-            label="Claude API (Sonnet 4.6)"
-
-            sub="콘텐츠·댓글·시나리오 생성 (메인)"
-
-            value={Boolean(app.claude_api ?? true)}
-
-            onChange={(v) => patchApp('claude_api', v)}
-
+            label="일일 발행 한도 (네이버 10건)"
+            value={Boolean(app.daily_limit ?? true)}
+            onChange={(v) => patchApp('daily_limit', v)}
+          />
+          <SettingsToggle
+            label="야간 발행 금지 (01~07시)"
+            value={Boolean(app.night_ban ?? true)}
+            onChange={(v) => patchApp('night_ban', v)}
           />
 
-          <SettingsToggle
-
-            label="Claude Haiku 4.5"
-
-            sub="이미지 모델 자동 판단·해시태그·autoDecide"
-
-            value={Boolean(app.claude_haiku_api ?? true)}
-
-            onChange={(v) => patchApp('claude_haiku_api', v)}
-
-          />
-
-          <SettingsToggle
-
-            label="Google Imagen 4 API"
-
-            badge="Gemini 키 공유"
-
-            badgeTone="google"
-
-            sub="이미지 생성 · Fast $0.02 / Standard $0.04"
-
-            value={Boolean(app.google_imagen_api ?? true)}
-
-            onChange={(v) => patchApp('google_imagen_api', v)}
-
-          />
-
-          <SettingsToggle
-
-            label="Higgsfield Cloud API"
-
-            badge="영상 전용"
-
-            sub="영상 생성 · Kling 3.0 $1.05 / Seedance 2.0 Std $3.75 · 15초 · 내장 오디오"
-
-            value={Boolean(app.higgsfield_api ?? true)}
-
-            onChange={(v) => patchApp('higgsfield_api', v)}
-
-          />
-
-          <SettingsToggle
-
-            label="Slack Webhook"
-
-            sub="#huma-alerts · Fail-Safe 알림"
-
-            value={Boolean(app.slack_webhook ?? true)}
-
-            onChange={(v) => patchApp('slack_webhook', v)}
-
-          />
-
-        </MPanel>
-
-        <MPanel title="포스팅 워밍업">
-          <p className="mb-3 text-[11px] leading-relaxed text-huma-t3">
+          <SettingsSectionLabel>로그인 워밍업</SettingsSectionLabel>
+          <p className="mb-2 text-[11px] leading-relaxed text-huma-t3">
             post_blog 로그인 전 네이버 검색·체류 횟수 확률. 세 값 합계는 100% 권장.
           </p>
           <SettingsPercentRow
@@ -420,28 +351,12 @@ export function SettingsView() {
           </div>
         </MPanel>
 
-        <MPanel title="발행 제한">
-
-          <SettingsToggle
-
-            label="일일 발행 한도 (네이버 10건)"
-
-            value={Boolean(app.daily_limit ?? true)}
-
-            onChange={(v) => patchApp('daily_limit', v)}
-
+        <MPanel title="포스팅 워밍업 단계">
+          <PostingWarmupStatusPanel
+            rows={postingWarmupStatus}
+            loading={postingWarmupStatusLoading}
+            standalone
           />
-
-          <SettingsToggle
-
-            label="야간 발행 금지 (01~07시)"
-
-            value={Boolean(app.night_ban ?? true)}
-
-            onChange={(v) => patchApp('night_ban', v)}
-
-          />
-
         </MPanel>
 
       </MGrid>

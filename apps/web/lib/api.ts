@@ -645,6 +645,7 @@ export const api = {
         is_complete: boolean;
         missing: boolean;
       }>;
+      is_super?: boolean;
     }>('/api/posting/warmup-status'),
   platformAccounts: () => request<Array<Record<string, unknown>>>('/api/platform-accounts'),
   createPlatformAccount: (body: Record<string, unknown>) =>

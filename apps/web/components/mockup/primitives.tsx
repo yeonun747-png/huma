@@ -8,13 +8,26 @@ export function MGrid({ cols = 2, className, children }: { cols?: 1 | 2 | 3 | 4;
   return <div className={cn(cls, className)}>{children}</div>;
 }
 
-export function MPanel({ title, action, children, className }: { title: ReactNode; action?: ReactNode; className?: string; children: ReactNode }) {
+export function MPanel({
+  title,
+  action,
+  children,
+  className,
+}: {
+  title?: ReactNode;
+  action?: ReactNode;
+  className?: string;
+  children: ReactNode;
+}) {
+  const showHeader = Boolean(title) || Boolean(action);
   return (
     <div className={cn('m-panel', className)}>
-      <div className="m-panel-t">
-        {title}
-        {action}
-      </div>
+      {showHeader ? (
+        <div className="m-panel-t">
+          {title}
+          {action}
+        </div>
+      ) : null}
       {children}
     </div>
   );

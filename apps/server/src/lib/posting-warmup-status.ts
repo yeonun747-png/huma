@@ -18,11 +18,15 @@ export interface PostingWarmupStatusRow {
   missing: boolean;
 }
 
-/** 연운1~3 · 퀴즈 · 파나나 포스팅 계정 워밍업 현황 */
-export async function fetchPostingWarmupStatus(): Promise<PostingWarmupStatusRow[]> {
+/** 연운1~3 · 퀴즈 · 파나나 포스팅 계정 워밍업 현황 — allowedWorkspaces에 해당하는 슬롯만 */
+export async function fetchPostingWarmupStatus(
+  allowedWorkspaces: string[],
+): Promise<PostingWarmupStatusRow[]> {
+  const allowed = new Set(allowedWorkspaces);
+  const slots = POSTING_DONGLE_SLOTS.filter((s) => allowed.has(s.workspace));
   const rows: PostingWarmupStatusRow[] = [];
 
-  for (const slot of POSTING_DONGLE_SLOTS) {
+  for (const slot of slots) {
     const { data: acc } = await supabase
       .from('huma_accounts')
       .select('id, warmup_day, slot_label, name')
