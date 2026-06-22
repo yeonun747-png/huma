@@ -88,4 +88,5 @@ export function parseEmbeddingVector(raw: unknown): number[] | null {
 }
 
 export const SIMILARITY_THRESHOLD = 0.85;
-export const MAX_REGENERATION_ATTEMPTS = 3;
+/** P0 — 유사도 재생성 없음 (1회 생성 후 경고만) */
+export const MAX_REGENERATION_ATTEMPTS = 1;

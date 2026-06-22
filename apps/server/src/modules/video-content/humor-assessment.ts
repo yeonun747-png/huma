@@ -4,7 +4,8 @@ import { hasDialogueDuplicate } from './dialogue-duplicate.js';
 import type { VideoConti } from './types.js';
 import { asContiShots } from './types.js';
 
-export const MAX_HUMOR_REGENERATION_ATTEMPTS = 2;
+/** P0 — dull이어도 conti_ready (재생성 없음) */
+export const MAX_HUMOR_REGENERATION_ATTEMPTS = 0;
 
 export const HUMOR_REGENERATION_FEEDBACK =
   '이 콘티는 보고 나서 웃기거나 놀랍거나 흥미롭다는 느낌이 부족하거나, 끝까지 봐도 "그래서 뭐?"가 남는다고 평가됐다. ' +

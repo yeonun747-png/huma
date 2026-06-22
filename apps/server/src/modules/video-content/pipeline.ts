@@ -30,6 +30,7 @@ import {
 } from './embedding.js';
 import { buildPreGenerationPlan, type PreGenerationPlan } from './pre-generation-plan.js';
 import { runPunchlineContiPipeline, runPunchlineContiStage3Only } from './punchline-pipeline.js';
+import type { ContiGenerationResult } from './conti-generator.js';
 import {
   pickSubtitleStyle,
   saveSubtitleStyleHistory,
@@ -39,10 +40,13 @@ import { videoContentFinalPath, videoContentSourcePath } from './paths.js';
 import { generateVideoContentThumbnails } from './thumbnail.js';
 import {
   assessContiHumor,
-  HUMOR_REGENERATION_FEEDBACK,
-  MAX_HUMOR_REGENERATION_ATTEMPTS,
   type SelfAssessedHumor,
 } from './humor-assessment.js';
+import {
+  CONTI_GENERATION_BUDGET_MS,
+  ContiGenerationBudgetExceeded,
+  createContiGenerationBudget,
+} from './conti-budget.js';
 
 function contiGenerationSecSince(startedAtIso: string): number {
   const t = new Date(startedAtIso).getTime();
@@ -52,7 +56,7 @@ function contiGenerationSecSince(startedAtIso: string): number {
 import type { GenerationConditions, VideoConti } from './types.js';
 
 const WEB_BASE = process.env.HUMA_WEB_URL?.trim() || 'http://localhost:3000';
-const STALE_VIDEO_CONTENT_MS = 15 * 60 * 1000;
+const STALE_VIDEO_CONTENT_MS = CONTI_GENERATION_BUDGET_MS + 60_000;
 
 /** EvoLink taskId는 있는데 status가 conti_ready로 되돌아간 row — 진행 중으로 복구 */
 export async function syncActiveVideoRenderStatuses(workspaces: string[]): Promise<number> {
@@ -103,7 +107,7 @@ export async function failStaleVideoContentJobs(accountId: string): Promise<numb
     .from('huma_video_content_history')
     .update({
       status: 'failed',
-      error_message: '콘티/영상 생성 시간 초과(15분) — worker 지연 또는 API 응답 없음',
+      error_message: '콘티/영상 생성 시간 초과 — worker 지연 또는 API 응답 없음',
     })
     .eq('account_id', accountId)
     .in('status', ['conti_generating', 'rendering', 'generating'])
@@ -492,6 +496,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
   const historyId = historyRow.id as string;
   const contiStartedAt = String(historyRow.created_at);
   const contiGenSec = () => contiGenerationSecSince(contiStartedAt);
+  const budget = createContiGenerationBudget(new Date(contiStartedAt).getTime());
 
   const logStage = async (stage: string) => {
     await logOperation({
@@ -499,6 +504,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
       message: `[video-content] ${stage}`,
       workspace,
       account_id: accountId,
+      metadata: { video_content_history_id: historyId, progress_stage: stage },
     });
   };
 
@@ -518,7 +524,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
     });
 
     const pastSummaries = await loadPastSummaries(accountId);
-    let conti!: VideoConti & { locationKeyword: string; timeOfDay: string };
+    let conti!: ContiGenerationResult;
     let punchlineIdea = '';
     let mustIncludeProps: string[] = [];
     let embedding: number[] = [];
@@ -526,6 +532,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
     let feedback: string | undefined;
 
     for (let attempt = 1; attempt <= MAX_REGENERATION_ATTEMPTS; attempt++) {
+      budget.assert();
       await logOperation({
         level: 'info',
         message: `[video-content] 콘티 LLM 시도 ${attempt}/${MAX_REGENERATION_ATTEMPTS} — cut=${baseConditions.cutType} ${baseConditions.duration}초`,
@@ -642,27 +649,21 @@ export async function runContiGeneration(accountId: string): Promise<string> {
 
       if (similarityScore < SIMILARITY_THRESHOLD) break;
 
-      feedback = `직전 시나리오와 코사인 유사도 ${similarityScore.toFixed(3)}으로 겹침. 펀치라인 "${punchlineIdea}"는 유지하고, 3a·3b를 다시 실행해 인물·장소·전개·대사를 완전히 다르게 작성하라.`;
-      if (attempt === MAX_REGENERATION_ATTEMPTS) {
-        await supabase
-          .from('huma_video_content_history')
-          .update({
-            status: 'failed',
-            similarity_score: similarityScore,
-            scenario_summary: conti.scenarioSummary,
-            punchline_idea: punchlineIdea,
-            error_message: '유사도 기준 미통과 (3회)',
-            conti_generation_sec: contiGenSec(),
-          })
-          .eq('id', historyId);
-
-        await notifyTelegram(
-          `⚠️ 영상 콘티 생성 실패 — 유사도 기준 미통과\n계정: ${accountName} (${accountId})`,
-          workspace,
-        );
-        throw new Error('유사도 기준 미통과');
-      }
+      await logOperation({
+        level: 'warn',
+        message:
+          `[video-content] 유사도 ${similarityScore.toFixed(3)} ≥ ${SIMILARITY_THRESHOLD} — 경고 후 검토 대기로 진행 history=${historyId}`,
+        workspace,
+        account_id: accountId,
+      });
+      await notifyTelegram(
+        `⚠️ 콘티 유사도 경고\n계정: ${accountName} (${accountId})\n유사도 ${similarityScore.toFixed(3)} — 시나리오 검토 권장`,
+        workspace,
+      );
+      break;
     }
+
+    budget.assert();
 
     let evoPrompt = '';
 
@@ -721,162 +722,34 @@ export async function runContiGeneration(accountId: string): Promise<string> {
       });
     }
 
-    let selfAssessedHumor: SelfAssessedHumor = 'dull';
-    let retryCountForHumor = 0;
+    budget.assert();
+    await logOperation({
+      level: 'info',
+      message: `[video-content] 유머 평가 — history=${historyId}`,
+      workspace,
+      account_id: accountId,
+    });
 
-    for (let humorEval = 0; humorEval <= MAX_HUMOR_REGENERATION_ATTEMPTS; humorEval++) {
+    const selfAssessedHumor = await assessContiHumor(conti!);
+    const retryCountForHumor = 0;
+
+    if (selfAssessedHumor === 'funny') {
       await logOperation({
         level: 'info',
-        message: `[video-content] 유머 평가 ${humorEval + 1}/${MAX_HUMOR_REGENERATION_ATTEMPTS + 1} — history=${historyId}`,
+        message: `[video-content] 유머 평가 funny — history=${historyId}`,
         workspace,
         account_id: accountId,
       });
-
-      selfAssessedHumor = await assessContiHumor(conti!);
-
-      if (selfAssessedHumor === 'funny') {
-        await logOperation({
-          level: 'info',
-          message: `[video-content] 유머 평가 funny — history=${historyId}`,
-          workspace,
-          account_id: accountId,
-        });
-        break;
-      }
-
-      if (humorEval >= MAX_HUMOR_REGENERATION_ATTEMPTS) {
-        if (selfAssessedHumor === 'dull') {
-          await logOperation({
-            level: 'warn',
-            message: `[video-content] 유머 dull (${MAX_HUMOR_REGENERATION_ATTEMPTS}회 재생성 후 보류) — history=${historyId}`,
-            workspace,
-            account_id: accountId,
-          });
-
-          const dullHoldPrompt = buildEvoLinkPrompt(conti!, baseConditions);
-          await supabase
-            .from('huma_video_content_history')
-            .update({
-              status: 'on_hold',
-              similarity_score: similarityScore,
-              scenario_summary: conti!.scenarioSummary,
-              location_keyword: conti!.locationKeyword,
-              time_of_day: conti!.timeOfDay,
-              conti_json: {
-                ...conti,
-                evolinkPrompt: dullHoldPrompt,
-                punchlineIdea,
-                mustIncludeProps,
-                storyDraft: conti!.storyDraft,
-              },
-              embedding_vector: embedding,
-              self_assessed_humor: selfAssessedHumor,
-              retry_count_for_humor: retryCountForHumor,
-              error_message: '유머 dull — 재생성 후에도 이해·펀치 전달 부족 (검토 또는 재생성 필요)',
-              conti_generation_sec: contiGenSec(),
-            })
-            .eq('id', historyId);
-
-          await notifyTelegram(
-            `⚠️ 영상 콘티 보류 — 유머 dull\n계정: ${accountName} (${accountId})\n${MAX_HUMOR_REGENERATION_ATTEMPTS}회 재생성 후에도 dull`,
-            workspace,
-          );
-          throw new Error('유머 dull 보류');
-        }
-
-        await logOperation({
-          level: 'warn',
-          message: `[video-content] 유머 평가 dull (${MAX_HUMOR_REGENERATION_ATTEMPTS}회 재생성 후 통과) — history=${historyId}`,
-          workspace,
-          account_id: accountId,
-        });
-        break;
-      }
-
-      retryCountForHumor += 1;
+    } else {
       await logOperation({
-        level: 'info',
-        message: `[video-content] 유머 dull → Sonnet 재생성 ${retryCountForHumor}/${MAX_HUMOR_REGENERATION_ATTEMPTS} — history=${historyId}`,
+        level: 'warn',
+        message: `[video-content] 유머 dull — conti_ready (재생성 없음) — history=${historyId}`,
         workspace,
         account_id: accountId,
       });
-
-      try {
-        const regenerated = await runPunchlineContiStage3Only({
-          workspace,
-          plan,
-          pastSummaries,
-          punchlineIdea,
-          mustIncludeProps,
-          existingConti: conti!,
-          regenMode: 'story_clarity',
-          feedback: HUMOR_REGENERATION_FEEDBACK,
-          onStage: logStage,
-        });
-
-        conti = regenerated.conti;
-        embedding = embedText(conti.fullText || conti.scenarioSummary || '');
-        const pastEmbAfterHumor = await loadPastEmbeddings(accountId, historyId);
-        const simAfterHumor = computeSimilarityScores(embedding, pastEmbAfterHumor);
-        similarityScore = simAfterHumor.max;
-        await logContiSimilarityDebug({
-          accountId,
-          historyId,
-          workspace,
-          pastEmbCount: pastEmbAfterHumor.length,
-          scores: simAfterHumor.scores,
-          maxScore: simAfterHumor.max,
-          textLen: (conti.fullText || conti.scenarioSummary || '').length,
-        });
-
-        if (similarityScore >= SIMILARITY_THRESHOLD) {
-          await logOperation({
-            level: 'warn',
-            message:
-              `[video-content] 유머 재생성 후 유사도 ${similarityScore.toFixed(4)} — 재평가 계속 (history=${historyId})`,
-            workspace,
-            account_id: accountId,
-          });
-        }
-      } catch (humorErr) {
-        if (humorErr instanceof ContiValidationError) {
-          await logOperation({
-            level: 'warn',
-            message: `[video-content] 유머 재생성 검증 실패 — 이전 콘티 dull 유지: ${humorErr.message.slice(0, 200)}`,
-            workspace,
-            account_id: accountId,
-          });
-          break;
-        }
-        throw humorErr;
-      }
     }
 
-    evoPrompt = buildEvoLinkPrompt(conti!, baseConditions);
-    if (!isEvoLinkPromptWithinLimit(evoPrompt)) {
-      await supabase
-        .from('huma_video_content_history')
-        .update({
-          status: 'on_hold',
-          similarity_score: similarityScore,
-          scenario_summary: conti!.scenarioSummary,
-          location_keyword: conti!.locationKeyword,
-          time_of_day: conti!.timeOfDay,
-          conti_json: { ...conti, evolinkPrompt: evoPrompt, evolinkPromptLength: evoPrompt.length },
-          embedding_vector: embedding,
-          self_assessed_humor: selfAssessedHumor,
-          retry_count_for_humor: retryCountForHumor,
-          error_message: `유머 재생성 후 프롬프트 길이 초과 (${evoPrompt.length}자 / 최대 ${EVOLINK_PROMPT_MAX_LENGTH}자)`,
-          conti_generation_sec: contiGenSec(),
-        })
-        .eq('id', historyId);
-
-      await notifyTelegram(
-        `영상 콘티 프롬프트 길이 초과(유머 재생성 후) — 계정: ${accountId}, ${evoPrompt.length}자`,
-        workspace,
-      );
-      throw new Error('프롬프트 길이 초과');
-    }
+    budget.assert();
 
     const storedCharacterNames = extractCharacterNamesForStorage(conti!, baseConditions.characterName);
 
@@ -942,9 +815,8 @@ export async function runContiGeneration(accountId: string): Promise<string> {
     const isContiValidation = err instanceof ContiValidationError;
     const isExpectedVideoContentOutcome =
       isContiValidation ||
-      msg === '유사도 기준 미통과' ||
       msg === '프롬프트 길이 초과' ||
-      msg === '유머 dull 보류';
+      err instanceof ContiGenerationBudgetExceeded;
     const outcomeLabel =
       isContiValidation && err.holdOnFailure
         ? '보류'
@@ -957,7 +829,15 @@ export async function runContiGeneration(accountId: string): Promise<string> {
       workspace,
       account_id: accountId,
     });
-    if (msg !== '유사도 기준 미통과' && msg !== '프롬프트 길이 초과' && msg !== '유머 dull 보류') {
+    if (
+      msg !== '프롬프트 길이 초과' &&
+      !(err instanceof ContiGenerationBudgetExceeded)
+    ) {
+      await supabase
+        .from('huma_video_content_history')
+        .update({ status: 'failed', error_message: msg.slice(0, 500), conti_generation_sec: contiGenSec() })
+        .eq('id', historyId);
+    } else if (err instanceof ContiGenerationBudgetExceeded) {
       await supabase
         .from('huma_video_content_history')
         .update({ status: 'failed', error_message: msg.slice(0, 500), conti_generation_sec: contiGenSec() })

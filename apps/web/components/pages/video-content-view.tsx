@@ -30,8 +30,12 @@ import {
   resolveContiGenerationAccountId,
   videoContentDisplayName,
 } from '@/lib/video-content-targets';
-import { ShortformVideoModelSettings } from '@/components/settings/shortform-video-model-settings';
+import {
+  parseVideoContentProgressStage,
+  resolveVideoContentProgressHistoryId,
+} from '@/lib/video-content-progress';
 import { ContiPreview } from '@/components/video/conti-preview';
+import { ShortformVideoModelSettings } from '@/components/settings/shortform-video-model-settings';
 import { VideoContentHumorBadge } from '@/components/video/video-content-humor-badge';
 import { VideoContentStoragePanel } from '@/components/video/video-content-storage-panel';
 import { MGrid, MPanel, MTag } from '@/components/mockup/primitives';
@@ -94,9 +98,24 @@ function useElapsedSec(sinceIso: string | null | undefined, active: boolean): nu
   return elapsed;
 }
 
-function ProgressWait({ status, createdAt }: { status: string; createdAt?: string }) {
+function ProgressWait({
+  status,
+  createdAt,
+  stageLabel,
+}: {
+  status: string;
+  createdAt?: string;
+  stageLabel?: string | null;
+}) {
   const isConti = status === 'conti_generating';
   const elapsedSec = useElapsedSec(createdAt, isConti);
+  const defaultStage =
+    status === 'conti_generating'
+      ? '콘티 파이프라인 준비 중…'
+      : status === 'rendering' || status === 'generating'
+        ? 'EvoLink 영상 제작 중…'
+        : null;
+  const currentStage = stageLabel?.trim() || defaultStage;
   return (
     <div className="py-12 text-center">
       <div className="mx-auto mb-4 h-1.5 max-w-[240px] overflow-hidden rounded-full bg-huma-bg3">
@@ -114,6 +133,9 @@ function ProgressWait({ status, createdAt }: { status: string; createdAt?: strin
         <p className="mt-3 font-mono text-[12px] font-semibold text-huma-acc">
           콘티 작성 경과 {formatElapsedDurationSec(elapsedSec)}
         </p>
+      ) : null}
+      {currentStage ? (
+        <p className="mt-2 px-4 font-mono text-[11px] leading-relaxed text-huma-t2">{currentStage}</p>
       ) : null}
     </div>
   );
@@ -301,6 +323,7 @@ function DetailPanel({
   onDelete,
   onReburn,
   onRefresh,
+  progressStage,
 }: {
   item: HumaVideoContentHistory;
   detail: HumaVideoContentHistory | null;
@@ -314,6 +337,7 @@ function DetailPanel({
   onDelete: () => void;
   onReburn: () => void;
   onRefresh: () => void;
+  progressStage?: string | null;
 }) {
   const full = detail ?? item;
   const conti = parseContiPreview(full.conti_json);
@@ -340,7 +364,7 @@ function DetailPanel({
   }
 
   if (item.status === 'conti_generating' || item.status === 'rendering' || item.status === 'generating') {
-    return <ProgressWait status={item.status} createdAt={item.created_at} />;
+    return <ProgressWait status={item.status} createdAt={item.created_at} stageLabel={progressStage} />;
   }
 
   const deletable = isDeletableVideoContent(item.status);
@@ -439,8 +463,13 @@ export function VideoContentView() {
   const [videoRefreshKey, setVideoRefreshKey] = useState(0);
   const [storageRefreshToken, setStorageRefreshToken] = useState(0);
   const [deleting, setDeleting] = useState(false);
+  const [progressStageById, setProgressStageById] = useState<Record<string, string>>({});
   const selectedStatusRef = useRef<string | null>(null);
   const hadProgressRef = useRef(false);
+  const selectedIdRef = useRef<string | null>(null);
+  const itemsRef = useRef(items);
+  selectedIdRef.current = selectedId;
+  itemsRef.current = items;
 
   const load = useCallback(async () => {
     const [accs, list] = await Promise.all([
@@ -480,9 +509,23 @@ export function VideoContentView() {
   useEffect(() => {
     const socket = getLogSocket();
     let debounce: ReturnType<typeof setTimeout> | null = null;
-    const onLog = (payload: { message?: string }) => {
+    const onLog = (payload: { message?: string; account_id?: string; metadata?: Record<string, unknown> }) => {
       const msg = payload?.message ?? '';
       if (!msg.includes('[video-content]')) return;
+
+      const parsed = parseVideoContentProgressStage(payload);
+      if (parsed) {
+        const historyId = resolveVideoContentProgressHistoryId({
+          payload,
+          parsed,
+          items: itemsRef.current,
+          selectedId: selectedIdRef.current,
+        });
+        if (historyId) {
+          setProgressStageById((prev) => ({ ...prev, [historyId]: parsed.stage }));
+        }
+      }
+
       if (msg.includes('생성 완료') || msg.includes('자막 재입히기 완료')) {
         bumpStorageRefresh();
       }
@@ -892,6 +935,7 @@ export function VideoContentView() {
                 onDelete={() => void handleDelete()}
                 onReburn={() => void handleReburn()}
                 onRefresh={() => void refreshSelectedDetail()}
+                progressStage={selectedId ? progressStageById[selectedId] : null}
               />
             ) : (
               <div className="py-16 text-center text-[12px] text-huma-t3">

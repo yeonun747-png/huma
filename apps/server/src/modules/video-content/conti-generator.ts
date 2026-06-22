@@ -1,15 +1,14 @@
 import type { Workspace } from '@huma/shared';
 import { askClaudeWithModel } from '../../lib/anthropic-client.js';
 import { callClaudeJsonWithRetry } from '../../lib/llm-json.js';
-import { getMainClaudeModel } from '../../lib/ai-engine.js';
+import { getMainClaudeModel, getSubClaudeModel } from '../../lib/ai-engine.js';
 import {
   enforcePunchlineShotMinDuration,
   finalizeContiTimeline,
   validateCutTypeMatchesRawShots,
   validatePunchlineShotMinDuration,
+  enforceAllShotsMinDuration,
   validateAllShotsMinDuration,
-  findAdjacentDuplicateShotIndices,
-  findRawShotQualityIssues,
   findIncompleteLastShotIndex,
   validateCharacterNameConsistency,
   extractCharacterNamesForStorage,
@@ -26,37 +25,20 @@ import {
   buildCharacterNamingRule,
   buildCameraActionNoRepeatRule,
   buildSentenceCompleteRule,
-  buildGenericActionFeedback,
-  buildGenericActionBatchFeedback,
   buildShotCountPreferLowerGuide,
-  buildEmptyShotContentFeedback,
-  buildAdjacentDuplicateFeedback,
-  buildShotFillPrompt,
-  SINGLE_SHOT_CUT_MISMATCH_FEEDBACK,
   ContiValidationError,
-  DEFAULT_CONTI_VALIDATION_MAX_ATTEMPTS,
   CONTI_FOUNDATION_MAX_TOKENS,
   CONTI_SHOTS_MAX_TOKENS,
   CONTI_SINGLE_SHOTS_MAX_TOKENS,
-  CONTI_SHOT_FILL_MAX_TOKENS,
-  MAX_SHOT_DURATION_REGENERATION_ATTEMPTS,
-  MAX_EMPTY_CONTENT_REGENERATION_ATTEMPTS,
-  MAX_SINGLE_SHOT_CUT_REGENERATION_ATTEMPTS,
-  MAX_ADJACENT_DUPLICATE_PATCH_ATTEMPTS,
-  MAX_SHOT_QUALITY_PATCH_ATTEMPTS,
-  MAX_GENERIC_ACTION_FULL_REGEN,
-  MAX_GENERIC_ACTION_PATCH_ATTEMPTS,
   PUNCHLINE_MIN_DURATION_SEC,
   SHOT_CONTENT_MIN_CHARS,
-  isGenericDefaultAction,
 } from './conti-validation.js';
 import {
   applyGenericActionNarrativeFallback,
   findGenericActionShotNumbers,
   GENERIC_ACTION_NARRATIVE_FALLBACK_WARNING,
-  isUsableActionPatch,
-  narrativeHintForShots,
 } from './generic-action-fallback.js';
+import { applyRuleBasedShotRecovery } from './conti-recovery.js';
 import { findRealNamesInShots, buildCharacterNameToLabelMap } from './character-labels.js';
 import {
   buildMetadataTagInstruction,
@@ -74,7 +56,6 @@ import { asContiCharacters, asContiShots, DEFAULT_VIDEO_PERSONAS } from './types
 import type { PreGenerationPlan } from './pre-generation-plan.js';
 import {
   buildCoreMaterialShotsInstruction,
-  MAX_CORE_MATERIAL_RETRIES,
   parseCoreMaterialTagsFromResponse,
   validateCoreMaterials,
 } from './punchline-material.js';
@@ -97,6 +78,10 @@ import {
 } from './story-draft.js';
 
 export type { ContiFoundation, StoryDraft };
+
+/** P1 — 3a Sonnet / 3b·패치 Haiku LLM 타임아웃 */
+export const CONTI_LLM_TIMEOUT_MS = 45_000;
+export const CONTI_JSON_MAX_ATTEMPTS = 2;
 
 export interface ContiGenerationResult extends VideoConti {
   locationKeyword: string;
@@ -132,14 +117,24 @@ async function reportStage(ctx: PromptContext, stage: string): Promise<void> {
   await ctx.onStage?.(stage);
 }
 
+async function getContiSonnetModel(): Promise<string> {
+  return (await getMainClaudeModel()) || 'claude-sonnet-4-6';
+}
+
+async function getContiHaikuModel(): Promise<string> {
+  return (await getSubClaudeModel()) || 'claude-haiku-4-5-20251001';
+}
+
 async function callClaudeJson(params: {
   model: string;
   max_tokens: number;
   prompt: string;
+  maxAttempts?: number;
 }): Promise<{ parsed: Record<string, unknown>; raw: string }> {
   return callClaudeJsonWithRetry<Record<string, unknown>>({
     ...params,
-    ask: askClaudeWithModel,
+    maxAttempts: params.maxAttempts ?? CONTI_JSON_MAX_ATTEMPTS,
+    ask: (p) => askClaudeWithModel({ ...p, timeout_ms: CONTI_LLM_TIMEOUT_MS }),
   });
 }
 
@@ -361,61 +356,6 @@ JSON 스키마:
 ${buildShotsJsonSchema(ctx.conditions)}${materialBlock}${metadataBlock}`;
 }
 
-function buildShotPatchPrompt(
-  ctx: PromptContext,
-  foundation: ContiFoundation,
-  conti: VideoConti,
-  invalidIndices: number[],
-  reason?: string,
-): string {
-  const shotNumbers = invalidIndices.map((i) => i + 1);
-  const existing = invalidIndices.map((i) => {
-    const s = conti.shots[i]!;
-    const prev = i > 0 ? conti.shots[i - 1] : null;
-    const prevLine = prev
-      ? `직전 샷${i}: action=${prev.action ?? ''}, dialogue=${prev.dialogue ?? ''}`
-      : '';
-    return `샷${i + 1}: camera=${s.camera ?? ''}, action=${s.action ?? ''}, dialogue=${s.dialogue ?? ''}${prevLine ? `\n  ${prevLine}` : ''}`;
-  });
-
-  const reasonBlock = reason ? `\n보완 사유: ${reason}\n` : ctx.feedback ? `\n${ctx.feedback}\n` : '';
-  const yeonunFortuneBlock =
-    ctx.workspace === 'yeonun' ? `\n${buildYeonunFortuneDialogueRule()}\n` : '';
-  const storyDraftBlock = ctx.storyDraft
-    ? `\n${buildFormatConversionIntro(ctx.storyDraft)}\n`
-    : '';
-
-  const patchEntries = shotNumbers
-    .map(
-      (n) =>
-        `{"shotNumber": ${n}, "camera": "...", "action": "... (${SHOT_CONTENT_MIN_CHARS}자 이상, filler 금지)", "dialogue": "..."}`,
-    )
-    .join(', ');
-
-  return `다음 영상 설정과 기존 콘티에서 지정 샷만 보완하라.
-${storyDraftBlock}
-설정:
-${JSON.stringify(foundation, null, 2)}
-${reasonBlock}
-
-보완 대상:
-${existing.join('\n')}
-
-${buildShotFillPrompt(shotNumbers)}
-${buildScreenTextRenderingRule()}${yeonunFortuneBlock}
-${buildDialogueLengthRule()}
-${buildDialogueDistinctRule()}
-${buildPunchlineClarityRule()}
-${buildSentenceCompleteRule()}
-${buildCameraActionNoRepeatRule()}
-${buildCharacterNamingRule()}
-
-JSON:
-{
-  "patches": [${patchEntries}]
-}`;
-}
-
 function parseFoundation(parsed: Record<string, unknown>): ContiFoundation {
   return {
     locationKeyword: String(parsed.locationKeyword ?? ''),
@@ -449,50 +389,32 @@ function assembleConti(
   };
 }
 
-function applyDefaultToRawShots(conti: VideoConti, indices: number[]): VideoConti {
-  const nums = indices.map((i) => i + 1).join(', ');
-  throw new ContiValidationError(
-    `샷 ${nums} 품질 보완 실패 — filler action으로 대체하지 않는다. 3b 전체 또는 해당 샷을 구체 action으로 다시 생성하라.`,
-    { maxAttempts: DEFAULT_CONTI_VALIDATION_MAX_ATTEMPTS, holdOnFailure: true, holdReason: 'generic_action' },
-  );
-}
-
-function mergeShotPatches(conti: VideoConti, patches: VideoContiShot[]): VideoConti {
-  const byNumber = new Map(patches.map((p) => [p.shotNumber, p]));
-  const shots = asContiShots(conti.shots).map((s, i) => {
-    const patch = byNumber.get(s.shotNumber) ?? byNumber.get(i + 1);
-    if (!patch) return s;
-    const prevAction = s.action;
-    const nextAction = patch.action?.trim();
-    const action =
-      nextAction && isUsableActionPatch(patch, prevAction) ? nextAction : prevAction;
-    return {
-      ...s,
-      camera: patch.camera?.trim() || s.camera,
-      action,
-      dialogue: patch.dialogue?.trim() || s.dialogue,
-    };
-  });
-  return { ...conti, shots };
-}
-
-function tryNarrativeGenericActionFallback(
+function warnRemainingGenericActions(
+  conti: VideoConti,
   ctx: PromptContext,
   foundation: ContiFoundation,
-  conti: VideoConti,
   warnings: string[],
-): VideoConti | null {
-  const fallback = applyGenericActionNarrativeFallback(conti, {
+): VideoConti {
+  let current = conti;
+  const remaining = findGenericActionShotNumbers(current);
+  if (!remaining.length) return current;
+
+  const fallback = applyGenericActionNarrativeFallback(current, {
     storyDraft: ctx.storyDraft,
     scenarioSummary: foundation.scenarioSummary,
   });
-  if (!fallback.replacedShotNumbers.length) return null;
-  const remaining = findGenericActionShotNumbers(fallback.conti);
-  if (remaining.length > 0) return null;
-  warnings.push(
-    `${GENERIC_ACTION_NARRATIVE_FALLBACK_WARNING} — 샷 ${fallback.replacedShotNumbers.join(', ')}`,
-  );
-  return fallback.conti;
+  if (fallback.replacedShotNumbers.length) {
+    current = fallback.conti;
+    warnings.push(
+      `${GENERIC_ACTION_NARRATIVE_FALLBACK_WARNING} — 샷 ${fallback.replacedShotNumbers.join(', ')}`,
+    );
+  }
+
+  const still = findGenericActionShotNumbers(current);
+  if (still.length) {
+    warnings.push(`filler action 잔존 (샷 ${still.join(', ')}) — EvoLink 전 검토 권장`);
+  }
+  return current;
 }
 
 async function generateStoryDraft(ctx: PromptContext, model: string): Promise<StoryDraft> {
@@ -549,17 +471,6 @@ async function ensureStoryDraftComprehension(
   return { draft: current, warnings };
 }
 
-function assertNoGenericActions(conti: VideoConti): void {
-  for (let i = 0; i < asContiShots(conti.shots).length; i++) {
-    if (isGenericDefaultAction(asContiShots(conti.shots)[i]!.action)) {
-      throw new ContiValidationError(buildGenericActionFeedback(i + 1), {
-        holdOnFailure: true,
-        holdReason: 'generic_action',
-      });
-    }
-  }
-}
-
 /** @deprecated 3a story-draft 경로 사용 — legacy fallback */
 async function generateFoundation(ctx: PromptContext, model: string): Promise<ContiFoundation> {
   const { parsed } = await callClaudeJson({
@@ -587,196 +498,16 @@ async function generateShots(
   return { shots, fullText, raw };
 }
 
-async function regenerateShotsOnly(
-  ctx: PromptContext,
-  foundation: ContiFoundation,
-  model: string,
-  feedback: string,
-): Promise<VideoConti> {
-  const { shots, fullText } = await generateShots({ ...ctx, feedback }, foundation, model);
-  return assembleConti(foundation, shots, ctx.conditions, fullText);
-}
-
-async function fillSpecificShots(
+function recoverRawShotContent(
   ctx: PromptContext,
   foundation: ContiFoundation,
   conti: VideoConti,
-  invalidIndices: number[],
-  model: string,
-  reason?: string,
-): Promise<VideoConti> {
-  const { parsed } = await callClaudeJson({
-    model,
-    max_tokens: CONTI_SHOT_FILL_MAX_TOKENS,
-    prompt: buildShotPatchPrompt(ctx, foundation, conti, invalidIndices, reason),
+): { conti: VideoConti; warnings: string[] } {
+  return applyRuleBasedShotRecovery({
+    conti,
+    storyDraft: ctx.storyDraft,
+    scenarioSummary: foundation.scenarioSummary,
   });
-  const patches = (parsed.patches as VideoContiShot[]) ?? [];
-  return mergeShotPatches(conti, patches);
-}
-
-async function patchShotIssues(
-  ctx: PromptContext,
-  foundation: ContiFoundation,
-  conti: VideoConti,
-  indices: number[],
-  feedback: string,
-  model: string,
-): Promise<VideoConti> {
-  return fillSpecificShots({ ...ctx, feedback }, foundation, conti, indices, model, feedback);
-}
-
-async function recoverShotQualityIssues(
-  ctx: PromptContext,
-  foundation: ContiFoundation,
-  conti: VideoConti,
-  model: string,
-  options: { allowEmptyFullRetry: boolean },
-): Promise<{ conti: VideoConti; warnings: string[] }> {
-  const warnings: string[] = [];
-  let current = conti;
-  let emptyFullRetries = 0;
-  let narrowPatchAttempts = 0;
-  let genericPatchAttempts = 0;
-  let fullGenericRegenAttempts = 0;
-  let storyDraftGenericAttempts = 0;
-  const maxNarrow =
-    MAX_SHOT_QUALITY_PATCH_ATTEMPTS + MAX_ADJACENT_DUPLICATE_PATCH_ATTEMPTS + 1;
-
-  while (true) {
-    const qualityIssues = findRawShotQualityIssues(current);
-    const duplicates = findAdjacentDuplicateShotIndices(current);
-    const emptyIssues = qualityIssues.filter((issue) => issue.kind === 'empty');
-    const nonEmptyQuality = qualityIssues.filter((issue) => issue.kind !== 'empty');
-
-    if (emptyIssues.length === 0 && nonEmptyQuality.length === 0 && duplicates.length === 0) {
-      break;
-    }
-
-    if (
-      options.allowEmptyFullRetry &&
-      emptyIssues.length > 0 &&
-      emptyFullRetries < MAX_EMPTY_CONTENT_REGENERATION_ATTEMPTS
-    ) {
-      emptyFullRetries += 1;
-      const shotsFeedback = buildEmptyShotContentFeedback(emptyIssues[0]!.index + 1);
-      const { shots, fullText } = await generateShots({ ...ctx, feedback: shotsFeedback }, foundation, model);
-      current = assembleConti(foundation, shots, ctx.conditions, fullText ?? current.fullText);
-      continue;
-    }
-
-    const genericIssues = nonEmptyQuality.filter((issue) => issue.kind === 'generic_action');
-    if (genericIssues.length > 0) {
-      const genericIndices = genericIssues.map((issue) => issue.index);
-      const narrativeProse = ctx.storyDraft?.narrativeProse;
-      const genericFeedback =
-        buildGenericActionBatchFeedback(
-          genericIndices.map((i) => i + 1),
-          narrativeProse,
-        ) +
-        narrativeHintForShots(
-          narrativeProse,
-          genericIndices.map((i) => i + 1),
-          asContiShots(current.shots).length,
-        );
-
-      if (genericPatchAttempts < MAX_GENERIC_ACTION_PATCH_ATTEMPTS) {
-        genericPatchAttempts += 1;
-        await reportStage(ctx, `filler action 보완 — 샷 ${genericIndices.map((i) => i + 1).join(', ')}`);
-        current = await patchShotIssues(ctx, foundation, current, genericIndices, genericFeedback, model);
-        continue;
-      }
-
-      if (fullGenericRegenAttempts < MAX_GENERIC_ACTION_FULL_REGEN) {
-        fullGenericRegenAttempts += 1;
-        genericPatchAttempts = 0;
-        await reportStage(
-          ctx,
-          `3b 전체 재생성 — filler action (${fullGenericRegenAttempts}/${MAX_GENERIC_ACTION_FULL_REGEN})`,
-        );
-        current = await regenerateShotsOnly({ ...ctx, feedback: genericFeedback }, foundation, model, genericFeedback);
-        continue;
-      }
-
-      if (ctx.storyDraft && storyDraftGenericAttempts < 1) {
-        storyDraftGenericAttempts += 1;
-        genericPatchAttempts = 0;
-        await reportStage(ctx, 'filler action 최종 보완 — 3a narrative 기준 일괄 패치');
-        const finalFeedback = `${genericFeedback}\n각 샷 action은 narrativeProse 해당 구간을 **한 문장 이상** 구체 동작·표정으로 작성. filler 문구 재사용 금지.`;
-        current = await patchShotIssues(ctx, foundation, current, genericIndices, finalFeedback, model);
-        continue;
-      }
-
-      const narrativeFallback = tryNarrativeGenericActionFallback(ctx, foundation, current, warnings);
-      if (narrativeFallback) {
-        current = narrativeFallback;
-        continue;
-      }
-
-      applyDefaultToRawShots(current, genericIndices);
-    }
-
-    let patchIdx: number;
-    let feedback: string;
-
-    if (duplicates.length > 0) {
-      patchIdx = duplicates[0]!;
-      feedback = buildAdjacentDuplicateFeedback(patchIdx + 1);
-    } else {
-      const dialogueDupIssues = nonEmptyQuality.filter((issue) => issue.kind === 'dialogue_duplicate');
-      if (dialogueDupIssues.length > 0) {
-        const issue = dialogueDupIssues[0]!;
-        patchIdx = issue.index;
-        feedback = issue.feedback;
-      } else if (nonEmptyQuality.length > 0) {
-        const issue = nonEmptyQuality[0]!;
-        patchIdx = issue.index;
-        feedback = issue.feedback;
-      } else {
-        patchIdx = emptyIssues[0]!.index;
-        feedback = emptyIssues[0]!.feedback;
-      }
-    }
-
-    if (narrowPatchAttempts < maxNarrow) {
-      narrowPatchAttempts += 1;
-      current = await patchShotIssues(ctx, foundation, current, [patchIdx], feedback, model);
-      continue;
-    }
-
-    const fallbackIndices = [
-      ...new Set([
-        ...emptyIssues.map((issue) => issue.index),
-        ...nonEmptyQuality.map((issue) => issue.index),
-        ...duplicates,
-      ]),
-    ];
-    const narrativeFallback = tryNarrativeGenericActionFallback(ctx, foundation, current, warnings);
-    if (narrativeFallback) {
-      current = narrativeFallback;
-      continue;
-    }
-    applyDefaultToRawShots(current, fallbackIndices);
-  }
-
-  return { conti: current, warnings };
-}
-
-async function recoverRawShotContent(
-  ctx: PromptContext,
-  foundation: ContiFoundation,
-  conti: VideoConti,
-  model: string,
-): Promise<{ conti: VideoConti; warnings: string[] }> {
-  return recoverShotQualityIssues(ctx, foundation, conti, model, { allowEmptyFullRetry: true });
-}
-
-async function recoverAdjacentDuplicates(
-  ctx: PromptContext,
-  foundation: ContiFoundation,
-  conti: VideoConti,
-  model: string,
-): Promise<{ conti: VideoConti; warnings: string[] }> {
-  return recoverShotQualityIssues(ctx, foundation, conti, model, { allowEmptyFullRetry: false });
 }
 
 function applyCutTypeNormalization(
@@ -799,36 +530,24 @@ async function ensureCutTypeMatches(
   ctx: PromptContext,
   foundation: ContiFoundation,
   conti: VideoConti,
-  model: string,
 ): Promise<{ conti: VideoConti; warnings: string[] }> {
   const warnings: string[] = [];
   let current = conti;
-  let cutRetries = 0;
 
-  while (true) {
-    const check = validateCutTypeMatchesRawShots(ctx.conditions.cutType, current.shots);
-    if (check.ok) return { conti: current, warnings };
+  const check = validateCutTypeMatchesRawShots(ctx.conditions.cutType, current.shots);
+  if (check.ok) return { conti: current, warnings };
 
-    if (ctx.conditions.cutType === 'single_shot') {
-      const normalized = applyCutTypeNormalization(current, ctx.conditions);
-      current = normalized.conti;
-      warnings.push(...normalized.warnings);
-      const afterNormalize = validateCutTypeMatchesRawShots(ctx.conditions.cutType, current.shots);
-      if (afterNormalize.ok) return { conti: current, warnings };
-
-      if (cutRetries < MAX_SINGLE_SHOT_CUT_REGENERATION_ATTEMPTS) {
-        cutRetries += 1;
-        await reportStage(ctx, `single_shot cut 재생성 ${cutRetries}/${MAX_SINGLE_SHOT_CUT_REGENERATION_ATTEMPTS}`);
-        current = await regenerateShotsOnly(ctx, foundation, model, SINGLE_SHOT_CUT_MISMATCH_FEEDBACK);
-        const normAgain = applyCutTypeNormalization(current, ctx.conditions);
-        current = normAgain.conti;
-        warnings.push(...normAgain.warnings);
-        continue;
-      }
-    }
-
-    throw new ContiValidationError(check.feedback);
+  if (ctx.conditions.cutType === 'single_shot') {
+    const normalized = applyCutTypeNormalization(current, ctx.conditions);
+    current = normalized.conti;
+    warnings.push(...normalized.warnings);
+    const afterNormalize = validateCutTypeMatchesRawShots(ctx.conditions.cutType, current.shots);
+    if (afterNormalize.ok) return { conti: current, warnings };
+    warnings.push(`single_shot cut 불일치 — 자동 병합 후에도 검증 실패: ${afterNormalize.feedback}`);
+    return { conti: current, warnings };
   }
+
+  throw new ContiValidationError(check.feedback);
 }
 
 export function contiToFoundation(conti: VideoConti & { locationKeyword?: string }): ContiFoundation {
@@ -849,22 +568,18 @@ async function finalizeContiFromParts(
   foundation: ContiFoundation,
   shots: VideoContiShot[],
   fullText: string | undefined,
-  model: string,
 ): Promise<ContiGenerationResult> {
   let conti = assembleConti(foundation, shots, params.conditions, fullText);
   const contentWarnings: string[] = [];
   let lastShotIncompleteDetected = findIncompleteLastShotIndex(conti) != null;
 
-  await reportStage(params, '샷 품질 보완');
-  const recovered = await recoverRawShotContent(params, foundation, conti, model);
+  await reportStage(params, '샷 품질 보완 (규칙)');
+  const recovered = recoverRawShotContent(params, foundation, conti);
   conti = recovered.conti;
   contentWarnings.push(...recovered.warnings);
 
   if (params.conditions.cutType === 'multi_shot') {
     conti = normalizeMultiShotConti(conti, params.conditions.duration);
-    const dupRecovered = await recoverAdjacentDuplicates(params, foundation, conti, model);
-    conti = dupRecovered.conti;
-    contentWarnings.push(...dupRecovered.warnings);
   } else {
     const normalized = applyCutTypeNormalization(conti, params.conditions);
     conti = normalized.conti;
@@ -872,12 +587,18 @@ async function finalizeContiFromParts(
   }
 
   await reportStage(params, 'cutType 정규화·검증');
-  const cutEnsured = await ensureCutTypeMatches(params, foundation, conti, model);
+  const cutEnsured = await ensureCutTypeMatches(params, foundation, conti);
   conti = cutEnsured.conti;
   contentWarnings.push(...cutEnsured.warnings);
 
   conti = enforcePunchlineShotMinDuration(conti);
+  const durationFix = enforceAllShotsMinDuration(conti);
+  conti = durationFix.conti;
+  if (durationFix.adjusted) {
+    contentWarnings.push('샷 최소 길이 미달 — 타임라인 자동 재분배 (검토 권장)');
+  }
   conti = finalizeContiTimeline(conti, params.conditions.duration);
+
   const punchCheck = validatePunchlineShotMinDuration(conti);
   if (!punchCheck.ok) {
     contentWarnings.push(`펀치라인 샷 길이 부족(통과): ${punchCheck.feedback}`);
@@ -885,11 +606,7 @@ async function finalizeContiFromParts(
 
   const shotDurCheck = validateAllShotsMinDuration(conti);
   if (!shotDurCheck.ok) {
-    throw new ContiValidationError(shotDurCheck.feedback, {
-      maxAttempts: MAX_SHOT_DURATION_REGENERATION_ATTEMPTS,
-      holdOnFailure: true,
-      holdReason: 'shot_duration',
-    });
+    contentWarnings.push(`샷 길이 검증 경고: ${shotDurCheck.feedback}`);
   }
 
   lastShotIncompleteDetected =
@@ -912,21 +629,7 @@ async function finalizeContiFromParts(
   }
 
   const characterNames = extractCharacterNamesForStorage(conti, params.conditions.characterName);
-
-  if (findGenericActionShotNumbers(conti).length > 0) {
-    const lastFallback = applyGenericActionNarrativeFallback(conti, {
-      storyDraft: params.storyDraft,
-      scenarioSummary: foundation.scenarioSummary,
-    });
-    if (lastFallback.replacedShotNumbers.length) {
-      conti = lastFallback.conti;
-      contentWarnings.push(
-        `${GENERIC_ACTION_NARRATIVE_FALLBACK_WARNING} — 샷 ${lastFallback.replacedShotNumbers.join(', ')}`,
-      );
-    }
-  }
-
-  assertNoGenericActions(conti);
+  conti = warnRemainingGenericActions(conti, params, foundation, contentWarnings);
 
   return {
     ...conti,
@@ -938,8 +641,50 @@ async function finalizeContiFromParts(
   };
 }
 
-const MAX_METADATA_TAG_RETRIES = 2;
+async function generateContiShotsFromFoundation(params: {
+  ctx: PromptContext;
+  foundation: ContiFoundation;
+  haikuModel: string;
+  initialFeedback?: string;
+}): Promise<ContiGenerationResult> {
+  const { ctx, foundation, haikuModel } = params;
+  const mustIncludeProps = ctx.mustIncludeProps ?? [];
+  const shotCtx = params.initialFeedback ? { ...ctx, feedback: params.initialFeedback } : ctx;
+  const extraWarnings: string[] = [];
 
+  await reportStage(ctx, '3b단계 형식 변환 (샷 분배)');
+  const { shots, fullText, raw } = await generateShots(shotCtx, foundation, haikuModel);
+
+  if (mustIncludeProps.length && raw) {
+    const placements = parseCoreMaterialTagsFromResponse(raw);
+    const materialCheck = validateCoreMaterials({
+      mustIncludeProps,
+      placements,
+      shots,
+    });
+    if (!materialCheck.ok) {
+      await reportStage(ctx, '핵심 소재 검증 경고 — 검토 단계로 진행');
+      extraWarnings.push(`핵심 소재 검증: ${materialCheck.message}`);
+    }
+  }
+
+  const parsedMeta = raw ? parseContiMetadataTags(raw) : null;
+  if (ctx.expectedMetadata) {
+    if (!parsedMeta) {
+      extraWarnings.push('메타 태그 LLM 미출력 — DB 저장 조건값 사용');
+    } else {
+      const metaCheck = validateContiMetadataTags(parsedMeta, ctx.expectedMetadata);
+      if (!metaCheck.ok) extraWarnings.push(`메타 태그: ${metaCheck.message}`);
+    }
+  }
+
+  const conti = await finalizeContiFromParts(shotCtx, foundation, shots, fullText);
+  if (!extraWarnings.length) return conti;
+  return {
+    ...conti,
+    contentWarnings: [...(conti.contentWarnings ?? []), ...extraWarnings],
+  };
+}
 function buildPunchlinePromptContext(params: {
   workspace: Workspace;
   plan: PreGenerationPlan;
@@ -966,72 +711,6 @@ function buildPunchlinePromptContext(params: {
   };
 }
 
-async function generateContiShotsFromFoundation(params: {
-  ctx: PromptContext;
-  foundation: ContiFoundation;
-  model: string;
-  initialFeedback?: string;
-}): Promise<ContiGenerationResult> {
-  const { ctx, foundation, model } = params;
-  const mustIncludeProps = ctx.mustIncludeProps ?? [];
-  let shotsFeedback = params.initialFeedback;
-  let conti!: ContiGenerationResult;
-  let materialRetries = 0;
-
-  for (let metaAttempt = 0; metaAttempt <= MAX_METADATA_TAG_RETRIES; metaAttempt++) {
-    await reportStage(
-      ctx,
-      `3b단계 형식 변환${metaAttempt ? ` (메타 재시도 ${metaAttempt})` : ''}${materialRetries ? ` (소재 재시도 ${materialRetries})` : ''}`,
-    );
-    const shotCtx = shotsFeedback ? { ...ctx, feedback: shotsFeedback } : ctx;
-    const { shots, fullText, raw } = await generateShots(shotCtx, foundation, model);
-
-    const parsedMeta = raw ? parseContiMetadataTags(raw) : null;
-    if (!parsedMeta) {
-      if (metaAttempt >= MAX_METADATA_TAG_RETRIES) {
-        throw new ContiValidationError('콘티 응답 끝 메타 태그가 없습니다. 형식을 준수하도록 다시 생성하라.');
-      }
-      shotsFeedback = 'JSON 뒤 마지막 줄에 [관계축: …] [감정곡선: …] … 형식 메타 태그를 반드시 출력하라.';
-      continue;
-    }
-
-    const metaCheck = validateContiMetadataTags(parsedMeta, ctx.expectedMetadata!);
-    if (!metaCheck.ok) {
-      if (metaAttempt >= MAX_METADATA_TAG_RETRIES) {
-        throw new ContiValidationError(metaCheck.message);
-      }
-      shotsFeedback = metaCheck.message;
-      continue;
-    }
-
-    if (mustIncludeProps.length && raw) {
-      const placements = parseCoreMaterialTagsFromResponse(raw);
-      const materialCheck = validateCoreMaterials({
-        mustIncludeProps,
-        placements,
-        shots,
-      });
-      if (!materialCheck.ok) {
-        if (materialRetries >= MAX_CORE_MATERIAL_RETRIES) {
-          await reportStage(
-            ctx,
-            `핵심 소재 검증 ${MAX_CORE_MATERIAL_RETRIES}회 실패 — 유머 평가 단계로 진행`,
-          );
-        } else {
-          materialRetries += 1;
-          shotsFeedback = materialCheck.message;
-          continue;
-        }
-      }
-    }
-
-    conti = await finalizeContiFromParts(shotCtx, foundation, shots, fullText, model);
-    break;
-  }
-
-  return conti!;
-}
-
 export type Stage3RegenMode = 'full' | 'format_only' | 'story_clarity';
 
 export async function generateContiFromPunchline(params: {
@@ -1046,7 +725,8 @@ export async function generateContiFromPunchline(params: {
   regenMode?: Stage3RegenMode;
   onStage?: (stage: string) => void | Promise<void>;
 }): Promise<ContiGenerationResult> {
-  const model = (await getMainClaudeModel()) || 'claude-sonnet-4-6';
+  const sonnetModel = await getContiSonnetModel();
+  const haikuModel = await getContiHaikuModel();
   const ctx = buildPunchlinePromptContext(params);
   const regenMode = params.regenMode ?? 'full';
   const punchlineIdea = params.punchlineIdea.trim();
@@ -1072,7 +752,7 @@ export async function generateContiFromPunchline(params: {
           existing: params.existingStoryDraft!,
           punchlineIdea,
           feedback: params.feedback ?? STORY_COMPREHENSION_REGEN_FEEDBACK,
-          model,
+          model: sonnetModel,
         });
       } else {
         await reportStage(ctx, '3a 재생성 (3b 형식 변환 반복 실패)');
@@ -1083,16 +763,16 @@ export async function generateContiFromPunchline(params: {
               (ctx.feedback ? `${ctx.feedback} ` : '') +
               '이전 이야기는 짧은 영상 샷·시간 형식에 맞지 않았다. 같은 펀치라인으로 더 압축된 흐름으로 다시 서술하라.',
           },
-          model,
+          sonnetModel,
         );
-        const comprehension = await ensureStoryDraftComprehension(ctx, storyDraft, punchlineIdea, model);
+        const comprehension = await ensureStoryDraftComprehension(ctx, storyDraft, punchlineIdea, sonnetModel);
         storyDraft = comprehension.draft;
         comprehensionWarnings.push(...comprehension.warnings);
       }
     } else if (!storyDraft) {
       await reportStage(ctx, '3a단계 자유 서술 (재미)');
-      storyDraft = await generateStoryDraft(ctx, model);
-      const comprehension = await ensureStoryDraftComprehension(ctx, storyDraft, punchlineIdea, model);
+      storyDraft = await generateStoryDraft(ctx, sonnetModel);
+      const comprehension = await ensureStoryDraftComprehension(ctx, storyDraft, punchlineIdea, sonnetModel);
       storyDraft = comprehension.draft;
       comprehensionWarnings.push(...comprehension.warnings);
     } else if (storyAttempt > 0) {
@@ -1104,9 +784,9 @@ export async function generateContiFromPunchline(params: {
             (ctx.feedback ? `${ctx.feedback} ` : '') +
             '이전 이야기는 짧은 영상 샷·시간 형식에 맞지 않았다. 같은 펀치라인으로 더 압축된 흐름으로 다시 서술하라.',
         },
-        model,
+        sonnetModel,
       );
-      const comprehension = await ensureStoryDraftComprehension(ctx, storyDraft, punchlineIdea, model);
+      const comprehension = await ensureStoryDraftComprehension(ctx, storyDraft, punchlineIdea, sonnetModel);
       storyDraft = comprehension.draft;
       comprehensionWarnings.push(...comprehension.warnings);
     }
@@ -1115,11 +795,10 @@ export async function generateContiFromPunchline(params: {
     const shotCtx: PromptContext = { ...ctx, storyDraft, feedback: params.feedback };
 
     try {
-      await reportStage(shotCtx, '3b단계 형식 변환 (샷 분배)');
       const conti = await generateContiShotsFromFoundation({
         ctx: shotCtx,
         foundation,
-        model,
+        haikuModel,
         initialFeedback: params.feedback,
       });
       const mergedWarnings = [...(conti.contentWarnings ?? []), ...comprehensionWarnings];

@@ -85,15 +85,16 @@ export class ContiValidationError extends Error {
 }
 
 export const DEFAULT_CONTI_VALIDATION_MAX_ATTEMPTS = 3;
-export const MAX_SHOT_DURATION_REGENERATION_ATTEMPTS = 2;
-export const MAX_EMPTY_CONTENT_REGENERATION_ATTEMPTS = 1;
+export const MAX_SHOT_DURATION_REGENERATION_ATTEMPTS = 0;
+export const MAX_EMPTY_CONTENT_REGENERATION_ATTEMPTS = 0;
 export const SHOT_MIN_DURATION_SEC = 1.5;
 export const SHOT_CONTENT_MIN_CHARS = 10;
 export const ADJACENT_SHOT_SIMILARITY_THRESHOLD = 0.9;
-export const MAX_ADJACENT_DUPLICATE_PATCH_ATTEMPTS = 1;
-export const MAX_SHOT_QUALITY_PATCH_ATTEMPTS = 2;
-export const MAX_GENERIC_ACTION_PATCH_ATTEMPTS = 6;
-export const MAX_GENERIC_ACTION_FULL_REGEN = 3;
+/** P0 — LLM 패치 루프 비활성 (규칙 기반 recovery 사용) */
+export const MAX_ADJACENT_DUPLICATE_PATCH_ATTEMPTS = 0;
+export const MAX_SHOT_QUALITY_PATCH_ATTEMPTS = 0;
+export const MAX_GENERIC_ACTION_PATCH_ATTEMPTS = 0;
+export const MAX_GENERIC_ACTION_FULL_REGEN = 0;
 
 /** 1단계: 시나리오·인물·장소 / 2단계: 샷·대사 / 보완: 빈 샷만 */
 export const CONTI_FOUNDATION_MAX_TOKENS = 4096;
@@ -101,7 +102,7 @@ export const CONTI_SHOTS_MAX_TOKENS = 4096;
 /** single_shot 2단계 — shots 1개만 생성 */
 export const CONTI_SINGLE_SHOTS_MAX_TOKENS = 2048;
 export const CONTI_SHOT_FILL_MAX_TOKENS = 2048;
-export const MAX_SINGLE_SHOT_CUT_REGENERATION_ATTEMPTS = 1;
+export const MAX_SINGLE_SHOT_CUT_REGENERATION_ATTEMPTS = 0;
 
 /** @deprecated 2단계 분리 전 단일 호출용 — 신규 코드는 FOUNDATION+SHOTS 사용 */
 export const CONTI_GENERATION_MAX_TOKENS = 8192;
@@ -151,6 +152,20 @@ export function buildShotTooShortFeedback(shotNumber: number, durationSec: numbe
     `샷 ${shotNumber}의 길이가 너무 짧다(${durationSec}초, 0초 또는 1초 미만), ` +
     `전체 샷 개수를 줄이거나 시간 배분을 재조정해서 모든 샷이 최소 ${SHOT_MIN_DURATION_SEC}초 이상이 되도록 다시 작성하라.`
   );
+}
+
+/** 짧은 샷 duration을 minSec 이상으로 올린 뒤 타임라인 재분배 */
+export function enforceAllShotsMinDuration(
+  conti: VideoConti,
+  minSec = SHOT_MIN_DURATION_SEC,
+): { conti: VideoConti; adjusted: boolean } {
+  const durations = asContiShots(conti.shots).map((s) => shotDurationSec(s));
+  const bumped = durations.map((d) => Math.max(d, minSec));
+  const adjusted = bumped.some((d, i) => d !== durations[i]);
+  return {
+    conti: rebuildShotsFromDurations(conti, bumped, conti.duration),
+    adjusted,
+  };
 }
 
 /** 모든 샷 최소 길이 — normalize·펀치라인 보정 이후 검사 */

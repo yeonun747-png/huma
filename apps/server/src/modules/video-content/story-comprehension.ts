@@ -4,7 +4,8 @@ import { callClaudeJsonWithRetry } from '../../lib/llm-json.js';
 import type { StoryDraft } from './story-draft.js';
 import { parseStoryDraft, STORY_DRAFT_MAX_TOKENS } from './story-draft.js';
 
-export const MAX_STORY_COMPREHENSION_REGEN = 2;
+/** P0 — Haiku 평가만, unclear 시 경고 후 3b 진행 */
+export const MAX_STORY_COMPREHENSION_REGEN = 0;
 
 export const STORY_COMPREHENSION_LIMIT_WARNING =
   '3a 이해도 보완 한계 — 경고 후 3b 진행 (setup→펀치 연결이 약할 수 있음)';
@@ -118,7 +119,7 @@ export async function regenerateStoryDraftForClarity(params: {
       feedback: params.feedback,
     }),
     ask: (p) => askClaudeWithModel({ ...p, timeout_ms: 120_000 }),
-    maxAttempts: 4,
+    maxAttempts: 2,
   });
   return parseStoryDraft(parsed);
 }

@@ -2,9 +2,11 @@ import type { Workspace } from '@huma/shared';
 import type { VideoConti } from './types.js';
 import { askClaudeWithModel } from '../../lib/anthropic-client.js';
 import { callClaudeJsonWithRetry } from '../../lib/llm-json.js';
-import { getMainClaudeModel, getSubClaudeModel } from '../../lib/ai-engine.js';
+import { getSubClaudeModel } from '../../lib/ai-engine.js';
 import {
   generateContiFromPunchline,
+  CONTI_JSON_MAX_ATTEMPTS,
+  CONTI_LLM_TIMEOUT_MS,
   type ContiGenerationResult,
   type Stage3RegenMode,
 } from './conti-generator.js';
@@ -23,9 +25,14 @@ async function callClaudeJson(params: {
 }): Promise<Record<string, unknown>> {
   const { parsed } = await callClaudeJsonWithRetry<Record<string, unknown>>({
     ...params,
-    ask: askClaudeWithModel,
+    maxAttempts: CONTI_JSON_MAX_ATTEMPTS,
+    ask: (p) => askClaudeWithModel({ ...p, timeout_ms: CONTI_LLM_TIMEOUT_MS }),
   });
   return parsed;
+}
+
+async function getPunchlineHaikuModel(): Promise<string> {
+  return (await getSubClaudeModel()) || 'claude-haiku-4-5-20251001';
 }
 
 export interface PunchlineSelection {
@@ -124,7 +131,7 @@ export async function generatePunchlineIdeas(params: {
   plan: PreGenerationPlan;
   pastSummaries: string[];
 }): Promise<string[]> {
-  const model = (await getMainClaudeModel()) || 'claude-sonnet-4-6';
+  const model = await getPunchlineHaikuModel();
   const parsed = await callClaudeJson({
     model,
     max_tokens: 2048,
@@ -139,7 +146,7 @@ export async function generatePunchlineIdeas(params: {
 }
 
 export async function selectPunchlineIdea(ideas: string[], hookType: string): Promise<PunchlineSelection> {
-  const model = (await getMainClaudeModel()) || 'claude-sonnet-4-6';
+  const model = await getPunchlineHaikuModel();
   const parsed = await callClaudeJson({
     model,
     max_tokens: 384,
@@ -258,7 +265,7 @@ export async function runPunchlineContiPipeline(params: {
       pastSummaries: params.pastSummaries,
     });
 
-    await params.onStage?.('2단계 Sonnet 펀치라인 1개 선택 + must_include_props');
+    await params.onStage?.('2단계 Haiku 펀치라인 1개 선택 + must_include_props');
     const selected = await selectPunchlineIdea(ideas, params.plan.conditions.hookType);
     punchlineIdea = selected.punchlineIdea;
     mustIncludeProps = selected.mustIncludeProps;

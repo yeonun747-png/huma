@@ -1,6 +1,7 @@
 import type { VideoContiShot } from './types.js';
 
-export const MAX_CORE_MATERIAL_RETRIES = 2;
+/** P1 — 소재 검증 실패 시 경고만 */
+export const MAX_CORE_MATERIAL_RETRIES = 0;
 
 export interface CoreMaterialPlacement {
   material: string;
