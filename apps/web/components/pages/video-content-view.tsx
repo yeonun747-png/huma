@@ -330,7 +330,7 @@ function DetailPanel({
   detail,
   accountName,
   loadingDetail,
-  rendering,
+  renderingStarting,
   deleting,
   reburning,
   videoRefreshKey,
@@ -346,7 +346,7 @@ function DetailPanel({
   detail: HumaVideoContentHistory | null;
   accountName?: string;
   loadingDetail: boolean;
-  rendering: boolean;
+  renderingStarting: boolean;
   deleting: boolean;
   reburning: boolean;
   stopping: boolean;
@@ -447,11 +447,11 @@ function DetailPanel({
           {item.status === 'conti_ready' ? (
             <button
               type="button"
-              className={`btn-primary btn-sm ${rendering ? 'animate-pulse' : ''}`}
-              disabled={rendering}
+              className={`btn-primary btn-sm ${renderingStarting ? 'animate-pulse' : ''}`}
+              disabled={renderingStarting}
               onClick={onRender}
             >
-              {rendering ? '영상 생성 중…' : '숏폼 생성'}
+              {renderingStarting ? '요청 중…' : '숏폼 생성'}
             </button>
           ) : null}
         </div>
@@ -460,6 +460,11 @@ function DetailPanel({
       {item.status === 'on_hold' ? (
         <p className="rounded border border-huma-warn/30 bg-huma-bg3 px-3 py-2 text-[11px] text-huma-warn">
           {item.error_message ?? '프롬프트 길이 초과로 보류되었습니다.'} 콘티를 확인한 뒤 새 콘티를 생성하세요.
+        </p>
+      ) : null}
+      {item.status === 'conti_ready' && item.error_message ? (
+        <p className="rounded border border-huma-warn/30 bg-huma-bg3 px-3 py-2 text-[11px] text-huma-warn">
+          {item.error_message} 「숏폼 생성」으로 다시 시도할 수 있습니다.
         </p>
       ) : null}
 
@@ -485,7 +490,7 @@ export function VideoContentView() {
   const [detail, setDetail] = useState<HumaVideoContentHistory | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [creatingConti, setCreatingConti] = useState(false);
-  const [rendering, setRendering] = useState(false);
+  const [renderingIds, setRenderingIds] = useState<Set<string>>(() => new Set());
   const [reburning, setReburning] = useState(false);
   const [videoRefreshKey, setVideoRefreshKey] = useState(0);
   const [storageRefreshToken, setStorageRefreshToken] = useState(0);
@@ -760,7 +765,7 @@ export function VideoContentView() {
   const handleRender = async () => {
     if (!selectedId) return;
     if (!(await appConfirm('검토한 콘티로 숏폼 영상을 제작합니다. 수 분 소요될 수 있습니다.'))) return;
-    setRendering(true);
+    setRenderingIds((prev) => new Set(prev).add(selectedId));
     try {
       await api.renderVideoContent(selectedId);
       setActiveTab('progress');
@@ -774,7 +779,11 @@ export function VideoContentView() {
     } catch (e) {
       await appAlert(e instanceof Error ? e.message : '영상 제작 실패');
     } finally {
-      setRendering(false);
+      setRenderingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(selectedId);
+        return next;
+      });
     }
   };
 
@@ -985,7 +994,7 @@ export function VideoContentView() {
                 detail={detail}
                 accountName={videoContentDisplayName(selectedItem.account_id, accounts)}
                 loadingDetail={loadingDetail}
-                rendering={rendering}
+                renderingStarting={selectedId ? renderingIds.has(selectedId) : false}
                 deleting={deleting}
                 reburning={reburning}
                 stopping={stopping}

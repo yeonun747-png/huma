@@ -291,7 +291,12 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
 
       const humanConfig = await getHumanEngineConfig();
 
-      if (accountId && !(await acquireAccount(accountId))) {
+      const skipAccountLock =
+        type === 'video_content_conti' ||
+        type === 'video_content_render' ||
+        type === 'video_content_generate';
+
+      if (accountId && !skipAccountLock && !(await acquireAccount(accountId))) {
         if (scheduledCrank || advanceRequested) {
           await deferHumaJob(job, humaJobId, advanceRequested ? 60_000 : CRANK_MODEM_DEFER_MS, {
             reason: 'ACCOUNT_BUSY',
@@ -744,16 +749,27 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
           await deferCrankForIdleModem(job, token, humaJobId, accountId, (err as Error).message);
           throw new DelayedError();
         }
+        const isVideoContentJob =
+          type === 'video_content_conti' ||
+          type === 'video_content_render' ||
+          type === 'video_content_generate';
         if (humaJobId) {
           await supabase
             .from('huma_jobs')
             .update({ status: 'failed', error_message: (err as Error).message, started_at: null })
             .eq('id', humaJobId);
         }
-        await logOperation({ level: 'ERROR', message: (err as Error).message, job_id: humaJobId, account_id: accountId });
+        if (!isVideoContentJob) {
+          await logOperation({
+            level: 'ERROR',
+            message: (err as Error).message,
+            job_id: humaJobId,
+            account_id: accountId,
+          });
+        }
         throw err;
       } finally {
-        if (accountId && !skipReleaseAccount) await releaseAccount(accountId);
+        if (accountId && !skipReleaseAccount && !skipAccountLock) await releaseAccount(accountId);
       }
     },
     { connection: redisConnection, concurrency }

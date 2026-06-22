@@ -203,6 +203,13 @@ function taskErrorMessage(task: TaskDetail): string {
   return task.error?.message ?? 'EvoLink 영상 생성 실패';
 }
 
+/** EvoLink 폴링 wall-clock 상한 — 초과 시 검토 대기(conti_ready)로 복귀 */
+export const EVOLINK_POLL_MAX_WAIT_MS = 20 * 60 * 1000;
+
+export function isEvoLinkPollTimeoutError(message: string): boolean {
+  return message.includes('영상 생성 시간 초과') || message.includes('20분');
+}
+
 export async function createEvoLinkVideoTask(params: {
   prompt: string;
   duration: number;
@@ -253,7 +260,7 @@ export async function pollEvoLinkVideoUrl(
   taskId: string,
   opts?: { maxWaitMs?: number; intervalMs?: number; onPoll?: (task: TaskDetail) => void | Promise<void> },
 ): Promise<string> {
-  const maxWaitMs = opts?.maxWaitMs ?? 20 * 60 * 1000;
+  const maxWaitMs = opts?.maxWaitMs ?? EVOLINK_POLL_MAX_WAIT_MS;
   const intervalMs = opts?.intervalMs ?? 5000;
   const deadline = Date.now() + maxWaitMs;
 

@@ -1,4 +1,4 @@
-import { crankServiceLabelKo, type Workspace } from '@huma/shared';
+import { crankServiceLabelKo, isVideoContentOperationalLog, type Workspace } from '@huma/shared';
 import { formatJobErrorLabel } from './job-error-label';
 
 export type WatcherLogRow = {
@@ -24,12 +24,11 @@ export function isLayer4FailSafeLog(log: WatcherLogRow): boolean {
   return /Layer4/i.test(String(log.message ?? ''));
 }
 
-/** Watcher 실시간 ERROR 패널 — 숏폼 영상(콘티·렌더) 운영 로그 제외 */
+/** Watcher 실시간 ERROR 패널 — 숏폼 영상(콘티·렌더·EvoLink) 운영 로그 제외 */
 export function isWatcherRealtimeErrorLog(log: WatcherLogRow): boolean {
   const level = String(log.level ?? '').toUpperCase();
   if (level !== 'ERROR') return false;
-  const msg = String(log.message ?? '');
-  if (/^\[video-content\]/i.test(msg)) return false;
+  if (isVideoContentOperationalLog(log.message)) return false;
   return true;
 }
 

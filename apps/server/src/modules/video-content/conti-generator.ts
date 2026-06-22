@@ -33,6 +33,7 @@ import {
   PUNCHLINE_MIN_DURATION_SEC,
   SHOT_CONTENT_MIN_CHARS,
 } from './conti-validation.js';
+import { enforceDialogueOnConti } from './dialogue-timing.js';
 import {
   applyGenericActionNarrativeFallback,
   findGenericActionShotNumbers,
@@ -598,6 +599,12 @@ async function finalizeContiFromParts(
     contentWarnings.push('샷 최소 길이 미달 — 타임라인 자동 재분배 (검토 권장)');
   }
   conti = finalizeContiTimeline(conti, params.conditions.duration);
+
+  const dialogueFix = enforceDialogueOnConti(conti);
+  conti = dialogueFix.conti;
+  if (dialogueFix.adjusted) {
+    contentWarnings.push(...dialogueFix.warnings);
+  }
 
   const punchCheck = validatePunchlineShotMinDuration(conti);
   if (!punchCheck.ok) {

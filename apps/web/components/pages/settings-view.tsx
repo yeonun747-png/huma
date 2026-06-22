@@ -662,7 +662,7 @@ export function WatcherView() {
         <MPanel title="실시간 로그 (전체 ERROR)">
 
           <p className="mb-2 text-[11px] text-huma-t3">
-            Layer4 CAPTCHA/429만 Fail-Safe 대상입니다. 숏폼 영상 콘티·보류 로그는 제외됩니다.
+            Layer4 CAPTCHA/429만 Fail-Safe 대상입니다. 숏폼 영상(콘티·EvoLink·렌더) 운영 로그는 제외됩니다.
           </p>
 
           <div className="m-log-t tall">

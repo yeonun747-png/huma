@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { isVideoContentOperationalLog } from '@huma/shared';
 import { authMiddleware, getWorkspaceFilter, supabase } from '../middleware/auth.js';
 import {
   enqueueHumaJob,
@@ -172,18 +173,22 @@ export async function registerJobRoutes(app: FastifyInstance) {
       { count: pending },
       { count: scheduled },
       { count: video },
-      { count: watcherErrors },
+      { data: watcherErrorRows },
     ] = await Promise.all([
       supabase.from('huma_jobs').select('*', { count: 'exact', head: true }).in('workspace', workspaces).eq('status', 'pending'),
       supabase.from('huma_jobs').select('*', { count: 'exact', head: true }).in('workspace', workspaces).eq('status', 'scheduled'),
       supabase.from('huma_video_queue').select('*', { count: 'exact', head: true }).in('workspace', workspaces).in('status', ['pending', 'image_generating', 'video_generating', 'tts_generating', 'lipsync_generating', 'finalizing', 'uploading']),
-      supabase.from('huma_logs').select('*', { count: 'exact', head: true }).in('workspace', workspaces).eq('level', 'ERROR').gte('created_at', dayAgo),
+      supabase.from('huma_logs').select('message').in('workspace', workspaces).eq('level', 'ERROR').gte('created_at', dayAgo),
     ]);
+
+    const watcherErrors = (watcherErrorRows ?? []).filter(
+      (row) => !isVideoContentOperationalLog(String(row.message ?? '')),
+    ).length;
 
     return {
       queue: (pending ?? 0) + (scheduled ?? 0),
       video: video ?? 0,
-      watcher: watcherErrors ?? 0,
+      watcher: watcherErrors,
     };
   });
 

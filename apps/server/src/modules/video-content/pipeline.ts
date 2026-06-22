@@ -15,6 +15,8 @@ import {
   downloadEvoLinkVideoToPath,
   handleEvoLinkDownloadFailure,
   pollEvoLinkVideoUrl,
+  isEvoLinkPollTimeoutError,
+  EVOLINK_POLL_MAX_WAIT_MS,
 } from './evolink.js';
 import {
   EVOLINK_PROMPT_MAX_LENGTH,
@@ -52,6 +54,7 @@ import {
   assertVideoContentNotCancelled,
   VideoContentCancelledError,
 } from './conti-cancel.js';
+import { enforceDialogueOnConti } from './dialogue-timing.js';
 
 function contiGenerationSecSince(startedAtIso: string): number {
   const t = new Date(startedAtIso).getTime();
@@ -62,6 +65,71 @@ import type { GenerationConditions, VideoConti } from './types.js';
 
 const WEB_BASE = process.env.HUMA_WEB_URL?.trim() || 'http://localhost:3000';
 const STALE_VIDEO_CONTENT_MS = CONTI_GENERATION_BUDGET_MS + 60_000;
+const STALE_RENDERING_MS = EVOLINK_POLL_MAX_WAIT_MS + 2 * 60_000;
+
+function stripEvoLinkRenderMeta(contiJson: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...contiJson };
+  delete next.evolinkTaskId;
+  delete next.videoRenderStartedAt;
+  return next;
+}
+
+/** 영상 제작 실패·타임아웃 — 콘티는 유지하고 검토 대기로 복귀 */
+export async function revertVideoRenderToContiReady(
+  historyId: string,
+  reason: string,
+): Promise<void> {
+  const { data: row } = await supabase
+    .from('huma_video_content_history')
+    .select('conti_json, status')
+    .eq('id', historyId)
+    .maybeSingle();
+  if (!row) return;
+
+  const contiJson = stripEvoLinkRenderMeta((row.conti_json as Record<string, unknown>) ?? {});
+  await supabase
+    .from('huma_video_content_history')
+    .update({
+      status: 'conti_ready',
+      error_message: reason.slice(0, 500),
+      conti_json: contiJson,
+    })
+    .eq('id', historyId);
+}
+
+/** worker 중단 등 — rendering 고착을 검토 대기로 복구 (목록 poll) */
+export async function revertStaleRenderingJobs(workspaces: string[]): Promise<number> {
+  const cutoff = new Date(Date.now() - STALE_RENDERING_MS).toISOString();
+  const { data: rows } = await supabase
+    .from('huma_video_content_history')
+    .select('id, conti_json')
+    .in('workspace', workspaces)
+    .eq('status', 'rendering');
+
+  let reverted = 0;
+  for (const row of rows ?? []) {
+    const meta = row.conti_json as Record<string, unknown> | null;
+    const startedAt = meta?.videoRenderStartedAt;
+    const taskId = meta?.evolinkTaskId;
+    if (!startedAt) {
+      if (!taskId) {
+        await revertVideoRenderToContiReady(
+          row.id as string,
+          '이전 영상 제작 요청이 중단되어 검토 대기로 복구됨',
+        );
+        reverted += 1;
+      }
+      continue;
+    }
+    if (String(startedAt) >= cutoff) continue;
+    await revertVideoRenderToContiReady(
+      row.id as string,
+      'EvoLink 영상 제작 시간 초과 — 검토 대기로 복구됨 (20분)',
+    );
+    reverted += 1;
+  }
+  return reverted;
+}
 
 /** EvoLink taskId는 있는데 status가 conti_ready로 되돌아간 row — 진행 중으로 복구 */
 export async function syncActiveVideoRenderStatuses(workspaces: string[]): Promise<number> {
@@ -105,17 +173,17 @@ export async function recoverStuckVideoRender(historyId: string): Promise<boolea
   return true;
 }
 
-/** 오래 conti_generating 등에 머문 row — 재시도 막힘 방지 */
+/** 오래 conti_generating에 머문 row만 정리 — rendering은 EvoLink 폴링·동시 n건 제작과 충돌하지 않게 제외 */
 export async function failStaleVideoContentJobs(accountId: string): Promise<number> {
   const cutoff = new Date(Date.now() - STALE_VIDEO_CONTENT_MS).toISOString();
   const { data, error } = await supabase
     .from('huma_video_content_history')
     .update({
       status: 'failed',
-      error_message: '콘티/영상 생성 시간 초과 — worker 지연 또는 API 응답 없음',
+      error_message: '콘티 생성 시간 초과 — worker 지연 또는 API 응답 없음',
     })
     .eq('account_id', accountId)
-    .in('status', ['conti_generating', 'rendering', 'generating'])
+    .eq('status', 'conti_generating')
     .lt('created_at', cutoff)
     .select('id');
   if (error) return 0;
@@ -891,9 +959,19 @@ export async function runVideoProduction(historyId: string): Promise<string> {
     accountName = account.name;
     workspace = account.workspace as Workspace;
 
-    const conti = parseContiFromJson(history.conti_json);
+    const parsedConti = parseContiFromJson(history.conti_json);
     const baseConditions = conditionsFromHistoryRow(history, history.character_used as string | null);
     const contiJson = history.conti_json as Record<string, unknown>;
+    const dialogueFix = enforceDialogueOnConti(parsedConti);
+    const conti = dialogueFix.conti;
+    if (dialogueFix.adjusted) {
+      await logOperation({
+        level: 'warn',
+        message: `[video-content] 렌더 전 대사 자동 축소 — history=${historyId}: ${dialogueFix.warnings.join('; ')}`,
+        workspace,
+        account_id: accountId,
+      });
+    }
     const evoPrompt = buildEvoLinkPrompt(conti, baseConditions);
     if (!isEvoLinkPromptWithinLimit(evoPrompt)) {
       throw new Error(`EvoLink 프롬프트 길이 초과 (${evoPrompt.length}자)`);
@@ -933,11 +1011,18 @@ export async function runVideoProduction(historyId: string): Promise<string> {
       .update({
         status: 'rendering',
         error_message: null,
-        conti_json: { ...contiJson, ...conti, evolinkPrompt: evoPrompt, evolinkTaskId: taskId },
+        conti_json: {
+          ...contiJson,
+          ...conti,
+          evolinkPrompt: evoPrompt,
+          evolinkTaskId: taskId,
+          videoRenderStartedAt: new Date().toISOString(),
+        },
       })
       .eq('id', historyId);
 
     let sourcePath: string;
+    let pollCompleted = false;
     try {
       await assertVideoContentNotCancelled(historyId);
       const videoUrl = await pollEvoLinkVideoUrl(taskId, {
@@ -945,6 +1030,7 @@ export async function runVideoProduction(historyId: string): Promise<string> {
           await assertVideoContentNotCancelled(historyId);
         },
       });
+      pollCompleted = true;
       await logOperation({
         level: 'info',
         message: `[video-content] EvoLink 완료 — 다운로드 시작 history=${historyId}`,
@@ -954,6 +1040,22 @@ export async function runVideoProduction(historyId: string): Promise<string> {
       sourcePath = await downloadEvoLinkVideoToPath({ videoUrl, historyId });
     } catch (dlErr) {
       const msg = (dlErr as Error).message;
+      if (dlErr instanceof VideoContentCancelledError) {
+        throw dlErr;
+      }
+      if (!pollCompleted) {
+        const reason = isEvoLinkPollTimeoutError(msg)
+          ? msg
+          : `EvoLink 영상 생성 실패 — 검토 대기로 복구: ${msg.slice(0, 200)}`;
+        await revertVideoRenderToContiReady(historyId, reason);
+        await logOperation({
+          level: 'warn',
+          message: `[video-content] ${reason} — history=${historyId}`,
+          workspace,
+          account_id: accountId,
+        });
+        throw dlErr;
+      }
       await supabase
         .from('huma_video_content_history')
         .update({ status: 'failed', error_message: `EvoLink 다운로드 실패: ${msg}` })

@@ -12,6 +12,7 @@ export * from './workspace-service-mention';
 export * from './blog-check-search';
 export * from './video-content';
 export * from './video-persona-text';
+export * from './watcher-log-filter';
 
 export type Workspace = import('./account').Workspace;
 

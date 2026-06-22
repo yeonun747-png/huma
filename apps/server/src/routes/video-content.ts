@@ -10,6 +10,7 @@ import {
   recoverStuckVideoRender,
   runSubtitleReburn,
   syncActiveVideoRenderStatuses,
+  revertStaleRenderingJobs,
 } from '../modules/video-content/pipeline.js';
 import { cancelVideoContentJob } from '../modules/video-content/conti-cancel.js';
 import { hasEvoLinkApiKey } from '../modules/video-content/evolink.js';
@@ -115,6 +116,7 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
     const { account_id, workspace } = request.query as { account_id?: string; workspace?: string };
 
     await syncActiveVideoRenderStatuses(allowed);
+    await revertStaleRenderingJobs(allowed);
     let query = supabase
       .from('huma_video_content_history')
       .select(
