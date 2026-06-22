@@ -1,6 +1,7 @@
 import type { VideoConti, VideoContiShot } from './types.js';
 import { asContiShots } from './types.js';
 import { parseDialogueSegments, type DialogueSegment } from './subtitle.js';
+import { buildMultiShotTimeline, getShotCountBounds, normalizeVideoDurationSec } from './shot-timing.js';
 
 /** 검증·프롬프트 — 권장 상한 (한국어 숏폼 발화) */
 export const DIALOGUE_MAX_CHARS_PER_SEC = 8;
@@ -84,6 +85,68 @@ export function maxDialogueTrimCharsForDuration(durationSec: number): number {
 
 export function totalDialogueBudgetForVideo(durationSec: number): number {
   return maxDialogueCharsForDuration(durationSec);
+}
+
+export function totalDialogueSpokenChars(conti: VideoConti): number {
+  return asContiShots(conti.shots).reduce(
+    (sum, shot) => sum + countDialogueSpokenChars(shot.dialogue ?? ''),
+    0,
+  );
+}
+
+export function isTotalDialogueOverVideoBudget(conti: VideoConti): boolean {
+  const budget = totalDialogueBudgetForVideo(conti.duration);
+  return totalDialogueSpokenChars(conti) > budget;
+}
+
+/** 확정 타임라인 기준 — 샷별 대사 글자 상한 안내 (3b 프롬프트·대사 맞춤용) */
+export function buildPerShotDialogueBudgetGuide(duration: number, shotCount?: number): string {
+  const total = normalizeVideoDurationSec(duration);
+  const count = shotCount ?? getShotCountBounds(total).min;
+  const timeline = buildMultiShotTimeline(total, count);
+  const lines = timeline.map((t) => {
+    const max = maxDialogueCharsForDuration(t.durationSec);
+    return `- 샷${t.shotNumber}: ${t.startSec}~${t.endSec}s (${t.durationSec}초) → dialogue 본문 최대 ${max}자`;
+  });
+  return (
+    `【대사 예산 — ${total}초 영상】한국어 발화 ${DIALOGUE_MAX_CHARS_PER_SEC}자/초(공백 제외). ` +
+    `전체 예산 약 ${totalDialogueBudgetForVideo(total)}자.\n` +
+    `1) 아래 startSec/endSec 타임라인을 따르고 2) 각 샷 dialogue는 해당 줄 최대 자수 이내로 작성.\n` +
+    `${lines.join('\n')}\n` +
+    `무대사 샷은 dialogue 비워도 됨. 한 샷에 A·B 두 대사는 가급적 피하고 샷을 나눈다.`
+  );
+}
+
+export function buildDialogueBudgetBlockForConti(conti: VideoConti): string {
+  const shots = asContiShots(conti.shots);
+  const total = normalizeVideoDurationSec(conti.duration);
+  const lines = shots.map((shot) => {
+    const dur = shot.endSec - shot.startSec;
+    const max = maxDialogueCharsForDuration(dur > 0 ? dur : 0);
+    const cur = countDialogueSpokenChars(shot.dialogue ?? '');
+    const over = cur > max ? ` ← 현재 ${cur}자 초과` : '';
+    return `샷${shot.shotNumber} (${shot.startSec}~${shot.endSec}s, ${dur}s): 최대 ${max}자${over}`;
+  });
+  return (
+    `영상 ${total}초 — 전체 대사 예산 ${totalDialogueBudgetForVideo(total)}자, 현재 ${totalDialogueSpokenChars(conti)}자\n` +
+    lines.join('\n')
+  );
+}
+
+export function findDialogueTooLongIssues(
+  conti: VideoConti,
+): Array<{ index: number; shotNumber: number; feedback: string }> {
+  return asContiShots(conti.shots)
+    .map((shot, index) => {
+      const issue = findDialogueTooLongIssue(shot, index);
+      if (!issue) return null;
+      return { index, shotNumber: shot.shotNumber ?? index + 1, feedback: issue.feedback };
+    })
+    .filter((x): x is NonNullable<typeof x> => x != null);
+}
+
+export function contiNeedsDialogueBudgetFit(conti: VideoConti): boolean {
+  return findDialogueTooLongIssues(conti).length > 0 || isTotalDialogueOverVideoBudget(conti);
 }
 
 export function isDialogueTooLongForShot(shot: VideoContiShot): boolean {
@@ -230,12 +293,11 @@ export function trimDialogueToFitShot(
 
 export function buildDialogueLengthRule(): string {
   return (
-    `각 샷 dialogue는 scenarioSummary 없이도 그 샷의 사건·정보가 전달되게 완결된 짧은 문장으로 쓴다. ` +
-    `인용부호 안 본문 기준 글자 수÷샷 시간이 ${DIALOGUE_MAX_CHARS_PER_SEC}를 넘으면 안 된다 ` +
-    `(1.5초 샷 최대 ${maxDialogueCharsForDuration(1.5)}자, 3초 샷 최대 ${maxDialogueCharsForDuration(3)}자, 5초 샷 최대 ${maxDialogueCharsForDuration(5)}자). ` +
-    '단어만 남기거나 "…"로 끊긴 불완전 대사 금지. setup·연운 경고·반전은 대사에 핵심 정보를 넣는다. ' +
-    '한 샷에 A·B 대사를 여러 줄 넣지 말고 샷을 나누거나 문장을 압축한다. ' +
-    '동작·표정 연기가 많은 샷은 더 짧게 쓸 수 있으나, 말이 필요한 샷은 의미가 통하는 최소 길이를 유지한다.'
+    `duration(초)가 먼저 확정되면 샷 startSec/endSec 타임라인을 배분하고, 각 샷 dialogue는 그 샷 초×${DIALOGUE_MAX_CHARS_PER_SEC}자(공백 제외) 이내로 쓴다. ` +
+    `(1.5초→${maxDialogueCharsForDuration(1.5)}자, 2.5초→${maxDialogueCharsForDuration(2.5)}자, 5초→${maxDialogueCharsForDuration(5)}자). ` +
+    'scenarioSummary 없이도 그 샷의 사건·정보가 전달되게 완결된 짧은 문장으로. ' +
+    '단어만 남기거나 "…"로 끊긴 불완전 대사 금지. setup·연운·반전 핵심은 유지하되 **같은 문구 전문 반복 금지** — 두 번째 화자는 짧게 참조. ' +
+    '한 샷에 A·B 대사를 여러 줄 넣지 말고 샷을 나눈다.'
   );
 }
 

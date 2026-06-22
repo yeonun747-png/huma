@@ -11,6 +11,9 @@ import {
   mergeShotTimingKeepDialogue,
   minShotDurationForDialogue,
   trimDialogueToFitShot,
+  buildPerShotDialogueBudgetGuide,
+  contiNeedsDialogueBudgetFit,
+  totalDialogueSpokenChars,
 } from './dialogue-timing.js';
 import { findRawShotQualityIssues, enforceDialogueShotsMinDuration } from './conti-validation.js';
 import type { VideoConti, VideoContiShot } from './types.js';
@@ -194,6 +197,36 @@ describe('enforceDialogueOnConti', () => {
     expect(adjusted).toBe(true);
     const dialogue = fixed.shots[0]!.dialogue ?? '';
     expect(countDialogueQuotedChars(dialogue)).toBeLessThanOrEqual(maxDialogueTrimCharsForDuration(3.5));
+  });
+});
+
+describe('per-shot dialogue budget', () => {
+  it('buildPerShotDialogueBudgetGuide lists shot durations and char caps', () => {
+    const guide = buildPerShotDialogueBudgetGuide(14, 5);
+    expect(guide).toContain('14초');
+    expect(guide).toContain('112자');
+    expect(guide).toContain('8자/초');
+    expect(guide).toContain('샷1');
+    expect(guide).toContain('최대 12자');
+  });
+
+  it('detects yeonun-style over-budget conti', () => {
+    const conti: VideoConti = {
+      characters: [],
+      location: '회의실',
+      lighting: '밝음',
+      timeOfDay: '낮',
+      cutType: 'multi_shot',
+      duration: 14,
+      scenarioSummary: '테스트',
+      fullText: '테스트',
+      shots: [
+        { shotNumber: 1, startSec: 0, endSec: 1.5, camera: '미디엄', action: 'A가 폰을 본다.', dialogue: 'A: "오늘 연운 앱에서 커리어 사주 봤는데요. 협력자와의 신뢰 문제 주의라고 했어요."' },
+        { shotNumber: 2, startSec: 1.5, endSec: 4, camera: '클로즈', action: 'A가 말한다.', dialogue: 'A: "구두 약속만 남으면 모래 위의 집처럼 무너질 수 있다고 해서요. 그래서 오늘 논의한 거 전부 문서로 남기고 싶은데, 체크리스트 같은 거 함께 만들어도 될까요?"' },
+      ],
+    };
+    expect(totalDialogueSpokenChars(conti)).toBeGreaterThan(112);
+    expect(contiNeedsDialogueBudgetFit(conti)).toBe(true);
   });
 });
 

@@ -2,6 +2,7 @@ import type { VideoConti, VideoContiShot } from './types.js';
 import { asContiShots } from './types.js';
 import {
   buildDialogueLengthRule,
+  buildPerShotDialogueBudgetGuide,
   findDialogueTooLongIssue,
   minShotDurationForDialogue,
   normalizeDialogueBody,
@@ -42,7 +43,10 @@ export {
   isDialogueTooLongForShot,
   buildDialogueLengthRule,
   buildDialogueTooLongFeedback,
+  buildPerShotDialogueBudgetGuide,
   findDialogueTooLongIssue,
+  findDialogueTooLongIssues,
+  contiNeedsDialogueBudgetFit,
   minShotDurationForDialogue,
   normalizeDialogueBody,
 } from './dialogue-timing.js';

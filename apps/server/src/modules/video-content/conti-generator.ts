@@ -19,6 +19,7 @@ import {
   buildYeonunFortuneDialogueRule,
   buildDialogueLengthRule,
   buildDialogueDistinctRule,
+  buildPerShotDialogueBudgetGuide,
   buildPunchlineClarityRule,
   buildSingleShotFoundationCutRule,
   buildMultiShotFoundationCutRule,
@@ -40,6 +41,7 @@ import {
   GENERIC_ACTION_NARRATIVE_FALLBACK_WARNING,
 } from './generic-action-fallback.js';
 import { applyRuleBasedShotRecovery } from './conti-recovery.js';
+import { fitContiDialogueToBudget } from './dialogue-fit.js';
 import { findRealNamesInShots, buildCharacterNameToLabelMap } from './character-labels.js';
 import {
   buildMetadataTagInstruction,
@@ -155,6 +157,7 @@ function buildMultiShotGuide(ctx: PromptContext): string {
 
   return `${baseGuide}
 ${buildShotCountPreferLowerGuide(conditions.duration)}
+${buildPerShotDialogueBudgetGuide(conditions.duration)}
 ${buildShotContentRule()}${yeonunFortuneBlock}
 ${punchlineDurationRule}
 shots 배열 길이는 ${getShotCountBounds(conditions.duration).min}~${getShotCountBounds(conditions.duration).max}개 — **가능하면 ${getShotCountBounds(conditions.duration).min}개(하한) 우선**. startSec/endSec 합 = ${conditions.duration}. 각 action ${SHOT_CONTENT_MIN_CHARS}자 이상, narrativeProse 사건을 action에 반영.
@@ -337,8 +340,8 @@ function buildShotsPrompt(ctx: PromptContext, foundation: ContiFoundation): stri
 
 ⚠️ 3b 최우선: 3a narrativeProse의 **모든 사건·발견·반응**을 샷 action에 구체적으로 반영한다.
 "행동과 반응이 이어지며", "상황을 소개한다", "여운 있게 마무리" 등 빈 filler action 금지.
-⚠️ 3b단계 — 위 3a 이야기를 그대로 유지하고 camera/action/dialogue JSON으로 **형식만** 분배한다.
-펀치라인·사건 순서·대사 **의미**를 새로 바꾸거나 약화하지 말 것.`
+⚠️ 3b단계 — 위 3a 이야기의 사건·펀치라인 **의미**는 유지하되, 아래 타임라인·샷별 대사 글자 예산에 맞게 camera/action/dialogue JSON으로 분배한다.
+3a에 긴 문장이 있어도 각 샷 dialogue는 해당 초×8자(공백 제외) 이내로 압축한다. 같은 운세 문구 전문 반복 금지.`
     : `1단계 설정 (변경 금지):
 ${JSON.stringify(foundation, null, 2)}`;
 
@@ -605,6 +608,18 @@ async function finalizeContiFromParts(
     contentWarnings.push('대사 길이에 맞게 샷 시간 자동 재배분');
   }
   conti = finalizeContiTimeline(conti, params.conditions.duration);
+
+  await reportStage(params, '대사 샷별 예산 맞춤');
+  const dialogueFit = await fitContiDialogueToBudget({
+    conti,
+    model: await getContiHaikuModel(),
+    workspace: params.workspace,
+  });
+  conti = dialogueFit.conti;
+  if (dialogueFit.adjusted) {
+    contentWarnings.push('대사를 샷별 러닝타임 예산(8자/초)에 맞게 압축');
+  }
+  contentWarnings.push(...dialogueFit.warnings);
 
   const punchCheck = validatePunchlineShotMinDuration(conti);
   if (!punchCheck.ok) {

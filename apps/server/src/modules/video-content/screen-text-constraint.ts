@@ -28,10 +28,11 @@ export function buildScreenTextRenderingRule(): string {
 export function buildYeonunFortuneDialogueRule(): string {
   return (
     '연운·운세 setup (Kling 한글 렌더 불가 — 필수):\n' +
-    '- 앱/폰에서 읽는 운세·경고 문구 전체(예: "윗집과 소음 갈등 주의")는 narrativeProse·scenarioSummary·action이 아니라 **해당 샷 dialogue**에 넣는다.\n' +
-    '- action 금지: "특정 문구에서 손가락을 멈춘다", "화면 글자가 보인다", "스크롤하다 문구에서 멈춘다".\n' +
-    '- action 허용: "스마트폰을 스크롤하며 코웃음 친다" 등 동작만.\n' +
-    '- dialogue 예: A: "윗집과 소음 갈등 주의라고? 웃기네, 빈 집인데." (❌ A: "빈 집인데." 만 — setup 문구 누락)'
+    '- 앱/폰에서 읽는 운세·경고 문구는 narrativeProse·action이 아니라 **dialogue**에 넣는다.\n' +
+    '- 경고 문구 **전문**은 전체 샷 중 **최초 setup 샷 1곳에만** 넣는다. 두 번째 화자 반응 샷은 "똑같은 경고 봤어요"처럼 **짧게 참조**하고 전문을 반복하지 않는다.\n' +
+    '- 각 샷 dialogue는 해당 샷 초×8자(공백 제외) 예산을 반드시 지킨다.\n' +
+    '- action 금지: "특정 문구에서 손가락을 멈춘다", "화면 글자가 보인다". action 허용: "스마트폰을 스크롤하며 코웃음 친다" 등 동작만.\n' +
+    '- dialogue 예: A: "협력자 신뢰 문제 주의래요. 모래 위 집이라던데요." (❌ B가 같은 문구 전문을 다시 읽음)'
   );
 }
 
