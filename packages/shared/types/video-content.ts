@@ -55,6 +55,8 @@ export interface HumaVideoContentHistory {
   /** EvoLink 원본 (자막 없음) — 서버 로컬 경로 */
   source_video_path?: string | null;
   error_message?: string | null;
+  /** conti_generating → 종료까지 경과 초 */
+  conti_generation_sec?: number | null;
   created_at: string;
 }
 

@@ -43,6 +43,12 @@ import {
   MAX_HUMOR_REGENERATION_ATTEMPTS,
   type SelfAssessedHumor,
 } from './humor-assessment.js';
+
+function contiGenerationSecSince(startedAtIso: string): number {
+  const t = new Date(startedAtIso).getTime();
+  if (Number.isNaN(t)) return 0;
+  return Math.max(0, Math.round((Date.now() - t) / 1000));
+}
 import type { GenerationConditions, VideoConti } from './types.js';
 
 const WEB_BASE = process.env.HUMA_WEB_URL?.trim() || 'http://localhost:3000';
@@ -479,11 +485,13 @@ export async function runContiGeneration(accountId: string): Promise<string> {
       used_product: plan.yeonunProduct?.slug ?? null,
       used_quiz_id: plan.quizContent?.quizExternalId ?? null,
     })
-    .select('id')
+    .select('id, created_at')
     .single();
 
   if (insertErr || !historyRow) throw new Error(insertErr?.message ?? '히스토리 생성 실패');
   const historyId = historyRow.id as string;
+  const contiStartedAt = String(historyRow.created_at);
+  const contiGenSec = () => contiGenerationSecSince(contiStartedAt);
 
   const logStage = async (stage: string) => {
     await logOperation({
@@ -546,6 +554,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
                 .update({
                   status: 'on_hold',
                   error_message: err.message.slice(0, 500),
+                  conti_generation_sec: contiGenSec(),
                 })
                 .eq('id', historyId);
               const holdLabel =
@@ -568,6 +577,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
                 .update({
                   status: 'failed',
                   error_message: err.message.slice(0, 500),
+                  conti_generation_sec: contiGenSec(),
                 })
                 .eq('id', historyId);
             }
@@ -642,6 +652,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
             scenario_summary: conti.scenarioSummary,
             punchline_idea: punchlineIdea,
             error_message: '유사도 기준 미통과 (3회)',
+            conti_generation_sec: contiGenSec(),
           })
           .eq('id', historyId);
 
@@ -672,6 +683,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
             conti_json: { ...conti, evolinkPrompt: evoPrompt, evolinkPromptLength: evoPrompt.length },
             embedding_vector: embedding,
             error_message: `프롬프트 길이 초과 (${evoPrompt.length}자 / 최대 ${EVOLINK_PROMPT_MAX_LENGTH}자)`,
+            conti_generation_sec: contiGenSec(),
           })
           .eq('id', historyId);
 
@@ -761,6 +773,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
               self_assessed_humor: selfAssessedHumor,
               retry_count_for_humor: retryCountForHumor,
               error_message: '유머 dull — 재생성 후에도 이해·펀치 전달 부족 (검토 또는 재생성 필요)',
+              conti_generation_sec: contiGenSec(),
             })
             .eq('id', historyId);
 
@@ -854,6 +867,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
           self_assessed_humor: selfAssessedHumor,
           retry_count_for_humor: retryCountForHumor,
           error_message: `유머 재생성 후 프롬프트 길이 초과 (${evoPrompt.length}자 / 최대 ${EVOLINK_PROMPT_MAX_LENGTH}자)`,
+          conti_generation_sec: contiGenSec(),
         })
         .eq('id', historyId);
 
@@ -888,6 +902,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
         retry_count_for_humor: retryCountForHumor,
         character_names: storedCharacterNames.length ? storedCharacterNames : null,
         error_message: null,
+        conti_generation_sec: contiGenSec(),
       })
       .eq('id', historyId);
 
@@ -945,7 +960,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
     if (msg !== '유사도 기준 미통과' && msg !== '프롬프트 길이 초과' && msg !== '유머 dull 보류') {
       await supabase
         .from('huma_video_content_history')
-        .update({ status: 'failed', error_message: msg.slice(0, 500) })
+        .update({ status: 'failed', error_message: msg.slice(0, 500), conti_generation_sec: contiGenSec() })
         .eq('id', historyId);
     }
     throw err;

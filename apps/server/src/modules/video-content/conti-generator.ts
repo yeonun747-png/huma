@@ -50,6 +50,13 @@ import {
   SHOT_CONTENT_MIN_CHARS,
   isGenericDefaultAction,
 } from './conti-validation.js';
+import {
+  applyGenericActionNarrativeFallback,
+  findGenericActionShotNumbers,
+  GENERIC_ACTION_NARRATIVE_FALLBACK_WARNING,
+  isUsableActionPatch,
+  narrativeHintForShots,
+} from './generic-action-fallback.js';
 import { findRealNamesInShots, buildCharacterNameToLabelMap } from './character-labels.js';
 import {
   buildMetadataTagInstruction,
@@ -455,14 +462,37 @@ function mergeShotPatches(conti: VideoConti, patches: VideoContiShot[]): VideoCo
   const shots = asContiShots(conti.shots).map((s, i) => {
     const patch = byNumber.get(s.shotNumber) ?? byNumber.get(i + 1);
     if (!patch) return s;
+    const prevAction = s.action;
+    const nextAction = patch.action?.trim();
+    const action =
+      nextAction && isUsableActionPatch(patch, prevAction) ? nextAction : prevAction;
     return {
       ...s,
       camera: patch.camera?.trim() || s.camera,
-      action: patch.action?.trim() || s.action,
+      action,
       dialogue: patch.dialogue?.trim() || s.dialogue,
     };
   });
   return { ...conti, shots };
+}
+
+function tryNarrativeGenericActionFallback(
+  ctx: PromptContext,
+  foundation: ContiFoundation,
+  conti: VideoConti,
+  warnings: string[],
+): VideoConti | null {
+  const fallback = applyGenericActionNarrativeFallback(conti, {
+    storyDraft: ctx.storyDraft,
+    scenarioSummary: foundation.scenarioSummary,
+  });
+  if (!fallback.replacedShotNumbers.length) return null;
+  const remaining = findGenericActionShotNumbers(fallback.conti);
+  if (remaining.length > 0) return null;
+  warnings.push(
+    `${GENERIC_ACTION_NARRATIVE_FALLBACK_WARNING} — 샷 ${fallback.replacedShotNumbers.join(', ')}`,
+  );
+  return fallback.conti;
 }
 
 async function generateStoryDraft(ctx: PromptContext, model: string): Promise<StoryDraft> {
@@ -638,10 +668,16 @@ async function recoverShotQualityIssues(
     if (genericIssues.length > 0) {
       const genericIndices = genericIssues.map((issue) => issue.index);
       const narrativeProse = ctx.storyDraft?.narrativeProse;
-      const genericFeedback = buildGenericActionBatchFeedback(
-        genericIndices.map((i) => i + 1),
-        narrativeProse,
-      );
+      const genericFeedback =
+        buildGenericActionBatchFeedback(
+          genericIndices.map((i) => i + 1),
+          narrativeProse,
+        ) +
+        narrativeHintForShots(
+          narrativeProse,
+          genericIndices.map((i) => i + 1),
+          asContiShots(current.shots).length,
+        );
 
       if (genericPatchAttempts < MAX_GENERIC_ACTION_PATCH_ATTEMPTS) {
         genericPatchAttempts += 1;
@@ -667,6 +703,12 @@ async function recoverShotQualityIssues(
         await reportStage(ctx, 'filler action 최종 보완 — 3a narrative 기준 일괄 패치');
         const finalFeedback = `${genericFeedback}\n각 샷 action은 narrativeProse 해당 구간을 **한 문장 이상** 구체 동작·표정으로 작성. filler 문구 재사용 금지.`;
         current = await patchShotIssues(ctx, foundation, current, genericIndices, finalFeedback, model);
+        continue;
+      }
+
+      const narrativeFallback = tryNarrativeGenericActionFallback(ctx, foundation, current, warnings);
+      if (narrativeFallback) {
+        current = narrativeFallback;
         continue;
       }
 
@@ -708,6 +750,11 @@ async function recoverShotQualityIssues(
         ...duplicates,
       ]),
     ];
+    const narrativeFallback = tryNarrativeGenericActionFallback(ctx, foundation, current, warnings);
+    if (narrativeFallback) {
+      current = narrativeFallback;
+      continue;
+    }
     applyDefaultToRawShots(current, fallbackIndices);
   }
 
@@ -865,6 +912,19 @@ async function finalizeContiFromParts(
   }
 
   const characterNames = extractCharacterNamesForStorage(conti, params.conditions.characterName);
+
+  if (findGenericActionShotNumbers(conti).length > 0) {
+    const lastFallback = applyGenericActionNarrativeFallback(conti, {
+      storyDraft: params.storyDraft,
+      scenarioSummary: foundation.scenarioSummary,
+    });
+    if (lastFallback.replacedShotNumbers.length) {
+      conti = lastFallback.conti;
+      contentWarnings.push(
+        `${GENERIC_ACTION_NARRATIVE_FALLBACK_WARNING} — 샷 ${lastFallback.replacedShotNumbers.join(', ')}`,
+      );
+    }
+  }
 
   assertNoGenericActions(conti);
 

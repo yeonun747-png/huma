@@ -16,6 +16,25 @@ export function listTotalPages(count: number, pageSize = VIDEO_CONTENT_LIST_PAGE
   return Math.max(1, Math.ceil(count / pageSize));
 }
 
+/** 경과 초 → "42초" / "3분 12초" / "1시간 5분" */
+export function formatElapsedDurationSec(totalSec: number): string {
+  const sec = Math.max(0, Math.floor(totalSec));
+  if (sec < 60) return `${sec}초`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  if (m < 60) return s > 0 ? `${m}분 ${s}초` : `${m}분`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return rm > 0 ? `${h}시간 ${rm}분` : `${h}시간`;
+}
+
+export function elapsedSecSince(iso: string | null | undefined, nowMs = Date.now()): number {
+  if (!iso) return 0;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return 0;
+  return Math.max(0, Math.floor((nowMs - t) / 1000));
+}
+
 export const VIDEO_CONTENT_TAB_LABEL: Record<VideoContentTab, string> = {
   review: '검토 대기',
   progress: '진행 중',

@@ -15,6 +15,8 @@ import {
   VIDEO_CONTENT_TAB_LABEL,
   countByVideoContentTab,
   filterByVideoContentTab,
+  formatElapsedDurationSec,
+  elapsedSecSince,
   isDeletableVideoContent,
   isVideoProgressStatus,
   listTotalPages,
@@ -77,8 +79,24 @@ function statusTone(status: string): 'ok' | 'warn' | 'err' | 'idle' {
   return 'warn';
 }
 
-function ProgressWait({ status }: { status: string }) {
+function useElapsedSec(sinceIso: string | null | undefined, active: boolean): number {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!sinceIso || !active) {
+      setElapsed(0);
+      return;
+    }
+    const tick = () => setElapsed(elapsedSecSince(sinceIso));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [sinceIso, active]);
+  return elapsed;
+}
+
+function ProgressWait({ status, createdAt }: { status: string; createdAt?: string }) {
   const isConti = status === 'conti_generating';
+  const elapsedSec = useElapsedSec(createdAt, isConti);
   return (
     <div className="py-12 text-center">
       <div className="mx-auto mb-4 h-1.5 max-w-[240px] overflow-hidden rounded-full bg-huma-bg3">
@@ -92,6 +110,11 @@ function ProgressWait({ status }: { status: string }) {
           ? 'Sonnet이 콘티를 작성 중입니다. 완료되면 「검토 대기」 탭으로 이동합니다.'
           : 'EvoLink 영상 제작·자막·캡션 생성 중입니다.'}
       </p>
+      {isConti && createdAt ? (
+        <p className="mt-3 font-mono text-[12px] font-semibold text-huma-acc">
+          콘티 작성 경과 {formatElapsedDurationSec(elapsedSec)}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -258,6 +281,13 @@ function CompletedDetail({
   );
 }
 
+function contiDurationLabel(item: HumaVideoContentHistory): string | null {
+  if (item.conti_generation_sec != null && item.conti_generation_sec > 0) {
+    return formatElapsedDurationSec(item.conti_generation_sec);
+  }
+  return null;
+}
+
 function DetailPanel({
   item,
   detail,
@@ -287,6 +317,7 @@ function DetailPanel({
 }) {
   const full = detail ?? item;
   const conti = parseContiPreview(full.conti_json);
+  const contiDuration = contiDurationLabel(full);
 
   if (loadingDetail && !detail?.conti_json) {
     return <p className="text-[12px] text-huma-t3">콘티 불러오는 중…</p>;
@@ -309,7 +340,7 @@ function DetailPanel({
   }
 
   if (item.status === 'conti_generating' || item.status === 'rendering' || item.status === 'generating') {
-    return <ProgressWait status={item.status} />;
+    return <ProgressWait status={item.status} createdAt={item.created_at} />;
   }
 
   const deletable = isDeletableVideoContent(item.status);
@@ -319,6 +350,9 @@ function DetailPanel({
       <div className="space-y-3">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <p className="text-[12px] text-huma-err">{item.error_message ?? '생성 실패'}</p>
+          {contiDuration ? (
+            <span className="font-mono text-[10px] text-huma-t3">콘티 작성 {contiDuration}</span>
+          ) : null}
           {deletable ? (
             <button
               type="button"
@@ -344,6 +378,7 @@ function DetailPanel({
             {item.relationship_axis} · {item.emotion_curve} · {item.hook_type} · {item.duration}s
             {item.similarity_score != null ? ` · 유사도 ${Number(item.similarity_score).toFixed(3)}` : ''}
             {item.retry_count_for_humor ? ` · 유머 재시도 ${item.retry_count_for_humor}회` : ''}
+            {contiDuration ? ` · 콘티 작성 ${contiDuration}` : ''}
           </div>
           <VideoContentHumorBadge humor={item.self_assessed_humor} className="mt-1" />
         </div>
