@@ -47,6 +47,10 @@ import {
   ContiGenerationBudgetExceeded,
   createContiGenerationBudget,
 } from './conti-budget.js';
+import {
+  assertVideoContentNotCancelled,
+  VideoContentCancelledError,
+} from './conti-cancel.js';
 
 function contiGenerationSecSince(startedAtIso: string): number {
   const t = new Date(startedAtIso).getTime();
@@ -497,6 +501,10 @@ export async function runContiGeneration(accountId: string): Promise<string> {
   const contiStartedAt = String(historyRow.created_at);
   const contiGenSec = () => contiGenerationSecSince(contiStartedAt);
   const budget = createContiGenerationBudget(new Date(contiStartedAt).getTime());
+  const assertContiProgress = async () => {
+    budget.assert();
+    await assertVideoContentNotCancelled(historyId);
+  };
 
   const logStage = async (stage: string) => {
     await logOperation({
@@ -532,7 +540,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
     let feedback: string | undefined;
 
     for (let attempt = 1; attempt <= MAX_REGENERATION_ATTEMPTS; attempt++) {
-      budget.assert();
+      await assertContiProgress();
       await logOperation({
         level: 'info',
         message: `[video-content] 콘티 LLM 시도 ${attempt}/${MAX_REGENERATION_ATTEMPTS} — cut=${baseConditions.cutType} ${baseConditions.duration}초`,
@@ -663,7 +671,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
       break;
     }
 
-    budget.assert();
+    await assertContiProgress();
 
     let evoPrompt = '';
 
@@ -722,7 +730,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
       });
     }
 
-    budget.assert();
+    await assertContiProgress();
     await logOperation({
       level: 'info',
       message: `[video-content] 유머 평가 — history=${historyId}`,
@@ -749,7 +757,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
       });
     }
 
-    budget.assert();
+    await assertContiProgress();
 
     const storedCharacterNames = extractCharacterNamesForStorage(conti!, baseConditions.characterName);
 
@@ -813,10 +821,12 @@ export async function runContiGeneration(accountId: string): Promise<string> {
         ? err.stack.split('\n').slice(1, 4).join(' | ')
         : '';
     const isContiValidation = err instanceof ContiValidationError;
+    const isCancelled = err instanceof VideoContentCancelledError;
     const isExpectedVideoContentOutcome =
       isContiValidation ||
       msg === '프롬프트 길이 초과' ||
-      err instanceof ContiGenerationBudgetExceeded;
+      err instanceof ContiGenerationBudgetExceeded ||
+      isCancelled;
     const outcomeLabel =
       isContiValidation && err.holdOnFailure
         ? '보류'
@@ -830,6 +840,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
       account_id: accountId,
     });
     if (
+      !isCancelled &&
       msg !== '프롬프트 길이 초과' &&
       !(err instanceof ContiGenerationBudgetExceeded)
     ) {
@@ -928,7 +939,12 @@ export async function runVideoProduction(historyId: string): Promise<string> {
 
     let sourcePath: string;
     try {
-      const videoUrl = await pollEvoLinkVideoUrl(taskId);
+      await assertVideoContentNotCancelled(historyId);
+      const videoUrl = await pollEvoLinkVideoUrl(taskId, {
+        onPoll: async () => {
+          await assertVideoContentNotCancelled(historyId);
+        },
+      });
       await logOperation({
         level: 'info',
         message: `[video-content] EvoLink 완료 — 다운로드 시작 history=${historyId}`,
@@ -965,6 +981,9 @@ export async function runVideoProduction(historyId: string): Promise<string> {
     return historyId;
   } catch (err) {
     const msg = (err as Error).message;
+    if (err instanceof VideoContentCancelledError) {
+      throw err;
+    }
     if (!msg.includes('EvoLink')) {
       await supabase
         .from('huma_video_content_history')

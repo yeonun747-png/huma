@@ -102,13 +102,17 @@ function ProgressWait({
   status,
   createdAt,
   stageLabel,
+  stopping,
+  onCancel,
 }: {
   status: string;
   createdAt?: string;
   stageLabel?: string | null;
+  stopping?: boolean;
+  onCancel?: () => void;
 }) {
   const isConti = status === 'conti_generating';
-  const elapsedSec = useElapsedSec(createdAt, isConti);
+  const elapsedSec = useElapsedSec(createdAt, true);
   const defaultStage =
     status === 'conti_generating'
       ? '콘티 파이프라인 준비 중…'
@@ -116,6 +120,7 @@ function ProgressWait({
         ? 'EvoLink 영상 제작 중…'
         : null;
   const currentStage = stageLabel?.trim() || defaultStage;
+  const elapsedLabel = isConti ? '콘티 작성 경과' : '작업 경과';
   return (
     <div className="py-12 text-center">
       <div className="mx-auto mb-4 h-1.5 max-w-[240px] overflow-hidden rounded-full bg-huma-bg3">
@@ -129,13 +134,23 @@ function ProgressWait({
           ? 'Sonnet이 콘티를 작성 중입니다. 완료되면 「검토 대기」 탭으로 이동합니다.'
           : 'EvoLink 영상 제작·자막·캡션 생성 중입니다.'}
       </p>
-      {isConti && createdAt ? (
+      {createdAt ? (
         <p className="mt-3 font-mono text-[12px] font-semibold text-huma-acc">
-          콘티 작성 경과 {formatElapsedDurationSec(elapsedSec)}
+          {elapsedLabel} {formatElapsedDurationSec(elapsedSec)}
         </p>
       ) : null}
       {currentStage ? (
         <p className="mt-2 px-4 font-mono text-[11px] leading-relaxed text-huma-t2">{currentStage}</p>
+      ) : null}
+      {onCancel ? (
+        <button
+          type="button"
+          className="btn-ghost btn-sm mt-5 border border-huma-warn/40 text-huma-warn hover:bg-huma-warn/10"
+          disabled={stopping}
+          onClick={onCancel}
+        >
+          {stopping ? '중지 중…' : '작업 중지'}
+        </button>
       ) : null}
     </div>
   );
@@ -324,6 +339,8 @@ function DetailPanel({
   onReburn,
   onRefresh,
   progressStage,
+  stopping,
+  onCancel,
 }: {
   item: HumaVideoContentHistory;
   detail: HumaVideoContentHistory | null;
@@ -332,12 +349,14 @@ function DetailPanel({
   rendering: boolean;
   deleting: boolean;
   reburning: boolean;
+  stopping: boolean;
   videoRefreshKey: number;
   onRender: () => void;
   onDelete: () => void;
   onReburn: () => void;
   onRefresh: () => void;
   progressStage?: string | null;
+  onCancel?: () => void;
 }) {
   const full = detail ?? item;
   const conti = parseContiPreview(full.conti_json);
@@ -364,7 +383,15 @@ function DetailPanel({
   }
 
   if (item.status === 'conti_generating' || item.status === 'rendering' || item.status === 'generating') {
-    return <ProgressWait status={item.status} createdAt={item.created_at} stageLabel={progressStage} />;
+    return (
+      <ProgressWait
+        status={item.status}
+        createdAt={item.created_at}
+        stageLabel={progressStage}
+        stopping={stopping}
+        onCancel={onCancel}
+      />
+    );
   }
 
   const deletable = isDeletableVideoContent(item.status);
@@ -463,6 +490,7 @@ export function VideoContentView() {
   const [videoRefreshKey, setVideoRefreshKey] = useState(0);
   const [storageRefreshToken, setStorageRefreshToken] = useState(0);
   const [deleting, setDeleting] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [progressStageById, setProgressStageById] = useState<Record<string, string>>({});
   const selectedStatusRef = useRef<string | null>(null);
   const hadProgressRef = useRef(false);
@@ -699,6 +727,36 @@ export function VideoContentView() {
     }
   };
 
+  const handleCancel = async () => {
+    if (!selectedId || !selectedItem) return;
+    if (!isVideoProgressStatus(selectedItem.status)) return;
+    const name = videoContentDisplayName(selectedItem.account_id, accounts);
+    const label = VIDEO_CONTENT_STATUS_LABEL[selectedItem.status] ?? selectedItem.status;
+    if (
+      !(await appConfirm(
+        `${name} · ${label}\n\n진행 중인 작업을 중지할까요?\n서버에 남아 있는 작업은 곧 멈추고, 「실패·보류」 탭으로 이동합니다.`,
+        { title: '작업 중지', destructive: true, confirmLabel: '중지' },
+      ))
+    ) {
+      return;
+    }
+    setStopping(true);
+    try {
+      await api.cancelVideoContent(selectedId);
+      setProgressStageById((prev) => {
+        const next = { ...prev };
+        delete next[selectedId];
+        return next;
+      });
+      await load();
+      setActiveTab('failed');
+    } catch (e) {
+      await appAlert(e instanceof Error ? e.message : '작업 중지 실패');
+    } finally {
+      setStopping(false);
+    }
+  };
+
   const handleRender = async () => {
     if (!selectedId) return;
     if (!(await appConfirm('검토한 콘티로 숏폼 영상을 제작합니다. 수 분 소요될 수 있습니다.'))) return;
@@ -930,11 +988,13 @@ export function VideoContentView() {
                 rendering={rendering}
                 deleting={deleting}
                 reburning={reburning}
+                stopping={stopping}
                 videoRefreshKey={videoRefreshKey}
                 onRender={() => void handleRender()}
                 onDelete={() => void handleDelete()}
                 onReburn={() => void handleReburn()}
                 onRefresh={() => void refreshSelectedDetail()}
+                onCancel={() => void handleCancel()}
                 progressStage={selectedId ? progressStageById[selectedId] : null}
               />
             ) : (

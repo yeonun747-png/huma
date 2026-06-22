@@ -414,6 +414,10 @@ export const api = {
     request<{ ok: boolean; message?: string }>(`/api/video-content/${historyId}/render-video`, {
       method: 'POST',
     }),
+  cancelVideoContent: (historyId: string) =>
+    request<{ ok: boolean; previousStatus?: string }>(`/api/video-content/${historyId}/cancel`, {
+      method: 'POST',
+    }),
   reburnVideoSubtitles: (historyId: string) =>
     request<{ ok: boolean; message?: string }>(`/api/video-content/${historyId}/reburn-subtitles`, {
       method: 'POST',

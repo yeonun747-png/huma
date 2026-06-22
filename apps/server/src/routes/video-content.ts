@@ -11,6 +11,7 @@ import {
   runSubtitleReburn,
   syncActiveVideoRenderStatuses,
 } from '../modules/video-content/pipeline.js';
+import { cancelVideoContentJob } from '../modules/video-content/conti-cancel.js';
 import { hasEvoLinkApiKey } from '../modules/video-content/evolink.js';
 import { videoContentFinalPath, videoContentSourcePath, resolveStoredVideoPath } from '../modules/video-content/paths.js';
 import { ensureVideoThumbnail, removeVideoContentThumb } from '../modules/video-content/thumbnail.js';
@@ -238,6 +239,22 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
       `attachment; filename="huma-video-${isSource ? 'source-' : ''}${id}.mp4"`,
     );
     return reply.send(createReadStream(filePath));
+  });
+
+  app.post('/api/video-content/:id/cancel', { preHandler: authMiddleware }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const allowed = getWorkspaceFilter(request);
+    const { data: existing } = await supabase
+      .from('huma_video_content_history')
+      .select('workspace')
+      .eq('id', id)
+      .maybeSingle();
+    if (!existing) return reply.code(404).send({ error: '없음' });
+    if (!allowed.includes(existing.workspace)) return reply.code(403).send({ error: '권한 없음' });
+
+    const result = await cancelVideoContentJob(id);
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
+    return { ok: true, previousStatus: result.previousStatus };
   });
 
   app.delete('/api/video-content/:id', { preHandler: authMiddleware }, async (request, reply) => {

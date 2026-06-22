@@ -251,7 +251,7 @@ export async function getEvoLinkTask(taskId: string): Promise<TaskDetail> {
 
 export async function pollEvoLinkVideoUrl(
   taskId: string,
-  opts?: { maxWaitMs?: number; intervalMs?: number; onPoll?: (task: TaskDetail) => void },
+  opts?: { maxWaitMs?: number; intervalMs?: number; onPoll?: (task: TaskDetail) => void | Promise<void> },
 ): Promise<string> {
   const maxWaitMs = opts?.maxWaitMs ?? 20 * 60 * 1000;
   const intervalMs = opts?.intervalMs ?? 5000;
@@ -259,7 +259,7 @@ export async function pollEvoLinkVideoUrl(
 
   while (Date.now() < deadline) {
     const task = await getEvoLinkTask(taskId);
-    opts?.onPoll?.(task);
+    await opts?.onPoll?.(task);
     const status = task.status;
     if (isTaskCompleted(status)) {
       const url = extractVideoUrlFromTask(task);
