@@ -93,7 +93,7 @@ export function YeonunPublishAccountsStrip({ refreshToken = 0, onDone }: YeonunP
       {accounts.map((row, index) => {
         const label = row.account_label ?? row.account_id?.slice(0, 8) ?? `연운${index + 1}`;
         const done = row.today_completed;
-        const target = row.auto_publish_planned_count ?? row.daily_target || '—';
+        const target = row.auto_publish_planned_count ?? (row.daily_target || '—');
         const enabled = row.auto_publish_enabled ?? false;
         const busy = togglingId === row.account_id;
         const skippedHint =
