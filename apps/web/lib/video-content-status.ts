@@ -2,7 +2,7 @@ import type { HumaVideoContentHistory } from '@huma/shared';
 
 export type VideoContentTab = 'review' | 'progress' | 'done' | 'failed';
 
-export const VIDEO_CONTENT_LIST_PAGE_SIZE = 10;
+export const VIDEO_CONTENT_LIST_PAGE_SIZE = 8;
 
 export function paginateList<T>(items: T[], page: number, pageSize = VIDEO_CONTENT_LIST_PAGE_SIZE): T[] {
   if (pageSize <= 0 || !items.length) return [];

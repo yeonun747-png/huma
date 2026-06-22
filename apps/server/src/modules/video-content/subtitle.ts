@@ -3,12 +3,73 @@ import { mkdir, writeFile } from 'fs/promises';
 import { join } from 'path';
 import type { SubtitleStyle, VideoConti, VideoContiShot } from './types.js';
 
-/** 화면 자막용 — A: "대사" 접두사·따옴표 제거 */
+/** ASS PrimaryColour — &H00BBGGRR */
+const ASS_COLOR_A = '&H00FFFFFF';
+const ASS_COLOR_B = '&H0000FFFF';
+
+export type DialogueSegment = { speaker: 'A' | 'B' | null; text: string };
+
+function normalizeDialogueQuotes(dialogue: string): string {
+  return dialogue.trim().replace(/[「『]/g, '"').replace(/[」』]/g, '"');
+}
+
+function cleanQuotedFragment(text: string): string {
+  return text.trim().replace(/^["']+|["']+$/g, '').trim();
+}
+
+/** A: / B: 구간별 파싱 — 한 샷에 복수 화자 대사 가능 */
+export function parseDialogueSegments(dialogue: string): DialogueSegment[] {
+  const normalized = normalizeDialogueQuotes(dialogue);
+  if (!normalized) return [];
+
+  const chunks = normalized.split(/(?=[AB]\s*:)/i).filter((c) => c.trim());
+  const segments: DialogueSegment[] = [];
+
+  for (const chunk of chunks) {
+    const m = chunk.match(/^([AB])\s*:\s*(.*)$/is);
+    if (m) {
+      const text = cleanQuotedFragment(m[2]!);
+      if (text) segments.push({ speaker: m[1]!.toUpperCase() as 'A' | 'B', text });
+      continue;
+    }
+    const text = cleanQuotedFragment(chunk);
+    if (text) segments.push({ speaker: null, text });
+  }
+
+  return segments;
+}
+
+/** 화면 자막용 — 모든 A:/B: 라벨·따옴표 제거 */
 export function stripSpeakerLabel(dialogue: string): string {
-  let text = dialogue.trim().replace(/[「」『』]/g, '');
-  text = text.replace(/^[A-Z]\s*:\s*/i, '');
-  text = text.replace(/^["'「]|["'」]$/g, '').trim();
-  return text;
+  const segments = parseDialogueSegments(dialogue);
+  if (segments.length) return segments.map((s) => s.text).join(' ').trim();
+  return cleanQuotedFragment(normalizeDialogueQuotes(dialogue).replace(/(?:^|\s)[AB]\s*:\s*/gi, ' '));
+}
+
+function escapeAssText(text: string): string {
+  return text.replace(/\\/g, '\\\\').replace(/{/g, '\\{').replace(/}/g, '\\}');
+}
+
+export function formatAssDialogueText(dialogue: string): {
+  text: string;
+  style: 'Default' | 'SpeakerA' | 'SpeakerB';
+} {
+  const segments = parseDialogueSegments(dialogue);
+  if (!segments.length) return { text: '', style: 'Default' };
+
+  if (segments.length === 1) {
+    const seg = segments[0]!;
+    if (seg.speaker === 'B') return { text: escapeAssText(seg.text), style: 'SpeakerB' };
+    if (seg.speaker === 'A') return { text: escapeAssText(seg.text), style: 'SpeakerA' };
+    return { text: escapeAssText(seg.text), style: 'Default' };
+  }
+
+  const parts = segments.map((seg, i) => {
+    const prefix = i > 0 ? ' ' : '';
+    const color = seg.speaker === 'B' ? ASS_COLOR_B : ASS_COLOR_A;
+    return `${prefix}{\\c${color}&}${escapeAssText(seg.text)}`;
+  });
+  return { text: parts.join(''), style: 'Default' };
 }
 
 function positionToAss(style: SubtitleStyle): { alignment: number; marginV: number } {
@@ -102,7 +163,9 @@ PlayResY: 1280
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${fontName},42,&H00FFFFFF,&H000000FF,&H00000000,${box.backColour},-1,0,0,0,100,100,0,0,${box.borderStyle},${box.outline},${box.shadow},${pos.alignment},20,20,${pos.marginV},1
+Style: Default,${fontName},42,${ASS_COLOR_A},&H000000FF,&H00000000,${box.backColour},-1,0,0,0,100,100,0,0,${box.borderStyle},${box.outline},${box.shadow},${pos.alignment},20,20,${pos.marginV},1
+Style: SpeakerA,${fontName},42,${ASS_COLOR_A},&H000000FF,&H00000000,${box.backColour},-1,0,0,0,100,100,0,0,${box.borderStyle},${box.outline},${box.shadow},${pos.alignment},20,20,${pos.marginV},1
+Style: SpeakerB,${fontName},42,${ASS_COLOR_B},&H000000FF,&H00000000,${box.backColour},-1,0,0,0,100,100,0,0,${box.borderStyle},${box.outline},${box.shadow},${pos.alignment},20,20,${pos.marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -120,11 +183,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     const window = subtitleWindow(shot, style, totalDuration, nextStart);
     if (!window) continue;
 
-    const text = stripSpeakerLabel(shot.dialogue!).replace(/\n/g, '\\N');
+    const { text, style } = formatAssDialogueText(shot.dialogue!);
     if (!text) continue;
 
     lines.push(
-      `Dialogue: 0,${secToAssTime(window.startSec)},${secToAssTime(window.endSec)},Default,,0,0,0,,${text}`,
+      `Dialogue: 0,${secToAssTime(window.startSec)},${secToAssTime(window.endSec)},${style},,0,0,0,,${text.replace(/\n/g, '\\N')}`,
     );
   }
 

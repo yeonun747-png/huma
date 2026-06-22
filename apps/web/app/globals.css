@@ -113,6 +113,30 @@
     @apply rounded-lg border border-huma-bdr bg-huma-bg2 p-3 transition-all duration-200 hover:border-huma-acc hover:shadow-glow;
   }
 
+  /* SSD 보관 파일 그리드 — 카드 아래 여백에 스크롤바 */
+  .storage-file-grid-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--acc) 55%, transparent) transparent;
+  }
+
+  .storage-file-grid-scroll::-webkit-scrollbar {
+    height: 5px;
+  }
+
+  .storage-file-grid-scroll::-webkit-scrollbar-track {
+    margin-top: 4px;
+    background: transparent;
+  }
+
+  .storage-file-grid-scroll::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--acc) 55%, transparent);
+    border-radius: 99px;
+  }
+
+  .storage-file-grid-scroll::-webkit-scrollbar-thumb:hover {
+    background: var(--acc);
+  }
+
   .stat-label {
     @apply font-mono text-[9.5px] uppercase tracking-wider text-huma-t3;
   }

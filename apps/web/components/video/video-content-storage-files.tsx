@@ -1,8 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { formatStorageBytes, formatVideoDurationSec, type VideoContentStorageFile } from '@/lib/video-content-storage';
+import {
+  resolveStorageGridLayout,
+  STORAGE_SCROLLBAR_GUTTER_PX,
+  STORAGE_THUMB_WIDTH_PX,
+  storageGridHeightPx,
+} from './video-content-storage-layout';
 
 export function VideoContentPlaybackModal({
   file,
@@ -84,36 +90,6 @@ export function VideoContentPlaybackModal({
   );
 }
 
-const BASE_THUMB_WIDTH_PX = 96;
-const COMPACT_THUMB_WIDTH_PX = 48;
-const COMPACT_FILE_THRESHOLD = 10;
-const DETAIL_BAR_HEIGHT_PX = 22;
-const GRID_ROW_GAP_PX = 8;
-
-function thumbHeightPx(widthPx: number): number {
-  return Math.round(widthPx * (16 / 9));
-}
-
-function storageGridHeightPx(thumbWidthPx: number, rowCount: 1 | 2): number {
-  const cardHeight = thumbHeightPx(thumbWidthPx) + DETAIL_BAR_HEIGHT_PX;
-  if (rowCount === 1) return cardHeight;
-  return cardHeight * 2 + GRID_ROW_GAP_PX;
-}
-
-function resolveThumbLayout(fileCount: number) {
-  const compact = fileCount > COMPACT_FILE_THRESHOLD;
-  const rowCount: 1 | 2 = compact ? 2 : 1;
-  const thumbWidthPx = compact ? COMPACT_THUMB_WIDTH_PX : BASE_THUMB_WIDTH_PX;
-  return {
-    compact,
-    rowCount,
-    thumbWidthPx,
-    sectionHeightPx: compact
-      ? storageGridHeightPx(BASE_THUMB_WIDTH_PX, 2)
-      : storageGridHeightPx(thumbWidthPx, rowCount),
-  };
-}
-
 function StorageThumbnail({
   historyId,
   variant,
@@ -121,7 +97,6 @@ function StorageThumbnail({
   accountName,
   typeLabel,
   sizeLabel,
-  compact,
   onClick,
 }: {
   historyId: string;
@@ -130,7 +105,6 @@ function StorageThumbnail({
   accountName: string;
   typeLabel: string;
   sizeLabel: string;
-  compact?: boolean;
   onClick: () => void;
 }) {
   const [url, setUrl] = useState<string | null>(null);
@@ -173,20 +147,12 @@ function StorageThumbnail({
           {durationLabel}
         </span>
       ) : null}
-      <div
-        className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-1.5 pb-1.5 ${
-          compact ? 'pt-4' : 'pt-8'
-        }`}
-      >
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-1.5 pb-1.5 pt-8">
         <p className="truncate text-[9px] font-semibold leading-tight text-white">
           {accountName} · {typeLabel} · {sizeLabel}
         </p>
       </div>
-      <span
-        className={`absolute inset-0 z-[1] flex items-center justify-center bg-black/0 text-white opacity-0 transition group-hover:bg-black/30 group-hover:opacity-100 ${
-          compact ? 'text-[14px]' : 'text-[24px]'
-        }`}
-      >
+      <span className="absolute inset-0 z-[1] flex items-center justify-center bg-black/0 text-[24px] text-white opacity-0 transition group-hover:bg-black/30 group-hover:opacity-100">
         ▶
       </span>
     </button>
@@ -204,6 +170,23 @@ export function VideoContentStorageFileGrid({
   onPlay: (file: VideoContentStorageFile) => void;
   onOpenJob: (historyId: string) => void;
 }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [layout, setLayout] = useState(() => resolveStorageGridLayout(0, files.length));
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const update = () => {
+      setLayout(resolveStorageGridLayout(el.clientWidth, files.length));
+    };
+
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [files.length]);
+
   if (!files.length) {
     return (
       <p className="rounded border border-dashed border-huma-bdr py-8 text-center text-[11px] text-huma-t3">
@@ -212,16 +195,23 @@ export function VideoContentStorageFileGrid({
     );
   }
 
-  const { compact, rowCount, thumbWidthPx, sectionHeightPx } = resolveThumbLayout(files.length);
+  const thumbWidthPx = STORAGE_THUMB_WIDTH_PX;
+  const { rowCount, needsScroll } = layout;
+  const gridHeightPx = storageGridHeightPx(thumbWidthPx, rowCount);
+  const scrollPaddingBottom = needsScroll ? STORAGE_SCROLLBAR_GUTTER_PX : 0;
 
   return (
     <div
-      className="overflow-x-auto overflow-y-hidden pb-1 [scrollbar-width:thin]"
-      style={{ height: sectionHeightPx, maxHeight: sectionHeightPx }}
+      ref={scrollRef}
+      className={`storage-file-grid-scroll overflow-y-hidden ${needsScroll ? 'overflow-x-auto' : 'overflow-x-hidden'}`}
+      style={{
+        minHeight: gridHeightPx + scrollPaddingBottom,
+        paddingBottom: scrollPaddingBottom,
+      }}
     >
       <div
         className={`grid w-max grid-flow-col gap-x-2 gap-y-2 ${rowCount === 2 ? 'grid-rows-2' : 'grid-rows-1'}`}
-        style={{ gridAutoColumns: `${thumbWidthPx}px` }}
+        style={{ gridAutoColumns: `${thumbWidthPx}px`, height: gridHeightPx }}
       >
         {files.map((file) => (
           <div
@@ -236,14 +226,11 @@ export function VideoContentStorageFileGrid({
               accountName={accountLabel(file.account_id)}
               typeLabel={file.label}
               sizeLabel={formatStorageBytes(file.bytes)}
-              compact={compact}
               onClick={() => onPlay(file)}
             />
             <button
               type="button"
-              className={`w-full shrink-0 border-t border-huma-bdr bg-huma-bg3 text-huma-t3 hover:bg-huma-bg2 hover:text-huma-acc ${
-                compact ? 'py-0.5 text-[8px]' : 'py-1 text-[9px]'
-              }`}
+              className="w-full shrink-0 border-t border-huma-bdr bg-huma-bg3 py-1 text-[9px] text-huma-t3 hover:bg-huma-bg2 hover:text-huma-acc"
               onClick={() => onOpenJob(file.historyId)}
             >
               작업 상세 →
