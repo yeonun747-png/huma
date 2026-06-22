@@ -170,7 +170,11 @@ export const api = {
       account_id?: string;
       account_label?: string;
       today_completed: number;
+      today_skipped?: number;
       daily_target: number;
+      auto_publish_enabled?: boolean;
+      auto_publish_planned_count?: number | null;
+      auto_publish_next_slot_at?: string | null;
       weekday_base: number;
       remaining: number;
       hard_cap: number;
@@ -187,7 +191,11 @@ export const api = {
       account_id?: string;
       account_label?: string;
       today_completed: number;
+      today_skipped?: number;
       daily_target: number;
+      auto_publish_enabled?: boolean;
+      auto_publish_planned_count?: number | null;
+      auto_publish_next_slot_at?: string | null;
       weekday_base: number;
       remaining: number;
       hard_cap: number;
@@ -199,9 +207,47 @@ export const api = {
       weekend_ratio?: number;
     }> }>(`/api/jobs/auto-publish/accounts?workspace=${encodeURIComponent(workspace)}`),
   runAutoPublish: (workspace: string, accountId?: string) =>
-    request<HumaJob & { _meta?: Record<string, unknown> }>('/api/jobs/auto-publish', {
+    request<{
+      ok: boolean;
+      enabled: boolean;
+      planned_count?: number;
+      remaining_today?: number;
+      next_slot_at?: string | null;
+      _meta?: {
+        daily_status?: {
+          workspace: string;
+          account_id?: string;
+          account_label?: string;
+          today_completed: number;
+          today_skipped?: number;
+          daily_target: number;
+          auto_publish_enabled?: boolean;
+          auto_publish_planned_count?: number | null;
+        };
+        accounts_status?: unknown[];
+      };
+    }>('/api/jobs/auto-publish', {
       method: 'POST',
       body: JSON.stringify({ workspace, ...(accountId ? { account_id: accountId } : {}) }),
+    }),
+  toggleAutoPublish: (workspace: string, enabled: boolean, accountId?: string) =>
+    request<{
+      ok: boolean;
+      enabled: boolean;
+      planned_count?: number;
+      remaining_today?: number;
+      next_slot_at?: string | null;
+      _meta?: {
+        daily_status?: Record<string, unknown>;
+        accounts_status?: unknown[];
+      };
+    }>('/api/jobs/auto-publish', {
+      method: 'POST',
+      body: JSON.stringify({
+        workspace,
+        enabled,
+        ...(accountId ? { account_id: accountId } : {}),
+      }),
     }),
   uploadJobSlotImage: (body: { workspace: string; slot_index: number; image_data: string }) =>
     request<{ url: string }>('/api/jobs/upload-image', {
@@ -584,6 +630,22 @@ export const api = {
   getSetting: (key: string) => request<Record<string, unknown>>(`/api/settings/${key}`),
   updateSetting: (key: string, value: unknown) =>
     request(`/api/settings/${key}`, { method: 'PUT', body: JSON.stringify(value) }),
+  getPostingWarmupStatus: () =>
+    request<{
+      accounts: Array<{
+        slot_label: string;
+        workspace: string;
+        proxy_port: number;
+        account_id: string | null;
+        warmup_day: number;
+        phase_label: string;
+        stage: string;
+        weekday_cap: number | null;
+        today_target: number | null;
+        is_complete: boolean;
+        missing: boolean;
+      }>;
+    }>('/api/posting/warmup-status'),
   platformAccounts: () => request<Array<Record<string, unknown>>>('/api/platform-accounts'),
   createPlatformAccount: (body: Record<string, unknown>) =>
     request('/api/platform-accounts', { method: 'POST', body: JSON.stringify(body) }),

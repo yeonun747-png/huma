@@ -23,6 +23,15 @@ import { isNaverBlogOnlyMode } from '../../../lib/activity-control.js';
 import { resolveFeaturedBlogImageUrl } from '../../../lib/blog-image-placement.js';
 import { planNextPostBlogScheduledAt } from '../../../lib/posting-slot-planner.js';
 import { assertAccountPostingQuota, assertAccountPostingQuotaBeforeGeneration } from '../../../lib/posting-daily-status.js';
+import {
+  assertPostingSimilarityPasses,
+  isPostingSimilaritySkipError,
+  loadPostingSimilarityCorpus,
+  POSTING_SIMILARITY_THRESHOLD,
+  type PostingSimilaritySkipKind,
+} from '../../../lib/posting-content-similarity.js';
+import { postingSlotByWorkspace } from '../../../lib/dongle-slots.js';
+import { notifyTelegram } from '../../watcher/telegram.js';
 
 export type ContentType = 'A' | 'B';
 
@@ -45,6 +54,57 @@ export interface ContentOrchestratorInput {
   scheduled_at: string;
   repeat_rule?: string | null;
   parentJobId?: string;
+}
+
+export interface ContentOrchestratorResult {
+  jobsCreated: number;
+  primaryJobId: string | null;
+  video_queue_id?: string;
+  dry_run?: true;
+  generated?: ContentGenerationOutput;
+  image_url?: string;
+  similaritySkipped?: true;
+  skipReason?: string;
+  skipKind?: PostingSimilaritySkipKind;
+}
+
+function skipKindLabel(kind: PostingSimilaritySkipKind): string {
+  if (kind === 'title') return 'SEO 제목 유사도';
+  if (kind === 'corpus_load') return '유사도 코퍼스 로드 실패';
+  return '본문 유사도';
+}
+
+async function notifyPostingSimilaritySkip(params: {
+  workspace: string;
+  accountLabel?: string | null;
+  operatorTitle: string;
+  skipKind: PostingSimilaritySkipKind;
+  titleSimilarity: number;
+  bodySimilarity: number;
+  regenerations: number;
+}): Promise<void> {
+  const accountLine = params.accountLabel?.trim() ? `계정: ${params.accountLabel.trim()}\n` : '';
+  const kindLabel = skipKindLabel(params.skipKind);
+  const scoreLine =
+    params.skipKind === 'title'
+      ? `제목 유사도: ${params.titleSimilarity.toFixed(3)} > ${POSTING_SIMILARITY_THRESHOLD}`
+      : params.skipKind === 'body'
+        ? `본문 유사도: ${params.bodySimilarity.toFixed(3)} > ${POSTING_SIMILARITY_THRESHOLD}`
+        : '과거 발행 이력을 불러오지 못했습니다';
+  const retryLine =
+    params.skipKind === 'corpus_load'
+      ? '발행 중단 — 다음 스케줄 대기'
+      : `재생성 ${params.regenerations}회 후에도 기준 미달 — 다음 스케줄 대기`;
+
+  await notifyTelegram(
+    `⏭️ 포스팅 발행 스킵 (${kindLabel})\n` +
+      `워크스페이스: ${params.workspace}\n` +
+      accountLine +
+      `주제: ${params.operatorTitle.trim()}\n` +
+      `${scoreLine}\n` +
+      retryLine,
+    params.workspace,
+  );
 }
 
 async function pickPlatformAccount(workspace: string, platform: string): Promise<string | null> {
@@ -385,7 +445,7 @@ async function persistAutoDecision(
     .eq('id', parentJobId);
 }
 
-export async function runContentOrchestrator(input: ContentOrchestratorInput) {
+export async function runContentOrchestrator(input: ContentOrchestratorInput): Promise<ContentOrchestratorResult> {
   let contentType = input.content_type;
   let videoModel = input.video_model ?? 'kling-3.0';
   let schedule = input.platform_schedule;
@@ -396,6 +456,9 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
     input.workspace,
     input.parentJobId,
   );
+  if (postingSlotByWorkspace(input.workspace) && !postingAccountForQuota?.id && !dryRun) {
+    throw new Error('포스팅 계정이 없어 유사도 검사·발행을 진행할 수 없습니다');
+  }
   if (postingAccountForQuota?.id && !dryRun) {
     await assertAccountPostingQuotaBeforeGeneration(input.workspace, postingAccountForQuota.id);
   }
@@ -403,8 +466,10 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
   const shouldAutoDecide = input.content_type_auto !== false && !contentType;
   const needsSchedule = autoScheduled && !schedule && !dryRun;
   const needsVideoModel = !input.video_model;
+  const deferScheduleVideoDecision =
+    !shouldAutoDecide && !dryRun && (needsSchedule || needsVideoModel);
 
-  if (shouldAutoDecide || needsSchedule || needsVideoModel) {
+  if (shouldAutoDecide) {
     const urlSummary = await fetchAndSummarizeUrl(input.sourceUrl.trim());
     const decision = await autoDecideWithCredits({
       title: input.title.trim(),
@@ -412,7 +477,23 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
       workspace: input.workspace,
     });
 
-    if (shouldAutoDecide) contentType = decision.content_type;
+    contentType = decision.content_type;
+    if (needsVideoModel) videoModel = decision.video_model;
+    if (needsSchedule) schedule = decision.schedule;
+
+    await persistAutoDecision(input.parentJobId, {
+      content_type: contentType ?? decision.content_type,
+      video_model: videoModel,
+      platform_schedule: schedule ?? decision.schedule,
+    });
+  } else if (!deferScheduleVideoDecision && (needsSchedule || needsVideoModel)) {
+    const urlSummary = await fetchAndSummarizeUrl(input.sourceUrl.trim());
+    const decision = await autoDecideWithCredits({
+      title: input.title.trim(),
+      urlSummary,
+      workspace: input.workspace,
+    });
+
     if (needsVideoModel) videoModel = decision.video_model;
     if (needsSchedule) schedule = decision.schedule;
 
@@ -424,7 +505,7 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
   }
 
   const resolvedType = contentType ?? 'A';
-  const baseScheduledAt =
+  let baseScheduledAt =
     autoScheduled && schedule?.naver_blog && !dryRun
       ? resolveNaverBlogScheduledAt(schedule.naver_blog, input.scheduled_at)
       : input.scheduled_at;
@@ -448,17 +529,83 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
   const hasUploadedImages = uploadedImages.length > 0;
 
   const claudeStart = Date.now();
-  const generated = await generateAllContent(
-    {
+  let generated: ContentGenerationOutput;
+  try {
+    generated = await generateAllContent(
+      {
+        title: input.title.trim(),
+        sourceUrl: input.sourceUrl.trim(),
+        synopsis: input.synopsis?.trim(),
+        workspace: input.workspace,
+        content_type: resolvedType,
+        blogWritingPersona,
+      },
+      { accountId: postingAccount?.id ?? undefined },
+    );
+  } catch (err) {
+    if (!isPostingSimilaritySkipError(err)) throw err;
+
+    const kindLabel = skipKindLabel(err.skipKind);
+    previewSteps[0] = {
+      ...previewSteps[0]!,
+      status: 'err',
+      ms: Date.now() - claudeStart,
+      detail: `${kindLabel} — 발행 스킵`,
+    };
+    if (input.parentJobId) {
+      const patch = dryRun ? patchJobPreviewProgress : patchJobGenerationProgress;
+      await patch(input.parentJobId, previewSteps, {
+        similarity_skipped: true,
+        similarity_skip_kind: err.skipKind,
+        similarity_title_score: err.check.titleSimilarity,
+        similarity_body_score: err.check.bodySimilarity,
+        similarity_regenerations: err.regenerations,
+      });
+    }
+
+    if (!dryRun) {
+      await notifyPostingSimilaritySkip({
+        workspace: input.workspace,
+        accountLabel: postingAccount?.label,
+        operatorTitle: input.title,
+        skipKind: err.skipKind,
+        titleSimilarity: err.check.titleSimilarity,
+        bodySimilarity: err.check.bodySimilarity,
+        regenerations: err.regenerations,
+      });
+    }
+
+    return {
+      jobsCreated: 0,
+      primaryJobId: null,
+      similaritySkipped: true,
+      skipReason: err.message,
+      skipKind: err.skipKind,
+    };
+  }
+
+  if (deferScheduleVideoDecision) {
+    const urlSummary = await fetchAndSummarizeUrl(input.sourceUrl.trim());
+    const decision = await autoDecideWithCredits({
       title: input.title.trim(),
-      sourceUrl: input.sourceUrl.trim(),
-      synopsis: input.synopsis?.trim(),
+      urlSummary,
       workspace: input.workspace,
+    });
+
+    if (needsVideoModel) videoModel = decision.video_model;
+    if (needsSchedule) schedule = decision.schedule;
+
+    await persistAutoDecision(input.parentJobId, {
       content_type: resolvedType,
-      blogWritingPersona,
-    },
-    { accountId: postingAccount?.id ?? undefined },
-  );
+      video_model: videoModel,
+      platform_schedule: schedule ?? decision.schedule,
+    });
+
+    baseScheduledAt =
+      autoScheduled && schedule?.naver_blog && !dryRun
+        ? resolveNaverBlogScheduledAt(schedule.naver_blog, input.scheduled_at)
+        : input.scheduled_at;
+  }
 
   previewSteps[0] = {
     ...previewSteps[0]!,
@@ -678,6 +825,10 @@ export async function promoteDryRunToPublish(parentJobId: string) {
     candidate: generated.seo_title,
   });
   const generatedWithSeo = { ...generated, seo_title };
+  if (postingAccount?.id) {
+    const corpus = await loadPostingSimilarityCorpus(postingAccount.id);
+    assertPostingSimilarityPasses(generatedWithSeo.seo_title, generatedWithSeo.blog_post, corpus);
+  }
   const schedule = extractPlatformSchedule(ps);
   const contentType = (job.content_type ?? 'A') as ContentType;
   const autoScheduled = job.auto_scheduled !== false;

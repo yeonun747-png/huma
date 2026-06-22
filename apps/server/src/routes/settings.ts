@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { authMiddleware, supabase } from '../middleware/auth.js';
 import { updateSetting } from '../lib/settings.js';
 import { setActivityControl, type ActivityControlState } from '../lib/activity-control.js';
+import { fetchPostingWarmupStatus } from '../lib/posting-warmup-status.js';
 
 // 전역 운영에 영향을 주는 민감 설정 키 — 슈퍼관리자만 변경 가능
 const SUPER_ONLY_SETTING_KEYS = new Set([
@@ -36,5 +37,14 @@ export async function registerSettingsRoutes(app: FastifyInstance) {
   app.get('/api/settings', { preHandler: authMiddleware }, async () => {
     const { data } = await supabase.from('huma_settings').select('*');
     return data ?? [];
+  });
+
+  app.get('/api/posting/warmup-status', { preHandler: authMiddleware }, async (_request, reply) => {
+    try {
+      const accounts = await fetchPostingWarmupStatus();
+      return { accounts };
+    } catch (err) {
+      return reply.code(500).send({ error: (err as Error).message ?? '워밍업 현황 조회 실패' });
+    }
   });
 }

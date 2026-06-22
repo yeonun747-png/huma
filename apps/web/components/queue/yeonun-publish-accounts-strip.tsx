@@ -3,129 +3,139 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { appAlert } from '@/lib/app-dialog';
-import type { AutoPublishStatus } from './auto-publish-button';
+import {
+  formatAutoPublishButtonLabel,
+  getInitialYeonunAccounts,
+  isAutoPublishButtonDisabled,
+  resolveAutoPublishButtonClass,
+  setYeonunAccountsCache,
+  type AutoPublishStatus,
+} from './auto-publish-button';
 
 interface YeonunPublishAccountsStripProps {
   refreshToken?: number;
   onDone?: () => void;
 }
 
-function barPct(done: number, target: number): number {
-  if (target <= 0) return 0;
-  return Math.min(100, Math.round((done / target) * 100));
-}
-
 export function YeonunPublishAccountsStrip({ refreshToken = 0, onDone }: YeonunPublishAccountsStripProps) {
-  const [accounts, setAccounts] = useState<AutoPublishStatus[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [publishingId, setPublishingId] = useState<string | null>(null);
+  const [accounts, setAccounts] = useState<AutoPublishStatus[]>(getInitialYeonunAccounts);
+  const [syncing, setSyncing] = useState(false);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(() =>
+    getInitialYeonunAccounts().some((a) => Boolean(a.account_id)),
+  );
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setSyncing(true);
     try {
       const res = await api.getAutoPublishAccountsStatus('yeonun');
-      setAccounts(res.accounts);
+      const rows = res.accounts;
+      if (rows.length) {
+        setYeonunAccountsCache(rows);
+        setAccounts(rows);
+      }
+      setLoaded(true);
     } catch {
-      setAccounts([]);
+      if (!getInitialYeonunAccounts().some((a) => a.account_id)) {
+        setLoaded(true);
+      }
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setSyncing(false);
     }
   }, []);
 
   useEffect(() => {
-    void load();
+    const silent = getInitialYeonunAccounts().some((a) => Boolean(a.account_id));
+    void load({ silent });
   }, [load, refreshToken]);
 
-  const handlePublish = async (row: AutoPublishStatus) => {
+  const handleToggle = async (row: AutoPublishStatus) => {
     const accountId = row.account_id;
-    if (!accountId || !row.can_publish || publishingId) return;
+    if (!accountId || togglingId) return;
 
-    setPublishingId(accountId);
+    const enabled = row.auto_publish_enabled ?? false;
+
+    setTogglingId(accountId);
     try {
-      const job = await api.runAutoPublish('yeonun', accountId);
-      const meta = job._meta as { auto_pick_label?: string; daily_status?: AutoPublishStatus } | undefined;
-      const label = meta?.auto_pick_label ?? job.title ?? '자동 발행';
-      const daily = meta?.daily_status;
-      const progress = daily ? `${daily.today_completed}/${daily.daily_target}` : '';
-      const who = daily?.account_label ?? row.account_label ?? '';
-      await appAlert(
-        `${label}\n포스팅 큐 등록 완료 (${who})${progress ? ` · 오늘 발행 완료 ${progress}건` : ''}`,
-      );
-      await load();
+      const res = await api.toggleAutoPublish('yeonun', !enabled, accountId);
+      const rows = res._meta?.accounts_status as AutoPublishStatus[] | undefined;
+      if (rows?.length) {
+        setYeonunAccountsCache(rows);
+        setAccounts(rows);
+      } else {
+        await load();
+      }
+      const who = row.account_label ?? '';
+      if (res.enabled) {
+        await appAlert(
+          `${who} 자동발행 ON\n오늘 계획 ${res.planned_count ?? '—'}건 · 남은 ${res.remaining_today ?? '—'}건`,
+        );
+      } else {
+        await appAlert(`${who} 자동발행 OFF`);
+      }
       onDone?.();
     } catch (e) {
-      await appAlert(e instanceof Error ? e.message : '자동 발행 실패');
+      await appAlert(e instanceof Error ? e.message : '자동발행 변경 실패');
       await load();
     } finally {
-      setPublishingId(null);
+      setTogglingId(null);
     }
   };
 
-  if (loading && !accounts.length) {
+  if (loaded && !accounts.some((a) => a.account_id)) {
     return (
-      <div className="w-full min-w-[240px] font-mono text-[10px] text-huma-t3">계정 현황 불러오는 중…</div>
-    );
-  }
-
-  if (!accounts.length) {
-    return (
-      <div className="w-full min-w-[240px] font-mono text-[10px] text-huma-t3">연운 포스팅 계정 없음</div>
+      <span className="font-mono text-[10px] text-huma-t3">연운 포스팅 계정 없음</span>
     );
   }
 
   return (
-    <div
-      className="grid w-full min-w-[280px] grid-cols-3 rounded border border-huma-bdr bg-huma-bg2/80 px-1 py-1 font-mono text-[10px]"
-      aria-label="연운 계정별 자동 발행"
-    >
-      {accounts.map((row, i) => {
-        const label = row.account_label ?? row.account_id?.slice(0, 8) ?? '계정';
-        const pct = barPct(row.today_completed, row.daily_target);
-        const full = row.remaining <= 0;
-        const busy = publishingId === row.account_id;
-        const disabled = loading || busy || !row.can_publish || publishingId != null;
+    <div className="flex flex-wrap items-center gap-3" aria-label="연운 계정별 자동 발행">
+      {accounts.map((row, index) => {
+        const label = row.account_label ?? row.account_id?.slice(0, 8) ?? `연운${index + 1}`;
+        const done = row.today_completed;
+        const target = row.auto_publish_planned_count ?? row.daily_target || '—';
+        const enabled = row.auto_publish_enabled ?? false;
+        const busy = togglingId === row.account_id;
+        const skippedHint =
+          row.today_skipped && row.today_skipped > 0 ? ` · 스킵 ${row.today_skipped}` : '';
         const inFlightHint = row.in_flight ? ` · 파이프라인 ${row.in_flight}건` : '';
+        const nextHint = row.auto_publish_next_slot_at
+          ? ` · 다음 ${new Date(row.auto_publish_next_slot_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`
+          : enabled
+            ? ' · 대기'
+            : '';
 
         return (
           <div
             key={row.account_id ?? label}
-            className={`flex min-w-0 flex-col gap-1 overflow-hidden px-1 ${i > 0 ? 'border-l border-huma-bdr' : ''}`}
+            className={`flex shrink-0 items-center gap-1 rounded-md border border-transparent bg-huma-bg2/80 py-0.5 pl-2 pr-0.5 ${
+              enabled ? 'ring-1 ring-emerald-500/30' : ''
+            }`}
           >
-            <div className="flex min-w-0 items-center gap-1">
-              <span
-                className={`w-9 shrink-0 truncate ${full ? 'text-huma-t3' : 'text-huma-t'}`}
-                title={label}
-              >
-                {label}
-              </span>
-              <span
-                className={`inline-flex w-10 shrink-0 justify-end tabular-nums ${full ? 'text-huma-ok' : 'text-huma-t2'}`}
-              >
-                {row.today_completed}/{row.daily_target}
-                <span className={full ? '' : 'invisible'} aria-hidden={!full}>
-                  ✓
-                </span>
-              </span>
-              <div className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-huma-bg3">
-                <div
-                  className={`h-full rounded-full ${full ? 'bg-huma-ok/70' : 'bg-huma-acc/80'}`}
-                  style={{ width: `${pct}%` }}
-                />
-              </div>
-            </div>
+            <span
+              className={`shrink-0 font-mono text-[10px] font-bold tracking-tight ${
+                enabled ? 'text-emerald-400' : 'text-huma-t3'
+              }`}
+              title={label}
+            >
+              {label}
+            </span>
             <button
               type="button"
-              className="btn-primary btn-sm w-full px-1 py-0.5 text-[10px] leading-tight disabled:opacity-40"
-              disabled={disabled}
+              className={resolveAutoPublishButtonClass(enabled)}
+              disabled={isAutoPublishButtonDisabled({ busy })}
               title={
-                row.block_message ??
-                (row.can_publish
-                  ? `${label} 자동 발행 · 평일 4~5건 · 주말 40~50%${inFlightHint}`
-                  : `${label} 발행 불가${inFlightHint}`)
+                syncing
+                  ? '발행 현황 불러오는 중…'
+                  : enabled
+                    ? `${label} 자동발행 ON${nextHint}${inFlightHint}${skippedHint}`
+                    : `클릭하여 ${label} 자동발행 ON${inFlightHint}${
+                        row.block_message ? ` (${row.block_message})` : ''
+                      }${skippedHint}`
               }
-              onClick={() => void handlePublish(row)}
+              onClick={() => void handleToggle(row)}
             >
-              {busy ? '등록 중…' : '⚡ 발행'}
+              {formatAutoPublishButtonLabel(done, target, { publishing: busy, enabled })}
             </button>
           </div>
         );

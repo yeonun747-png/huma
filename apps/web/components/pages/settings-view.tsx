@@ -22,6 +22,7 @@ import {
 
 import { MGrid, MPanel } from '@/components/mockup/primitives';
 import { useRegisterPageAction } from '@/components/dashboard/page-action-context';
+import { PostingWarmupStatusPanel, type PostingWarmupStatusRow } from '@/components/settings/posting-warmup-status-panel';
 
 
 
@@ -208,15 +209,19 @@ export function SettingsView() {
     posting_enabled: true,
   });
   const [postingWarmup, setPostingWarmup] = useState<PostingWarmupSettings>(DEFAULT_POSTING_WARMUP);
+  const [postingWarmupStatus, setPostingWarmupStatus] = useState<PostingWarmupStatusRow[]>([]);
+  const [postingWarmupStatusLoading, setPostingWarmupStatusLoading] = useState(true);
 
 
 
   const load = useCallback(() => {
+    setPostingWarmupStatusLoading(true);
 
     Promise.all([
       api.getSetting('app_settings').catch(() => ({})),
       api.getSetting('activity_control').catch(() => ({ crank_enabled: true, posting_enabled: true })),
-    ]).then(([a, act]) => {
+      api.getPostingWarmupStatus().catch(() => ({ accounts: [] as PostingWarmupStatusRow[] })),
+    ]).then(([a, act, warmupRes]) => {
 
       const appSettings = a as Record<string, unknown>;
 
@@ -244,7 +249,9 @@ export function SettingsView() {
         crank_enabled: actRow.crank_enabled !== false,
         posting_enabled: actRow.posting_enabled !== false,
       });
-
+      setPostingWarmupStatus(warmupRes.accounts ?? []);
+    }).finally(() => {
+      setPostingWarmupStatusLoading(false);
     });
 
   }, []);
@@ -308,6 +315,7 @@ export function SettingsView() {
             value={activity.posting_enabled}
             onChange={(v) => patchActivity('posting_enabled', v)}
           />
+          <PostingWarmupStatusPanel rows={postingWarmupStatus} loading={postingWarmupStatusLoading} />
         </MPanel>
 
         <MPanel title="API 연결">

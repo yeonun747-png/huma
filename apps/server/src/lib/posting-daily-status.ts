@@ -17,6 +17,7 @@ import { listActivePananaCharacters } from '../modules/video-content/panana-char
 import { listYeonunProducts } from '../modules/video-content/yeonun-product-picker.js';
 
 import { getPostingReservedToday } from './posting-quota-reserve.js';
+import { countTodaySimilaritySkipped } from './posting-content-similarity.js';
 
 
 
@@ -48,6 +49,9 @@ export interface AutoPublishStatus {
 
   today_completed: number;
 
+  /** 오늘 유사도 스킵된 content_full 건수 */
+  today_skipped: number;
+
   daily_target: number;
 
   weekday_base: number;
@@ -71,6 +75,15 @@ export interface AutoPublishStatus {
   warmup_cap?: number;
 
   in_flight?: number;
+
+  /** DB 자동발행 ON/OFF */
+  auto_publish_enabled?: boolean;
+
+  /** 당일 고정 계획 건수 (켜는 날 확정) */
+  auto_publish_planned_count?: number | null;
+
+  /** 다음 content_full 자동 등록 예정 */
+  auto_publish_next_slot_at?: string | null;
 
 }
 
@@ -242,7 +255,7 @@ async function buildAccountPublishStatus(
 
     .from('huma_accounts')
 
-    .select('warmup_day')
+    .select('warmup_day, auto_publish_enabled, auto_publish_planned_count, auto_publish_next_slot_at')
 
     .eq('id', account.id)
 
@@ -254,6 +267,8 @@ async function buildAccountPublishStatus(
 
   const today_completed = await countTodayPostBlogCompleted(account.id);
 
+  const today_skipped = await countTodaySimilaritySkipped(account.id, kstTodayStartIso());
+
   const pipeline_jobs = await countInFlightPostingPipeline(account.id);
 
   const reserved_slots = await getPostingReservedToday(account.id);
@@ -262,7 +277,7 @@ async function buildAccountPublishStatus(
 
   const daily_target = targetInfo.target;
 
-  const remaining = Math.max(0, daily_target - today_completed - in_flight);
+  const remaining = Math.max(0, daily_target - today_completed - today_skipped - in_flight);
 
 
 
@@ -275,6 +290,8 @@ async function buildAccountPublishStatus(
     account_label: account.label,
 
     today_completed,
+
+    today_skipped,
 
     daily_target,
 
@@ -295,6 +312,12 @@ async function buildAccountPublishStatus(
     warmup_cap: targetInfo.warmup_cap,
 
     in_flight,
+
+    auto_publish_enabled: Boolean(accRow?.auto_publish_enabled),
+
+    auto_publish_planned_count: (accRow?.auto_publish_planned_count as number | null) ?? null,
+
+    auto_publish_next_slot_at: (accRow?.auto_publish_next_slot_at as string | null) ?? null,
 
   };
 
@@ -390,7 +413,7 @@ async function buildAccountPublishStatus(
 
           ? `이 계정 파이프라인 처리 중 (${in_flight}건) · 목표 ${daily_target}건`
 
-          : `이 계정 오늘 목표 도달 (${today_completed}/${daily_target}건)`,
+          : `이 계정 오늘 목표 도달 (${today_completed}/${daily_target}건${today_skipped > 0 ? ` · 스킵 ${today_skipped}건` : ''})`,
 
     };
 
@@ -430,7 +453,15 @@ export async function getAutoPublishStatus(
 
       today_completed: 0,
 
+      today_skipped: 0,
+
       daily_target: 0,
+
+      auto_publish_enabled: false,
+
+      auto_publish_planned_count: null,
+
+      auto_publish_next_slot_at: null,
 
       weekday_base: 4,
 
@@ -465,9 +496,8 @@ export async function getAutoPublishButtonStatus(workspace: string): Promise<Aut
   const accounts = await listPostingAccounts(workspace);
 
   if (accounts.length <= 1) {
-
-    return getAutoPublishStatus(workspace, accounts[0]?.id);
-
+    const picked = await pickPostingAccount(workspace, { advance: false });
+    return getAutoPublishStatus(workspace, picked?.id ?? accounts[0]?.id);
   }
 
 
@@ -483,13 +513,14 @@ export async function getAutoPublishButtonStatus(workspace: string): Promise<Aut
   const primary = all.find((s) => s.account_id === next?.id) ?? all[0]!;
 
   const anyCan = all.some((s) => s.can_publish);
+  const anyAutoOn = all.some((s) => s.auto_publish_enabled);
 
-  if (!anyCan) return primary;
+  if (!anyCan && !anyAutoOn) return primary;
 
-  if (primary.can_publish) return primary;
+  if (primary.can_publish || primary.auto_publish_enabled) return primary;
 
-  return { ...primary, can_publish: true };
-
+  const fallback = all.find((s) => s.can_publish || s.auto_publish_enabled);
+  return fallback ?? primary;
 }
 
 
@@ -534,14 +565,15 @@ export async function assertAccountPostingQuota(
 
 
 
-/** 파이프라인+예약이 일일 목표를 초과하는지 (실행 중 job 포함) */
+/** 파이프라인+예약+스킵이 일일 목표를 초과하는지 (실행 중 job 포함) */
 export function isPostingQuotaOvercommitted(
   todayCompleted: number,
   pipelineJobs: number,
   reservedSlots: number,
   dailyTarget: number,
+  todaySkipped = 0,
 ): boolean {
-  return todayCompleted + pipelineJobs + reservedSlots > dailyTarget;
+  return todayCompleted + pipelineJobs + reservedSlots + todaySkipped > dailyTarget;
 }
 
 
@@ -592,7 +624,15 @@ export async function assertAccountPostingQuotaBeforeGeneration(
 
 
 
-  if (isPostingQuotaOvercommitted(status.today_completed, pipeline_jobs, reserved_slots, status.daily_target)) {
+  if (
+    isPostingQuotaOvercommitted(
+      status.today_completed,
+      pipeline_jobs,
+      reserved_slots,
+      status.daily_target,
+      status.today_skipped,
+    )
+  ) {
 
     throw new Error(
 

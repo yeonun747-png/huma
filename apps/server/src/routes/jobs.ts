@@ -17,10 +17,11 @@ import { runContentPreview } from '../modules/claude/content-preview.js';
 import {
   fetchAutoPublishStatus,
   fetchAutoPublishAccountsStatus,
-  runAutoPublish,
+  toggleAutoPublish,
 } from '../modules/content/auto-publish.js';
 import { promoteDryRunToPublish } from '../modules/queue/jobs/content-orchestrator.js';
 import { kstTodayStartIso } from '../lib/posting-daily-status.js';
+import { resolvePostingAccount } from '../lib/posting-accounts.js';
 import { assertCafeNewPostAccount, assertCafeReplyAccount } from '../lib/cafe-accounts.js';
 import { assertHumaJobAdvanceAllowed, assertHumaJobRunnable } from '../lib/account-guards.js';
 import { assertManualSocialCrankAllowed } from '../lib/crank-guard.js';
@@ -347,7 +348,7 @@ export async function registerJobRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/jobs/auto-publish', { preHandler: authMiddleware }, async (request, reply) => {
-    const body = request.body as { workspace?: string; account_id?: string };
+    const body = request.body as { workspace?: string; account_id?: string; enabled?: boolean };
     const allowedWorkspaces = getWorkspaceFilter(request);
 
     if (!body.workspace || !allowedWorkspaces.includes(body.workspace)) {
@@ -355,19 +356,42 @@ export async function registerJobRoutes(app: FastifyInstance) {
     }
 
     try {
-      const result = await runAutoPublish(body.workspace, body.account_id);
+      const accountId =
+        body.account_id?.trim() ??
+        (body.workspace === 'yeonun' ? undefined : (await resolvePostingAccount(body.workspace))?.id);
+      if (!accountId) {
+        return reply.code(400).send({ error: '연운 자동발행은 account_id가 필요합니다' });
+      }
+
+      const { data: row } = await supabase
+        .from('huma_accounts')
+        .select('auto_publish_enabled')
+        .eq('id', accountId)
+        .maybeSingle();
+
+      const nextEnabled = typeof body.enabled === 'boolean' ? body.enabled : !row?.auto_publish_enabled;
+      const result = await toggleAutoPublish(body.workspace, accountId, nextEnabled);
+
       return {
-        ...result.job,
+        ok: true,
+        enabled: result.enabled,
+        planned_count: result.planned_count,
+        remaining_today: result.remaining_today,
+        next_slot_at: result.next_slot_at,
         _meta: {
-          auto_picked: result.auto_picked,
-          auto_pick_label: result.auto_pick_label,
           daily_status: result.status,
           accounts_status: result.accounts_status,
         },
       };
     } catch (err) {
       const msg = (err as Error).message ?? '자동 발행 실패';
-      if (msg.includes('한도') || msg.includes('OFF') || msg.includes('야간') || msg.includes('캐시')) {
+      if (
+        msg.includes('한도') ||
+        msg.includes('OFF') ||
+        msg.includes('야간') ||
+        msg.includes('캐시') ||
+        msg.includes('불가')
+      ) {
         return reply.code(429).send({ error: msg });
       }
       return reply.code(500).send({ error: msg });

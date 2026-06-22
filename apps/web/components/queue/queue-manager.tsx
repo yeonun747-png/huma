@@ -499,14 +499,6 @@ export function QueueManager() {
     load();
   };
 
-  const legend = (
-    <span className="flex items-center gap-2 font-mono text-[10px] text-huma-t3">
-      <span className="text-[#c0506e]">● 연운</span>
-      <span className="text-[#5b7fff]">● 퀴즈</span>
-      <span className="text-[#00d4ff]">● 파나나</span>
-    </span>
-  );
-
   return (
     <div className="animate-fadeIn">
       <p className="mb-3 text-[12px] leading-relaxed text-huma-t3">
@@ -584,11 +576,10 @@ export function QueueManager() {
       <MPanel
         title="포스팅 큐"
         action={
-          <div className="flex items-start gap-2">
-            {legend}
+          <div className="flex flex-wrap items-center justify-end gap-3">
             <AutoPublishPanel workspace={workspace} onDone={load} accountsRefresh={accountsTick} />
             <button type="button" className="btn-ghost btn-sm shrink-0 px-2 py-1" onClick={() => setShowModal(true)}>
-              + 포스팅 추가
+              + 포스팅 수동 추가
             </button>
           </div>
         }

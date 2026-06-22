@@ -10,6 +10,14 @@ import { extractKstScheduleTime } from '@/lib/format-kst';
 import { formatScheduleLabel } from './job-schedule-form';
 import { api } from '@/lib/api';
 import { compressImageFileForUpload } from '@/lib/compress-image-for-upload';
+import {
+  getInitialYeonunAccounts,
+  resolveYeonunAccountId,
+  isYeonunPlaceholderAccountId,
+  setYeonunAccountsCache,
+  toYeonunAccountOptions,
+  type YeonunAccountOption,
+} from './auto-publish-button';
 
 const IMAGE_SLOT_COUNT = 5;
 const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
@@ -77,8 +85,6 @@ function countFilledSlots(slots: UploadedImageSlot[]): number {
   return slots.filter(Boolean).length;
 }
 
-type YeonunAccountOption = { id: string; label: string };
-
 export function QueueAutoContentModal({
   workspace,
   open,
@@ -100,6 +106,7 @@ export function QueueAutoContentModal({
   const [uploadProgress, setUploadProgress] = useState({ done: 0, total: 0 });
   const [error, setError] = useState('');
   const [yeonunAccounts, setYeonunAccounts] = useState<YeonunAccountOption[]>([]);
+  const [accountsSyncing, setAccountsSyncing] = useState(false);
 
   const loading = loadingAction !== null;
   const uploadPct =
@@ -112,43 +119,65 @@ export function QueueAutoContentModal({
       setSlotNames(
         slotsFromJob(editJob).map((url, i) => (url ? `슬롯 ${i + 1}` : '')),
       );
+      if (workspace === 'yeonun') {
+        setYeonunAccounts(toYeonunAccountOptions(getInitialYeonunAccounts()));
+      }
     } else if (prefill) {
+      const yeonunOpts =
+        workspace === 'yeonun' ? toYeonunAccountOptions(getInitialYeonunAccounts()) : [];
       setForm({
         ...EMPTY_FORM,
         title: prefill.title,
         source_url: prefill.source_url,
+        account_id: yeonunOpts[0]?.id ?? '',
       });
       setSlotNames(Array(IMAGE_SLOT_COUNT).fill(''));
+      if (workspace === 'yeonun') setYeonunAccounts(yeonunOpts);
     } else {
-      setForm(EMPTY_FORM);
+      const yeonunOpts =
+        workspace === 'yeonun' ? toYeonunAccountOptions(getInitialYeonunAccounts()) : [];
+      setForm({
+        ...EMPTY_FORM,
+        account_id: yeonunOpts[0]?.id ?? '',
+      });
       setSlotNames(Array(IMAGE_SLOT_COUNT).fill(''));
+      if (workspace === 'yeonun') setYeonunAccounts(yeonunOpts);
+      else setYeonunAccounts([]);
     }
     setPreviewSlot(null);
     setDragOverSlot(null);
     setError('');
     setLoadingAction(null);
     setUploadProgress({ done: 0, total: 0 });
-  }, [open, editJob, prefill]);
+  }, [open, editJob, prefill, workspace]);
 
   useEffect(() => {
-    if (!open || workspace !== 'yeonun') {
-      setYeonunAccounts([]);
-      return;
-    }
+    if (!open || workspace !== 'yeonun') return;
     let cancelled = false;
+    const hadRealIds = getInitialYeonunAccounts().some((a) => Boolean(a.account_id));
+    if (!hadRealIds) setAccountsSyncing(true);
+
     void api.getAutoPublishAccountsStatus('yeonun').then((res) => {
       if (cancelled) return;
-      const opts = res.accounts
-        .filter((a) => a.account_id)
-        .map((a) => ({
-          id: a.account_id!,
-          label: a.account_label ?? a.account_id!,
-        }));
+      const rows = res.accounts;
+      if (rows.length) setYeonunAccountsCache(rows);
+      const opts = toYeonunAccountOptions(rows.length ? rows : getInitialYeonunAccounts());
       setYeonunAccounts(opts);
-      if (!editJob && opts.length && !form.account_id) {
-        setForm((f) => ({ ...f, account_id: opts[0]!.id }));
+      if (!editJob) {
+        setForm((f) => {
+          const resolved =
+            resolveYeonunAccountId(f.account_id, rows) ??
+            rows.find((a) => a.account_id)?.account_id ??
+            opts.find((o) => !isYeonunPlaceholderAccountId(o.id))?.id ??
+            f.account_id;
+          return resolved !== f.account_id ? { ...f, account_id: resolved } : f;
+        });
       }
+      setAccountsSyncing(false);
+    }).catch(() => {
+      if (!cancelled) setAccountsSyncing(false);
     });
+
     return () => {
       cancelled = true;
     };
@@ -157,9 +186,15 @@ export function QueueAutoContentModal({
   const requireYeonunAccount = workspace === 'yeonun' && !isEdit;
 
   const validateForm = (): boolean => {
-    if (requireYeonunAccount && !form.account_id.trim()) {
-      setError('연운 포스팅 계정(연운1~3)을 선택하세요.');
-      return false;
+    if (requireYeonunAccount) {
+      if (accountsSyncing || isYeonunPlaceholderAccountId(form.account_id)) {
+        setError('연운 포스팅 계정 정보를 불러오는 중입니다. 잠시 후 다시 시도하세요.');
+        return false;
+      }
+      if (!form.account_id.trim()) {
+        setError('연운 포스팅 계정(연운1~3)을 선택하세요.');
+        return false;
+      }
     }
     return true;
   };
@@ -339,7 +374,7 @@ export function QueueAutoContentModal({
                         selected
                           ? 'border-huma-acc bg-huma-acc/10 text-huma-acc'
                           : 'border-huma-bdr text-huma-t2 hover:border-huma-bdr2'
-                      } ${!editable ? 'pointer-events-none opacity-60' : ''}`}
+                      } ${!editable ? 'pointer-events-none opacity-60' : accountsSyncing ? 'opacity-80' : ''}`}
                     >
                       <input
                         type="radio"
@@ -355,7 +390,7 @@ export function QueueAutoContentModal({
                 })}
               </div>
             ) : (
-              <p className="font-mono text-[10.5px] text-huma-t3">연운 포스팅 계정 로딩 중…</p>
+              <p className="font-mono text-[10.5px] text-huma-t3">연운 포스팅 계정 없음</p>
             )}
           </div>
         ) : null}

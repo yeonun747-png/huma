@@ -27,12 +27,20 @@ import {
   workspaceServiceMentionRuleLine,
 } from '../../lib/workspace-service-mention.js';
 import {
-  buildPostingSimilarityFeedback,
+  buildPostingBodySimilarityFeedback,
+  buildPostingTitleSimilarityFeedback,
   checkPostingSimilarity,
+  isPostingSimilarityTooHigh,
   loadPostingSimilarityCorpus,
-  MAX_POSTING_SIMILARITY_RETRIES,
+  maxPostingTitleSimilarity,
+  MAX_POSTING_BODY_SIMILARITY_RETRIES,
+  MAX_POSTING_TITLE_SIMILARITY_ATTEMPTS,
+  PostingSimilarityCorpusLoadError,
+  PostingSimilaritySkipError,
   POSTING_SIMILARITY_THRESHOLD,
 } from '../../lib/posting-content-similarity.js';
+import { postingSlotByWorkspace } from '../../lib/dongle-slots.js';
+import { withPostingSimilarityLock } from '../../lib/posting-similarity-lock.js';
 import { logOperation } from '../../lib/log-emitter.js';
 
 export interface ContentGenerationInput {
@@ -171,10 +179,15 @@ async function generateSeoTitleOnly(params: {
   synopsis?: string;
   urlSummary: string;
   blogExcerpt?: string;
+  extraPrompt?: string;
 }): Promise<string | undefined> {
   const synopsisBlock = params.synopsis?.trim()
     ? `[운영자 시놉시스 — 반드시 반영]\n${params.synopsis.trim()}`
     : '[시놉시스 없음]';
+
+  const similarityBlock = params.extraPrompt?.trim()
+    ? `\n[유사도 재생성 지침 — 반드시 따를 것]\n${params.extraPrompt.trim()}`
+    : '';
 
   const raw = await askClaudeWithModel({
     model: (await getSubClaudeModel()) || HAIKU_MODEL_FALLBACK,
@@ -186,6 +199,7 @@ ${synopsisBlock}
 [URL·주제 요약]
 ${params.urlSummary.slice(0, 400)}
 ${params.blogExcerpt ? `[생성된 본문 앞부분]\n${params.blogExcerpt.slice(0, 300)}` : ''}
+${similarityBlock}
 
 규칙:
 - 32자 이내 (공백 포함, 초과 금지)
@@ -214,6 +228,7 @@ export async function ensureSeoTitle(params: {
   urlSummary: string;
   blogExcerpt?: string;
   candidate?: string;
+  extraPrompt?: string;
 }): Promise<string> {
   const operatorTitle = params.operatorTitle.trim();
   if (isAcceptableSeoTitle(params.candidate, operatorTitle)) {
@@ -232,6 +247,29 @@ export async function ensureSeoTitle(params: {
   }
 
   return forceDistinctSeoTitle(operatorTitle, params.synopsis, params.blogExcerpt);
+}
+
+/** 유사도 루프 전용 — forceDistinct 폴백 없이 LLM 재시도만 */
+async function regenerateSeoTitleForSimilarity(params: {
+  operatorTitle: string;
+  synopsis?: string;
+  urlSummary: string;
+  blogExcerpt: string;
+  extraPrompt: string;
+}): Promise<string> {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const candidate = await generateSeoTitleOnly({
+      operatorTitle: params.operatorTitle,
+      synopsis: params.synopsis,
+      urlSummary: params.urlSummary,
+      blogExcerpt: params.blogExcerpt,
+      extraPrompt: params.extraPrompt,
+    });
+    if (candidate?.trim() && isAcceptableSeoTitle(candidate, params.operatorTitle)) {
+      return truncateSeoTitle(candidate.trim());
+    }
+  }
+  throw new Error('SEO 제목 유사도 재생성 실패');
 }
 
 export function resolvePostingTitle(generated: Pick<ContentGenerationOutput, 'seo_title'>): string {
@@ -597,51 +635,148 @@ export async function generateAllContent(
   input: ContentGenerationInput,
   options?: GenerateAllContentOptions,
 ): Promise<ContentGenerationOutput> {
-  if (!options?.accountId?.trim()) {
+  const requiresSimilarity = Boolean(postingSlotByWorkspace(input.workspace));
+  const accountId = options?.accountId?.trim();
+
+  if (requiresSimilarity && !accountId) {
+    throw new Error('포스팅 계정 ID가 없어 유사도 검사를 진행할 수 없습니다');
+  }
+
+  if (!accountId) {
     return generateAllContentOnce(input, options);
   }
 
-  const accountId = options.accountId.trim();
-  const corpus = await loadPostingSimilarityCorpus(accountId);
-  let mainExtraPrompt = options.mainExtraPrompt;
-  let lastCheck = checkPostingSimilarity('', '', corpus);
-  let result: ContentGenerationOutput | undefined;
+  return withPostingSimilarityLock(accountId, () =>
+    generateAllContentWithSimilarity(input, options, accountId),
+  );
+}
 
-  for (let attempt = 1; attempt <= MAX_POSTING_SIMILARITY_RETRIES; attempt++) {
-    result = await generateAllContentOnce(input, { mainExtraPrompt });
-    lastCheck = checkPostingSimilarity(result.seo_title, result.blog_post, corpus);
+async function generateAllContentWithSimilarity(
+  input: ContentGenerationInput,
+  options: GenerateAllContentOptions | undefined,
+  accountId: string,
+): Promise<ContentGenerationOutput> {
+  let corpus: Awaited<ReturnType<typeof loadPostingSimilarityCorpus>>;
+  try {
+    corpus = await loadPostingSimilarityCorpus(accountId);
+  } catch (err) {
+    if (err instanceof PostingSimilarityCorpusLoadError) {
+      throw new PostingSimilaritySkipError(
+        err.message,
+        {
+          ok: false,
+          titleSimilarity: 0,
+          titleTooSimilar: false,
+          bodySimilarity: 0,
+          bodyTooSimilar: false,
+        },
+        0,
+        'corpus_load',
+      );
+    }
+    throw err;
+  }
 
-    if (lastCheck.ok) {
-      return {
+  const urlSummary = await resolveSourceContext(input);
+  let mainExtraPrompt = options?.mainExtraPrompt;
+  let bodyRegenerations = 0;
+  let titleRegenerations = 0;
+  let result = await generateAllContentOnce(input, { mainExtraPrompt });
+
+  while (true) {
+    while (isPostingSimilarityTooHigh(maxPostingTitleSimilarity(result.seo_title, corpus.allTitleEmbeddings))) {
+      titleRegenerations++;
+      if (titleRegenerations > MAX_POSTING_TITLE_SIMILARITY_ATTEMPTS) {
+        const titleSimilarity = maxPostingTitleSimilarity(result.seo_title, corpus.allTitleEmbeddings);
+        const titleCheck = checkPostingSimilarity(result.seo_title, result.blog_post, corpus);
+        throw new PostingSimilaritySkipError(
+          `SEO 제목 유사도 ${titleSimilarity.toFixed(3)} > ${POSTING_SIMILARITY_THRESHOLD} — 제목 재생성 ${MAX_POSTING_TITLE_SIMILARITY_ATTEMPTS}회 후 발행 스킵`,
+          titleCheck,
+          titleRegenerations,
+          'title',
+        );
+      }
+
+      const titleCheck = checkPostingSimilarity(result.seo_title, result.blog_post, corpus);
+      await logOperation({
+        level: 'warn',
+        message:
+          `[posting-similarity] SEO 제목 재생성 ${titleRegenerations} — ` +
+          `제목유사도=${titleCheck.titleSimilarity.toFixed(3)} account=${accountId}`,
+        workspace: input.workspace,
+      });
+
+      result = {
         ...result,
-        similarity_score: Math.max(lastCheck.titleSimilarity, lastCheck.bodySimilarity),
-        similarity_regenerations: attempt - 1,
+        seo_title: await regenerateSeoTitleForSimilarity({
+          operatorTitle: input.title,
+          synopsis: input.synopsis,
+          urlSummary,
+          blogExcerpt: result.blog_post,
+          extraPrompt: buildPostingTitleSimilarityFeedback(titleCheck),
+        }),
       };
     }
 
-    await logOperation({
-      level: 'warn',
-      message:
-        `[posting-similarity] 재생성 ${attempt}/${MAX_POSTING_SIMILARITY_RETRIES} — ` +
-        `제목유사도=${lastCheck.titleSimilarity.toFixed(3)} 본문유사도=${lastCheck.bodySimilarity.toFixed(3)} ` +
-        `account=${accountId}`,
-      workspace: input.workspace,
-    });
+    let check = checkPostingSimilarity(result.seo_title, result.blog_post, corpus);
+    if (check.ok) {
+      corpus = await loadPostingSimilarityCorpus(accountId);
+      check = checkPostingSimilarity(result.seo_title, result.blog_post, corpus);
+      if (check.ok) {
+        return {
+          ...result,
+          similarity_score: Math.max(check.titleSimilarity, check.bodySimilarity),
+          similarity_regenerations: titleRegenerations + bodyRegenerations,
+        };
+      }
+      if (check.titleTooSimilar) {
+        continue;
+      }
+      if (check.bodyTooSimilar) {
+        throw new PostingSimilaritySkipError(
+          `본문 유사도 ${check.bodySimilarity.toFixed(3)} > ${POSTING_SIMILARITY_THRESHOLD} — 최종 검증 실패, 발행 스킵`,
+          check,
+          bodyRegenerations,
+          'body',
+        );
+      }
+    }
 
-    if (attempt >= MAX_POSTING_SIMILARITY_RETRIES) break;
-    mainExtraPrompt = buildPostingSimilarityFeedback(lastCheck);
-  }
+    if (check.bodyTooSimilar) {
+      if (bodyRegenerations >= MAX_POSTING_BODY_SIMILARITY_RETRIES) {
+        throw new PostingSimilaritySkipError(
+          `본문 유사도 ${check.bodySimilarity.toFixed(3)} > ${POSTING_SIMILARITY_THRESHOLD} — 재생성 ${MAX_POSTING_BODY_SIMILARITY_RETRIES}회 후 발행 스킵`,
+          check,
+          bodyRegenerations,
+          'body',
+        );
+      }
 
-  const reasons: string[] = [];
-  if (lastCheck.titleTooSimilar) {
-    reasons.push(`SEO 제목 유사도 ${lastCheck.titleSimilarity.toFixed(3)} ≥ ${POSTING_SIMILARITY_THRESHOLD}`);
+      bodyRegenerations++;
+      await logOperation({
+        level: 'warn',
+        message:
+          `[posting-similarity] 본문 재생성 ${bodyRegenerations}/${MAX_POSTING_BODY_SIMILARITY_RETRIES} — ` +
+          `본문유사도=${check.bodySimilarity.toFixed(3)} account=${accountId}`,
+        workspace: input.workspace,
+      });
+
+      mainExtraPrompt = buildPostingBodySimilarityFeedback(check);
+      result = await generateAllContentOnce(input, { mainExtraPrompt });
+      continue;
+    }
+
+    if (check.titleTooSimilar) {
+      continue;
+    }
+
+    throw new PostingSimilaritySkipError(
+      `유사도 검사 실패 — 발행 스킵 (제목 ${check.titleSimilarity.toFixed(3)}, 본문 ${check.bodySimilarity.toFixed(3)})`,
+      check,
+      titleRegenerations + bodyRegenerations,
+      'title',
+    );
   }
-  if (lastCheck.bodyTooSimilar) {
-    reasons.push(`본문 유사도 ${lastCheck.bodySimilarity.toFixed(3)} ≥ ${POSTING_SIMILARITY_THRESHOLD}`);
-  }
-  throw new Error(
-    `포스팅 유사도 검사 실패 (${MAX_POSTING_SIMILARITY_RETRIES}회 재생성) — ${reasons.join(' · ')}`,
-  );
 }
 
 /** @deprecated use generateAllContent */

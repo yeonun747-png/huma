@@ -1,12 +1,17 @@
-import { registerAutoContentJobs } from '../claude/auto-content-orchestrator.js';
 import {
-  getAutoPublishButtonStatus,
   getAutoPublishStatus,
   getAutoPublishStatusForAllAccounts,
   type AutoPublishStatus,
 } from '../../lib/posting-daily-status.js';
+import {
+  disableAutoPublish,
+  enableAutoPublish,
+  setAutoPublishEnabled,
+} from '../../lib/auto-publish-state.js';
+import { resolvePostingAccount } from '../../lib/posting-accounts.js';
 
 export async function fetchAutoPublishStatus(workspace: string): Promise<AutoPublishStatus> {
+  const { getAutoPublishButtonStatus } = await import('../../lib/posting-daily-status.js');
   return getAutoPublishButtonStatus(workspace);
 }
 
@@ -14,43 +19,36 @@ export async function fetchAutoPublishAccountsStatus(workspace: string): Promise
   return getAutoPublishStatusForAllAccounts(workspace);
 }
 
-export async function runAutoPublish(workspace: string, accountId?: string) {
-  const trimmedAccountId = accountId?.trim();
+/** 자동발행 ON/OFF 토글 */
+export async function toggleAutoPublish(
+  workspace: string,
+  accountId: string,
+  enabled: boolean,
+) {
+  const state = enabled
+    ? await enableAutoPublish(workspace, accountId)
+    : await disableAutoPublish(workspace, accountId);
 
-  if (workspace === 'yeonun') {
-    if (!trimmedAccountId) {
-      throw new Error('연운 자동 발행은 계정을 선택하세요');
-    }
-    const accountStatus = await getAutoPublishStatus(workspace, trimmedAccountId);
-    if (!accountStatus.can_publish) {
-      throw new Error(accountStatus.block_message ?? '자동 발행 불가');
-    }
-  } else {
-    const buttonStatus = await getAutoPublishButtonStatus(workspace);
-    if (!buttonStatus.can_publish) {
-      throw new Error(buttonStatus.block_message ?? '자동 발행 불가');
-    }
-  }
-
-  const result = await registerAutoContentJobs({
-    workspace,
-    account_id: trimmedAccountId,
-    auto_schedule: true,
-    content_type_auto: true,
-  });
-
-  const resolvedAccountId = (result.primary_job.account_id as string | undefined) ?? trimmedAccountId;
-  const status = await getAutoPublishStatus(workspace, resolvedAccountId);
+  const status = await getAutoPublishStatus(workspace, accountId);
   const accounts_status =
     workspace === 'yeonun' ? await getAutoPublishStatusForAllAccounts(workspace) : undefined;
 
   return {
-    job: result.primary_job,
-    auto_picked: result.auto_picked,
-    auto_pick_label: result.auto_pick_label,
-    title: result.primary_job.title,
-    link_url: result.primary_job.link_url,
+    enabled: state.enabled,
+    planned_count: state.planned_count,
+    remaining_today: state.remaining_today,
+    next_slot_at: state.next_slot_at,
     status,
     accounts_status,
   };
+}
+
+export async function setAutoPublish(workspace: string, accountId: string | undefined, enabled: boolean) {
+  const trimmed = accountId?.trim();
+  if (workspace === 'yeonun' && !trimmed) {
+    throw new Error('연운 자동발행은 계정을 선택하세요');
+  }
+  const targetId = trimmed ?? (await resolvePostingAccount(workspace))?.id;
+  if (!targetId) throw new Error('포스팅 계정 없음');
+  return setAutoPublishEnabled(workspace, targetId, enabled);
 }

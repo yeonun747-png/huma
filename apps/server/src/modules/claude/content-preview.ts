@@ -1,4 +1,5 @@
 import { generateAllContent, type ContentGenerationInput } from './content-generator.js';
+import { isPostingSimilaritySkipError } from '../../lib/posting-content-similarity.js';
 import { generateImage } from '../higgsfield/image.js';
 import { selectImageModel } from '../claude/auto-decide.js';
 import { supabase } from '../../middleware/auth.js';
@@ -103,11 +104,12 @@ export async function runContentPreview(input: ContentPreviewInput): Promise<Con
       } · image_prompt ${generated.image_prompt.slice(0, 80)}…`,
     };
   } catch (err) {
+    const skip = isPostingSimilaritySkipError(err);
     steps[0] = {
       ...steps[0]!,
       status: 'err',
       ms: Date.now() - claudeStart,
-      detail: (err as Error).message,
+      detail: skip ? `${err.message} (발행 스킵)` : (err as Error).message,
     };
     return { steps, dry_run: true, total_ms: Date.now() - started };
   }

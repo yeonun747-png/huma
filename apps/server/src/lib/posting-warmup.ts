@@ -33,3 +33,35 @@ export function applyPostingWarmupCap(
 
   return Math.min(rawTarget, cap);
 }
+
+export type PostingWarmupStage = 'initial' | 'adapt' | 'expand' | 'late' | 'complete';
+
+/** UI·설정 — warmup_day 단계 설명 */
+export function describePostingWarmupPhase(warmupDay: number): {
+  stage: PostingWarmupStage;
+  label: string;
+  weekday_cap: number | null;
+} {
+  const d = Math.max(0, warmupDay);
+  const cap = getPostingWarmupWeekdayCap(d);
+  if (cap >= 999) {
+    return { stage: 'complete', label: '완료 · 평일 4~5건', weekday_cap: null };
+  }
+
+  const stage: PostingWarmupStage =
+    d <= 2 ? 'initial' : d <= 5 ? 'adapt' : d <= 9 ? 'expand' : 'late';
+  const stageKo =
+    stage === 'initial'
+      ? '초기'
+      : stage === 'adapt'
+        ? '적응'
+        : stage === 'expand'
+          ? '확대'
+          : '후반';
+
+  return {
+    stage,
+    label: `${stageKo} ${d}일차 · 평일 최대 ${cap}건/일`,
+    weekday_cap: cap,
+  };
+}

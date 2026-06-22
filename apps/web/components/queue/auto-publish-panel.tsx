@@ -22,12 +22,12 @@ export function AutoPublishPanel({ workspace, onDone, accountsRefresh = 0 }: Aut
   const stripRefresh = refreshToken + accountsRefresh;
 
   if (workspace === 'yeonun') {
-    return <YeonunPublishAccountsStrip refreshToken={stripRefresh} onDone={handleDone} />;
+    return (
+      <div className="flex min-w-0 flex-1 items-stretch justify-end">
+        <YeonunPublishAccountsStrip refreshToken={stripRefresh} onDone={handleDone} />
+      </div>
+    );
   }
 
-  return (
-    <div className="flex flex-col items-end gap-1.5">
-      <AutoPublishButton workspace={workspace} onDone={handleDone} />
-    </div>
-  );
+  return <AutoPublishButton workspace={workspace} onDone={handleDone} refreshToken={stripRefresh} />;
 }

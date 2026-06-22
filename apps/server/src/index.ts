@@ -45,6 +45,7 @@ import {
   stopTelegramCaptchaInbound,
 } from './modules/watcher/telegram-captcha-inbound.js';
 import { startCrankScheduler } from './lib/crank-scheduler.js';
+import { startAutoPublishScheduler } from './lib/auto-publish-scheduler.js';
 import { startCafeActivityScheduler } from './lib/cafe-activity-scheduler.js';
 import { registerCrankRoutes } from './routes/crank.js';
 import { registerMonitorRoutes } from './routes/monitor.js';
@@ -225,6 +226,7 @@ async function main() {
     startTelegramCaptchaInbound();
     await recoverCrankPipeline();
     startCrankScheduler();
+    startAutoPublishScheduler();
     startCafeActivityScheduler();
     startBlogCheckScheduler();
     startPananaCharacterSyncScheduler();

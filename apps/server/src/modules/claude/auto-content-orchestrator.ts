@@ -10,6 +10,7 @@ import {
   runContentOrchestrator,
   type ContentType,
 } from '../queue/jobs/content-orchestrator.js';
+import { isAutoPublishJob, replanAutoPublishSlot } from '../../lib/auto-publish-state.js';
 
 export interface AutoContentRequest {
   workspace: string;
@@ -28,6 +29,8 @@ export interface AutoContentRequest {
   repeat_rule?: string | null;
   /** true면 Claude+Imagen만 실행, post_blog·SNS 발행 job 미생성 */
   dry_run?: boolean;
+  /** 스케줄러 자동발행 — platform_schedule._auto_publish */
+  auto_publish?: boolean;
 }
 
 export interface AutoContentResult {
@@ -77,13 +80,13 @@ export async function registerAutoContentJobs(body: AutoContentRequest): Promise
     source_url: body.source_url,
   });
 
-  const platformScheduleBase =
-    body.dry_run || resolved.auto_pick_label
-      ? {
-          ...(body.dry_run ? { _dry_run: true } : {}),
-          ...(resolved.auto_pick_label ? { _auto_pick: resolved.auto_pick_label } : {}),
-        }
-      : null;
+  const platformScheduleBase = (() => {
+    const extras: Record<string, unknown> = {};
+    if (body.dry_run) extras._dry_run = true;
+    if (body.auto_publish) extras._auto_publish = true;
+    if (resolved.auto_pick_label) extras._auto_pick = resolved.auto_pick_label;
+    return Object.keys(extras).length ? extras : null;
+  })();
 
   const { data: parentJob, error } = await supabase
     .from('huma_jobs')
@@ -181,6 +184,34 @@ export async function executeContentFull(humaJobId: string) {
     repeat_rule: job.repeat_rule,
     parentJobId: humaJobId,
   });
+
+  if (result.similaritySkipped) {
+    const prevPs = (job.platform_schedule as Record<string, unknown> | null) ?? {};
+    await supabase
+      .from('huma_jobs')
+      .update({
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+        error_message: result.skipReason ?? '유사도 초과 — 발행 스킵',
+        platform_schedule: {
+          ...prevPs,
+          _similarity_skipped: true,
+          _similarity_skip_kind: result.skipKind ?? 'body',
+          _similarity_skipped_at: new Date().toISOString(),
+        },
+      })
+      .eq('id', humaJobId);
+
+    if (isAutoPublishJob(job.platform_schedule) && job.account_id) {
+      await replanAutoPublishSlot(job.account_id as string, job.workspace as string).catch(() => undefined);
+    }
+
+    return {
+      jobs_created: 0,
+      similarity_skipped: true,
+      skip_reason: result.skipReason,
+    };
+  }
 
   const { data: refreshed } = await supabase.from('huma_jobs').select('*').eq('id', humaJobId).single();
 
