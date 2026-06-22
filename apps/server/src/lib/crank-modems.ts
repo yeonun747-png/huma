@@ -242,3 +242,11 @@ export async function resetDailyCrankCounters(): Promise<void> {
   await supabase.from('huma_modems').update({ crank_sessions_today: 0 }).eq('modem_role', 'crank');
   await supabase.from('huma_accounts').update({ crank_count_today: 0 }).eq('account_type', 'crank');
 }
+
+/** KST 날짜 변경 시 포스팅 계정 post_count_today · 예약 슬롯 초기화 */
+export async function resetDailyPostingCounters(): Promise<void> {
+  await supabase
+    .from('huma_accounts')
+    .update({ post_count_today: 0, posting_reserved_today: 0, posting_reserved_kst_date: null })
+    .eq('account_type', 'posting');
+}

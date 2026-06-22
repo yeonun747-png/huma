@@ -1,6 +1,13 @@
 import { supabase } from '../middleware/auth.js';
 import { getKstClock, isKstNightBan } from './crank-schedule-config.js';
 import { PLATFORM_DAILY_LIMITS } from './limits.js';
+import { getDailyPostingTarget } from './posting-daily-target.js';
+import {
+  computeDynamicPublishIntervalHours,
+  deriveActiveHourWindow,
+  getActivePostingWindowHours,
+} from './posting-interval.js';
+import { ABSOLUTE_MIN_PUBLISH_INTERVAL_HOURS } from './posting-warmup.js';
 import { getHumanEngineConfig, getSetting, type HumanEngineConfig } from './settings.js';
 
 export interface AppSettings {
@@ -201,19 +208,30 @@ export async function passesWeekendVolumeGate(): Promise<boolean> {
 export async function getEffectiveDailyLimit(jobType: string): Promise<number> {
   const app = await getAppSettings();
   if (app.daily_limit === false) return 999_999;
-  return PLATFORM_DAILY_LIMITS[jobType] ?? 30;
+  return PLATFORM_DAILY_LIMITS[jobType] ?? 10;
 }
 
 export async function checkMinPublishInterval(accountId: string, jobType: string): Promise<number | null> {
   if (!POSTING_JOB_TYPES.includes(jobType)) return null;
 
   const human = await getHumanEngineScheduleConfig();
-  const minHours = human.min_publish_interval_hours ?? 4;
+  const floorHours = ABSOLUTE_MIN_PUBLISH_INTERVAL_HOURS;
+
+  const { data: acc } = await supabase
+    .from('huma_accounts')
+    .select('warmup_day')
+    .eq('id', accountId)
+    .maybeSingle();
+  const warmupDay = (acc?.warmup_day as number | undefined) ?? 0;
+  const targetInfo = getDailyPostingTarget(accountId, new Date(), { warmupDay });
+  const windowHours = getActivePostingWindowHours(human.active_hours ?? []);
+  const minHours = computeDynamicPublishIntervalHours(targetInfo.target, windowHours, floorHours);
+
   const { data } = await supabase
     .from('huma_jobs')
     .select('completed_at')
     .eq('account_id', accountId)
-    .in('job_type', POSTING_JOB_TYPES)
+    .eq('job_type', 'post_blog')
     .eq('status', 'completed')
     .order('completed_at', { ascending: false })
     .limit(1)
@@ -225,18 +243,7 @@ export async function checkMinPublishInterval(accountId: string, jobType: string
   return waitMs > 0 ? waitMs : null;
 }
 
-/** C-Rank 스케줄러 시간창 — active_hours intensity ≥ threshold */
-export function deriveActiveHourWindow(
-  activeHours: number[],
-  minIntensity = 0.25,
-): { start: number; end: number } {
-  const active: number[] = [];
-  for (let h = 0; h < 24; h++) {
-    if ((activeHours[h] ?? 0) >= minIntensity) active.push(h);
-  }
-  if (!active.length) return { start: 8, end: 22 };
-  return { start: active[0], end: active[active.length - 1] + 1 };
-}
+export { deriveActiveHourWindow } from './posting-interval.js';
 
 export async function getCrankScheduleWindow(): Promise<{ start: number; end: number }> {
   const human = await getHumanEngineScheduleConfig();

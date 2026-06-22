@@ -41,6 +41,8 @@ CREATE TABLE IF NOT EXISTS huma_accounts (
   is_active BOOLEAN DEFAULT true,
   last_posted_at TIMESTAMPTZ,
   post_count_today INTEGER DEFAULT 0,
+  posting_reserved_today INTEGER NOT NULL DEFAULT 0,
+  posting_reserved_kst_date VARCHAR(10),
   crank_count_today INTEGER DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
@@ -218,7 +220,7 @@ CREATE TABLE IF NOT EXISTS huma_admins (
 );
 
 INSERT INTO huma_settings (key, value) VALUES
-('human_engine', '{"wpm_mean":55,"wpm_sigma":18,"typo_rate":0.04,"backspace_delay_ms":[200,800],"paragraph_pause_ms":[2000,8000],"review_duration_ms":[120000,300000],"night_ban_start":1,"night_ban_end":7,"active_hours":[0.1,0.05,0.05,0.05,0.08,0.15,0.35,0.55,0.7,0.85,0.9,0.88,0.75,0.8,0.85,0.9,0.95,0.92,0.88,0.82,0.7,0.5,0.3,0.15],"weekend_ratio":0.5,"min_publish_interval_hours":4,"crank_publish_ratio":1,"crank_comm_ratio":3,"fingerprint":{"canvas_spoof":true,"webgl_spoof":true,"audio_noise":true,"mouse_bezier":true,"click_jitter_px":3,"auto_pause_on_detect":true,"captcha_slack":true,"cooldown_429_hours":2}}'),
+('human_engine', '{"wpm_mean":55,"wpm_sigma":18,"typo_rate":0.04,"backspace_delay_ms":[200,800],"paragraph_pause_ms":[2000,8000],"review_duration_ms":[120000,300000],"night_ban_start":1,"night_ban_end":7,"active_hours":[0.1,0.05,0.05,0.05,0.08,0.15,0.35,0.55,0.7,0.85,0.9,0.88,0.75,0.8,0.85,0.9,0.95,0.92,0.88,0.82,0.7,0.5,0.3,0.15],"weekend_ratio":0.5,"min_publish_interval_hours":2,"crank_publish_ratio":1,"crank_comm_ratio":3,"fingerprint":{"canvas_spoof":true,"webgl_spoof":true,"audio_noise":true,"mouse_bezier":true,"click_jitter_px":3,"auto_pause_on_detect":true,"captcha_slack":true,"cooldown_429_hours":2}}'),
 ('image_engine', '{"noise_pct":0.3,"jpeg_quality_range":[90,96],"exif_randomize":true,"gps_randomize":true,"block_duplicate":true}'),
 ('watcher', '{"slack_webhook":"","cooldown_429_min":15,"recovery_steps_min":[12,30,120],"auto_pause":true,"gradual_recovery":true}'),
 ('app_settings', '{"claude_api":true,"higgsfield_api":true,"slack_webhook":true,"daily_limit":true,"night_ban":true}'),

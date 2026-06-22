@@ -3,6 +3,7 @@ import { generateImage } from '../higgsfield/image.js';
 import { selectImageModel } from '../claude/auto-decide.js';
 import { supabase } from '../../middleware/auth.js';
 import { resolveBlogWritingPersona } from '../../lib/blog-writing-persona.js';
+import { resolveAutoPostingInput } from '../content/auto-posting-input.js';
 import { pickPostingAccount } from '../../lib/posting-accounts.js';
 
 export type PreviewStepStatus = 'pending' | 'running' | 'ok' | 'err';
@@ -17,8 +18,8 @@ export interface PreviewStep {
 
 export interface ContentPreviewInput {
   workspace: string;
-  title: string;
-  source_url: string;
+  title?: string;
+  source_url?: string;
   synopsis?: string;
   uploaded_images?: string[];
   content_type?: 'A' | 'B';
@@ -67,11 +68,18 @@ export async function runContentPreview(input: ContentPreviewInput): Promise<Con
     { id: 'imagen', label: 'Imagen — 대표 이미지 생성', status: 'pending' },
   ];
 
-  const { blogWritingPersona } = await loadAccountBlogPersona(input.workspace, input.account_id);
+  const { accountId, blogWritingPersona } = await loadAccountBlogPersona(input.workspace, input.account_id);
+
+  const resolved = await resolveAutoPostingInput({
+    workspace: input.workspace,
+    accountId,
+    title: input.title,
+    source_url: input.source_url,
+  });
 
   const genInput: ContentGenerationInput = {
-    title: input.title.trim(),
-    sourceUrl: input.source_url.trim(),
+    title: resolved.title,
+    sourceUrl: resolved.source_url,
     synopsis: input.synopsis?.trim(),
     workspace: input.workspace,
     content_type: input.content_type ?? 'A',
@@ -85,12 +93,14 @@ export async function runContentPreview(input: ContentPreviewInput): Promise<Con
   const claudeStart = Date.now();
   steps[0]!.status = 'running';
   try {
-    generated = await generateAllContent(genInput);
+    generated = await generateAllContent(genInput, { accountId });
     steps[0] = {
       ...steps[0]!,
       status: 'ok',
       ms: Date.now() - claudeStart,
-      detail: `본문 ${generated.blog_post.length}자 (목표 ${generated.blog_post_target_min_chars ?? '?'}~${generated.blog_post_target_max_chars ?? generated.blog_post_target_chars ?? '?'}자) · SEO제목 ${generated.seo_title} · image_prompt ${generated.image_prompt.slice(0, 80)}…`,
+      detail: `본문 ${generated.blog_post.length}자 (목표 ${generated.blog_post_target_min_chars ?? '?'}~${generated.blog_post_target_max_chars ?? generated.blog_post_target_chars ?? '?'}자) · SEO제목 ${generated.seo_title}${
+        generated.similarity_score != null ? ` · 유사도 ${generated.similarity_score.toFixed(3)}` : ''
+      } · image_prompt ${generated.image_prompt.slice(0, 80)}…`,
     };
   } catch (err) {
     steps[0] = {

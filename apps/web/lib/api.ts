@@ -146,8 +146,9 @@ export const api = {
   },
   createAutoContentJob: (body: {
     workspace: string;
-    title: string;
-    source_url: string;
+    account_id?: string;
+    title?: string;
+    source_url?: string;
     synopsis?: string;
     uploaded_images?: string[];
     screenshot_base64?: string;
@@ -159,6 +160,45 @@ export const api = {
     dry_run?: boolean;
   }) =>
     request<HumaJob>('/api/jobs/auto-content', { method: 'POST', body: JSON.stringify(body) }),
+  getAutoPublishStatus: (workspace: string) =>
+    request<{
+      workspace: string;
+      account_id?: string;
+      account_label?: string;
+      today_completed: number;
+      daily_target: number;
+      weekday_base: number;
+      remaining: number;
+      hard_cap: number;
+      can_publish: boolean;
+      block_reason?: string;
+      block_message?: string;
+      auto_pick_ready: boolean;
+      is_weekend: boolean;
+      weekend_ratio?: number;
+    }>(`/api/jobs/auto-publish/status?workspace=${encodeURIComponent(workspace)}`),
+  getAutoPublishAccountsStatus: (workspace: string) =>
+    request<{ accounts: Array<{
+      workspace: string;
+      account_id?: string;
+      account_label?: string;
+      today_completed: number;
+      daily_target: number;
+      weekday_base: number;
+      remaining: number;
+      hard_cap: number;
+      can_publish: boolean;
+      block_reason?: string;
+      block_message?: string;
+      auto_pick_ready: boolean;
+      is_weekend: boolean;
+      weekend_ratio?: number;
+    }> }>(`/api/jobs/auto-publish/accounts?workspace=${encodeURIComponent(workspace)}`),
+  runAutoPublish: (workspace: string, accountId?: string) =>
+    request<HumaJob & { _meta?: Record<string, unknown> }>('/api/jobs/auto-publish', {
+      method: 'POST',
+      body: JSON.stringify({ workspace, ...(accountId ? { account_id: accountId } : {}) }),
+    }),
   uploadJobSlotImage: (body: { workspace: string; slot_index: number; image_data: string }) =>
     request<{ url: string }>('/api/jobs/upload-image', {
       method: 'POST',
@@ -227,8 +267,8 @@ export const api = {
   },
   contentPreview: (body: {
     workspace: string;
-    title: string;
-    source_url: string;
+    title?: string;
+    source_url?: string;
     synopsis?: string;
     uploaded_images?: string[];
     screenshot_base64?: string;

@@ -154,6 +154,45 @@ ${slugLine}제목: ${row.title}
 ${desc}(이번 영상에 자연스럽게 녹일 심리테스트 — 결과 유형·펀치라인과 연결)`;
 }
 
+/** 포스팅 Claude 컨텍스트 — 계정관리 퀴즈 캐시 기준 */
+export function formatQuizContextForPosting(row: QuizContentRow): string {
+  const slugLine = row.slug ? `slug: ${row.slug}\n` : '';
+  const desc = row.description?.trim() ? `소개: ${row.description.trim()}\n` : '';
+  return `[퀴즈오아시스 테스트]
+${slugLine}제목: ${row.title}
+${desc}(블로그 글은 이 테스트 주제·유형·공유 포인트 중심 — 결과 스포일러는 최소화)`;
+}
+
+export async function lookupQuizContentBySlug(slug: string): Promise<QuizContentRow | null> {
+  const key = slug.trim();
+  if (!key) return null;
+
+  const { data, error } = await supabase
+    .from('huma_quiz_content_cache')
+    .select('*')
+    .eq('slug', key)
+    .eq('status', 'active')
+    .maybeSingle();
+
+  if (!error && data) return data as QuizContentRow;
+  return null;
+}
+
+export async function lookupQuizContentByExternalId(id: string): Promise<QuizContentRow | null> {
+  const key = id.trim();
+  if (!key) return null;
+
+  const { data, error } = await supabase
+    .from('huma_quiz_content_cache')
+    .select('*')
+    .eq('quiz_external_id', key)
+    .eq('status', 'active')
+    .maybeSingle();
+
+  if (!error && data) return data as QuizContentRow;
+  return null;
+}
+
 export type QuizContentPick = {
   quizExternalId: string;
   slug: string | null;

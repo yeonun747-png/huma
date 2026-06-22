@@ -7,6 +7,8 @@ import {
 } from '../../lib/ai-human-writing.js';
 import { formatKstWritingContext } from '../../lib/dashboard-period.js';
 import { buildYeonunContextWithPrompt } from '../content/yeonun-context.js';
+import { buildQuizOasisContextWithPrompt } from '../content/quizoasis-context.js';
+import { buildPananaContextWithPrompt } from '../content/panana-context.js';
 import {
   defaultWorkspaceHashtags,
   sanitizeHashtags,
@@ -24,6 +26,14 @@ import {
   workspaceServiceMentionPromptGuide,
   workspaceServiceMentionRuleLine,
 } from '../../lib/workspace-service-mention.js';
+import {
+  buildPostingSimilarityFeedback,
+  checkPostingSimilarity,
+  loadPostingSimilarityCorpus,
+  MAX_POSTING_SIMILARITY_RETRIES,
+  POSTING_SIMILARITY_THRESHOLD,
+} from '../../lib/posting-content-similarity.js';
+import { logOperation } from '../../lib/log-emitter.js';
 
 export interface ContentGenerationInput {
   title: string;
@@ -52,6 +62,17 @@ export interface ContentGenerationOutput {
   blog_post_target_chars?: BlogPostLengthTier;
   blog_post_target_min_chars?: number;
   blog_post_target_max_chars?: number;
+  /** post_blog 유사도 검사 — 최종 본문 max 유사도 */
+  similarity_score?: number;
+  /** 유사도 초과로 Claude 재생성한 횟수 */
+  similarity_regenerations?: number;
+}
+
+export interface GenerateAllContentOptions {
+  /** 포스팅 계정 — 설정 시 과거 발행 대비 유사도 가드 */
+  accountId?: string;
+  /** Claude main 재생성 시 추가 지시 */
+  mainExtraPrompt?: string;
 }
 
 const SONNET_MODEL_FALLBACK = 'claude-sonnet-4-6';
@@ -65,9 +86,11 @@ const SYSTEM_PROMPTS: Record<string, string> = {
 ${workspaceServiceMentionRuleLine('yeonun')}`,
   quizoasis: `당신은 퀴즈오아시스 글로벌 심리테스트 플랫폼의 콘텐츠 마케터입니다.
 톤: 재미있고 공유 욕구를 자극하는 가벼운 문체.
+필수: 입력에 [퀴즈오아시스 테스트] 블록(계정관리 퀴즈 캐시)이 있으면 제목·소개·slug를 글 주제로 반영.
 ${workspaceServiceMentionRuleLine('quizoasis')}`,
   panana: `당신은 파나나(PANANA) AI 캐릭터 콘텐츠 플랫폼의 콘텐츠 마케터입니다.
 톤: 시네마틱하고 감성적인 짧은 문체.
+필수: 입력에 [파나나 캐릭터] 블록(계정관리 캐릭터 캐시)이 있으면 이름·소개·톤을 글에 반영.
 ${workspaceServiceMentionRuleLine('panana')}`,
 };
 
@@ -287,6 +310,7 @@ async function generateMainContent(
   input: ContentGenerationInput,
   urlSummary: string,
   lengthRange: BlogPostLengthRange,
+  mainExtraPrompt?: string,
 ): Promise<Omit<ContentGenerationOutput, 'hashtags'>> {
   const lengthGuide = blogPostLengthPromptGuide(lengthRange);
   const { min, max } = lengthRange;
@@ -345,8 +369,9 @@ ${serviceMentionGuide}
   const system = withHumanWritingSystem(SYSTEM_PROMPTS[input.workspace] ?? SYSTEM_PROMPTS.yeonun);
 
   const callOnce = async (extra?: string) => {
-    const content = extra
-      ? [...userParts, { type: 'text', text: extra }]
+    const mergedExtra = [mainExtraPrompt, extra].filter(Boolean).join('\n\n');
+    const content = mergedExtra
+      ? [...userParts, { type: 'text', text: mergedExtra }]
       : userParts;
     const raw = await askClaudeWithModel({ model, max_tokens: 4096, system, content });
     if (!raw) throw new Error('Claude Sonnet 응답 없음');
@@ -439,28 +464,54 @@ async function resolveSourceContext(input: ContentGenerationInput): Promise<stri
   }
 
   const blocks: string[] = [`[참조 URL] ${url}`];
+  let skipUrlFetch = false;
 
   if (input.workspace === 'yeonun') {
     const yeonunCtx = await buildYeonunContextWithPrompt(url);
-    if (yeonunCtx.trim()) blocks.push(yeonunCtx);
+    if (yeonunCtx.trim()) {
+      blocks.push(yeonunCtx);
+      if (yeonunCtx.includes('[연운 상품 정보]')) skipUrlFetch = true;
+    }
   }
 
-  const fetched = await fetchAndSummarizeUrl(url);
-  if (fetched.trim() && !/^URL:\s*$/i.test(fetched)) {
-    blocks.push(
-      fetched.startsWith('URL:')
-        ? `[URL fetch 실패 — 주소만 참고]\n${fetched}\n(가능하면 yeonun 상품 DB·페이지 구조를 추론)`
-        : `[URL 페이지 요약]\n${fetched}`,
-    );
-  } else if (blocks.length === 1) {
-    blocks.push(`[URL fetch 실패] ${url} — 제목·시놉시스·스크린샷(있으면)을 최대한 활용`);
+  if (input.workspace === 'quizoasis') {
+    const quizCtx = await buildQuizOasisContextWithPrompt(url);
+    if (quizCtx.text.trim()) {
+      blocks.push(quizCtx.text);
+      if (quizCtx.cacheHit) skipUrlFetch = true;
+    }
+  }
+
+  if (input.workspace === 'panana') {
+    const pananaCtx = await buildPananaContextWithPrompt(url);
+    if (pananaCtx.text.trim()) {
+      blocks.push(pananaCtx.text);
+      if (pananaCtx.cacheHit) skipUrlFetch = true;
+    }
+  }
+
+  if (skipUrlFetch) {
+    blocks.push('[캐시 컨텍스트 적용 — 계정관리 동기화 데이터 기준, URL fetch 생략]');
+  } else {
+    const fetched = await fetchAndSummarizeUrl(url);
+    if (fetched.trim() && !/^URL:\s*$/i.test(fetched)) {
+      blocks.push(
+        fetched.startsWith('URL:')
+          ? `[URL fetch 실패 — 주소만 참고]\n${fetched}\n(가능하면 워크스페이스 캐시·페이지 구조를 추론)`
+          : `[URL 페이지 요약]\n${fetched}`,
+      );
+    } else if (blocks.length === 1) {
+      blocks.push(`[URL fetch 실패] ${url} — 제목·시놉시스·계정관리 캐시 동기화 여부 확인`);
+    }
   }
 
   return blocks.join('\n\n');
 }
 
-/** 기획서 7-0 generateAllContent */
-export async function generateAllContent(input: ContentGenerationInput): Promise<ContentGenerationOutput> {
+async function generateAllContentOnce(
+  input: ContentGenerationInput,
+  options?: Pick<GenerateAllContentOptions, 'mainExtraPrompt'>,
+): Promise<ContentGenerationOutput> {
   const urlSummary = await resolveSourceContext(input);
   const lengthRange = pickBlogPostLengthRange();
 
@@ -479,7 +530,12 @@ export async function generateAllContent(input: ContentGenerationInput): Promise
   };
 
   try {
-    const mainContent = await generateMainContent(input, urlSummary, lengthRange);
+    const mainContent = await generateMainContent(
+      input,
+      urlSummary,
+      lengthRange,
+      options?.mainExtraPrompt,
+    );
     const subContent = await generateSubContent({
       title: input.title,
       synopsis: input.synopsis,
@@ -498,7 +554,7 @@ export async function generateAllContent(input: ContentGenerationInput): Promise
         max_tokens: 2000,
         system: withHumanWritingSystem(SYSTEM_PROMPTS[input.workspace] ?? SYSTEM_PROMPTS.yeonun),
         prompt: withLongformWritingMandate(
-          `제목: ${input.title}
+          `${options?.mainExtraPrompt ? `${options.mainExtraPrompt}\n\n` : ''}제목: ${input.title}
 ${input.synopsis?.trim() ? `[운영자 시놉시스 - 반드시 참고]\n"${input.synopsis.trim()}"` : '[시놉시스 없음 — URL 요약 반영]'}
 URL 요약: ${urlSummary.slice(0, 500)}
 ${blogPostLengthPromptGuide(lengthRange)}
@@ -534,6 +590,58 @@ ${workspaceServiceMentionPromptGuide(input.workspace)}
     console.warn('[content-generator] Sonnet failed, using fallback:', (mainErr as Error).message);
     return fallbackContent(input, urlSummary, lengthRange);
   }
+}
+
+/** 기획서 7-0 generateAllContent */
+export async function generateAllContent(
+  input: ContentGenerationInput,
+  options?: GenerateAllContentOptions,
+): Promise<ContentGenerationOutput> {
+  if (!options?.accountId?.trim()) {
+    return generateAllContentOnce(input, options);
+  }
+
+  const accountId = options.accountId.trim();
+  const corpus = await loadPostingSimilarityCorpus(accountId);
+  let mainExtraPrompt = options.mainExtraPrompt;
+  let lastCheck = checkPostingSimilarity('', '', corpus);
+  let result: ContentGenerationOutput | undefined;
+
+  for (let attempt = 1; attempt <= MAX_POSTING_SIMILARITY_RETRIES; attempt++) {
+    result = await generateAllContentOnce(input, { mainExtraPrompt });
+    lastCheck = checkPostingSimilarity(result.seo_title, result.blog_post, corpus);
+
+    if (lastCheck.ok) {
+      return {
+        ...result,
+        similarity_score: Math.max(lastCheck.titleSimilarity, lastCheck.bodySimilarity),
+        similarity_regenerations: attempt - 1,
+      };
+    }
+
+    await logOperation({
+      level: 'warn',
+      message:
+        `[posting-similarity] 재생성 ${attempt}/${MAX_POSTING_SIMILARITY_RETRIES} — ` +
+        `제목유사도=${lastCheck.titleSimilarity.toFixed(3)} 본문유사도=${lastCheck.bodySimilarity.toFixed(3)} ` +
+        `account=${accountId}`,
+      workspace: input.workspace,
+    });
+
+    if (attempt >= MAX_POSTING_SIMILARITY_RETRIES) break;
+    mainExtraPrompt = buildPostingSimilarityFeedback(lastCheck);
+  }
+
+  const reasons: string[] = [];
+  if (lastCheck.titleTooSimilar) {
+    reasons.push(`SEO 제목 유사도 ${lastCheck.titleSimilarity.toFixed(3)} ≥ ${POSTING_SIMILARITY_THRESHOLD}`);
+  }
+  if (lastCheck.bodyTooSimilar) {
+    reasons.push(`본문 유사도 ${lastCheck.bodySimilarity.toFixed(3)} ≥ ${POSTING_SIMILARITY_THRESHOLD}`);
+  }
+  throw new Error(
+    `포스팅 유사도 검사 실패 (${MAX_POSTING_SIMILARITY_RETRIES}회 재생성) — ${reasons.join(' · ')}`,
+  );
 }
 
 /** @deprecated use generateAllContent */

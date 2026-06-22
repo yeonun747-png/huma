@@ -2,7 +2,10 @@ import { getSetting } from './settings.js';
 
 export interface DaySchedule {
   yeonun_blog: number;
+  /** @deprecated quizoasis_blog + panana_blog 합 — 하위 호환 */
   quizoasis_panana_blog: number;
+  quizoasis_blog: number;
+  panana_blog: number;
   total_blog: number;
   type_b_ratio: number;
   videos_per_day: number;
@@ -19,6 +22,8 @@ const DEFAULT: PostingScheduleConfig = {
   weekday: {
     yeonun_blog: 6,
     quizoasis_panana_blog: 2,
+    quizoasis_blog: 1,
+    panana_blog: 1,
     total_blog: 8,
     type_b_ratio: 0.5,
     videos_per_day: 4,
@@ -26,6 +31,8 @@ const DEFAULT: PostingScheduleConfig = {
   weekend: {
     yeonun_blog: 3,
     quizoasis_panana_blog: 2,
+    quizoasis_blog: 1,
+    panana_blog: 1,
     total_blog: 5,
     type_b_ratio: 0.5,
     videos_per_day: 3,
@@ -52,11 +59,17 @@ export async function getPostingSchedule(): Promise<PostingScheduleConfig> {
 
 export async function getDailyBlogQuota(): Promise<DaySchedule> {
   const schedule = await getPostingSchedule();
-  return isWeekendKst() ? schedule.weekend : schedule.weekday;
+  const raw = isWeekendKst() ? schedule.weekend : schedule.weekday;
+  return normalizeDaySchedule(raw);
 }
 
-/** v3.16 ㉙ — 평일 8 / 주말 5 초과 여부 */
-export async function isBlogDailyQuotaExceeded(todayCount: number): Promise<boolean> {
-  const quota = await getDailyBlogQuota();
-  return todayCount >= quota.total_blog;
+function normalizeDaySchedule(raw: DaySchedule): DaySchedule {
+  const quizoasis_blog = raw.quizoasis_blog ?? 1;
+  const panana_blog = raw.panana_blog ?? 1;
+  return {
+    ...raw,
+    quizoasis_blog,
+    panana_blog,
+    quizoasis_panana_blog: quizoasis_blog + panana_blog,
+  };
 }

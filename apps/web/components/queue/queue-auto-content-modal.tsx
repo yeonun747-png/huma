@@ -3,10 +3,13 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import type { HumaJob } from '@huma/shared';
+import type { Workspace } from '@huma/shared';
 import { buildScheduledAt } from '@/lib/queue-repeat';
 import type { QueuePrefill } from '@/lib/queue-prefill';
 import { extractKstScheduleTime } from '@/lib/format-kst';
 import { formatScheduleLabel } from './job-schedule-form';
+import { api } from '@/lib/api';
+import { compressImageFileForUpload } from '@/lib/compress-image-for-upload';
 
 const IMAGE_SLOT_COUNT = 5;
 const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
@@ -20,6 +23,8 @@ export interface AutoContentFormValues {
   auto_schedule: boolean;
   uploaded_images: UploadedImageSlot[];
   schedule_time: string;
+  /** 연운 수동 등록 — 포스팅 계정 */
+  account_id: string;
 }
 
 export type AutoContentSubmitContext = {
@@ -27,6 +32,7 @@ export type AutoContentSubmitContext = {
 };
 
 interface QueueAutoContentModalProps {
+  workspace: Workspace;
   open: boolean;
   editJob?: HumaJob | null;
   prefill?: QueuePrefill | null;
@@ -44,6 +50,7 @@ const EMPTY_FORM: AutoContentFormValues = {
   auto_schedule: true,
   uploaded_images: [...EMPTY_SLOTS],
   schedule_time: '10:00',
+  account_id: '',
 };
 
 function slotsFromJob(job: HumaJob): UploadedImageSlot[] {
@@ -62,6 +69,7 @@ function jobToForm(job: HumaJob): AutoContentFormValues {
     auto_schedule: job.auto_scheduled ?? true,
     uploaded_images: slotsFromJob(job),
     schedule_time: extractKstScheduleTime(job.scheduled_at),
+    account_id: job.account_id ?? '',
   };
 }
 
@@ -69,9 +77,17 @@ function countFilledSlots(slots: UploadedImageSlot[]): number {
   return slots.filter(Boolean).length;
 }
 
-import { compressImageFileForUpload } from '@/lib/compress-image-for-upload';
+type YeonunAccountOption = { id: string; label: string };
 
-export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmit, onPreview }: QueueAutoContentModalProps) {
+export function QueueAutoContentModal({
+  workspace,
+  open,
+  editJob,
+  prefill,
+  onClose,
+  onSubmit,
+  onPreview,
+}: QueueAutoContentModalProps) {
   const fileRefs = useRef<Array<HTMLInputElement | null>>([]);
   const isEdit = Boolean(editJob);
   const editable = !editJob || ['pending', 'scheduled', 'paused'].includes(editJob.status);
@@ -83,6 +99,7 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
   const [loadingAction, setLoadingAction] = useState<'preview' | 'publish' | null>(null);
   const [uploadProgress, setUploadProgress] = useState({ done: 0, total: 0 });
   const [error, setError] = useState('');
+  const [yeonunAccounts, setYeonunAccounts] = useState<YeonunAccountOption[]>([]);
 
   const loading = loadingAction !== null;
   const uploadPct =
@@ -112,6 +129,40 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
     setLoadingAction(null);
     setUploadProgress({ done: 0, total: 0 });
   }, [open, editJob, prefill]);
+
+  useEffect(() => {
+    if (!open || workspace !== 'yeonun') {
+      setYeonunAccounts([]);
+      return;
+    }
+    let cancelled = false;
+    void api.getAutoPublishAccountsStatus('yeonun').then((res) => {
+      if (cancelled) return;
+      const opts = res.accounts
+        .filter((a) => a.account_id)
+        .map((a) => ({
+          id: a.account_id!,
+          label: a.account_label ?? a.account_id!,
+        }));
+      setYeonunAccounts(opts);
+      if (!editJob && opts.length && !form.account_id) {
+        setForm((f) => ({ ...f, account_id: opts[0]!.id }));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, workspace, editJob]);
+
+  const requireYeonunAccount = workspace === 'yeonun' && !isEdit;
+
+  const validateForm = (): boolean => {
+    if (requireYeonunAccount && !form.account_id.trim()) {
+      setError('연운 포스팅 계정(연운1~3)을 선택하세요.');
+      return false;
+    }
+    return true;
+  };
 
   useEffect(() => {
     if (previewSlot == null) return;
@@ -175,10 +226,11 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
   };
 
   const handlePreview = async () => {
-    if (!form.title.trim() || !form.source_url.trim()) {
-      setError('① 제목과 ② URL은 필수 입력 항목입니다.');
+    if (isEdit && (!form.title.trim() || !form.source_url.trim())) {
+      setError('수정 시 제목과 URL은 필수입니다.');
       return;
     }
+    if (!validateForm()) return;
     if (!onPreview || isEdit) return;
     setError('');
     setLoadingAction('preview');
@@ -198,10 +250,11 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
   };
 
   const handleSubmit = async () => {
-    if (!form.title.trim() || !form.source_url.trim()) {
-      setError('① 제목과 ② URL은 필수 입력 항목입니다.');
+    if (isEdit && (!form.title.trim() || !form.source_url.trim())) {
+      setError('수정 시 제목과 URL은 필수입니다.');
       return;
     }
+    if (!validateForm()) return;
     setError('');
     setLoadingAction('publish');
     setUploadProgress({ done: 0, total: 0 });
@@ -270,11 +323,50 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
           </div>
         </div>
 
+        {workspace === 'yeonun' ? (
+          <div className="m-modal-field">
+            <div className="m-modal-label">
+              포스팅 계정 <span className="text-huma-err">필수</span>
+            </div>
+            {yeonunAccounts.length ? (
+              <div className="flex flex-wrap gap-2">
+                {yeonunAccounts.map((ac) => {
+                  const selected = form.account_id === ac.id;
+                  return (
+                    <label
+                      key={ac.id}
+                      className={`cursor-pointer rounded-md border px-3 py-2 font-mono text-[11px] ${
+                        selected
+                          ? 'border-huma-acc bg-huma-acc/10 text-huma-acc'
+                          : 'border-huma-bdr text-huma-t2 hover:border-huma-bdr2'
+                      } ${!editable ? 'pointer-events-none opacity-60' : ''}`}
+                    >
+                      <input
+                        type="radio"
+                        className="sr-only"
+                        name="yeonun-posting-account"
+                        checked={selected}
+                        disabled={!editable}
+                        onChange={() => setForm((f) => ({ ...f, account_id: ac.id }))}
+                      />
+                      {ac.label}
+                    </label>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="font-mono text-[10.5px] text-huma-t3">연운 포스팅 계정 로딩 중…</p>
+            )}
+          </div>
+        ) : null}
+
         <div className="m-modal-field">
-          <div className="m-modal-label">① 포스팅 제목 <span className="text-huma-err">필수</span></div>
+          <div className="m-modal-label">
+            ① 포스팅 제목 <span className="text-huma-t3">선택 — 비우면 캐시에서 자동</span>
+          </div>
           <input
             className="m-modal-input"
-            placeholder="예: 2026년 병오년 사주 총운 분석"
+            placeholder="비우면 연운 상품·퀴즈·캐릭터 캐시에서 자동 선택"
             value={form.title}
             disabled={!editable}
             onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
@@ -282,15 +374,23 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
         </div>
 
         <div className="m-modal-field">
-          <div className="m-modal-label">② 관련 URL <span className="text-huma-err">필수 — Claude가 직접 읽고 이해</span></div>
+          <div className="m-modal-label">
+            ② 관련 URL <span className="text-huma-t3">선택 — 비우면 자동 생성</span>
+          </div>
           <input
             className="m-modal-input"
-            placeholder="https://yeonun.ai/fortune/2026"
+            placeholder="예: myquizoasis.com/ko/test/… · panana.kr/c/… · yeonun.com/fortune/…"
             value={form.source_url}
             disabled={!editable}
             onChange={(e) => setForm((f) => ({ ...f, source_url: e.target.value }))}
           />
         </div>
+
+        {!form.title.trim() && !form.source_url.trim() ? (
+          <p className="-mt-1 mb-2 font-mono text-[10.5px] text-huma-acc">
+            제목·URL 모두 비우면 「포스팅 큐」만 눌러도 계정관리 캐시 기준으로 완전 자동 발행됩니다.
+          </p>
+        ) : null}
 
         <div className="m-modal-field">
           <div className="m-modal-label">
@@ -436,18 +536,16 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
               onChange={(e) => setForm((f) => ({ ...f, auto_schedule: e.target.checked }))}
             />
             <div>
-              <div className="text-[13px] font-medium text-huma-t">네이버·SNS 발행 시간 자동 배분</div>
+              <div className="text-[13px] font-medium text-huma-t">네이버 발행 시간 자동 배분</div>
               <div className="mt-0.5 font-mono text-[10.5px] text-huma-t3">
-                Haiku + <span className="text-huma-acc">optimal_schedule</span> — 플랫폼·요일·시간대별 조회 패턴 분석
+                활성 시간대에 오늘 목표 건수 기준 <span className="text-huma-acc">대략 균등 슬롯</span> 배분 ·
+                동글 계정 간 10분 간격
               </div>
             </div>
           </label>
           {form.auto_schedule && (
-            <div className="mt-2 flex flex-wrap gap-2 rounded bg-huma-bg2 px-2 py-1.5 font-mono text-[10.5px] text-huma-t3">
-              <span>네이버 블로그 <span className="text-huma-ok">→ 오전 10:00</span></span>
-              <span>Instagram <span className="text-huma-ok">→ 오후 7:30</span></span>
-              <span>TikTok <span className="text-huma-ok">→ 오후 9:00</span></span>
-              <span>X/Threads <span className="text-huma-ok">→ 오전 8:00</span></span>
+            <div className="mt-2 rounded bg-huma-bg2 px-2 py-1.5 font-mono text-[10.5px] text-huma-t3">
+              콘텐츠 생성은 즉시 · 네이버 발행 시각은 계정별 슬롯 플래너가 자동 배정
             </div>
           )}
         </div>
@@ -483,11 +581,11 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
           {!isEdit && onPreview ? (
             <button
               type="button"
-              className="btn-primary min-w-0 py-2 text-[11px] leading-tight sm:text-xs"
+              className="btn-ghost min-w-0 py-2 text-[11px] leading-tight sm:text-xs"
               onClick={handlePreview}
               disabled={loading || !editable}
             >
-              {loadingAction === 'preview' ? '등록 중…' : '🔍 검증 미리보기'}
+              {loadingAction === 'preview' ? '등록 중…' : '🔍 검증 미리보기 데모'}
             </button>
           ) : (
             <button type="button" className="btn-primary flex-[2] py-2" onClick={handleSubmit} disabled={loading || !editable}>
@@ -503,7 +601,7 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
           {!isEdit && onPreview ? (
             <button
               type="button"
-              className="btn-ghost btn-upload-progress min-w-0 py-2 text-[11px] leading-tight text-huma-warn sm:text-xs"
+              className="btn-primary btn-upload-progress min-w-0 py-2 text-[11px] leading-tight sm:text-xs"
               onClick={handleSubmit}
               disabled={loading || !editable}
               title="Claude·Imagen 새로 생성 후 네이버 발행"
@@ -525,11 +623,9 @@ export function QueueAutoContentModal({ open, editJob, prefill, onClose, onSubmi
           ) : null}
         </div>
         <p className="mt-2 text-center font-mono text-[10.5px] text-huma-t3">
-          {!isEdit && onPreview
-            ? '검증 미리보기 → 새 창 확인 후 「포스팅 큐 등록」 · 닫기는 우상단 ✕'
-            : form.auto_schedule
-              ? '등록 직후 Claude·Imagen 생성 시작 · 발행 시각은 Haiku가 결정합니다'
-              : `생성·발행 시작: ${buildScheduledAt(form.schedule_time).slice(0, 16).replace('T', ' ')}`}
+          {form.auto_schedule
+            ? '등록 직후 Claude·Imagen 생성 · 네이버 발행은 활성 시간대 슬롯에 자동 배정'
+            : `생성·발행 시작: ${buildScheduledAt(form.schedule_time).slice(0, 16).replace('T', ' ')}`}
         </p>
       </div>
     </div>

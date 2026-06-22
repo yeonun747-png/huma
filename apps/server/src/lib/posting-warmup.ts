@@ -1,0 +1,35 @@
+/**
+ * 포스팅 계정 워밍업 — huma_accounts.warmup_day(일일 활동 일수) 기준 점진적 일일 상한.
+ * C-Rank와 동일 필드를 공유하므로, 이미 오래 쓰인 계정은 상한이 빨리 풀림.
+ */
+
+/** 절대 최소 발행 간격(시간) — human_engine 설정 하한 */
+export const ABSOLUTE_MIN_PUBLISH_INTERVAL_HOURS = 2;
+
+/** warmup_day별 평일 최대 발행 건수 (이후 4~5 목표 적용) */
+export function getPostingWarmupWeekdayCap(warmupDay: number): number {
+  const d = Math.max(0, warmupDay);
+  if (d <= 2) return 1;
+  if (d <= 5) return 2;
+  if (d <= 9) return 3;
+  if (d <= 14) return 4;
+  return 999;
+}
+
+export function applyPostingWarmupCap(
+  rawTarget: number,
+  warmupDay: number,
+  isWeekend: boolean,
+  weekendRatio?: number,
+): number {
+  const cap = getPostingWarmupWeekdayCap(warmupDay);
+  if (cap >= 999) return rawTarget;
+
+  if (isWeekend) {
+    const ratio = weekendRatio ?? 0.45;
+    const weekendCap = Math.max(1, Math.round(cap * ratio));
+    return Math.min(rawTarget, weekendCap);
+  }
+
+  return Math.min(rawTarget, cap);
+}

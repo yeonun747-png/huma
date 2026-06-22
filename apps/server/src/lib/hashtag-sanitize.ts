@@ -59,6 +59,12 @@ export function urlContextForHashtags(urlSummary: string): string {
   const productBlock = trimmed.match(/\[연운 상품 정보\][\s\S]*?(?=\n\[|$)/)?.[0]?.trim();
   if (productBlock) return productBlock.slice(0, 600);
 
+  const quizBlock = trimmed.match(/\[퀴즈오아시스 테스트\][\s\S]*?(?=\n\[|$)/)?.[0]?.trim();
+  if (quizBlock) return quizBlock.slice(0, 600);
+
+  const pananaBlock = trimmed.match(/\[파나나 캐릭터\][\s\S]*?(?=\n\[|$)/)?.[0]?.trim();
+  if (pananaBlock) return pananaBlock.slice(0, 600);
+
   if (URL_NOISE_RE.test(trimmed)) {
     const cleanLines = trimmed
       .split('\n')

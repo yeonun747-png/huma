@@ -230,6 +230,48 @@ export async function syncPananaCharacters(): Promise<{ synced: number; error?: 
   }
 }
 
+/** 영상·포스팅 공용 캐릭터 컨텍스트 블록 */
+export function formatPananaContext(row: PananaCharacterRow, mode: 'video' | 'posting' = 'video'): string {
+  const desc = row.description?.trim() ? `소개: ${row.description.trim()}\n` : '';
+  const tail =
+    mode === 'posting'
+      ? '(블로그 글은 이 캐릭터 성격·세계관·대화 톤을 반영 — 시네마틱·감성 톤)'
+      : '(이번 영상에 자연스럽게 녹일 캐릭터 — 외형·톤·말버릇 고정)';
+  return `[파나나 캐릭터]
+이름: ${row.name}
+${desc}${tail}`;
+}
+
+export async function lookupPananaCharacterByExternalId(id: string): Promise<PananaCharacterRow | null> {
+  const key = id.trim();
+  if (!key) return null;
+
+  const { data, error } = await supabase
+    .from('huma_panana_characters_cache')
+    .select('*')
+    .eq('panana_character_id', key)
+    .eq('status', 'active')
+    .maybeSingle();
+
+  if (!error && data) return data as PananaCharacterRow;
+  return null;
+}
+
+export async function lookupPananaCharacterByName(name: string): Promise<PananaCharacterRow | null> {
+  const key = name.trim();
+  if (!key) return null;
+
+  const { data, error } = await supabase
+    .from('huma_panana_characters_cache')
+    .select('*')
+    .eq('status', 'active')
+    .ilike('name', key)
+    .maybeSingle();
+
+  if (!error && data) return data as PananaCharacterRow;
+  return null;
+}
+
 export async function listActivePananaCharacters(): Promise<PananaCharacterRow[]> {
   const { data } = await supabase
     .from('huma_panana_characters_cache')

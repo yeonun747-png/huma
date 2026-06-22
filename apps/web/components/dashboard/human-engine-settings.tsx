@@ -64,7 +64,7 @@ const DEFAULT_HUMAN: HumanEngineConfig = {
   paste_ratio: 0.55,
   active_hours: MOCKUP_ACTIVE_HOURS,
   weekend_ratio: 0.5,
-  min_publish_interval_hours: 4,
+  min_publish_interval_hours: 2,
   crank_publish_ratio: 1,
   crank_comm_ratio: 3,
   fingerprint: {
@@ -385,7 +385,7 @@ export function HumanEngineSettings() {
           </div>
           <div className="he-heatmap-stats">
             <HeStaticRow label="주말 발행량" value="평일 50%" />
-            <HeStaticRow label="연속 발행 간격" value="최소 4시간" />
+            <HeStaticRow label="연속 발행 간격" value="절대 최소 2시간 · 일일 목표에 따라 동적" />
             <HeStaticRow label="C-Rank 소통비율" value="발행1 : 소통3" />
           </div>
         </div>

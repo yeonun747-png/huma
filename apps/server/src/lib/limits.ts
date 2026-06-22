@@ -1,5 +1,5 @@
 export const PLATFORM_DAILY_LIMITS: Record<string, number> = {
-  post_blog: 30,
+  post_blog: 10,
   cafe_new_post: 5,
   cafe_reply: 15,
   social_crank: 30,
@@ -15,9 +15,11 @@ export const PLATFORM_DAILY_LIMITS: Record<string, number> = {
 };
 
 export const SHARED_WORKSPACE_LIMITS = [
-  { workspaces: ['quizoasis', 'panana'] as const, jobTypes: ['post_blog'], limit: 30 },
+  { workspaces: ['yeonun'] as const, jobTypes: ['post_blog'], limit: 10 },
+  { workspaces: ['quizoasis'] as const, jobTypes: ['post_blog'], limit: 10 },
+  { workspaces: ['panana'] as const, jobTypes: ['post_blog'], limit: 10 },
 ];
 
 export function getDailyLimit(jobType: string): number {
-  return PLATFORM_DAILY_LIMITS[jobType] ?? 30;
+  return PLATFORM_DAILY_LIMITS[jobType] ?? 10;
 }

@@ -18,6 +18,7 @@ import {
   listCrankModemsForDashboard,
   resetAllMonthlyDataMb,
   resetDailyCrankCounters,
+  resetDailyPostingCounters,
 } from './crank-modems.js';
 import { enqueueHumaJob, type JobRecord } from './job-scheduler.js';
 import { recoverCrankPipeline } from './crank-pipeline-recovery.js';
@@ -41,9 +42,10 @@ export async function ensureDailyCrankCountersReset(): Promise<void> {
   if (lastDailyCounterResetKey === dailyKey) return;
   lastDailyCounterResetKey = dailyKey;
   await resetDailyCrankCounters();
+  await resetDailyPostingCounters();
   await logOperation({
     level: 'info',
-    message: `[crank-scheduler] ${dailyKey}: crank_sessions_today · crank_count_today 일일 초기화`,
+    message: `[crank-scheduler] ${dailyKey}: crank_sessions_today · crank_count_today · post_count_today 일일 초기화`,
   });
 }
 

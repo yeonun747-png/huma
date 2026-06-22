@@ -416,7 +416,7 @@ export function SettingsView() {
 
           <SettingsToggle
 
-            label="일일 발행 한도 (네이버 30건)"
+            label="일일 발행 한도 (네이버 10건)"
 
             value={Boolean(app.daily_limit ?? true)}
 

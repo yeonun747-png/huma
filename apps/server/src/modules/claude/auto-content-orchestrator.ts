@@ -1,9 +1,11 @@
 import { enqueueHumaJob, type JobRecord } from '../../lib/job-scheduler.js';
 import { supabase } from '../../middleware/auth.js';
 import { getPostingEnabled } from '../../lib/activity-control.js';
-import { pickPostingAccount } from '../../lib/posting-accounts.js';
+import { assertAndReservePostingQuota, releasePostingQuotaSlot } from '../../lib/posting-quota-reserve.js';
+import { resolvePostingAccount } from '../../lib/posting-accounts.js';
 import { persistUploadedJobImages, normalizeUploadedImagesInput } from '../../lib/upload-job-images.js';
 import { toTodayDatetime } from './auto-decide.js';
+import { resolveAutoPostingInput } from '../content/auto-posting-input.js';
 import {
   runContentOrchestrator,
   type ContentType,
@@ -11,8 +13,9 @@ import {
 
 export interface AutoContentRequest {
   workspace: string;
-  title: string;
-  source_url: string;
+  account_id?: string;
+  title?: string;
+  source_url?: string;
   synopsis?: string;
   /** @deprecated uploaded_images 사용 */
   screenshot_base64?: string;
@@ -31,6 +34,8 @@ export interface AutoContentResult {
   primary_job: JobRecord;
   jobs_created: number;
   video_queue_id?: string;
+  auto_picked?: boolean;
+  auto_pick_label?: string;
 }
 
 export function buildScheduledAtFromTime(time: string): string {
@@ -47,6 +52,15 @@ export async function registerAutoContentJobs(body: AutoContentRequest): Promise
   if (!getPostingEnabled()) {
     throw new Error('POSTING_ACTIVITY_DISABLED');
   }
+
+  const postingAccount = await resolvePostingAccount(body.workspace, body.account_id);
+  if (!postingAccount?.id) {
+    throw new Error(body.account_id ? '포스팅 계정을 찾을 수 없거나 비활성입니다' : '활성 포스팅 계정 없음');
+  }
+
+  await assertAndReservePostingQuota(body.workspace, postingAccount.id);
+  let slotReserved = true;
+  try {
   const contentTypeAuto = body.content_type_auto ?? body.content_type == null;
   const autoScheduled = body.auto_schedule !== false;
 
@@ -56,7 +70,20 @@ export async function registerAutoContentJobs(body: AutoContentRequest): Promise
 
   const status = new Date(scheduledAt).getTime() > Date.now() ? 'scheduled' : 'pending';
 
-  const postingAccount = await pickPostingAccount(body.workspace);
+  const resolved = await resolveAutoPostingInput({
+    workspace: body.workspace,
+    accountId: postingAccount.id,
+    title: body.title,
+    source_url: body.source_url,
+  });
+
+  const platformScheduleBase =
+    body.dry_run || resolved.auto_pick_label
+      ? {
+          ...(body.dry_run ? { _dry_run: true } : {}),
+          ...(resolved.auto_pick_label ? { _auto_pick: resolved.auto_pick_label } : {}),
+        }
+      : null;
 
   const { data: parentJob, error } = await supabase
     .from('huma_jobs')
@@ -67,13 +94,13 @@ export async function registerAutoContentJobs(body: AutoContentRequest): Promise
       content_type: body.content_type ?? 'A',
       content_type_auto: contentTypeAuto,
       auto_scheduled: autoScheduled,
-      title: body.title.trim(),
+      title: resolved.title,
       content: body.synopsis?.trim() || null,
-      link_url: body.source_url.trim(),
+      link_url: resolved.source_url,
       image_urls: null,
       scheduled_at: scheduledAt,
       repeat_rule: body.repeat_rule || null,
-      platform_schedule: body.dry_run ? { _dry_run: true } : null,
+      platform_schedule: platformScheduleBase,
       status,
       retry_count: 0,
     })
@@ -81,6 +108,9 @@ export async function registerAutoContentJobs(body: AutoContentRequest): Promise
     .single();
 
   if (error || !parentJob) throw new Error(error?.message ?? '작업 등록 실패');
+
+  await releasePostingQuotaSlot(postingAccount.id);
+  slotReserved = false;
 
   const rawImages =
     normalizeUploadedImagesInput(body.uploaded_images) ??
@@ -98,13 +128,39 @@ export async function registerAutoContentJobs(body: AutoContentRequest): Promise
   return {
     primary_job: parentJob as JobRecord,
     jobs_created: 1,
+    auto_picked: resolved.auto_picked,
+    auto_pick_label: resolved.auto_pick_label,
   };
+  } finally {
+    if (slotReserved) {
+      await releasePostingQuotaSlot(postingAccount.id).catch(() => undefined);
+    }
+  }
 }
 
 /** content_full BullMQ 작업에서 호출 */
 export async function executeContentFull(humaJobId: string) {
   const { data: job, error } = await supabase.from('huma_jobs').select('*').eq('id', humaJobId).single();
   if (error || !job) throw new Error('content_full 작업 없음');
+
+  const resolved = await resolveAutoPostingInput({
+    workspace: job.workspace,
+    accountId: job.account_id as string | null,
+    title: (job.title as string | null) ?? undefined,
+    source_url: (job.link_url as string | null) ?? undefined,
+  });
+
+  if (
+    resolved.title !== (job.title ?? '').trim() ||
+    resolved.source_url !== (job.link_url ?? '').trim()
+  ) {
+    await supabase
+      .from('huma_jobs')
+      .update({ title: resolved.title, link_url: resolved.source_url })
+      .eq('id', humaJobId);
+    job.title = resolved.title;
+    job.link_url = resolved.source_url;
+  }
 
   const uploadedImageUrls = Array.isArray(job.image_urls)
     ? job.image_urls.filter((u): u is string => typeof u === 'string' && Boolean(u.trim()))

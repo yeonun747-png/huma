@@ -21,6 +21,8 @@ import {
 } from '../../claude/content-preview.js';
 import { isNaverBlogOnlyMode } from '../../../lib/activity-control.js';
 import { resolveFeaturedBlogImageUrl } from '../../../lib/blog-image-placement.js';
+import { planNextPostBlogScheduledAt } from '../../../lib/posting-slot-planner.js';
+import { assertAccountPostingQuota, assertAccountPostingQuotaBeforeGeneration } from '../../../lib/posting-daily-status.js';
 
 export type ContentType = 'A' | 'B';
 
@@ -122,6 +124,18 @@ function platformTime(
   return resolvePlatformScheduledAt(platform, schedule, fallback);
 }
 
+async function resolveBlogScheduledAt(
+  autoScheduled: boolean,
+  accountId: string | null | undefined,
+  schedule: PlatformSchedule | undefined,
+  fallback: string,
+): Promise<string> {
+  if (autoScheduled && accountId?.trim()) {
+    return planNextPostBlogScheduledAt(accountId.trim());
+  }
+  return platformTime(autoScheduled, schedule, 'naver_blog', fallback);
+}
+
 async function enqueueVideoPipeline(
   videoQueueId: string,
   workspace: string,
@@ -171,7 +185,8 @@ async function runTypeA(
   const featuredImage = resolveFeaturedBlogImageUrl(imageUrls);
 
   const blogLink = normalizeBlogLinkUrl(workspace, sourceUrl);
-  const blogAt = platformTime(auto_scheduled, schedule, 'naver_blog', scheduled_at);
+  if (accountId) await assertAccountPostingQuota(workspace, accountId);
+  const blogAt = await resolveBlogScheduledAt(auto_scheduled, accountId, schedule, scheduled_at);
   const blogJob = await insertJob({
     workspace,
     account_id: accountId,
@@ -239,7 +254,8 @@ async function runTypeB(
   const featuredImage = resolveFeaturedBlogImageUrl(imageUrls);
 
   const blogLink = normalizeBlogLinkUrl(workspace, sourceUrl);
-  const blogAt = platformTime(auto_scheduled, schedule, 'naver_blog', scheduled_at);
+  if (accountId) await assertAccountPostingQuota(workspace, accountId);
+  const blogAt = await resolveBlogScheduledAt(auto_scheduled, accountId, schedule, scheduled_at);
   const threadsAt = platformTime(auto_scheduled, schedule, 'threads', scheduled_at);
   const twitterAt = platformTime(auto_scheduled, schedule, 'x', scheduled_at);
   const videoAt = platformTime(auto_scheduled, schedule, 'tiktok', scheduled_at);
@@ -350,10 +366,14 @@ async function persistAutoDecision(
     .select('platform_schedule')
     .eq('id', parentJobId)
     .maybeSingle();
-  const wasDryRun = isDryRunJob(job?.platform_schedule);
-  const platformSchedule = wasDryRun
-    ? { ...decision.platform_schedule, _dry_run: true }
-    : decision.platform_schedule;
+  const prev = (job?.platform_schedule as Record<string, unknown> | null) ?? {};
+  const wasDryRun = prev._dry_run === true;
+  const autoPick = prev._auto_pick;
+  const platformSchedule = {
+    ...decision.platform_schedule,
+    ...(wasDryRun ? { _dry_run: true } : {}),
+    ...(autoPick ? { _auto_pick: autoPick } : {}),
+  };
 
   await supabase
     .from('huma_jobs')
@@ -371,6 +391,15 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
   let schedule = input.platform_schedule;
   const autoScheduled = input.auto_scheduled !== false;
   const dryRun = isDryRunJob(schedule);
+
+  const postingAccountForQuota = await resolvePostingAccountForOrchestrator(
+    input.workspace,
+    input.parentJobId,
+  );
+  if (postingAccountForQuota?.id && !dryRun) {
+    await assertAccountPostingQuotaBeforeGeneration(input.workspace, postingAccountForQuota.id);
+  }
+
   const shouldAutoDecide = input.content_type_auto !== false && !contentType;
   const needsSchedule = autoScheduled && !schedule && !dryRun;
   const needsVideoModel = !input.video_model;
@@ -419,26 +448,33 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput) {
   const hasUploadedImages = uploadedImages.length > 0;
 
   const claudeStart = Date.now();
-  const generated = await generateAllContent({
-    title: input.title.trim(),
-    sourceUrl: input.sourceUrl.trim(),
-    synopsis: input.synopsis?.trim(),
-    workspace: input.workspace,
-    content_type: resolvedType,
-    blogWritingPersona,
-  });
+  const generated = await generateAllContent(
+    {
+      title: input.title.trim(),
+      sourceUrl: input.sourceUrl.trim(),
+      synopsis: input.synopsis?.trim(),
+      workspace: input.workspace,
+      content_type: resolvedType,
+      blogWritingPersona,
+    },
+    { accountId: postingAccount?.id ?? undefined },
+  );
 
   previewSteps[0] = {
     ...previewSteps[0]!,
     status: 'ok',
     ms: Date.now() - claudeStart,
-    detail: `${generated.blog_post.length}자 · SEO제목 ${generated.seo_title}`,
+    detail: `${generated.blog_post.length}자 · SEO제목 ${generated.seo_title}${
+      generated.similarity_score != null ? ` · 유사도 ${generated.similarity_score.toFixed(3)}` : ''
+    }`,
   };
   previewSteps[1] = { ...previewSteps[1]!, status: 'running' };
   if (input.parentJobId) {
     const patch = dryRun ? patchJobPreviewProgress : patchJobGenerationProgress;
     await patch(input.parentJobId, previewSteps, {
       blog_post_length: generated.blog_post.length,
+      similarity_score: generated.similarity_score,
+      similarity_regenerations: generated.similarity_regenerations,
     });
   }
   if (dryRun && input.parentJobId) {
@@ -645,6 +681,9 @@ export async function promoteDryRunToPublish(parentJobId: string) {
   const schedule = extractPlatformSchedule(ps);
   const contentType = (job.content_type ?? 'A') as ContentType;
   const autoScheduled = job.auto_scheduled !== false;
+  if (postingAccount?.id) {
+    await assertAccountPostingQuota(job.workspace as string, postingAccount.id);
+  }
   const baseScheduledAt =
     autoScheduled && schedule?.naver_blog
       ? resolveNaverBlogScheduledAt(schedule.naver_blog, job.scheduled_at ?? new Date().toISOString())

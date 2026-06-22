@@ -14,7 +14,13 @@ import {
   resolveAutoContentStartAt,
 } from '../modules/claude/auto-content-orchestrator.js';
 import { runContentPreview } from '../modules/claude/content-preview.js';
+import {
+  fetchAutoPublishStatus,
+  fetchAutoPublishAccountsStatus,
+  runAutoPublish,
+} from '../modules/content/auto-publish.js';
 import { promoteDryRunToPublish } from '../modules/queue/jobs/content-orchestrator.js';
+import { kstTodayStartIso } from '../lib/posting-daily-status.js';
 import { assertCafeNewPostAccount, assertCafeReplyAccount } from '../lib/cafe-accounts.js';
 import { assertHumaJobAdvanceAllowed, assertHumaJobRunnable } from '../lib/account-guards.js';
 import { assertManualSocialCrankAllowed } from '../lib/crank-guard.js';
@@ -37,7 +43,7 @@ import {
   countContentFullPipelineShells,
   filterOutPipelineShells,
 } from '../lib/job-pipeline-shell.js';
-import { attachPostingAccountLabels } from '../lib/posting-accounts.js';
+import { attachPostingAccountLabels, pickPostingAccount } from '../lib/posting-accounts.js';
 
 const JOB_ACCOUNT_SELECT = '*, huma_accounts(name, slot_label)';
 
@@ -53,19 +59,19 @@ async function assertJobWorkspaceAccess(
   return { ok: true };
 }
 
-function kstTodayStartIso(): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Seoul',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date());
-  const pick = (type: Intl.DateTimeFormatPartTypes) =>
-    Number(parts.find((p) => p.type === type)?.value ?? 0);
-  const y = pick('year');
-  const m = pick('month');
-  const d = pick('day');
-  return new Date(Date.UTC(y, m - 1, d, -9, 0, 0)).toISOString();
+function postingQuotaErrorStatus(message: string): number {
+  if (
+    message.includes('한도') ||
+    message.includes('목표') ||
+    message.includes('파이프라인') ||
+    message.includes('OFF') ||
+    message.includes('야간') ||
+    message.includes('캐시') ||
+    message.includes('계정')
+  ) {
+    return 429;
+  }
+  return 500;
 }
 
 async function fetchQueueStats(workspace: string) {
@@ -209,8 +215,11 @@ export async function registerJobRoutes(app: FastifyInstance) {
           ? body.contentTypeAuto
           : contentType == null;
     const autoSchedule = body.auto_schedule ?? body.autoSchedule;
-    if (sourceUrl && body.title) {
-      if (!body.workspace || !allowedWorkspaces.includes(body.workspace as string)) {
+    const isAutoContentJob =
+      (body.job_type as string | undefined) === 'content_full' ||
+      (Boolean(sourceUrl?.toString().trim()) && Boolean(body.title));
+    if (body.workspace && isAutoContentJob) {
+      if (!allowedWorkspaces.includes(body.workspace as string)) {
         return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
       }
       try {
@@ -220,8 +229,9 @@ export async function registerJobRoutes(app: FastifyInstance) {
           resolveAutoContentStartAt(autoScheduled, (body.schedule_time as string) ?? undefined);
         const result = await registerAutoContentJobs({
           workspace: body.workspace as string,
-          title: String(body.title).trim(),
-          source_url: sourceUrl.trim(),
+          account_id: (body.account_id as string | undefined)?.trim() || undefined,
+          title: body.title ? String(body.title).trim() : undefined,
+          source_url: sourceUrl?.toString().trim() || undefined,
           synopsis: (body.synopsis as string | undefined)?.trim(),
           uploaded_images:
             normalizeUploadedImagesInput(body.uploaded_images ?? body.uploadedImages) ??
@@ -239,7 +249,8 @@ export async function registerJobRoutes(app: FastifyInstance) {
           _meta: { jobs_created: result.jobs_created, video_queue_id: result.video_queue_id },
         };
       } catch (err) {
-        return reply.code(500).send({ error: (err as Error).message ?? 'AI 콘텐츠 생성 실패' });
+        const msg = (err as Error).message ?? 'AI 콘텐츠 생성 실패';
+        return reply.code(postingQuotaErrorStatus(msg)).send({ error: msg });
       }
     }
 
@@ -304,6 +315,65 @@ export async function registerJobRoutes(app: FastifyInstance) {
     },
   );
 
+  app.get('/api/jobs/auto-publish/status', { preHandler: authMiddleware }, async (request, reply) => {
+    const { workspace } = request.query as { workspace?: string };
+    const allowedWorkspaces = getWorkspaceFilter(request);
+
+    if (!workspace || !allowedWorkspaces.includes(workspace)) {
+      return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
+    }
+
+    try {
+      return await fetchAutoPublishStatus(workspace);
+    } catch (err) {
+      return reply.code(500).send({ error: (err as Error).message ?? '상태 조회 실패' });
+    }
+  });
+
+  app.get('/api/jobs/auto-publish/accounts', { preHandler: authMiddleware }, async (request, reply) => {
+    const { workspace } = request.query as { workspace?: string };
+    const allowedWorkspaces = getWorkspaceFilter(request);
+
+    if (!workspace || !allowedWorkspaces.includes(workspace)) {
+      return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
+    }
+
+    try {
+      const accounts = await fetchAutoPublishAccountsStatus(workspace);
+      return { accounts };
+    } catch (err) {
+      return reply.code(500).send({ error: (err as Error).message ?? '계정 현황 조회 실패' });
+    }
+  });
+
+  app.post('/api/jobs/auto-publish', { preHandler: authMiddleware }, async (request, reply) => {
+    const body = request.body as { workspace?: string; account_id?: string };
+    const allowedWorkspaces = getWorkspaceFilter(request);
+
+    if (!body.workspace || !allowedWorkspaces.includes(body.workspace)) {
+      return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
+    }
+
+    try {
+      const result = await runAutoPublish(body.workspace, body.account_id);
+      return {
+        ...result.job,
+        _meta: {
+          auto_picked: result.auto_picked,
+          auto_pick_label: result.auto_pick_label,
+          daily_status: result.status,
+          accounts_status: result.accounts_status,
+        },
+      };
+    } catch (err) {
+      const msg = (err as Error).message ?? '자동 발행 실패';
+      if (msg.includes('한도') || msg.includes('OFF') || msg.includes('야간') || msg.includes('캐시')) {
+        return reply.code(429).send({ error: msg });
+      }
+      return reply.code(500).send({ error: msg });
+    }
+  });
+
   app.post('/api/jobs/content-preview', { preHandler: authMiddleware }, async (request, reply) => {
     const body = request.body as {
       workspace?: string;
@@ -320,15 +390,12 @@ export async function registerJobRoutes(app: FastifyInstance) {
     if (!body.workspace || !allowedWorkspaces.includes(body.workspace)) {
       return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
     }
-    if (!body.title?.trim() || !body.source_url?.trim()) {
-      return reply.code(400).send({ error: '제목과 URL은 필수입니다' });
-    }
 
     try {
       const result = await runContentPreview({
         workspace: body.workspace,
-        title: body.title.trim(),
-        source_url: body.source_url.trim(),
+        title: body.title?.trim() || undefined,
+        source_url: body.source_url?.trim() || undefined,
         synopsis: body.synopsis?.trim(),
         uploaded_images:
           normalizeUploadedImagesInput(body.uploaded_images) ??
@@ -347,6 +414,7 @@ export async function registerJobRoutes(app: FastifyInstance) {
   app.post('/api/jobs/auto-content', { preHandler: authMiddleware }, async (request, reply) => {
     const body = request.body as {
       workspace?: string;
+      account_id?: string;
       title?: string;
       source_url?: string;
       synopsis?: string;
@@ -364,17 +432,15 @@ export async function registerJobRoutes(app: FastifyInstance) {
     if (!body.workspace || !allowedWorkspaces.includes(body.workspace)) {
       return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
     }
-    if (!body.title?.trim() || !body.source_url?.trim()) {
-      return reply.code(400).send({ error: '제목과 URL은 필수입니다' });
-    }
 
     try {
       const autoScheduled = body.auto_schedule !== false;
       const scheduledAt = resolveAutoContentStartAt(autoScheduled, body.schedule_time);
       const result = await registerAutoContentJobs({
         workspace: body.workspace,
-        title: body.title.trim(),
-        source_url: body.source_url.trim(),
+        account_id: body.account_id?.trim() || undefined,
+        title: body.title?.trim() || undefined,
+        source_url: body.source_url?.trim() || undefined,
         synopsis: body.synopsis?.trim(),
         uploaded_images:
           normalizeUploadedImagesInput(body.uploaded_images) ??
@@ -388,10 +454,16 @@ export async function registerJobRoutes(app: FastifyInstance) {
       });
       return {
         ...result.primary_job,
-        _meta: { jobs_created: result.jobs_created, video_queue_id: result.video_queue_id },
+        _meta: {
+          jobs_created: result.jobs_created,
+          video_queue_id: result.video_queue_id,
+          auto_picked: result.auto_picked,
+          auto_pick_label: result.auto_pick_label,
+        },
       };
     } catch (err) {
-      return reply.code(500).send({ error: (err as Error).message ?? 'AI 콘텐츠 생성 실패' });
+      const msg = (err as Error).message ?? 'AI 콘텐츠 생성 실패';
+      return reply.code(postingQuotaErrorStatus(msg)).send({ error: msg });
     }
   });
 
@@ -414,7 +486,9 @@ export async function registerJobRoutes(app: FastifyInstance) {
         video_queue_id: result.video_queue_id,
       };
     } catch (err) {
-      return reply.code(400).send({ error: (err as Error).message ?? '발행 큐 등록 실패' });
+      const msg = (err as Error).message ?? '발행 큐 등록 실패';
+      const code = postingQuotaErrorStatus(msg);
+      return reply.code(code === 500 ? 400 : code).send({ error: msg });
     }
   });
 

@@ -42,6 +42,8 @@ import { hasIdleCrankModem } from '../modem/allocation.js';
 import { acquireAccount, releaseAccount } from '../../lib/account-lock.js';
 import { getCrankDailyLimit } from '../playwright/warmup.js';
 import { checkSharedWorkspaceLimit } from '../../lib/shared-limit.js';
+import { assertAccountPostingQuota } from '../../lib/posting-daily-status.js';
+import { checkCrossPostingStagger } from '../../lib/posting-cross-stagger.js';
 import { logOperation } from '../../lib/log-emitter.js';
 import { executePostBlog } from './jobs/post-blog.js';
 import { applyPostingResourceBlocking } from '../playwright/naver/posting-resource-block.js';
@@ -89,7 +91,11 @@ async function getTodayCount(accountId: string, field: 'post_count_today' | 'cra
 
 async function incrementAccountCount(accountId: string, field: 'post_count_today' | 'crank_count_today') {
   const current = await getTodayCount(accountId, field);
-  await supabase.from('huma_accounts').update({ [field]: current + 1 }).eq('id', accountId);
+  await supabase
+    .from('huma_accounts')
+    .update({ [field]: current + 1 })
+    .eq('id', accountId)
+    .eq(field, current);
 }
 
 async function completeJob(jobId: string, resultUrl?: string) {
@@ -243,7 +249,12 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         throw new DelayedError();
       }
 
-      if (POSTING_JOBS.includes(type) && !advanceRequested && !(await passesWeekendVolumeGate())) {
+      if (
+        POSTING_JOBS.includes(type) &&
+        type !== 'post_blog' &&
+        !advanceRequested &&
+        !(await passesWeekendVolumeGate())
+      ) {
         await deferHumaJob(job, humaJobId, 2 * 60 * 60 * 1000, {
           reason: 'WEEKEND_VOLUME',
           accountId,
@@ -333,7 +344,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
           if (type === 'cafe_new_post') await assertCafeNewPostAccount(accountId);
           if (type === 'cafe_reply') await assertCafeReplyAccount(accountId);
 
-          if (!scheduledCrank) {
+          if (!scheduledCrank && type !== 'post_blog') {
             const countField = dailyCountField(type);
             let limit = await getEffectiveDailyLimit(type);
             if (type === 'social_crank' || type === 'cafe_reply') {
@@ -350,7 +361,22 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
           }
         }
         const workspace = payload.workspace as string | undefined;
-        if (workspace) await checkSharedWorkspaceLimit(workspace, type);
+        if (accountId && workspace && type === 'post_blog' && !advanceRequested) {
+          await assertAccountPostingQuota(workspace, accountId);
+        }
+        if (type === 'post_blog' && accountId && !advanceRequested) {
+          const crossWait = await checkCrossPostingStagger(accountId);
+          if (crossWait) {
+            await deferHumaJob(job, humaJobId, crossWait, {
+              accountId,
+              token,
+              logMessage: `[post_blog] 동글 CAPTCHA 겹침 방지 — ${Math.ceil(crossWait / 60_000)}분 후`,
+              level: 'info',
+            });
+            throw new DelayedError();
+          }
+        }
+        if (workspace) await checkSharedWorkspaceLimit(workspace, type, accountId);
 
         let jobWorkspace = workspace;
         if (!jobWorkspace && humaJobId) {

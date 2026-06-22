@@ -15,6 +15,7 @@ import { CrankJobDetailModal } from './crank-job-detail-modal';
 import { parseSocialCrankJobContent } from '@/lib/crank-job-payload';
 import { parseQueueKstParts, isSchedulePast, isSameKstDay, weekdayColorClass } from '@/lib/format-kst';
 import { QueueAutoContentModal, type AutoContentFormValues, type AutoContentSubmitContext } from './queue-auto-content-modal';
+import { AutoPublishPanel } from './auto-publish-panel';
 import { resolveQueueUploadedImages } from '@/lib/resolve-queue-uploaded-images';
 import { buildScheduledAt } from '@/lib/queue-repeat';
 import { formatJobErrorLabel } from '@/lib/job-error-label';
@@ -200,6 +201,7 @@ export function QueueManager() {
     hashtags?: string[] | null;
     linkUrl?: string | null;
   } | null>(null);
+  const [accountsTick, setAccountsTick] = useState(0);
 
   const load = useCallback(async () => {
     const offset = (page - 1) * pageSize;
@@ -234,6 +236,7 @@ export function QueueManager() {
       const stats = await applyCompletedStats(result.stats);
       setStats(stats);
       setLoadError(null);
+      setAccountsTick((n) => n + 1);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('huma:queue-updated', { detail: stats }));
       }
@@ -265,6 +268,7 @@ export function QueueManager() {
       setStats({ pending: 0, running: 0, doneToday: 0, doneAll: 0 });
       setLoadError('큐 데이터를 불러오지 못했습니다. 서버 연결을 확인하세요.');
     }
+    setAccountsTick((n) => n + 1);
   }, [workspace, page, pageSize]);
 
   useEffect(() => {
@@ -419,8 +423,9 @@ export function QueueManager() {
     );
     const job = await api.createAutoContentJob({
       workspace,
-      title: values.title.trim(),
-      source_url: values.source_url.trim(),
+      account_id: values.account_id.trim() || undefined,
+      title: values.title.trim() || undefined,
+      source_url: values.source_url.trim() || undefined,
       synopsis: values.synopsis.trim() || undefined,
       content_type: 'A',
       content_type_auto: false,
@@ -455,6 +460,9 @@ export function QueueManager() {
         auto_scheduled: values.auto_schedule,
         scheduled_at: scheduledAt,
       };
+      if (workspace === 'yeonun' && values.account_id.trim()) {
+        patch.account_id = values.account_id.trim();
+      }
       const uploaded = await resolveQueueUploadedImages(
         workspace,
         values.uploaded_images,
@@ -476,8 +484,9 @@ export function QueueManager() {
       );
       await api.createAutoContentJob({
         workspace,
-        title: values.title.trim(),
-        source_url: values.source_url.trim(),
+        account_id: values.account_id.trim() || undefined,
+        title: values.title.trim() || undefined,
+        source_url: values.source_url.trim() || undefined,
         synopsis: values.synopsis.trim() || undefined,
         content_type: 'A',
         content_type_auto: false,
@@ -559,6 +568,7 @@ export function QueueManager() {
       </MGrid>
 
       <QueueAutoContentModal
+        workspace={workspace}
         open={showModal || editingJob !== null}
         editJob={editingJob}
         prefill={prefill}
@@ -574,9 +584,10 @@ export function QueueManager() {
       <MPanel
         title="포스팅 큐"
         action={
-          <div className="flex items-center gap-2">
+          <div className="flex items-start gap-2">
             {legend}
-            <button type="button" className="btn-primary btn-sm px-2 py-1" onClick={() => setShowModal(true)}>
+            <AutoPublishPanel workspace={workspace} onDone={load} accountsRefresh={accountsTick} />
+            <button type="button" className="btn-ghost btn-sm shrink-0 px-2 py-1" onClick={() => setShowModal(true)}>
               + 포스팅 추가
             </button>
           </div>

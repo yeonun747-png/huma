@@ -90,6 +90,75 @@ export async function loadPostingAccountById(accountId: string): Promise<Posting
   };
 }
 
+/** workspace·활성·연운 proxy_port 검증 */
+export async function loadPostingAccountForWorkspace(
+  accountId: string,
+  workspace: string,
+): Promise<PostingAccountPick | null> {
+  if (!postingSlotByWorkspace(workspace)) return null;
+
+  let query = supabase
+    .from('huma_accounts')
+    .select('id, persona, name, slot_label, proxy_port, layer4_rest_until')
+    .eq('id', accountId.trim())
+    .eq('workspace', workspace)
+    .eq('account_type', 'posting')
+    .eq('is_active', true)
+    .or(layer4RestSupabaseOr());
+
+  if (workspace === 'yeonun') {
+    query = query.in('proxy_port', [...YEONUN_POSTING_PORTS]);
+  }
+
+  const { data } = await query.maybeSingle();
+  if (!data?.id) return null;
+
+  const active = filterAccountsWithoutLayer4Rest([data]);
+  if (!active.length) return null;
+
+  return {
+    id: data.id as string,
+    persona: data.persona as Record<string, unknown> | undefined,
+    label: formatPostingAccountLabel(data) ?? undefined,
+  };
+}
+
+/** 포스팅 큐 UI — workspace 활성 계정 전체 (연운1~3 순) */
+export async function listPostingAccounts(workspace: string): Promise<PostingAccountPick[]> {
+  if (!postingSlotByWorkspace(workspace)) return [];
+
+  let query = supabase
+    .from('huma_accounts')
+    .select('id, persona, proxy_port, layer4_rest_until, name, slot_label')
+    .eq('workspace', workspace)
+    .eq('account_type', 'posting')
+    .eq('is_active', true)
+    .or(layer4RestSupabaseOr());
+
+  if (workspace === 'yeonun') {
+    query = query.in('proxy_port', [...YEONUN_POSTING_PORTS]);
+  }
+
+  const { data: rows } = await query.order('proxy_port', { ascending: true });
+  return filterAccountsWithoutLayer4Rest(rows ?? []).map((account) => ({
+    id: account.id as string,
+    persona: account.persona as Record<string, unknown> | undefined,
+    label: formatPostingAccountLabel(account) ?? undefined,
+  }));
+}
+
+/** 수동 지정 account_id 또는 순환 pick */
+export async function resolvePostingAccount(
+  workspace: string,
+  accountId?: string | null,
+  options?: { advance?: boolean },
+): Promise<PostingAccountPick | null> {
+  if (accountId?.trim()) {
+    return loadPostingAccountForWorkspace(accountId.trim(), workspace);
+  }
+  return pickPostingAccount(workspace, options);
+}
+
 /** content_full 부모 job에 이미 account_id가 있으면 재사용 — 순환 이중 소비 방지 */
 export async function resolvePostingAccountForOrchestrator(
   workspace: string,
