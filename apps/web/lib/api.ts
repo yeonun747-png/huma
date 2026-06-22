@@ -124,7 +124,11 @@ export const api = {
     request<{
       token: string;
       admin: { name: string; email: string; workspaces: string[]; isSuper?: boolean };
-    }>('/api/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
+    }>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+      timeoutMs: 20_000,
+    }),
   me: () => request<{ adminId: string; email: string; workspaces: string[]; isSuper: boolean }>('/api/auth/me'),
   jobs: (params?: {
     status?: string;
