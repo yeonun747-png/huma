@@ -17,6 +17,7 @@ import {
   filterByVideoContentTab,
   formatElapsedDurationSec,
   elapsedSecSince,
+  resolveVideoContentProgressSince,
   isDeletableVideoContent,
   isVideoProgressStatus,
   listTotalPages,
@@ -100,19 +101,19 @@ function useElapsedSec(sinceIso: string | null | undefined, active: boolean): nu
 
 function ProgressWait({
   status,
-  createdAt,
+  sinceIso,
   stageLabel,
   stopping,
   onCancel,
 }: {
   status: string;
-  createdAt?: string;
+  sinceIso?: string;
   stageLabel?: string | null;
   stopping?: boolean;
   onCancel?: () => void;
 }) {
   const isConti = status === 'conti_generating';
-  const elapsedSec = useElapsedSec(createdAt, true);
+  const elapsedSec = useElapsedSec(sinceIso, true);
   const defaultStage =
     status === 'conti_generating'
       ? '콘티 파이프라인 준비 중…'
@@ -134,7 +135,7 @@ function ProgressWait({
           ? 'Sonnet이 콘티를 작성 중입니다. 완료되면 「검토 대기」 탭으로 이동합니다.'
           : 'EvoLink 영상 제작·자막·캡션 생성 중입니다.'}
       </p>
-      {createdAt ? (
+      {sinceIso ? (
         <p className="mt-3 font-mono text-[12px] font-semibold text-huma-acc">
           {elapsedLabel} {formatElapsedDurationSec(elapsedSec)}
         </p>
@@ -386,7 +387,7 @@ function DetailPanel({
     return (
       <ProgressWait
         status={item.status}
-        createdAt={item.created_at}
+        sinceIso={resolveVideoContentProgressSince(full)}
         stageLabel={progressStage}
         stopping={stopping}
         onCancel={onCancel}
@@ -769,8 +770,19 @@ export function VideoContentView() {
     try {
       await api.renderVideoContent(selectedId);
       setActiveTab('progress');
+      const renderStartedAt = new Date().toISOString();
       setItems((prev) =>
-        prev.map((i) => (i.id === selectedId ? { ...i, status: 'rendering', error_message: null } : i)),
+        prev.map((i) =>
+          i.id === selectedId
+            ? {
+                ...i,
+                status: 'rendering',
+                error_message: null,
+                progress_since_at: renderStartedAt,
+                conti_json: { ...(i.conti_json ?? {}), videoRenderStartedAt: renderStartedAt },
+              }
+            : i,
+        ),
       );
       selectedStatusRef.current = 'rendering';
       const list = await load();

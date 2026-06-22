@@ -35,6 +35,18 @@ export function elapsedSecSince(iso: string | null | undefined, nowMs = Date.now
   return Math.max(0, Math.floor((nowMs - t) / 1000));
 }
 
+/** 진행 중 작업 — 경과 표시 기준 시각 (콘티=created_at, 렌더=videoRenderStartedAt) */
+export function resolveVideoContentProgressSince(
+  item: Pick<HumaVideoContentHistory, 'status' | 'created_at' | 'conti_json' | 'progress_since_at'>,
+): string | undefined {
+  if (!isVideoProgressStatus(item.status)) return undefined;
+  if (item.progress_since_at) return item.progress_since_at;
+  if (item.status === 'conti_generating') return item.created_at;
+  const renderStarted = item.conti_json?.videoRenderStartedAt;
+  if (typeof renderStarted === 'string' && renderStarted.trim()) return renderStarted;
+  return item.created_at;
+}
+
 export const VIDEO_CONTENT_TAB_LABEL: Record<VideoContentTab, string> = {
   review: '검토 대기',
   progress: '진행 중',

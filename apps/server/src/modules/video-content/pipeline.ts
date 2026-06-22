@@ -7,7 +7,7 @@ import { logOperation } from '../../lib/log-emitter.js';
 import { isJsonParseError } from '../../lib/llm-json.js';
 import { getPipelineModelSettings } from '../../lib/pipeline-settings.js';
 import { notifyTelegram } from '../watcher/telegram.js';
-import { generatePlatformCaptions } from './captions.js';
+import { generatePlatformCaptions, fallbackPlatformCaptions } from './captions.js';
 import { ContiValidationError, extractCharacterNamesForStorage, formatContiTokenSettingsLog } from './conti-validation.js';
 import {
   buildEvoLinkPrompt,
@@ -54,8 +54,8 @@ import {
   assertVideoContentNotCancelled,
   VideoContentCancelledError,
 } from './conti-cancel.js';
-import { enforceDialogueOnConti } from './dialogue-timing.js';
 import { enforceDialogueShotsMinDuration } from './conti-validation.js';
+import { mergeShotTimingKeepDialogue } from './dialogue-timing.js';
 
 function contiGenerationSecSince(startedAtIso: string): number {
   const t = new Date(startedAtIso).getTime();
@@ -413,12 +413,24 @@ async function finalizeVideoContent(params: {
   }
   await saveSubtitleStyleHistory(accountId, subtitleStyle);
 
-  const captions = await generatePlatformCaptions({
-    workspace,
-    conti,
-    hookType: baseConditions.hookType,
-    recentCaptions: await loadRecentCaptions(accountId),
-  });
+  let captions;
+  try {
+    captions = await generatePlatformCaptions({
+      workspace,
+      conti,
+      hookType: baseConditions.hookType,
+      recentCaptions: await loadRecentCaptions(accountId),
+    });
+  } catch (capErr) {
+    const capMsg = (capErr as Error).message;
+    await logOperation({
+      level: 'warn',
+      message: `[video-content] 캡션 생성 실패 — 시나리오 요약으로 완료 처리: ${capMsg.slice(0, 200)}`,
+      workspace,
+      account_id: accountId,
+    });
+    captions = fallbackPlatformCaptions(workspace, conti);
+  }
 
   await copyFile(subtitledPath, finalPath);
 
@@ -963,13 +975,12 @@ export async function runVideoProduction(historyId: string): Promise<string> {
     const parsedConti = parseContiFromJson(history.conti_json);
     const baseConditions = conditionsFromHistoryRow(history, history.character_used as string | null);
     const contiJson = history.conti_json as Record<string, unknown>;
-    const durationAdjusted = enforceDialogueShotsMinDuration(parsedConti).conti;
-    const dialogueFix = enforceDialogueOnConti(durationAdjusted);
-    const conti = dialogueFix.conti;
-    if (dialogueFix.adjusted) {
+    const { conti: timedConti, adjusted: timingAdjusted } = enforceDialogueShotsMinDuration(parsedConti);
+    const conti = mergeShotTimingKeepDialogue(timedConti, parsedConti);
+    if (timingAdjusted) {
       await logOperation({
-        level: 'warn',
-        message: `[video-content] 렌더 전 대사 자동 축소 — history=${historyId}: ${dialogueFix.warnings.join('; ')}`,
+        level: 'info',
+        message: `[video-content] 렌더 전 샷 시간 재배분(대사 유지) — history=${historyId}`,
         workspace,
         account_id: accountId,
       });
@@ -1015,10 +1026,13 @@ export async function runVideoProduction(historyId: string): Promise<string> {
         error_message: null,
         conti_json: {
           ...contiJson,
-          ...conti,
+          ...(timingAdjusted ? { shots: conti.shots, duration: conti.duration } : {}),
           evolinkPrompt: evoPrompt,
           evolinkTaskId: taskId,
-          videoRenderStartedAt: new Date().toISOString(),
+          videoRenderStartedAt:
+            typeof contiJson.videoRenderStartedAt === 'string' && contiJson.videoRenderStartedAt.trim()
+              ? contiJson.videoRenderStartedAt
+              : new Date().toISOString(),
         },
       })
       .eq('id', historyId);

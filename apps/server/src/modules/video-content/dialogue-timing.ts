@@ -294,3 +294,20 @@ export function enforceDialogueOnConti(conti: VideoConti): {
 
   return { conti: { ...conti, shots }, adjusted, warnings };
 }
+
+/** 샷 시간 재배분 결과에 검토된 원본 샷 본문(액션·대사·카메라) 유지 */
+export function mergeShotTimingKeepDialogue(timed: VideoConti, original: VideoConti): VideoConti {
+  const origShots = asContiShots(original.shots);
+  const timedShots = asContiShots(timed.shots);
+  const shots = timedShots.map((shot, i) => {
+    const orig = origShots[i];
+    if (!orig) return shot;
+    return {
+      ...orig,
+      shotNumber: shot.shotNumber,
+      startSec: shot.startSec,
+      endSec: shot.endSec,
+    };
+  });
+  return { ...timed, shots };
+}

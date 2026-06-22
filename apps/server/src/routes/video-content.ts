@@ -110,6 +110,25 @@ async function removeVideoContentFiles(
   }
 }
 
+function mapVideoContentListRow(
+  row: Record<string, unknown>,
+  opts?: { keepContiJson?: boolean },
+): Record<string, unknown> {
+  const status = String(row.status ?? '');
+  let progress_since_at = row.created_at as string;
+  if (status === 'rendering' || status === 'generating') {
+    const renderStarted = (row.conti_json as Record<string, unknown> | null)?.videoRenderStartedAt;
+    if (typeof renderStarted === 'string' && renderStarted.trim()) {
+      progress_since_at = renderStarted;
+    }
+  }
+  if (opts?.keepContiJson) {
+    return { ...row, progress_since_at };
+  }
+  const { conti_json: _cj, ...rest } = row;
+  return { ...rest, progress_since_at };
+}
+
 export async function registerVideoContentRoutes(app: FastifyInstance) {
   app.get('/api/video-content', { preHandler: authMiddleware }, async (request) => {
     const allowed = getWorkspaceFilter(request);
@@ -120,7 +139,7 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
     let query = supabase
       .from('huma_video_content_history')
       .select(
-        'id, account_id, workspace, status, relationship_axis, emotion_curve, hook_type, cut_type, duration, scenario_summary, similarity_score, self_assessed_humor, retry_count_for_humor, character_used, caption_youtube, caption_tiktok, caption_instagram, caption_threads, caption_x, first_comment_threads, first_comment_x, uploaded_youtube, uploaded_youtube_at, uploaded_tiktok, uploaded_tiktok_at, uploaded_instagram, uploaded_instagram_at, uploaded_threads, uploaded_threads_at, uploaded_x, uploaded_x_at, video_file_path, source_video_path, error_message, created_at',
+        'id, account_id, workspace, status, relationship_axis, emotion_curve, hook_type, cut_type, duration, scenario_summary, similarity_score, self_assessed_humor, retry_count_for_humor, character_used, caption_youtube, caption_tiktok, caption_instagram, caption_threads, caption_x, first_comment_threads, first_comment_x, uploaded_youtube, uploaded_youtube_at, uploaded_tiktok, uploaded_tiktok_at, uploaded_instagram, uploaded_instagram_at, uploaded_threads, uploaded_threads_at, uploaded_x, uploaded_x_at, video_file_path, source_video_path, error_message, conti_generation_sec, created_at, conti_json',
       )
       .in('workspace', allowed)
       .order('created_at', { ascending: false })
@@ -130,7 +149,7 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
     if (workspace && allowed.includes(workspace)) query = query.eq('workspace', workspace);
 
     const { data } = await query;
-    return data ?? [];
+    return (data ?? []).map((row) => mapVideoContentListRow(row as Record<string, unknown>));
   });
 
   app.get('/api/video-content/:id', { preHandler: authMiddleware }, async (request, reply) => {
@@ -152,7 +171,7 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
       data.status = 'rendering';
       data.error_message = null;
     }
-    return data;
+    return mapVideoContentListRow({ ...data, conti_json: data.conti_json }, { keepContiJson: true });
   });
 
   app.get('/api/video-content/:id/stream', { preHandler: authMiddleware }, async (request, reply) => {
@@ -383,9 +402,15 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
       });
     }
 
+    const renderStartedAt = new Date().toISOString();
+    const contiJson = {
+      ...((row.conti_json as Record<string, unknown> | null) ?? {}),
+      videoRenderStartedAt: renderStartedAt,
+    };
+
     await supabase
       .from('huma_video_content_history')
-      .update({ status: 'rendering', error_message: null })
+      .update({ status: 'rendering', error_message: null, conti_json: contiJson })
       .eq('id', id);
 
     await enqueueJob({

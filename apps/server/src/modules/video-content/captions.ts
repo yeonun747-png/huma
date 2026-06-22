@@ -1,7 +1,42 @@
 import type { Workspace } from '@huma/shared';
 import { askClaudeWithModel } from '../../lib/anthropic-client.js';
+import { callClaudeJsonWithRetry } from '../../lib/llm-json.js';
 import { getMainClaudeModel } from '../../lib/ai-engine.js';
 import { SERVICE_URLS, type PlatformCaptions, type VideoConti } from './types.js';
+
+function normalizePlatformCaptions(parsed: Record<string, unknown>): PlatformCaptions {
+  const text = (key: string) => String(parsed[key] ?? '').trim();
+  const nullable = (key: string): string | null => {
+    const v = parsed[key];
+    if (v == null || v === 'null') return null;
+    const s = String(v).trim();
+    return s || null;
+  };
+  return {
+    captionYoutube: text('captionYoutube'),
+    captionTiktok: text('captionTiktok'),
+    captionInstagram: text('captionInstagram'),
+    captionThreads: text('captionThreads'),
+    captionX: text('captionX'),
+    firstCommentThreads: nullable('firstCommentThreads'),
+    firstCommentX: nullable('firstCommentX'),
+  };
+}
+
+export function fallbackPlatformCaptions(workspace: Workspace, conti: VideoConti): PlatformCaptions {
+  const summary = (conti.scenarioSummary ?? conti.fullText ?? '숏폼 영상').trim().slice(0, 280);
+  const url = SERVICE_URLS[workspace];
+  const linkComment = url ? `👉 ${url}` : null;
+  return {
+    captionYoutube: summary,
+    captionTiktok: summary,
+    captionInstagram: summary,
+    captionThreads: summary,
+    captionX: summary,
+    firstCommentThreads: linkComment,
+    firstCommentX: linkComment,
+  };
+}
 
 export async function generatePlatformCaptions(params: {
   workspace: Workspace;
@@ -30,6 +65,8 @@ ${recentBlock}
 - threads: 1~2줄 + "첫 댓글에 링크" 유도, firstCommentThreads에 URL 포함 댓글
 - x: 1~2줄 + firstCommentX에 URL 포함 댓글 (첫 댓글 유도 방식)
 
+JSON 문자열 값 안의 큰따옴표(")는 반드시 \\" 로 이스케이프하거나 「」 따옴표를 쓴다.
+
 JSON:
 {
   "captionYoutube": "완성 텍스트",
@@ -41,12 +78,11 @@ JSON:
   "firstCommentX": "URL 포함 댓글 또는 null"
 }`;
 
-  const raw = await askClaudeWithModel({ model, max_tokens: 2048, prompt });
-  if (!raw) throw new Error('캡션 LLM 응답 없음');
-
-  const trimmed = raw.trim();
-  const fence = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const body = fence ? fence[1]!.trim() : trimmed;
-  const parsed = JSON.parse(body) as PlatformCaptions;
-  return parsed;
+  const { parsed } = await callClaudeJsonWithRetry<Record<string, unknown>>({
+    model,
+    max_tokens: 2048,
+    prompt,
+    ask: (p) => askClaudeWithModel(p),
+  });
+  return normalizePlatformCaptions(parsed);
 }

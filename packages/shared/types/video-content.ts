@@ -57,6 +57,8 @@ export interface HumaVideoContentHistory {
   error_message?: string | null;
   /** conti_generating → 종료까지 경과 초 */
   conti_generation_sec?: number | null;
+  /** 목록 API — 진행 중 작업 경과 기준 시각 (렌더는 videoRenderStartedAt) */
+  progress_since_at?: string | null;
   created_at: string;
 }
 

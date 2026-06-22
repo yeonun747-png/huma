@@ -8,6 +8,7 @@ import {
   isDialogueTooLongForShot,
   maxDialogueCharsForDuration,
   maxDialogueTrimCharsForDuration,
+  mergeShotTimingKeepDialogue,
   minShotDurationForDialogue,
   trimDialogueToFitShot,
 } from './dialogue-timing.js';
@@ -78,6 +79,39 @@ describe('trimDialogueToFitShot', () => {
     const trimmed = trimDialogueToFitShot(`B: "${text}"`, 2, DIALOGUE_TRIM_CHARS_PER_SEC);
     expect(trimmed).toContain('연운에서');
     expect(trimmed).not.toMatch(/좋다고\s*…$/);
+  });
+});
+
+describe('mergeShotTimingKeepDialogue', () => {
+  it('keeps reviewed action and dialogue when shot timing is extended', () => {
+    const original: VideoConti = {
+      characters: [],
+      location: '편의점',
+      lighting: '밝음',
+      timeOfDay: '낮',
+      cutType: 'multi_shot',
+      duration: 11,
+      scenarioSummary: '테스트',
+      fullText: '테스트',
+      shots: [
+        {
+          shotNumber: 2,
+          startSec: 1.5,
+          endSec: 3,
+          camera: '클로즈업',
+          action: 'B가 스마트폰 화면을 보며 조심스럽게 연운 관재궁 경고를 읽는다.',
+          dialogue: 'B: "어… 사장님, 연운 관재궁 물품 손상 주의래요."',
+        },
+      ],
+    };
+    const timed: VideoConti = {
+      ...original,
+      shots: [{ ...original.shots[0]!, startSec: 1.5, endSec: 4 }],
+    };
+    const merged = mergeShotTimingKeepDialogue(timed, original);
+    expect(merged.shots[0]!.endSec).toBe(4);
+    expect(merged.shots[0]!.action).toBe(original.shots[0]!.action);
+    expect(merged.shots[0]!.dialogue).toBe(original.shots[0]!.dialogue);
   });
 });
 
