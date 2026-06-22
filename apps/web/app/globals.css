@@ -177,6 +177,13 @@
     @apply rounded-md border border-huma-bdr bg-transparent px-3 py-1 text-[12.5px] text-huma-t2 transition hover:border-huma-acc hover:text-huma-acc;
   }
 
+  .modem-reconnect-btn {
+    padding-left: 6px;
+    padding-right: 6px;
+    padding-top: 3px;
+    padding-bottom: 3px;
+  }
+
   .btn-upload-progress {
     position: relative;
     overflow: hidden;
@@ -240,6 +247,23 @@
 
   .he-slider-row:last-child {
     border-bottom: none;
+  }
+
+  .he-slider-row-nowrap {
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+
+  .he-slider-row-nowrap .he-slider-label {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .he-slider-row-nowrap .he-slider-static {
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    font-size: 11px;
   }
 
   .he-slider-label {
@@ -640,6 +664,21 @@
   .m-tbl tr:hover td { background: var(--glow); color: var(--t); }
   .m-tbl tr.m-tbl-err-row td { color: var(--err); }
   .m-tbl tr.m-tbl-err-row:hover td { background: var(--err-bg); }
+  .m-tbl.m-tbl-oplog { table-layout: fixed; width: 100%; }
+  .m-tbl.m-tbl-oplog td { min-width: 0; }
+  .m-tbl.m-tbl-oplog th:nth-child(1),
+  .m-tbl.m-tbl-oplog td:nth-child(1) { width: 12%; }
+  .m-tbl.m-tbl-oplog th:nth-child(2),
+  .m-tbl.m-tbl-oplog td:nth-child(2) { width: 16%; }
+  .m-tbl.m-tbl-oplog th:nth-child(4),
+  .m-tbl.m-tbl-oplog td:nth-child(4) { width: 11%; }
+  .m-tbl-clip {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
   .m-url-link { color: var(--acc); font-family: var(--font-ui); font-size: 11.5px; text-decoration: none; }
   .m-url-link:hover { text-decoration: underline; }
   .m-roas-bar { display: inline-block; height: 6px; border-radius: 3px; background: var(--acc); vertical-align: middle; opacity: 0.7; }
@@ -827,7 +866,7 @@
   .m-cr-a.r { border-color: var(--ok); color: var(--ok); background: var(--ok-bg); }
   .m-cr-a.w { border-color: var(--warn); color: var(--warn); background: var(--warn-bg); }
 
-  .m-log-t { background: #000; border: 1px solid var(--bdr); border-radius: 7px; padding: 11px; font-family: var(--font-ui); font-size: 11.5px; height: 200px; overflow-y: auto; line-height: 1.9; }
+  .m-log-t { background: #000; border: 1px solid var(--bdr); border-radius: 7px; padding: 11px; font-family: var(--font-ui); font-size: 11.5px; height: 200px; overflow-y: auto; overflow-x: hidden; max-width: 100%; line-height: 1.9; overflow-wrap: anywhere; word-break: break-word; }
   .m-log-t.tall { height: 380px; }
 
   .m-ws-col-title { font-size: 9.5px; letter-spacing: 2px; color: var(--t3); font-family: var(--font-ui); margin-bottom: 8px; text-transform: uppercase; }
@@ -857,13 +896,27 @@
   .m-tgl-sm::after { width: 9px; height: 9px; }
   .m-tgl-sm.on::after { transform: translateX(10px); }
 
-  .m-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
-  .m-cal-head { font-size: 9.5px; color: var(--t2); font-family: var(--font-ui); text-align: center; padding: 4px 0; }
-  .m-cal-day { background: var(--bg3); border: 1px solid var(--bdr2); border-radius: 6px; padding: 6px 5px; min-height: 70px; }
+  .m-cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; width: 100%; }
+  .m-cal-head { font-size: 9.5px; color: var(--t2); font-family: var(--font-ui); text-align: center; padding: 4px 0; min-width: 0; }
+  .m-cal-day {
+    background: var(--bg3);
+    border: 1px solid var(--bdr2);
+    border-radius: 6px;
+    padding: 6px 5px;
+    min-width: 0;
+    min-height: 64px;
+    aspect-ratio: 6 / 7;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
   .m-cal-day.today { border-color: var(--acc); background: var(--glow); }
-  .m-cal-num { font-size: 11.5px; font-family: var(--font-ui); color: var(--t2); margin-bottom: 4px; }
+  .m-cal-num { font-size: 11.5px; font-family: var(--font-ui); color: var(--t2); margin-bottom: 4px; flex-shrink: 0; }
   .m-cal-day.today .m-cal-num { color: var(--acc); font-weight: 700; }
-  .m-cal-ev { font-size: 9.5px; padding: 2px 4px; border-radius: 3px; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .m-cal-day-body { min-width: 0; min-height: 0; flex: 1; overflow: hidden; }
+  .m-cal-ev { font-size: 9.5px; padding: 2px 4px; border-radius: 3px; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; }
+  .m-cal-job { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .m-ev-yn { background: rgba(192, 80, 110, 0.6); color: #fff; }
   .m-ev-qz { background: rgba(67, 97, 238, 0.6); color: #fff; }
   .m-ev-pa { background: rgba(0, 180, 210, 0.55); color: #fff; }

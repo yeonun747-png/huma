@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { cn } from '@/lib/constants';
 import {
   IMAGEN_PIPELINE_OPTIONS,
@@ -86,14 +85,6 @@ export function PostingImageModelSettings() {
             <span className="font-mono text-huma-t">{imgCost.display}</span>
           </div>
         </div>
-
-        <p className="font-mono text-[10.5px] leading-relaxed text-huma-t3">
-          숏폼 영상(EvoLink) 설정은{' '}
-          <Link href="/video-content" className="font-semibold text-huma-acc hover:underline">
-            숏폼 영상 관리
-          </Link>
-          에서 변경합니다.
-        </p>
       </div>
     </MPanel>
   );

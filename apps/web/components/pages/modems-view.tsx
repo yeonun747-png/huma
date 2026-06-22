@@ -54,9 +54,10 @@ function ModemProbingLabel() {
 
 function modemStatusTag(
   m: HumaModem,
-  opts?: { probing?: boolean },
+  opts?: { probing?: boolean; reconnecting?: boolean },
 ): { label: string; tone: 'ok' | 'warn' | 'err' | 'idle' } {
   if (opts?.probing) return { label: '검사중', tone: 'idle' };
+  if (opts?.reconnecting) return { label: '재발급중', tone: 'warn' };
   if (m.status === 'error') return { label: '오류', tone: 'err' };
   if (m.status === 'reconnecting') return { label: '재연결', tone: 'warn' };
   if (m.status === 'offline') return { label: '오프라인', tone: 'idle' };
@@ -128,6 +129,7 @@ export function ModemsView() {
   const [probing, setProbing] = useState(false);
   const [probingSlot, setProbingSlot] = useState<number | null>(null);
   const [restoring, setRestoring] = useState(false);
+  const [reconnectingSlot, setReconnectingSlot] = useState<number | null>(null);
   const probeGenRef = useRef(0);
 
   const runSlotProbes = useCallback(async (base: HumaModem[], gen: number, opts?: { silent?: boolean }) => {
@@ -200,6 +202,71 @@ export function ModemsView() {
     }
   }, [load]);
 
+  const reconnectSlot = useCallback(async (modem: HumaModem) => {
+    const slot = modem.slot_number;
+    const oldPublicIp = modem.public_ip?.trim() || '';
+    const oldLabel = oldPublicIp || modem.current_ip?.trim() || '—';
+
+    if (
+      !(await appConfirm(
+        `동글 ${slot} IP를 재발급합니다.\n현재 IP: ${oldLabel}\nLTE 리셋·SOCKS 갱신에 1~2분 걸릴 수 있습니다. 계속할까요?`,
+      ))
+    ) {
+      return;
+    }
+
+    setReconnectingSlot(slot);
+    setLoadError(null);
+    try {
+      await api.reconnectModem(modem.id);
+
+      const deadline = Date.now() + 120_000;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 4_000));
+        const list = await api.modems({ force: true });
+        setModems(list);
+        const cur = list.find((x) => x.slot_number === slot);
+        if (!cur || cur.status !== 'reconnecting') break;
+      }
+
+      const probed = await api.modems({
+        probe: true,
+        slots: [slot],
+        timeoutMs: PER_SLOT_PROBE_MS,
+      });
+      setModems((prev) => mergeProbedModems(prev, probed));
+      const updated = probed.find((x) => x.slot_number === slot);
+
+      if (!updated) {
+        await appAlert(`동글 ${slot} 상태를 확인할 수 없습니다. 「다시 검사」를 실행하세요.`);
+        return;
+      }
+
+      const newPublicIp = updated.public_ip?.trim() || '';
+      const newLabel = newPublicIp || updated.current_ip?.trim() || '—';
+
+      if (updated.status === 'error') {
+        await appAlert(`동글 ${slot} IP 재발급 실패 (상태: 오류).\nOperation Log를 확인하세요.`);
+      } else if (oldPublicIp && newPublicIp && newPublicIp !== oldPublicIp) {
+        await appAlert(`동글 ${slot} IP 재발급 완료.\n${oldPublicIp} → ${newPublicIp}`);
+      } else if (newPublicIp) {
+        await appAlert(`동글 ${slot} 재발급 완료.\n공인 IP: ${newPublicIp}`);
+      } else if (newLabel !== '—') {
+        await appAlert(`동글 ${slot} 재발급 완료.\n인터페이스 IP: ${newLabel}`);
+      } else {
+        await appAlert(
+          `동글 ${slot} 재발급이 종료되었습니다.\n공인 IP를 가져오지 못했습니다. 「다시 검사」로 확인하세요.`,
+        );
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'IP 재발급 요청 실패';
+      setLoadError(msg);
+      await appAlert(msg);
+    } finally {
+      setReconnectingSlot(null);
+    }
+  }, []);
+
   useEffect(() => {
     void load();
     return () => {
@@ -228,6 +295,7 @@ export function ModemsView() {
         '—';
       const { label: statusLabel, tone } = modemStatusTag(m, {
         probing: probingSlot === slot,
+        reconnecting: reconnectingSlot === slot,
       });
       const publicIp = m.public_ip?.trim();
       const displayIp = publicIp || '—';
@@ -265,7 +333,7 @@ export function ModemsView() {
         </MTag>,
       ];
     });
-  }, [modems, accounts, probingSlot]);
+  }, [modems, accounts, probingSlot, reconnectingSlot]);
 
   const extraRows = useMemo(() => {
     return modems
@@ -330,11 +398,11 @@ export function ModemsView() {
           </>
         )}
         {modems.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className="mt-3 flex flex-wrap gap-1">
             <button
               type="button"
               className="btn-primary btn-sm"
-              disabled={restoring || probing}
+              disabled={restoring || probing || reconnectingSlot != null}
               onClick={() => void restoreNetwork()}
             >
               {restoring ? '복구 중…' : '🔧 동글 네트워크 일괄 복구'}
@@ -346,11 +414,13 @@ export function ModemsView() {
                 <button
                   key={m.id}
                   type="button"
-                  className="btn-ghost text-[10px]"
-                  disabled={restoring}
-                  onClick={() => api.reconnectModem(m.id).then(load)}
+                  className="btn-ghost modem-reconnect-btn text-[10px]"
+                  disabled={restoring || probing || reconnectingSlot != null}
+                  onClick={() => void reconnectSlot(m)}
                 >
-                  동글 {m.slot_number} IP 재발급
+                  {reconnectingSlot === m.slot_number
+                    ? `동글 ${m.slot_number} 재발급중…`
+                    : `동글 ${m.slot_number} IP 재발급`}
                 </button>
               ))}
           </div>

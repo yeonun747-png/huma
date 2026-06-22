@@ -2,13 +2,17 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ContiPreviewData } from '@/lib/video-content-status';
+import { VIDEO_PRIMARY_BTN } from '@/components/video/video-content-ui';
 
 export type ShotDialogueDraft = { shotNumber: number; dialogue: string };
 
 function syncTextareaHeight(el: HTMLTextAreaElement) {
-  el.style.height = '0px';
+  el.style.height = 'auto';
   el.style.height = `${el.scrollHeight}px`;
 }
+
+const CONTI_DIALOGUE_TEXTAREA =
+  'w-full min-h-[2rem] rounded-md border border-huma-bdr bg-huma-bg3 px-2 py-1.5 font-[inherit] text-[11.5px] leading-relaxed text-huma-warn outline-none focus:border-huma-acc';
 
 function AutoHeightTextarea({
   value,
@@ -24,7 +28,12 @@ function AutoHeightTextarea({
   const ref = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    if (ref.current) syncTextareaHeight(ref.current);
+    const el = ref.current;
+    if (!el) return;
+    syncTextareaHeight(el);
+    const observer = new ResizeObserver(() => syncTextareaHeight(el));
+    observer.observe(el);
+    return () => observer.disconnect();
   }, [value]);
 
   return (
@@ -81,17 +90,48 @@ export function ContiPreview({
       {conti.scenarioSummary ? (
         <div>
           <div className="mb-1 font-semibold text-huma-t2">시나리오 요약</div>
-          <p className="whitespace-pre-wrap text-huma-t3">{conti.scenarioSummary}</p>
+          <p className="rounded-md border border-huma-bdr bg-huma-bg2 px-2.5 py-2 text-[11.5px] leading-relaxed text-huma-t whitespace-pre-wrap">
+            {conti.scenarioSummary}
+          </p>
         </div>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-2 font-mono text-[10.5px] text-huma-t3">
-        {conti.location ? <div>장소: {conti.location}</div> : null}
-        {conti.lighting ? <div>조명: {conti.lighting}</div> : null}
-        {conti.timeOfDay ? <div>시간: {conti.timeOfDay}</div> : null}
-        {conti.cutType ? <div>컷: {conti.cutType}</div> : null}
-        {conti.duration ? <div>길이: {Math.round(conti.duration)}s</div> : null}
-      </div>
+      {conti.location || conti.lighting || conti.timeOfDay || conti.cutType || conti.duration ? (
+        <div className="rounded-md border border-huma-bdr bg-huma-bg2 px-2.5 py-2">
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11.5px] leading-relaxed text-huma-t">
+            {conti.location ? (
+              <div className="flex gap-1.5">
+                <span className="shrink-0 text-huma-acc">•</span>
+                <span>장소: {conti.location}</span>
+              </div>
+            ) : null}
+            {conti.lighting ? (
+              <div className="flex gap-1.5">
+                <span className="shrink-0 text-huma-acc">•</span>
+                <span>조명: {conti.lighting}</span>
+              </div>
+            ) : null}
+            {conti.timeOfDay ? (
+              <div className="flex gap-1.5">
+                <span className="shrink-0 text-huma-acc">•</span>
+                <span>시간: {conti.timeOfDay}</span>
+              </div>
+            ) : null}
+            {conti.cutType ? (
+              <div className="flex gap-1.5">
+                <span className="shrink-0 text-huma-acc">•</span>
+                <span>컷: {conti.cutType}</span>
+              </div>
+            ) : null}
+            {conti.duration ? (
+              <div className="flex gap-1.5">
+                <span className="shrink-0 text-huma-acc">•</span>
+                <span>길이: {Math.round(conti.duration)}s</span>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {conti.characters?.length ? (
         <div>
@@ -116,7 +156,7 @@ export function ContiPreview({
             {editable ? (
               <button
                 type="button"
-                className="btn-primary btn-sm"
+                className={VIDEO_PRIMARY_BTN}
                 disabled={!dirty || saving || !onSaveDialogues}
                 onClick={() => void handleSave()}
               >
@@ -125,16 +165,22 @@ export function ContiPreview({
             ) : null}
           </div>
           <div className="max-h-[320px] overflow-y-auto rounded border border-huma-bdr">
-            <table className="w-full text-[10px]">
-              <thead className="sticky top-0 bg-huma-bg3 text-huma-t3">
+            <table className="w-full table-fixed">
+              <colgroup>
+                <col className="w-[7%]" />
+                <col className="w-[14%]" />
+                <col className="w-[17%]" />
+                <col />
+              </colgroup>
+              <thead className="sticky top-0 bg-huma-bg3 text-[10px] text-huma-t3">
                 <tr>
                   <th className="p-1 text-left">#</th>
-                  <th className="p-1 text-left">시간</th>
-                  <th className="p-1 text-left">카메라</th>
+                  <th className="whitespace-nowrap p-1 text-left">시간</th>
+                  <th className="whitespace-nowrap p-1 text-left">카메라</th>
                   <th className="p-1 text-left">액션 / 멘트</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="text-[11.5px] leading-relaxed text-huma-t">
                 {shots.map((s, i) => (
                   <tr key={i} className="border-t border-huma-bdr2 align-top">
                     <td className="p-1">{s.shotNumber ?? i + 1}</td>
@@ -146,7 +192,7 @@ export function ContiPreview({
                       {s.action ? <div>{s.action}</div> : null}
                       {editable ? (
                         <AutoHeightTextarea
-                          className={`m-model-select w-full py-1 text-[10px] leading-snug text-huma-warn ${s.action ? 'mt-1' : ''}`}
+                          className={`${CONTI_DIALOGUE_TEXTAREA} ${s.action ? 'mt-1' : ''}`}
                           value={drafts[i]?.dialogue ?? ''}
                           placeholder="멘트 없음"
                           onChange={(value) => {

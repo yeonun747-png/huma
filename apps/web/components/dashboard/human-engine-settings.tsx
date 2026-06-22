@@ -173,10 +173,20 @@ function HeSliderRow({
   );
 }
 
-function HeStaticRow({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function HeStaticRow({
+  label,
+  value,
+  hint,
+  nowrap,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  nowrap?: boolean;
+}) {
   return (
     <div className="he-field">
-      <div className="he-slider-row">
+      <div className={cn('he-slider-row', nowrap && 'he-slider-row-nowrap')}>
         <span className="he-slider-label">{label}</span>
         <span className="he-slider-static">{value}</span>
       </div>
@@ -341,7 +351,7 @@ export function HumanEngineSettings() {
             value={typoPct <= 0 ? '오타 0% — 미사용' : '200~800ms (오타 보정 시)'}
           />
           <HeStaticRow label="문단 간 사고 정지" value="2~8초" />
-          <HeStaticRow label="발행 전 검토" value={REVIEW_DURATION_SUMMARY} />
+          <HeStaticRow label="발행전검토" value={REVIEW_DURATION_SUMMARY} nowrap />
           <div className="he-wpm-chart">
             {chartBars.map((bar, i) => (
               <div key={i} className="he-wpm-bar" style={{ height: `${bar.height}%`, opacity: bar.opacity }} />
@@ -449,7 +459,6 @@ export function HumanEngineSettings() {
           <HeStaticRow label="JPEG 품질 범위" value="90~96%" hint="매 업로드마다 90~96% 사이에서 품질을 랜덤 선택합니다." />
           <HeToggle label="중복 이미지 차단" hint="이미 사용한 이미지 해시는 다시 업로드하지 않습니다." value={image.block_duplicate} onChange={(v) => { setImage((img) => { const next = { ...img, block_duplicate: v }; imageRef.current = next; saveNow(humanRef.current, next, mediaRef.current); return next; }); }} />
           <HeStaticRow label="기본 이미지 모델" value={HUMAN_ENGINE_IMAGE_LABEL} hint="포스팅 큐에서 Imagen 모델을 설정합니다." />
-          <div className="he-chart-caption">v3.26 · Imagen 4 + Kling 3.0 내장 오디오 (TTS 기본 미사용)</div>
           <HeStaticRow label="영상 해상도" value={`${FIXED_VIDEO_DIMENSIONS} · ${FIXED_VIDEO_RESOLUTION} 고정`} hint="Shorts·릴스 업로드용 9:16 세로 해상도입니다." />
           <HeToggle
             label="자막 자동 싱크 (Whisper)"

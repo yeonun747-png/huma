@@ -56,13 +56,15 @@ export function MTable({
   head,
   rows,
   rowClassName,
+  className,
 }: {
   head: string[];
   rows: ReactNode[][];
   rowClassName?: (index: number) => string | undefined;
+  className?: string;
 }) {
   return (
-    <table className="m-tbl">
+    <table className={cn('m-tbl', className)}>
       <thead>
         <tr>{head.map((h) => <th key={h}>{h}</th>)}</tr>
       </thead>

@@ -40,6 +40,7 @@ import { ContiPreview, type ShotDialogueDraft } from '@/components/video/conti-p
 import { ShortformVideoModelSettings } from '@/components/settings/shortform-video-model-settings';
 import { VideoContentHumorBadge } from '@/components/video/video-content-humor-badge';
 import { VideoContentStoragePanel } from '@/components/video/video-content-storage-panel';
+import { VIDEO_PRIMARY_BTN } from '@/components/video/video-content-ui';
 import { MGrid, MPanel, MTag } from '@/components/mockup/primitives';
 
 const PLATFORMS = [
@@ -487,7 +488,7 @@ function DetailPanel({
           {item.status === 'conti_ready' ? (
             <button
               type="button"
-              className={`btn-primary btn-sm ${renderingStarting ? 'animate-pulse' : ''}`}
+              className={`${VIDEO_PRIMARY_BTN} ${renderingStarting ? 'animate-pulse' : ''}`}
               disabled={renderingStarting}
               onClick={onRender}
             >
@@ -932,7 +933,7 @@ export function VideoContentView() {
             <div className="flex gap-2">
               <button
                 type="button"
-                className={`btn-primary btn-sm w-full ${creatingConti ? 'animate-pulse' : ''}`}
+                className={`${VIDEO_PRIMARY_BTN} w-full ${creatingConti ? 'animate-pulse' : ''}`}
                 disabled={!contiTarget || creatingConti}
                 onClick={() => void handleCreateConti()}
               >

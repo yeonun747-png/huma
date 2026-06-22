@@ -223,7 +223,7 @@ export function CalendarView() {
 
       >
 
-        <div className="m-cal-grid">
+        <div className="m-cal-grid min-w-0">
 
           {DAYS.map((d) => (
             <div key={d} className={cn('m-cal-head', weekdayColorClass(d))}>
@@ -277,27 +277,21 @@ export function CalendarView() {
 
                     <div className="m-cal-num">{d}</div>
 
-                    {summary && (
+                    {(summary || dayJobs.length > 0) && (
+                      <div className="m-cal-day-body">
+                        {summary && (
+                          <div className="m-cal-ev bg-[var(--glow)] text-huma-acc" title={summary}>
+                            {summary} ↗
+                          </div>
+                        )}
 
-                      <div className="m-cal-ev bg-[var(--glow)] text-huma-acc" title={summary}>
-
-                        {summary} ↗
-
+                        {dayJobs.slice(0, 2).map((j) => (
+                          <div key={j.id} className="m-cal-job truncate font-mono text-[9px] text-huma-t3" title={j.title}>
+                            {formatKstHm(j.scheduled_at)} {j.title}
+                          </div>
+                        ))}
                       </div>
-
                     )}
-
-                    {dayJobs.slice(0, 2).map((j) => (
-
-                      <div key={j.id} className="truncate font-mono text-[9px] text-huma-t3" title={j.title}>
-
-                        {formatKstHm(j.scheduled_at)}{' '}
-
-                        {j.title}
-
-                      </div>
-
-                    ))}
 
                   </>
 

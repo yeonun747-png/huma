@@ -65,13 +65,19 @@ export function OplogView() {
 
   const rows = logs.map((l) => {
     const time = formatLogKst(String(l.created_at ?? ''));
+    const message = String(l.message ?? '—');
+    const account = accountLabel(l);
 
     return [
-      <span key="t" className="whitespace-nowrap font-mono text-[10.5px]">
+      <span key="t" className="m-tbl-clip font-mono text-[10.5px]" title={time}>
         {time}
       </span>,
-      accountLabel(l),
-      String(l.message ?? '—').slice(0, 80),
+      <span key="a" className="m-tbl-clip" title={account}>
+        {account}
+      </span>,
+      <span key="m" className="m-tbl-clip" title={message}>
+        {message}
+      </span>,
       levelTag(String(l.level ?? 'INFO')),
     ];
   });
@@ -87,7 +93,7 @@ export function OplogView() {
         {rows.length === 0 ? (
           <div className="py-8 text-center text-sm text-huma-t3">로그가 없습니다</div>
         ) : (
-          <MTable head={['시각 (KST)', '계정', '콘텐츠', '결과']} rows={rows} />
+          <MTable className="m-tbl-oplog" head={['시각 (KST)', '계정', '콘텐츠', '결과']} rows={rows} />
         )}
       </MPanel>
     </div>

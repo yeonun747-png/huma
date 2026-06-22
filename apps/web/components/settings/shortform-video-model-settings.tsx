@@ -1,10 +1,8 @@
 'use client';
 
-import Link from 'next/link';
 import {
   DEFAULT_VIDEO_MODEL,
   PIPELINE_VIDEO_DURATION_OPTIONS,
-  PIPELINE_VIDEO_HINT,
   PIPELINE_VIDEO_QUALITY_OPTIONS,
   getPipelineVideoOption,
   normalizePipelineVideoQuality,
@@ -12,6 +10,8 @@ import {
 } from '@/lib/higgsfield-models';
 import { usePipelineModelSettings } from '@/lib/use-pipeline-model-settings';
 import { MPanel } from '@/components/mockup/primitives';
+
+const SETTING_LABEL_CLASS = 'font-mono text-[11px] tracking-wide text-huma-t3';
 
 export function ShortformVideoModelSettings() {
   const {
@@ -37,7 +37,7 @@ export function ShortformVideoModelSettings() {
     >
       <div className="flex flex-col gap-2.5">
         <div>
-          <div className="mb-1 font-mono text-[11px] tracking-wide text-huma-t3">
+          <div className={`mb-1 ${SETTING_LABEL_CLASS}`}>
             영상 모델 <span className="text-huma-acc">{pipelineVideoDisplayName}</span>
           </div>
           <select
@@ -57,7 +57,9 @@ export function ShortformVideoModelSettings() {
             ))}
           </select>
           <div className="mt-2">
-            <div className="mb-1 font-mono text-[10px] text-huma-t3">영상 길이</div>
+            <div className={`mb-1 ${SETTING_LABEL_CLASS}`}>
+              영상길이 | 멀티샷 · 720p $0.106/초 · 1080p $0.133/초 · 음성 포함
+            </div>
             <select
               className="m-model-select"
               value={videoDurationSec}
@@ -75,27 +77,12 @@ export function ShortformVideoModelSettings() {
               ))}
             </select>
           </div>
-          <div className="mt-1 rounded bg-[var(--ok-bg)] px-2 py-1 font-mono text-[10px] text-huma-ok">
-            {PIPELINE_VIDEO_HINT}
-          </div>
         </div>
 
-        <div className="rounded-md border border-huma-bdr bg-huma-bg3 px-2.5 py-2">
-          <div className="flex justify-between text-[11.5px] text-huma-t3">
-            <span>
-              예상 비용 {vidCost.durationLabel}
-            </span>
-            <span className="font-mono text-huma-t">{vidCost.usdDisplay}</span>
-          </div>
+        <div className={`flex justify-between ${SETTING_LABEL_CLASS}`}>
+          <span>예상 비용 {vidCost.durationLabel}</span>
+          <span className="text-huma-t">{vidCost.usdDisplay}</span>
         </div>
-
-        <p className="font-mono text-[10.5px] leading-relaxed text-huma-t3">
-          네이버 포스팅 이미지(Imagen) 설정은{' '}
-          <Link href="/queue" className="font-semibold text-huma-acc hover:underline">
-            포스팅 큐 관리
-          </Link>
-          에서 변경합니다.
-        </p>
       </div>
     </MPanel>
   );

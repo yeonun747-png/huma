@@ -519,95 +519,11 @@ export function WatcherView() {
 
   return (
 
-    <div className="animate-fadeIn">
+    <div className="animate-fadeIn min-w-0">
 
-      <MGrid cols={3}>
+      <MPanel title="Fail-Safe 설정" className="min-w-0">
 
-        <div className="m-sc">
-
-          <div className="m-sc-l">감지 (오늘)</div>
-
-          <div className="m-sc-v err">{layer4Logs.length}</div>
-
-          <div className="m-sc-s">CAPTCHA · 429 · 휴식</div>
-
-        </div>
-
-        <div className="m-sc">
-
-          <div className="m-sc-l">기타 ERROR</div>
-
-          <div className="m-sc-v warn">{otherErrors}</div>
-
-          <div className="m-sc-s">동글 · 워밍업 · 타임아웃 등</div>
-
-        </div>
-
-        <div className="m-sc">
-
-          <div className="m-sc-l">Slack 알림</div>
-
-          <div className="m-sc-v ok">ON</div>
-
-          <div className="m-sc-s">#huma-alerts</div>
-
-        </div>
-
-      </MGrid>
-
-      <MPanel title="Fail-Safe 감지 이력 (Layer4만)">
-
-        {rows.length ? (
-
-          <table className="m-tbl">
-
-            <thead>
-
-              <tr>
-
-                {['시각', '서비스', '유형', '조치', 'Slack', '복구'].map((h) => (
-
-                  <th key={h}>{h}</th>
-
-                ))}
-
-              </tr>
-
-            </thead>
-
-            <tbody>
-
-              {rows.map((row, i) => (
-
-                <tr key={i}>
-
-                  {row.map((cell, j) => (
-
-                    <td key={j}>{cell}</td>
-
-                  ))}
-
-                </tr>
-
-              ))}
-
-            </tbody>
-
-          </table>
-
-        ) : (
-
-          <div className="py-6 text-center text-sm text-huma-t3">
-            오늘 Layer4 탐지 없음 — 아래 실시간 로그는 전체 ERROR입니다
-          </div>
-
-        )}
-
-      </MPanel>
-
-      <MGrid cols={2}>
-
-        <MPanel title="Fail-Safe 설정">
+        <MGrid cols={2} className="mb-0 items-stretch">
 
           <SettingsToggle
 
@@ -657,21 +573,109 @@ export function WatcherView() {
 
           />
 
-        </MPanel>
+        </MGrid>
 
-        <MPanel title="실시간 로그 (전체 ERROR)">
+      </MPanel>
 
-          <p className="mb-2 text-[11px] text-huma-t3">
-            Layer4 CAPTCHA/429만 Fail-Safe 대상입니다. 숏폼 영상(콘티·EvoLink·렌더) 운영 로그는 제외됩니다.
-          </p>
+      <MGrid cols={3}>
 
-          <div className="m-log-t tall">
+        <div className="m-sc">
 
-            {watcherErrorLogs.map((l, i) => {
-              const type = classifyWatcherLogType(l);
-              const service = resolveWatcherLogService(l);
-              return (
-              <div key={i} className="mb-1.5 leading-snug">
+          <div className="m-sc-l">감지 (오늘)</div>
+
+          <div className="m-sc-v err">{layer4Logs.length}</div>
+
+          <div className="m-sc-s">CAPTCHA · 429 · 휴식</div>
+
+        </div>
+
+        <div className="m-sc">
+
+          <div className="m-sc-l">기타 ERROR</div>
+
+          <div className="m-sc-v warn">{otherErrors}</div>
+
+          <div className="m-sc-s">동글 · 워밍업 · 타임아웃 등</div>
+
+        </div>
+
+        <div className="m-sc">
+
+          <div className="m-sc-l">Slack 알림</div>
+
+          <div className="m-sc-v ok">ON</div>
+
+          <div className="m-sc-s">#huma-alerts</div>
+
+        </div>
+
+      </MGrid>
+
+      <MPanel title="Fail-Safe 감지 이력 (Layer4만)" className="min-w-0">
+
+        {rows.length ? (
+
+          <div className="watcher-history-scroll max-w-full overflow-x-auto">
+
+            <table className="m-tbl m-tbl-watcher min-w-[520px]">
+
+              <thead>
+
+                <tr>
+
+                  {['시각', '서비스', '유형', '조치', 'Slack', '복구'].map((h) => (
+
+                    <th key={h}>{h}</th>
+
+                  ))}
+
+                </tr>
+
+              </thead>
+
+              <tbody>
+
+                {rows.map((row, i) => (
+
+                  <tr key={i}>
+
+                    {row.map((cell, j) => (
+
+                      <td key={j}>{cell}</td>
+
+                    ))}
+
+                  </tr>
+
+                ))}
+
+              </tbody>
+
+            </table>
+
+          </div>
+
+        ) : (
+
+          <div className="py-6 text-center text-sm text-huma-t3">오늘 Layer4 탐지 없음</div>
+
+        )}
+
+      </MPanel>
+
+      <MPanel title="실시간 로그 (전체 ERROR)" className="min-w-0 overflow-hidden">
+
+        <p className="mb-2 text-[11px] text-huma-t3">
+          Layer4 CAPTCHA/429만 Fail-Safe 대상입니다. 숏폼 영상(콘티·EvoLink·렌더) 운영 로그는 제외됩니다.
+        </p>
+
+        <div className="m-log-t tall min-w-0 max-w-full overflow-x-hidden overflow-y-auto">
+
+          {watcherErrorLogs.map((l, i) => {
+            const type = classifyWatcherLogType(l);
+            const service = resolveWatcherLogService(l);
+            return (
+              <div key={i} className="mb-1.5 min-w-0 break-words leading-snug">
 
                 <span className="mr-2 whitespace-nowrap font-mono text-[11px] text-[#5a7090]">
                   {formatLogKst(String(l.created_at ?? ''))}
@@ -690,14 +694,12 @@ export function WatcherView() {
                 </span>
 
               </div>
-              );
-            })}
+            );
+          })}
 
-          </div>
+        </div>
 
-        </MPanel>
-
-      </MGrid>
+      </MPanel>
 
     </div>
 
