@@ -10,7 +10,6 @@ import { getAccessibleBusinessUnits } from '@/lib/admin-scope';
 import { WORKSPACES } from '@/lib/constants';
 import { getLogSocket } from '@/lib/socket';
 import {
-  VIDEO_CONTENT_LIST_PAGE_SIZE,
   VIDEO_CONTENT_STATUS_LABEL,
   VIDEO_CONTENT_TAB_LABEL,
   countByVideoContentTab,
@@ -20,9 +19,11 @@ import {
   resolveVideoContentProgressSince,
   isDeletableVideoContent,
   isVideoProgressStatus,
+  listPageSizeForVideoContentTab,
   listTotalPages,
   paginateList,
   parseContiPreview,
+  canEditContiDialogues,
   videoContentTabOf,
   type VideoContentTab,
 } from '@/lib/video-content-status';
@@ -35,7 +36,7 @@ import {
   parseVideoContentProgressStage,
   resolveVideoContentProgressHistoryId,
 } from '@/lib/video-content-progress';
-import { ContiPreview } from '@/components/video/conti-preview';
+import { ContiPreview, type ShotDialogueDraft } from '@/components/video/conti-preview';
 import { ShortformVideoModelSettings } from '@/components/settings/shortform-video-model-settings';
 import { VideoContentHumorBadge } from '@/components/video/video-content-humor-badge';
 import { VideoContentStoragePanel } from '@/components/video/video-content-storage-panel';
@@ -195,6 +196,20 @@ function CompletedDetail({
   const firstComment =
     tab === 'threads' ? item.first_comment_threads : tab === 'x' ? item.first_comment_x : null;
 
+  const saveShotDialogues = useCallback(
+    async (dialogues: ShotDialogueDraft[]) => {
+      try {
+        await api.updateVideoContentShotDialogues(item.id, dialogues);
+        await appAlert('멘트를 저장했습니다');
+        onRefresh();
+      } catch (e) {
+        await appAlert(e instanceof Error ? e.message : '멘트 저장 실패');
+        throw e;
+      }
+    },
+    [item.id, onRefresh],
+  );
+
   const copyText = async (text: string) => {
     await navigator.clipboard.writeText(text);
     await appAlert('클립보드에 복사되었습니다');
@@ -297,7 +312,11 @@ function CompletedDetail({
       </div>
       {showConti && conti ? (
         <div className="rounded border border-huma-bdr bg-huma-bg2 p-3">
-          <ContiPreview conti={conti} />
+          <ContiPreview
+            conti={conti}
+            editable={canEditContiDialogues(item.status)}
+            onSaveDialogues={saveShotDialogues}
+          />
         </div>
       ) : null}
 
@@ -363,6 +382,20 @@ function DetailPanel({
   const conti = parseContiPreview(full.conti_json);
   const contiDuration = contiDurationLabel(full);
 
+  const saveShotDialogues = useCallback(
+    async (dialogues: ShotDialogueDraft[]) => {
+      try {
+        await api.updateVideoContentShotDialogues(full.id, dialogues);
+        await appAlert('멘트를 저장했습니다');
+        onRefresh();
+      } catch (e) {
+        await appAlert(e instanceof Error ? e.message : '멘트 저장 실패');
+        throw e;
+      }
+    },
+    [full.id, onRefresh],
+  );
+
   if (loadingDetail && !detail?.conti_json) {
     return <p className="text-[12px] text-huma-t3">콘티 불러오는 중…</p>;
   }
@@ -416,7 +449,13 @@ function DetailPanel({
             </button>
           ) : null}
         </div>
-        {conti ? <ContiPreview conti={conti} /> : null}
+        {conti ? (
+          <ContiPreview
+            conti={conti}
+            editable={canEditContiDialogues(item.status)}
+            onSaveDialogues={saveShotDialogues}
+          />
+        ) : null}
       </div>
     );
   }
@@ -470,7 +509,11 @@ function DetailPanel({
       ) : null}
 
       {conti ? (
-        <ContiPreview conti={conti} />
+        <ContiPreview
+          conti={conti}
+          editable={canEditContiDialogues(item.status)}
+          onSaveDialogues={saveShotDialogues}
+        />
       ) : (
         <p className="text-[11px] text-huma-t3">콘티 데이터가 없습니다.</p>
       )}
@@ -639,13 +682,14 @@ export function VideoContentView() {
 
   const tabCounts = useMemo(() => countByVideoContentTab(items), [items]);
   const filteredItems = useMemo(() => filterByVideoContentTab(items, activeTab), [items, activeTab]);
+  const listPageSize = listPageSizeForVideoContentTab(activeTab);
   const listTotal = filteredItems.length;
-  const listPageCount = listTotalPages(listTotal);
+  const listPageCount = listTotalPages(listTotal, listPageSize);
   const pagedItems = useMemo(
-    () => paginateList(filteredItems, listPage),
-    [filteredItems, listPage],
+    () => paginateList(filteredItems, listPage, listPageSize),
+    [filteredItems, listPage, listPageSize],
   );
-  const showListPagination = listTotal > VIDEO_CONTENT_LIST_PAGE_SIZE;
+  const showListPagination = listTotal > listPageSize;
 
   useEffect(() => {
     setListPage(1);

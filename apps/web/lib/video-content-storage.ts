@@ -81,11 +81,60 @@ export interface VideoContentStorageFile {
   durationSec: number | null;
 }
 
-export function flattenStorageFiles(items: VideoContentStorageItem[]): VideoContentStorageFile[] {
-  const files: VideoContentStorageFile[] = [];
-  for (const item of items) {
-    const short = item.id.slice(0, 8);
-    const base = {
+function storageFileFromItem(
+  item: VideoContentStorageItem,
+  variant: 'subtitled' | 'source',
+): VideoContentStorageFile {
+  const short = item.id.slice(0, 8);
+  const base = {
+    historyId: item.id,
+    account_id: item.account_id,
+    workspace: item.workspace,
+    scenario_summary: item.scenario_summary,
+    status: item.status,
+    created_at: item.created_at,
+    durationSec: item.durationSec,
+  };
+  if (variant === 'subtitled') {
+    return {
+      ...base,
+      variant,
+      fileName: `${short}-subtitled.mp4`,
+      label: '자막본',
+      bytes: item.subtitledBytes,
+    };
+  }
+  return {
+    ...base,
+    variant,
+    fileName: `${short}-source.mp4`,
+    label: '원본',
+    bytes: item.sourceBytes,
+  };
+}
+
+/** 작업 1건 — 자막본·원본 쌍 */
+export interface VideoContentStoragePair {
+  historyId: string;
+  account_id: string;
+  workspace: string;
+  scenario_summary: string | null;
+  status: string;
+  created_at: string;
+  durationSec: number | null;
+  subtitled: VideoContentStorageFile | null;
+  source: VideoContentStorageFile | null;
+}
+
+export function pairTotalBytes(pair: VideoContentStoragePair): number {
+  return (pair.subtitled?.bytes ?? 0) + (pair.source?.bytes ?? 0);
+}
+
+/** 작업별로 자막본·원본을 묶어 반환 (용량 큰 작업 우선) */
+export function groupStorageFiles(items: VideoContentStorageItem[]): VideoContentStoragePair[] {
+  return items
+    .filter((item) => item.hasSubtitled || item.hasSource)
+    .map((item) => ({
       historyId: item.id,
       account_id: item.account_id,
       workspace: item.workspace,
@@ -93,25 +142,18 @@ export function flattenStorageFiles(items: VideoContentStorageItem[]): VideoCont
       status: item.status,
       created_at: item.created_at,
       durationSec: item.durationSec,
-    };
-    if (item.hasSubtitled) {
-      files.push({
-        ...base,
-        variant: 'subtitled',
-        fileName: `${short}-subtitled.mp4`,
-        label: '자막본',
-        bytes: item.subtitledBytes,
-      });
-    }
-    if (item.hasSource) {
-      files.push({
-        ...base,
-        variant: 'source',
-        fileName: `${short}-source.mp4`,
-        label: '원본',
-        bytes: item.sourceBytes,
-      });
-    }
+      subtitled: item.hasSubtitled ? storageFileFromItem(item, 'subtitled') : null,
+      source: item.hasSource ? storageFileFromItem(item, 'source') : null,
+    }))
+    .sort((a, b) => pairTotalBytes(b) - pairTotalBytes(a));
+}
+
+/** @deprecated groupStorageFiles 사용 */
+export function flattenStorageFiles(items: VideoContentStorageItem[]): VideoContentStorageFile[] {
+  const files: VideoContentStorageFile[] = [];
+  for (const pair of groupStorageFiles(items)) {
+    if (pair.subtitled) files.push(pair.subtitled);
+    if (pair.source) files.push(pair.source);
   }
-  return files.sort((a, b) => b.bytes - a.bytes);
+  return files;
 }

@@ -2,7 +2,11 @@ import type { HumaVideoContentHistory } from '@huma/shared';
 
 export type VideoContentTab = 'review' | 'progress' | 'done' | 'failed';
 
-export const VIDEO_CONTENT_LIST_PAGE_SIZE = 8;
+export const VIDEO_CONTENT_LIST_PAGE_SIZE = 5;
+
+export function listPageSizeForVideoContentTab(_tab: VideoContentTab): number {
+  return VIDEO_CONTENT_LIST_PAGE_SIZE;
+}
 
 export function paginateList<T>(items: T[], page: number, pageSize = VIDEO_CONTENT_LIST_PAGE_SIZE): T[] {
   if (pageSize <= 0 || !items.length) return [];
@@ -95,6 +99,17 @@ export function isVideoProgressStatus(status: string): boolean {
 
 export function isDeletableVideoContent(status: string): boolean {
   return (DELETABLE_STATUSES as readonly string[]).includes(status);
+}
+
+export const EDITABLE_CONTI_DIALOGUE_STATUSES = [
+  'conti_ready',
+  'on_hold',
+  'failed',
+  'completed',
+] as const;
+
+export function canEditContiDialogues(status: string): boolean {
+  return (EDITABLE_CONTI_DIALOGUE_STATUSES as readonly string[]).includes(status);
 }
 
 export const VIDEO_CONTENT_STATUS_LABEL: Record<string, string> = {

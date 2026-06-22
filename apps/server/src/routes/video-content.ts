@@ -47,6 +47,11 @@ import {
   PERSONA_REQUIRED_HEADERS,
   validatePersonaTextHeaders,
 } from '../modules/video-content/persona-axis.js';
+import {
+  applyShotDialoguePatches,
+  canEditContiDialogues,
+  type ShotDialoguePatch,
+} from '../modules/video-content/conti-dialogue-edit.js';
 import type { Workspace } from '@huma/shared';
 
 async function assertAccountAccess(
@@ -330,6 +335,44 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
       .single();
     if (error) return reply.code(400).send({ error: error.message });
     return data;
+  });
+
+  app.patch('/api/video-content/:id/conti-dialogues', { preHandler: authMiddleware }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const allowed = getWorkspaceFilter(request);
+    const { data: existing } = await supabase
+      .from('huma_video_content_history')
+      .select('workspace, status, conti_json')
+      .eq('id', id)
+      .maybeSingle();
+    if (!existing) return reply.code(404).send({ error: '없음' });
+    if (!allowed.includes(existing.workspace)) return reply.code(403).send({ error: '권한 없음' });
+    if (!canEditContiDialogues(existing.status)) {
+      return reply.code(409).send({ error: `멘트 수정 불가 상태: ${existing.status}` });
+    }
+
+    const body = request.body as { dialogues?: ShotDialoguePatch[] };
+    if (!Array.isArray(body.dialogues) || !body.dialogues.length) {
+      return reply.code(400).send({ error: 'dialogues 배열이 필요합니다' });
+    }
+
+    const contiJson = (existing.conti_json as Record<string, unknown> | null) ?? {};
+    let nextContiJson: Record<string, unknown>;
+    try {
+      nextContiJson = applyShotDialoguePatches(contiJson, body.dialogues);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '멘트 저장 실패';
+      return reply.code(400).send({ error: msg });
+    }
+
+    const { data, error } = await supabase
+      .from('huma_video_content_history')
+      .update({ conti_json: nextContiJson })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) return reply.code(400).send({ error: error.message });
+    return mapVideoContentListRow({ ...data, conti_json: data.conti_json }, { keepContiJson: true });
   });
 
   app.get('/api/accounts/:id/video-content-history', { preHandler: authMiddleware }, async (request, reply) => {

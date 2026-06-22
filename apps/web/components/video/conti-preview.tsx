@@ -1,8 +1,81 @@
 'use client';
 
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ContiPreviewData } from '@/lib/video-content-status';
 
-export function ContiPreview({ conti }: { conti: ContiPreviewData }) {
+export type ShotDialogueDraft = { shotNumber: number; dialogue: string };
+
+function syncTextareaHeight(el: HTMLTextAreaElement) {
+  el.style.height = '0px';
+  el.style.height = `${el.scrollHeight}px`;
+}
+
+function AutoHeightTextarea({
+  value,
+  onChange,
+  className,
+  placeholder,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  className?: string;
+  placeholder?: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (ref.current) syncTextareaHeight(ref.current);
+  }, [value]);
+
+  return (
+    <textarea
+      ref={ref}
+      rows={1}
+      className={className}
+      value={value}
+      placeholder={placeholder}
+      style={{ overflow: 'hidden', resize: 'none' }}
+      onChange={(e) => {
+        onChange(e.target.value);
+        syncTextareaHeight(e.target);
+      }}
+    />
+  );
+}
+
+export function ContiPreview({
+  conti,
+  editable = false,
+  onSaveDialogues,
+}: {
+  conti: ContiPreviewData;
+  editable?: boolean;
+  onSaveDialogues?: (dialogues: ShotDialogueDraft[]) => Promise<void>;
+}) {
+  const shots = conti.shots ?? [];
+  const initialDrafts = useMemo(
+    () => shots.map((s, i) => ({ shotNumber: s.shotNumber ?? i + 1, dialogue: s.dialogue ?? '' })),
+    [shots],
+  );
+  const [drafts, setDrafts] = useState(initialDrafts);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setDrafts(initialDrafts);
+  }, [initialDrafts]);
+
+  const dirty = drafts.some((d, i) => d.dialogue !== (shots[i]?.dialogue ?? ''));
+
+  const handleSave = async () => {
+    if (!onSaveDialogues || !dirty) return;
+    setSaving(true);
+    try {
+      await onSaveDialogues(drafts);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-3 text-[11px]">
       {conti.scenarioSummary ? (
@@ -36,21 +109,33 @@ export function ContiPreview({ conti }: { conti: ContiPreviewData }) {
         </div>
       ) : null}
 
-      {conti.shots?.length ? (
+      {shots.length ? (
         <div>
-          <div className="mb-1 font-semibold text-huma-t2">샷 구성</div>
-          <div className="max-h-[240px] overflow-y-auto rounded border border-huma-bdr">
+          <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+            <div className="font-semibold text-huma-t2">샷 구성</div>
+            {editable ? (
+              <button
+                type="button"
+                className="btn-primary btn-sm"
+                disabled={!dirty || saving || !onSaveDialogues}
+                onClick={() => void handleSave()}
+              >
+                {saving ? '저장 중…' : '멘트 저장'}
+              </button>
+            ) : null}
+          </div>
+          <div className="max-h-[320px] overflow-y-auto rounded border border-huma-bdr">
             <table className="w-full text-[10px]">
               <thead className="sticky top-0 bg-huma-bg3 text-huma-t3">
                 <tr>
                   <th className="p-1 text-left">#</th>
                   <th className="p-1 text-left">시간</th>
                   <th className="p-1 text-left">카메라</th>
-                  <th className="p-1 text-left">액션 / 대사</th>
+                  <th className="p-1 text-left">액션 / 멘트</th>
                 </tr>
               </thead>
               <tbody>
-                {conti.shots.map((s, i) => (
+                {shots.map((s, i) => (
                   <tr key={i} className="border-t border-huma-bdr2 align-top">
                     <td className="p-1">{s.shotNumber ?? i + 1}</td>
                     <td className="p-1 whitespace-nowrap">
@@ -59,7 +144,22 @@ export function ContiPreview({ conti }: { conti: ContiPreviewData }) {
                     <td className="p-1">{s.camera ?? '—'}</td>
                     <td className="p-1">
                       {s.action ? <div>{s.action}</div> : null}
-                      {s.dialogue ? <div className="text-huma-acc">「{s.dialogue}」</div> : null}
+                      {editable ? (
+                        <AutoHeightTextarea
+                          className={`m-model-select w-full py-1 text-[10px] leading-snug text-huma-warn ${s.action ? 'mt-1' : ''}`}
+                          value={drafts[i]?.dialogue ?? ''}
+                          placeholder="멘트 없음"
+                          onChange={(value) => {
+                            setDrafts((prev) =>
+                              prev.map((row, idx) => (idx === i ? { ...row, dialogue: value } : row)),
+                            );
+                          }}
+                        />
+                      ) : drafts[i]?.dialogue ? (
+                        <div className={`text-huma-warn ${s.action ? 'mt-1' : ''}`}>「{drafts[i]!.dialogue}」</div>
+                      ) : !s.action ? (
+                        <span className="text-huma-t4">—</span>
+                      ) : null}
                     </td>
                   </tr>
                 ))}

@@ -6,9 +6,10 @@ import { api } from '@/lib/api';
 import { appAlert, appConfirm } from '@/lib/app-dialog';
 import {
   STORAGE_FILTER_LABEL,
-  flattenStorageFiles,
+  groupStorageFiles,
   formatStorageBytes,
   type VideoContentStorageFile,
+  type VideoContentStoragePair,
   type VideoContentStorageFilter,
   type VideoContentStorageSettings,
   type VideoContentStorageStats,
@@ -52,7 +53,7 @@ export function VideoContentStoragePanel({
   const [listFilter, setListFilter] = useState<VideoContentStorageFilter>('all_with_files');
   const [loading, setLoading] = useState(true);
   const [listLoading, setListLoading] = useState(true);
-  const [files, setFiles] = useState<VideoContentStorageFile[]>([]);
+  const [pairs, setPairs] = useState<VideoContentStoragePair[]>([]);
   const [showPolicy, setShowPolicy] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [playFile, setPlayFile] = useState<VideoContentStorageFile | null>(null);
@@ -79,9 +80,9 @@ export function VideoContentStoragePanel({
         workspace: filterWorkspace || undefined,
         filter: listFilter,
       });
-      setFiles(flattenStorageFiles(items));
+      setPairs(groupStorageFiles(items));
     } catch {
-      setFiles([]);
+      setPairs([]);
     } finally {
       setListLoading(false);
     }
@@ -187,7 +188,7 @@ export function VideoContentStoragePanel({
                   </button>
                   <div className="flex shrink-0 items-center gap-1.5 whitespace-nowrap">
                     <span className="font-mono text-[10.5px] text-huma-t3">
-                      파일 목록{!listLoading ? ` (${files.length})` : ''}
+                      파일 목록{!listLoading ? ` (${pairs.length}건)` : ''}
                     </span>
                     <select
                       className="m-model-select max-w-[128px] shrink-0 py-0.5 pl-1.5 pr-6 text-[10px] leading-tight"
@@ -282,7 +283,7 @@ export function VideoContentStoragePanel({
               <p className="py-6 text-center text-[11px] text-huma-t3">파일 목록 불러오는 중…</p>
             ) : (
               <VideoContentStorageFileGrid
-                files={files}
+                pairs={pairs}
                 accountLabel={(id) => videoContentDisplayName(id, accounts)}
                 onPlay={setPlayFile}
                 onOpenJob={onOpenItem}

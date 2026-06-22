@@ -469,6 +469,14 @@ export const api = {
     }),
   updateVideoContentUpload: (id: string, body: Record<string, boolean>) =>
     request(`/api/video-content/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  updateVideoContentShotDialogues: (
+    id: string,
+    dialogues: Array<{ shotNumber: number; dialogue: string }>,
+  ) =>
+    request<HumaVideoContentHistory>(`/api/video-content/${id}/conti-dialogues`, {
+      method: 'PATCH',
+      body: JSON.stringify({ dialogues }),
+    }),
   deleteVideoContent: (id: string) =>
     request<{ ok: boolean }>(`/api/video-content/${id}`, { method: 'DELETE' }),
   fetchVideoContentBlob: async (id: string, variant?: 'source' | 'subtitled'): Promise<Blob> => {

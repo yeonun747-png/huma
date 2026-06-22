@@ -2,12 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
-import { formatStorageBytes, formatVideoDurationSec, type VideoContentStorageFile } from '@/lib/video-content-storage';
+import { formatStorageBytes, formatVideoDurationSec, type VideoContentStorageFile, type VideoContentStoragePair } from '@/lib/video-content-storage';
 import {
   resolveStorageGridLayout,
   STORAGE_SCROLLBAR_GUTTER_PX,
   STORAGE_THUMB_WIDTH_PX,
   storageGridHeightPx,
+  storagePairColumnWidthPx,
 } from './video-content-storage-layout';
 
 export function VideoContentPlaybackModal({
@@ -160,34 +161,34 @@ function StorageThumbnail({
 }
 
 export function VideoContentStorageFileGrid({
-  files,
+  pairs,
   accountLabel,
   onPlay,
   onOpenJob,
 }: {
-  files: VideoContentStorageFile[];
+  pairs: VideoContentStoragePair[];
   accountLabel: (accountId: string) => string;
   onPlay: (file: VideoContentStorageFile) => void;
   onOpenJob: (historyId: string) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [layout, setLayout] = useState(() => resolveStorageGridLayout(0, files.length));
+  const [layout, setLayout] = useState(() => resolveStorageGridLayout(0, pairs.length));
 
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
 
     const update = () => {
-      setLayout(resolveStorageGridLayout(el.clientWidth, files.length));
+      setLayout(resolveStorageGridLayout(el.clientWidth, pairs.length));
     };
 
     update();
     const observer = new ResizeObserver(update);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [files.length]);
+  }, [pairs.length]);
 
-  if (!files.length) {
+  if (!pairs.length) {
     return (
       <p className="rounded border border-dashed border-huma-bdr py-8 text-center text-[11px] text-huma-t3">
         보관 중인 mp4 파일이 없습니다
@@ -196,9 +197,12 @@ export function VideoContentStorageFileGrid({
   }
 
   const thumbWidthPx = STORAGE_THUMB_WIDTH_PX;
-  const { rowCount, needsScroll } = layout;
-  const gridHeightPx = storageGridHeightPx(thumbWidthPx, rowCount);
+  const { rowCount, needsScroll, pairStack } = layout;
+  const pairColumnWidthPx = storagePairColumnWidthPx(thumbWidthPx, pairStack);
+  const gridHeightPx = storageGridHeightPx(thumbWidthPx, rowCount, pairStack);
   const scrollPaddingBottom = needsScroll ? STORAGE_SCROLLBAR_GUTTER_PX : 0;
+  const pairThumbLayoutClass =
+    pairStack === 'col' ? 'flex flex-col gap-1' : 'grid grid-cols-2 gap-1';
 
   return (
     <div
@@ -211,32 +215,43 @@ export function VideoContentStorageFileGrid({
     >
       <div
         className={`grid w-max grid-flow-col gap-x-2 gap-y-2 ${rowCount === 2 ? 'grid-rows-2' : 'grid-rows-1'}`}
-        style={{ gridAutoColumns: `${thumbWidthPx}px`, height: gridHeightPx }}
+        style={{ gridAutoColumns: `${pairColumnWidthPx}px`, height: gridHeightPx }}
       >
-        {files.map((file) => (
-          <div
-            key={`${file.historyId}-${file.variant}`}
-            className="flex flex-col overflow-hidden rounded-md border border-huma-bdr"
-            style={{ width: thumbWidthPx }}
-          >
-            <StorageThumbnail
-              historyId={file.historyId}
-              variant={file.variant}
-              durationSec={file.durationSec}
-              accountName={accountLabel(file.account_id)}
-              typeLabel={file.label}
-              sizeLabel={formatStorageBytes(file.bytes)}
-              onClick={() => onPlay(file)}
-            />
-            <button
-              type="button"
-              className="w-full shrink-0 border-t border-huma-bdr bg-huma-bg3 py-1 text-[9px] text-huma-t3 hover:bg-huma-bg2 hover:text-huma-acc"
-              onClick={() => onOpenJob(file.historyId)}
+        {pairs.map((pair) => {
+          const files = [pair.subtitled, pair.source].filter(
+            (f): f is VideoContentStorageFile => f != null,
+          );
+          const singleFile = files.length === 1;
+          return (
+            <div
+              key={pair.historyId}
+              className="flex flex-col overflow-hidden rounded-md border border-huma-bdr"
+              style={{ width: pairColumnWidthPx }}
             >
-              작업 상세 →
-            </button>
-          </div>
-        ))}
+              <div className={singleFile ? '' : pairThumbLayoutClass}>
+                {files.map((file) => (
+                  <StorageThumbnail
+                    key={file.variant}
+                    historyId={file.historyId}
+                    variant={file.variant}
+                    durationSec={file.durationSec}
+                    accountName={accountLabel(file.account_id)}
+                    typeLabel={file.label}
+                    sizeLabel={formatStorageBytes(file.bytes)}
+                    onClick={() => onPlay(file)}
+                  />
+                ))}
+              </div>
+              <button
+                type="button"
+                className="w-full shrink-0 border-t border-huma-bdr bg-huma-bg3 py-1 text-[9px] text-huma-t3 hover:bg-huma-bg2 hover:text-huma-acc"
+                onClick={() => onOpenJob(pair.historyId)}
+              >
+                작업 상세 →
+              </button>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
