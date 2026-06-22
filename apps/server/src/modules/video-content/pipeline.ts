@@ -4,6 +4,7 @@ import { join } from 'path';
 import type { Workspace } from '@huma/shared';
 import { supabase } from '../../middleware/auth.js';
 import { logOperation } from '../../lib/log-emitter.js';
+import { isJsonParseError } from '../../lib/llm-json.js';
 import { getPipelineModelSettings } from '../../lib/pipeline-settings.js';
 import { notifyTelegram } from '../watcher/telegram.js';
 import { generatePlatformCaptions } from './captions.js';
@@ -538,6 +539,8 @@ export async function runContiGeneration(accountId: string): Promise<string> {
     let embedding: number[] = [];
     let similarityScore = 0;
     let feedback: string | undefined;
+    let jsonPipelineRetries = 0;
+    const MAX_JSON_PIPELINE_RETRIES = 1;
 
     for (let attempt = 1; attempt <= MAX_REGENERATION_ATTEMPTS; attempt++) {
       await assertContiProgress();
@@ -601,16 +604,13 @@ export async function runContiGeneration(accountId: string): Promise<string> {
           continue;
         }
         const msg = err instanceof Error ? err.message : String(err);
-        const jsonFail =
-          err instanceof SyntaxError ||
-          msg.includes('JSON') ||
-          msg.includes("Expected ','") ||
-          msg.includes('Unexpected token');
-        if (jsonFail && attempt < MAX_REGENERATION_ATTEMPTS) {
-          feedback = `JSON 형식 오류 — ${msg.slice(0, 180)}. 대사 속 따옴표 이스케이프 후 다시 생성.`;
+        if (isJsonParseError(err) && jsonPipelineRetries < MAX_JSON_PIPELINE_RETRIES) {
+          jsonPipelineRetries++;
+          attempt--;
+          feedback = `JSON 형식 오류 — ${msg.slice(0, 180)}. narrativeProse·대사 속 큰따옴표는 \\" 또는 「」로, 줄바꿈은 \\n으로 처리 후 다시 생성.`;
           await logOperation({
             level: 'warn',
-            message: `[video-content] JSON 파싱 실패 → 재시도 ${attempt}/${MAX_REGENERATION_ATTEMPTS}: ${msg.slice(0, 120)}`,
+            message: `[video-content] JSON 파싱 실패 → 파이프라인 재시도 ${jsonPipelineRetries}/${MAX_JSON_PIPELINE_RETRIES}: ${msg.slice(0, 120)}`,
             workspace,
             account_id: accountId,
           });

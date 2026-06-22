@@ -65,21 +65,118 @@ export function repairLooseJsonStringQuotes(input: string): string {
   return out;
 }
 
+/** JSON 문자열 값 안의 실제 줄바꿈·탭을 이스케이프 */
+export function escapeRawNewlinesInJsonStrings(input: string): string {
+  let out = '';
+  let inString = false;
+  let escape = false;
+
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i]!;
+    if (!inString) {
+      out += ch;
+      if (ch === '"') inString = true;
+      continue;
+    }
+
+    if (escape) {
+      out += ch;
+      escape = false;
+      continue;
+    }
+
+    if (ch === '\\') {
+      out += ch;
+      escape = true;
+      continue;
+    }
+
+    if (ch === '"') {
+      out += ch;
+      inString = false;
+      continue;
+    }
+
+    if (ch === '\n') {
+      out += '\\n';
+      continue;
+    }
+    if (ch === '\r') {
+      out += '\\r';
+      continue;
+    }
+    if (ch === '\t') {
+      out += '\\t';
+      continue;
+    }
+
+    out += ch;
+  }
+
+  return out;
+}
+
+/** 잘린 JSON — 열린 문자열·괄호 닫기 (max_tokens 초과 등) */
+export function closeTruncatedJson(input: string): string {
+  let inString = false;
+  let escape = false;
+  const stack: ('{' | '[')[] = [];
+
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i]!;
+    if (inString) {
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escape = true;
+        continue;
+      }
+      if (ch === '"') inString = false;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === '{') stack.push('{');
+    else if (ch === '[') stack.push('[');
+    else if (ch === '}' && stack[stack.length - 1] === '{') stack.pop();
+    else if (ch === ']' && stack[stack.length - 1] === '[') stack.pop();
+  }
+
+  let suffix = '';
+  if (inString) suffix += '"';
+  while (stack.length) {
+    const open = stack.pop();
+    suffix += open === '{' ? '}' : ']';
+  }
+  return input + suffix;
+}
+
+function uniqueJsonRepairCandidates(body: string): string[] {
+  const loose = repairLooseJsonStringQuotes(body);
+  const escaped = escapeRawNewlinesInJsonStrings(loose);
+  const closedLoose = closeTruncatedJson(loose);
+  const closedEscaped = closeTruncatedJson(escaped);
+  return [...new Set([body, loose, escaped, closedLoose, closedEscaped])];
+}
+
 export function parseLlmJsonBlock(raw: string): unknown {
   const body = extractLlmJsonBody(raw);
-  try {
-    return JSON.parse(body);
-  } catch (firstErr) {
-    const repaired = repairLooseJsonStringQuotes(body);
-    if (repaired !== body) {
-      try {
-        return JSON.parse(repaired);
-      } catch {
-        /* fall through */
-      }
+  let lastErr: unknown;
+
+  for (const candidate of uniqueJsonRepairCandidates(body)) {
+    try {
+      return JSON.parse(candidate);
+    } catch (err) {
+      lastErr = err;
     }
-    throw firstErr instanceof Error ? firstErr : new Error(String(firstErr));
   }
+
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 
 export function isJsonParseError(err: unknown): boolean {

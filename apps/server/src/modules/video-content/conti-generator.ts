@@ -81,7 +81,7 @@ export type { ContiFoundation, StoryDraft };
 
 /** P1 — 3a Sonnet / 3b·패치 Haiku LLM 타임아웃 */
 export const CONTI_LLM_TIMEOUT_MS = 45_000;
-export const CONTI_JSON_MAX_ATTEMPTS = 2;
+export const CONTI_JSON_MAX_ATTEMPTS = 3;
 
 export interface ContiGenerationResult extends VideoConti {
   locationKeyword: string;

@@ -197,6 +197,7 @@ ${buildSlimHumorContext(params)}${charBlock}${productBlock}${quizBlock}${propsBl
 지시:
 - narrativeProse에 **setup → 발견/전환 → 펀치** 3 beat가 순서대로 드러나게 서술한다 (시청자가 "그래서 뭐?" 없이 이해 가능).
 - narrativeProse에 사건 전개·인물 반응·핵심 대사 내용을 **문단 형식**으로 충분히 서술한다.
+- narrativeProse·모든 문자열 값 안의 인용부호는 **「」** 를 쓰고, ASCII 큰따옴표(")는 JSON 이스케이프(\\")만 사용. 문자열 안에 실제 줄바꿈 금지(한 줄로 쓰거나 \\n).
 - 펀치라인 직전 setup과 반전/펀치 반응이 분명해야 한다.
 - 등장인물 이름·외형은 새로 창작. ${buildCharacterNamingRule()}
 
