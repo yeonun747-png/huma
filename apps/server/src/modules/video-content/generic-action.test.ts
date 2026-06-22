@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   GENERIC_DEFAULT_ACTION_PHRASES,
   buildGenericActionFeedback,
+  buildGenericActionBatchFeedback,
   findRawShotQualityIssues,
   isGenericDefaultAction,
 } from './conti-validation.js';
@@ -47,5 +48,11 @@ describe('findRawShotQualityIssues generic_action', () => {
     const issues = findRawShotQualityIssues(conti);
     expect(issues.some((i) => i.kind === 'generic_action')).toBe(true);
     expect(buildGenericActionFeedback(1)).toContain('filler');
+  });
+
+  it('builds batch feedback for multiple shots', () => {
+    const msg = buildGenericActionBatchFeedback([1, 2, 5]);
+    expect(msg).toContain('샷 1, 2, 5');
+    expect(msg).toContain('filler');
   });
 });

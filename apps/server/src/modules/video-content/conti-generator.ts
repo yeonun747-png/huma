@@ -27,6 +27,7 @@ import {
   buildCameraActionNoRepeatRule,
   buildSentenceCompleteRule,
   buildGenericActionFeedback,
+  buildGenericActionBatchFeedback,
   buildShotCountPreferLowerGuide,
   buildEmptyShotContentFeedback,
   buildAdjacentDuplicateFeedback,
@@ -43,6 +44,7 @@ import {
   MAX_SINGLE_SHOT_CUT_REGENERATION_ATTEMPTS,
   MAX_ADJACENT_DUPLICATE_PATCH_ATTEMPTS,
   MAX_SHOT_QUALITY_PATCH_ATTEMPTS,
+  MAX_GENERIC_ACTION_FULL_REGEN,
   PUNCHLINE_MIN_DURATION_SEC,
   SHOT_CONTENT_MIN_CHARS,
   isGenericDefaultAction,
@@ -372,6 +374,13 @@ function buildShotPatchPrompt(
   const yeonunFortuneBlock =
     ctx.workspace === 'yeonun' ? `\n${buildYeonunFortuneDialogueRule()}\n` : '';
 
+  const patchEntries = shotNumbers
+    .map(
+      (n) =>
+        `{"shotNumber": ${n}, "camera": "...", "action": "... (${SHOT_CONTENT_MIN_CHARS}자 이상, filler 금지)", "dialogue": "..."}`,
+    )
+    .join(', ');
+
   return `다음 영상 설정과 기존 콘티에서 지정 샷만 보완하라.
 
 설정:
@@ -392,7 +401,7 @@ ${buildCharacterNamingRule()}
 
 JSON:
 {
-  "patches": [{"shotNumber": ${shotNumbers[0]}, "camera": "...", "action": "... (${SHOT_CONTENT_MIN_CHARS}자 이상)", "dialogue": "..."}]
+  "patches": [${patchEntries}]
 }`;
 }
 
@@ -593,6 +602,7 @@ async function recoverShotQualityIssues(
   let current = conti;
   let emptyFullRetries = 0;
   let narrowPatchAttempts = 0;
+  let fullGenericRegenAttempts = 0;
   const maxNarrow =
     MAX_SHOT_QUALITY_PATCH_ATTEMPTS + MAX_ADJACENT_DUPLICATE_PATCH_ATTEMPTS + 1;
 
@@ -618,15 +628,36 @@ async function recoverShotQualityIssues(
       continue;
     }
 
+    const genericIssues = nonEmptyQuality.filter((issue) => issue.kind === 'generic_action');
+    if (genericIssues.length > 0) {
+      const genericIndices = genericIssues.map((issue) => issue.index);
+      const genericFeedback = buildGenericActionBatchFeedback(genericIndices.map((i) => i + 1));
+
+      if (narrowPatchAttempts < maxNarrow) {
+        narrowPatchAttempts += 1;
+        await reportStage(ctx, `filler action 보완 — 샷 ${genericIndices.map((i) => i + 1).join(', ')}`);
+        current = await patchShotIssues(ctx, foundation, current, genericIndices, genericFeedback, model);
+        continue;
+      }
+
+      if (fullGenericRegenAttempts < MAX_GENERIC_ACTION_FULL_REGEN) {
+        fullGenericRegenAttempts += 1;
+        narrowPatchAttempts = 0;
+        await reportStage(
+          ctx,
+          `3b 전체 재생성 — filler action (${fullGenericRegenAttempts}/${MAX_GENERIC_ACTION_FULL_REGEN})`,
+        );
+        current = await regenerateShotsOnly({ ...ctx, feedback: genericFeedback }, foundation, model, genericFeedback);
+        continue;
+      }
+
+      applyDefaultToRawShots(current, genericIndices);
+    }
+
     let patchIdx: number;
     let feedback: string;
 
-    const genericIssues = nonEmptyQuality.filter((issue) => issue.kind === 'generic_action');
-    if (genericIssues.length > 0) {
-      const issue = genericIssues[0]!;
-      patchIdx = issue.index;
-      feedback = issue.feedback;
-    } else if (duplicates.length > 0) {
+    if (duplicates.length > 0) {
       patchIdx = duplicates[0]!;
       feedback = buildAdjacentDuplicateFeedback(patchIdx + 1);
     } else {
