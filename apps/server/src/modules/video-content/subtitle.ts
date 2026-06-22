@@ -151,7 +151,7 @@ function subtitleWindow(
   return { startSec, endSec };
 }
 
-function buildAssContent(conti: VideoConti, style: SubtitleStyle): string {
+export function buildAssContent(conti: VideoConti, style: SubtitleStyle): string {
   const pos = positionToAss(style);
   const box = boxStyleToAss(style);
   const fontName = style.font.replace(/[^\w\s]/g, '') || 'Noto Sans KR';
@@ -183,11 +183,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     const window = subtitleWindow(shot, style, totalDuration, nextStart);
     if (!window) continue;
 
-    const { text, style } = formatAssDialogueText(shot.dialogue!);
+    const { text, style: assStyle } = formatAssDialogueText(shot.dialogue!);
     if (!text) continue;
 
     lines.push(
-      `Dialogue: 0,${secToAssTime(window.startSec)},${secToAssTime(window.endSec)},${style},,0,0,0,,${text.replace(/\n/g, '\\N')}`,
+      `Dialogue: 0,${secToAssTime(window.startSec)},${secToAssTime(window.endSec)},${assStyle},,0,0,0,,${text.replace(/\n/g, '\\N')}`,
     );
   }
 
