@@ -56,17 +56,24 @@ export {
   hasDialogueDuplicate,
 } from './dialogue-duplicate.js';
 
+export type ContiHoldReason =
+  | 'shot_duration'
+  | 'empty_content'
+  | 'generic_action'
+  | 'story_comprehension'
+  | 'humor_dull';
+
 export class ContiValidationError extends Error {
   readonly maxAttempts: number;
   readonly holdOnFailure: boolean;
-  readonly holdReason?: 'shot_duration' | 'empty_content';
+  readonly holdReason?: ContiHoldReason;
 
   constructor(
     message: string,
     options?: {
       maxAttempts?: number;
       holdOnFailure?: boolean;
-      holdReason?: 'shot_duration' | 'empty_content';
+      holdReason?: ContiHoldReason;
     },
   ) {
     super(message);
@@ -109,6 +116,20 @@ export const SHOT_CONTENT_PLACEHOLDERS = [
   '미정',
   '추후 작성',
 ] as const;
+
+/** Kling/EvoLink 기본 filler — 콘티 저장·통과 금지 */
+export const GENERIC_DEFAULT_ACTION_PHRASES = [
+  '두 인물과 공간 관계가 드러나며 상황을 소개한다',
+  '행동과 반응이 이어지며 장면이 전개된다',
+  '감정이 고조되며 펀치라인 직전의 순간이 포착된다',
+  '장면이 서서히 멀어지며 여운 있게 마무리된다',
+] as const;
+
+export function isGenericDefaultAction(text: string | undefined | null): boolean {
+  const t = trimField(text);
+  if (!t) return false;
+  return GENERIC_DEFAULT_ACTION_PHRASES.some((phrase) => t === phrase || t.includes(phrase));
+}
 
 export const SINGLE_SHOT_CUT_MISMATCH_FEEDBACK =
   'single_shot은 컷 전환이 전혀 없는 한 화면 구성이어야 한다. 현재 결과는 여러 컷으로 나뉘어 있어 single_shot 정의에 맞지 않는다, 컷을 하나로 통합해서 다시 작성하라.';
@@ -261,6 +282,13 @@ export function isInvalidShotContentField(text: string | undefined | null): bool
   if (t.length < SHOT_CONTENT_MIN_CHARS) return true;
   if (isShotContentPlaceholder(t)) return true;
   return false;
+}
+
+export function buildGenericActionFeedback(shotNumber: number): string {
+  return (
+    `샷 ${shotNumber} action이 "행동과 반응이 이어지며", "상황을 소개한다" 등 **빈 filler**이다. ` +
+    '3a narrativeProse의 해당 구간 사건·표정·동작·발견(폰 확인·알림·반응 등)을 **구체적으로** action에 쓰라. filler action은 저장·통과 불가.'
+  );
 }
 
 export function buildEmptyShotContentFeedback(shotNumber: number): string {
@@ -518,6 +546,7 @@ export type RawShotQualityKind =
   | 'incomplete'
   | 'camera_in_action'
   | 'on_screen_text'
+  | 'generic_action'
   | 'fortune_setup_dialogue'
   | 'dialogue_too_long'
   | 'dialogue_duplicate'
@@ -615,6 +644,15 @@ export function findRawShotQualityIssues(conti: VideoConti): RawShotQualityIssue
 
     if (actionMentionsCameraKind(shot) && conti.cutType !== 'single_shot') {
       issues.push({ index: i, kind: 'camera_in_action', feedback: buildCameraInActionFeedback(shotNumber) });
+      continue;
+    }
+
+    if (isGenericDefaultAction(shot.action)) {
+      issues.push({
+        index: i,
+        kind: 'generic_action',
+        feedback: buildGenericActionFeedback(shotNumber),
+      });
       continue;
     }
 

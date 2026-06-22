@@ -101,7 +101,7 @@ ${numbered}
 부합하는 아이디어가 여러 개면 2번 기준으로 최고를 고른다.
 
 must_include_props 규칙:
-- 선택한 아이디어의 펀치라인을 성립시키는 촬영 가능한 구체적 소품·사물 2~4개
+- 선택한 아이디어의 펀치라인을 성립시키는 **필수** 촬영 가능 소품·사물 **1~2개만** (최대 2개)
 - 스마트폰·반지 케이스·서류봉투·우산 등 OK
 - "사주 결과 페이지", "앱 화면 글자", "이름이 적힌 …" 등 읽어야 하는 화면/문서는 제외
 - dialogue로 전달할 정보는 props에 넣지 말 것
@@ -116,7 +116,7 @@ JSON만 출력:
 
 function parseMustIncludeProps(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
-  return filterFilmableMustIncludeProps(raw.map((v) => String(v)));
+  return filterFilmableMustIncludeProps(raw.map((v) => String(v))).slice(0, 2);
 }
 
 export async function generatePunchlineIdeas(params: {
@@ -139,7 +139,7 @@ export async function generatePunchlineIdeas(params: {
 }
 
 export async function selectPunchlineIdea(ideas: string[], hookType: string): Promise<PunchlineSelection> {
-  const model = (await getSubClaudeModel()) || 'claude-haiku-4-5-20251001';
+  const model = (await getMainClaudeModel()) || 'claude-sonnet-4-6';
   const parsed = await callClaudeJson({
     model,
     max_tokens: 384,
@@ -159,7 +159,7 @@ export async function inferMustIncludePropsFromIdea(punchlineIdea: string): Prom
   const parsed = await callClaudeJson({
     model,
     max_tokens: 256,
-    prompt: `아래 펀치라인 아이디어를 13초 영상으로 만들 때 반드시 샷에 보여야 할 촬영 가능한 소품·사물 2~4개를 JSON으로 추출하라.
+    prompt: `아래 펀치라인 아이디어를 13초 영상으로 만들 때 펀치라인에 **필수**인 촬영 가능 소품·사물 **1~2개만** JSON으로 추출하라.
 읽어야 하는 앱 화면·문서 글자·이름 표시는 제외.
 
 펀치라인:
@@ -211,12 +211,14 @@ export async function runPunchlineContiStage3Only(params: {
     await params.onStage?.(
       regenMode === 'format_only'
         ? '3b만 재생성 (3a·1~2단계 유지)'
-        : '3단계 재생성 (1~2단계 유지)',
+        : regenMode === 'story_clarity'
+          ? '3a 부분 수정 + 3b 재생성 (1~2단계 유지)'
+          : '3단계 재생성 (1~2단계 유지)',
     );
   }
 
   const existingStoryDraft =
-    regenMode === 'format_only' && params.existingConti
+    (regenMode === 'format_only' || regenMode === 'story_clarity') && params.existingConti
       ? contiToStoryDraft(params.existingConti as VideoConti & { storyDraft?: StoryDraft })
       : undefined;
 
@@ -256,7 +258,7 @@ export async function runPunchlineContiPipeline(params: {
       pastSummaries: params.pastSummaries,
     });
 
-    await params.onStage?.('2단계 Haiku 펀치라인 1개 선택 + must_include_props');
+    await params.onStage?.('2단계 Sonnet 펀치라인 1개 선택 + must_include_props');
     const selected = await selectPunchlineIdea(ideas, params.plan.conditions.hookType);
     punchlineIdea = selected.punchlineIdea;
     mustIncludeProps = selected.mustIncludeProps;

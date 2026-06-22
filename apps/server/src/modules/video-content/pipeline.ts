@@ -553,7 +553,11 @@ export async function runContiGeneration(accountId: string): Promise<string> {
                   ? '빈 액션/대사 검증 실패'
                   : err.holdReason === 'shot_duration'
                     ? '샷 길이 검증 실패'
-                    : '콘티 검증 실패';
+                    : err.holdReason === 'generic_action'
+                      ? 'filler action 검증 실패'
+                      : err.holdReason === 'story_comprehension'
+                        ? '3a 이해도 검증 실패'
+                        : '콘티 검증 실패';
               await notifyTelegram(
                 `⚠️ 영상 콘티 보류 — ${holdLabel}\n계정: ${accountName} (${accountId})\n${err.message}`,
                 workspace,
@@ -729,6 +733,44 @@ export async function runContiGeneration(accountId: string): Promise<string> {
       }
 
       if (humorEval >= MAX_HUMOR_REGENERATION_ATTEMPTS) {
+        if (selfAssessedHumor === 'dull') {
+          await logOperation({
+            level: 'warn',
+            message: `[video-content] 유머 dull (${MAX_HUMOR_REGENERATION_ATTEMPTS}회 재생성 후 보류) — history=${historyId}`,
+            workspace,
+            account_id: accountId,
+          });
+
+          const dullHoldPrompt = buildEvoLinkPrompt(conti!, baseConditions);
+          await supabase
+            .from('huma_video_content_history')
+            .update({
+              status: 'on_hold',
+              similarity_score: similarityScore,
+              scenario_summary: conti!.scenarioSummary,
+              location_keyword: conti!.locationKeyword,
+              time_of_day: conti!.timeOfDay,
+              conti_json: {
+                ...conti,
+                evolinkPrompt: dullHoldPrompt,
+                punchlineIdea,
+                mustIncludeProps,
+                storyDraft: conti!.storyDraft,
+              },
+              embedding_vector: embedding,
+              self_assessed_humor: selfAssessedHumor,
+              retry_count_for_humor: retryCountForHumor,
+              error_message: '유머 dull — 재생성 후에도 이해·펀치 전달 부족 (검토 또는 재생성 필요)',
+            })
+            .eq('id', historyId);
+
+          await notifyTelegram(
+            `⚠️ 영상 콘티 보류 — 유머 dull\n계정: ${accountName} (${accountId})\n${MAX_HUMOR_REGENERATION_ATTEMPTS}회 재생성 후에도 dull`,
+            workspace,
+          );
+          throw new Error('유머 dull 보류');
+        }
+
         await logOperation({
           level: 'warn',
           message: `[video-content] 유머 평가 dull (${MAX_HUMOR_REGENERATION_ATTEMPTS}회 재생성 후 통과) — history=${historyId}`,
@@ -754,7 +796,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
           punchlineIdea,
           mustIncludeProps,
           existingConti: conti!,
-          regenMode: 'format_only',
+          regenMode: 'story_clarity',
           feedback: HUMOR_REGENERATION_FEEDBACK,
           onStage: logStage,
         });
@@ -888,7 +930,7 @@ export async function runContiGeneration(accountId: string): Promise<string> {
       workspace,
       account_id: accountId,
     });
-    if (msg !== '유사도 기준 미통과' && msg !== '프롬프트 길이 초과') {
+    if (msg !== '유사도 기준 미통과' && msg !== '프롬프트 길이 초과' && msg !== '유머 dull 보류') {
       await supabase
         .from('huma_video_content_history')
         .update({ status: 'failed', error_message: msg.slice(0, 500) })

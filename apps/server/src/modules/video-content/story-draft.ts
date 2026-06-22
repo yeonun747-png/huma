@@ -195,6 +195,7 @@ ${punchlineIdea}
 ${buildSlimHumorContext(params)}${charBlock}${productBlock}${quizBlock}${propsBlock}${pastBlock}${feedbackBlock}
 
 지시:
+- narrativeProse에 **setup → 발견/전환 → 펀치** 3 beat가 순서대로 드러나게 서술한다 (시청자가 "그래서 뭐?" 없이 이해 가능).
 - narrativeProse에 사건 전개·인물 반응·핵심 대사 내용을 **문단 형식**으로 충분히 서술한다.
 - 펀치라인 직전 setup과 반전/펀치 반응이 분명해야 한다.
 - 등장인물 이름·외형은 새로 창작. ${buildCharacterNamingRule()}

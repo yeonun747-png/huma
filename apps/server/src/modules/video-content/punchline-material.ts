@@ -158,11 +158,11 @@ export function buildCoreMaterialShotsInstruction(mustIncludeProps: string[]): s
   const list = mustIncludeProps.map((p) => `- ${p}`).join('\n');
   return `
 콘티 shots JSON 작성 전 필수:
-1) 아래 must_include 소재(촬영 가능한 소품·동작)를 펀치라인에 맞게 각각 최소 1개 샷에 배치할 것을 먼저 정한다.
+1) 아래 must_include 소재(펀치라인에 **필수**인 1~2개)를 각각 최소 1개 샷에 자연스럽게 배치한다. 매 샷마다 소재를 넣을 필요 없다.
 2) 소재를 다른 것으로 바꾸거나 빠뜨리지 않는다.
-3) 앱 화면 글자·사주 결과 페이지·이름이 적힌 문서·"보이도록 각도를 잡음" 등 "읽어야 하는 화면"은 must_include가 아니다 — 스마트폰/종이 소품만 보이고 정보는 dialogue로.
+3) 앱 화면 글자·사주 결과 페이지 등 "읽어야 하는 화면"은 must_include가 아니다 — 정보는 dialogue로.
 
-must_include (고정):
+must_include (고정, 최대 ${mustIncludeProps.length}개):
 ${list}
 
 JSON 뒤 메타 태그 줄에 must_include 소재마다 [핵심소재: 소재1 → 샷2, 소재2 → 샷4] 형식 추가 (JSON 밖).`;

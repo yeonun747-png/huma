@@ -26,11 +26,14 @@ import {
   buildCharacterNamingRule,
   buildCameraActionNoRepeatRule,
   buildSentenceCompleteRule,
+  buildGenericActionFeedback,
+  buildShotCountPreferLowerGuide,
   buildEmptyShotContentFeedback,
   buildAdjacentDuplicateFeedback,
   buildShotFillPrompt,
   SINGLE_SHOT_CUT_MISMATCH_FEEDBACK,
   ContiValidationError,
+  DEFAULT_CONTI_VALIDATION_MAX_ATTEMPTS,
   CONTI_FOUNDATION_MAX_TOKENS,
   CONTI_SHOTS_MAX_TOKENS,
   CONTI_SINGLE_SHOTS_MAX_TOKENS,
@@ -42,6 +45,7 @@ import {
   MAX_SHOT_QUALITY_PATCH_ATTEMPTS,
   PUNCHLINE_MIN_DURATION_SEC,
   SHOT_CONTENT_MIN_CHARS,
+  isGenericDefaultAction,
 } from './conti-validation.js';
 import { findRealNamesInShots, buildCharacterNameToLabelMap } from './character-labels.js';
 import {
@@ -52,7 +56,7 @@ import {
   type ContiMetadataTags,
 } from './conti-metadata.js';
 import { extractSectionBody, buildHookTypePromptBlock } from './persona-axis.js';
-import { normalizeMultiShotConti, normalizeSingleShotConti, buildEvoLinkPrompt, getDefaultShotAction } from './evolink.js';
+import { normalizeMultiShotConti, normalizeSingleShotConti, buildEvoLinkPrompt } from './evolink.js';
 import { EVOLINK_PROMPT_LENGTH_GUIDANCE } from './prompt-length.js';
 import { getShotCountBounds } from './shot-timing.js';
 import type { GenerationConditions, VideoConti, VideoContiShot, VideoPersonaConfig } from './types.js';
@@ -64,6 +68,12 @@ import {
   parseCoreMaterialTagsFromResponse,
   validateCoreMaterials,
 } from './punchline-material.js';
+import {
+  assessStoryDraftComprehension,
+  MAX_STORY_COMPREHENSION_REGEN,
+  regenerateStoryDraftForClarity,
+  STORY_COMPREHENSION_REGEN_FEEDBACK,
+} from './story-comprehension.js';
 import {
   buildFormatConversionIntro,
   buildStoryDraftPrompt,
@@ -80,7 +90,7 @@ export type { ContiFoundation, StoryDraft };
 export interface ContiGenerationResult extends VideoConti {
   locationKeyword: string;
   timeOfDay: string;
-  /** 기본 action 대체 등 — 콘티는 완성되나 운영자 경고용 */
+  /** 샷 품질 보완 경고 — 운영자 검토용 */
   contentWarnings?: string[];
   /** 마지막 샷 문장 미완결 — max_tokens 부족 신호 */
   lastShotIncompleteDetected?: boolean;
@@ -137,9 +147,10 @@ function buildMultiShotGuide(ctx: PromptContext): string {
     ctx.workspace === 'yeonun' ? `\n${buildYeonunFortuneDialogueRule()}\n` : '';
 
   return `${baseGuide}
+${buildShotCountPreferLowerGuide(conditions.duration)}
 ${buildShotContentRule()}${yeonunFortuneBlock}
 ${punchlineDurationRule}
-shots 배열 길이는 ${getShotCountBounds(conditions.duration).min}~${getShotCountBounds(conditions.duration).max}개. startSec/endSec 합 = ${conditions.duration}. 각 action ${SHOT_CONTENT_MIN_CHARS}자 이상.
+shots 배열 길이는 ${getShotCountBounds(conditions.duration).min}~${getShotCountBounds(conditions.duration).max}개 — **가능하면 ${getShotCountBounds(conditions.duration).min}개(하한) 우선**. startSec/endSec 합 = ${conditions.duration}. 각 action ${SHOT_CONTENT_MIN_CHARS}자 이상, narrativeProse 사건을 action에 반영.
 ${EVOLINK_PROMPT_LENGTH_GUIDANCE}`;
 }
 
@@ -317,6 +328,8 @@ function buildShotsPrompt(ctx: PromptContext, foundation: ContiFoundation): stri
   const storySource = ctx.storyDraft
     ? `${buildFormatConversionIntro(ctx.storyDraft)}
 
+⚠️ 3b 최우선: 3a narrativeProse의 **모든 사건·발견·반응**을 샷 action에 구체적으로 반영한다.
+"행동과 반응이 이어지며", "상황을 소개한다", "여운 있게 마무리" 등 빈 filler action 금지.
 ⚠️ 3b단계 — 위 3a 이야기를 그대로 유지하고 camera/action/dialogue JSON으로 **형식만** 분배한다.
 펀치라인·사건 순서·대사 **의미**를 새로 바꾸거나 약화하지 말 것.`
     : `1단계 설정 (변경 금지):
@@ -416,17 +429,11 @@ function assembleConti(
 }
 
 function applyDefaultToRawShots(conti: VideoConti, indices: number[]): VideoConti {
-  const src = asContiShots(conti.shots);
-  const shots = src.map((s, i) => {
-    if (!indices.includes(i)) return s;
-    return {
-      ...s,
-      shotNumber: s.shotNumber || i + 1,
-      camera: s.camera?.trim() || (i === 0 || i === src.length - 1 ? '와이드' : '미디엄'),
-      action: getDefaultShotAction(i, src.length),
-    };
-  });
-  return { ...conti, shots };
+  const nums = indices.map((i) => i + 1).join(', ');
+  throw new ContiValidationError(
+    `샷 ${nums} 품질 보완 실패 — filler action으로 대체하지 않는다. 3b 전체 또는 해당 샷을 구체 action으로 다시 생성하라.`,
+    { maxAttempts: DEFAULT_CONTI_VALIDATION_MAX_ATTEMPTS, holdOnFailure: true, holdReason: 'generic_action' },
+  );
 }
 
 function mergeShotPatches(conti: VideoConti, patches: VideoContiShot[]): VideoConti {
@@ -463,6 +470,50 @@ async function generateStoryDraft(ctx: PromptContext, model: string): Promise<St
     }),
   });
   return parseStoryDraft(parsed);
+}
+
+async function ensureStoryDraftComprehension(
+  ctx: PromptContext,
+  storyDraft: StoryDraft,
+  punchlineIdea: string,
+  model: string,
+): Promise<StoryDraft> {
+  let current = storyDraft;
+  for (let attempt = 0; attempt <= MAX_STORY_COMPREHENSION_REGEN; attempt++) {
+    await reportStage(
+      ctx,
+      attempt === 0 ? '3a 이해도 평가' : `3a 이해도 보완 (${attempt}/${MAX_STORY_COMPREHENSION_REGEN})`,
+    );
+    const verdict = await assessStoryDraftComprehension(current, punchlineIdea);
+    if (verdict === 'clear') return current;
+    if (attempt >= MAX_STORY_COMPREHENSION_REGEN) {
+      throw new ContiValidationError(STORY_COMPREHENSION_REGEN_FEEDBACK, {
+        holdOnFailure: true,
+        holdReason: 'story_comprehension',
+      });
+    }
+    const clarityFeedback = ctx.feedback
+      ? `${STORY_COMPREHENSION_REGEN_FEEDBACK}\n${ctx.feedback}`
+      : STORY_COMPREHENSION_REGEN_FEEDBACK;
+    current = await regenerateStoryDraftForClarity({
+      existing: current,
+      punchlineIdea,
+      feedback: clarityFeedback,
+      model,
+    });
+  }
+  return current;
+}
+
+function assertNoGenericActions(conti: VideoConti): void {
+  for (let i = 0; i < asContiShots(conti.shots).length; i++) {
+    if (isGenericDefaultAction(asContiShots(conti.shots)[i]!.action)) {
+      throw new ContiValidationError(buildGenericActionFeedback(i + 1), {
+        holdOnFailure: true,
+        holdReason: 'generic_action',
+      });
+    }
+  }
 }
 
 /** @deprecated 3a story-draft 경로 사용 — legacy fallback */
@@ -569,7 +620,12 @@ async function recoverShotQualityIssues(
     let patchIdx: number;
     let feedback: string;
 
-    if (duplicates.length > 0) {
+    const genericIssues = nonEmptyQuality.filter((issue) => issue.kind === 'generic_action');
+    if (genericIssues.length > 0) {
+      const issue = genericIssues[0]!;
+      patchIdx = issue.index;
+      feedback = issue.feedback;
+    } else if (duplicates.length > 0) {
       patchIdx = duplicates[0]!;
       feedback = buildAdjacentDuplicateFeedback(patchIdx + 1);
     } else {
@@ -601,12 +657,7 @@ async function recoverShotQualityIssues(
         ...duplicates,
       ]),
     ];
-    current = applyDefaultToRawShots(current, fallbackIndices);
-    const nums = fallbackIndices.map((i) => i + 1).join(', ');
-    warnings.push(
-      `샷 ${nums} 자동 보완 실패 — 기본 action으로 대체했습니다. 콘티 검토 후 필요 시 재생성하세요.`,
-    );
-    break;
+    applyDefaultToRawShots(current, fallbackIndices);
   }
 
   return { conti: current, warnings };
@@ -764,6 +815,8 @@ async function finalizeContiFromParts(
 
   const characterNames = extractCharacterNamesForStorage(conti, params.conditions.characterName);
 
+  assertNoGenericActions(conti);
+
   return {
     ...conti,
     locationKeyword: foundation.locationKeyword,
@@ -868,7 +921,7 @@ async function generateContiShotsFromFoundation(params: {
   return conti!;
 }
 
-export type Stage3RegenMode = 'full' | 'format_only';
+export type Stage3RegenMode = 'full' | 'format_only' | 'story_clarity';
 
 export async function generateContiFromPunchline(params: {
   workspace: Workspace;
@@ -877,7 +930,7 @@ export async function generateContiFromPunchline(params: {
   mustIncludeProps?: string[];
   pastSummaries?: string[];
   feedback?: string;
-  /** dull·형식 재시도 — 3a 스킵, 3b만 */
+  /** dull·형식 재시도 — 3a 스킵(format_only) 또는 3a 부분 수정(story_clarity) */
   existingStoryDraft?: StoryDraft;
   regenMode?: Stage3RegenMode;
   onStage?: (stage: string) => void | Promise<void>;
@@ -885,20 +938,47 @@ export async function generateContiFromPunchline(params: {
   const model = (await getMainClaudeModel()) || 'claude-sonnet-4-6';
   const ctx = buildPunchlinePromptContext(params);
   const regenMode = params.regenMode ?? 'full';
+  const punchlineIdea = params.punchlineIdea.trim();
 
-  let storyDraft: StoryDraft | undefined =
-    regenMode === 'format_only' ? params.existingStoryDraft : undefined;
-
-  if (regenMode === 'format_only' && !storyDraft) {
+  if (regenMode === 'format_only' && !params.existingStoryDraft) {
     throw new Error('3b-only 재생성 — existingStoryDraft(storyDraft)가 필요합니다');
   }
+  if (regenMode === 'story_clarity' && !params.existingStoryDraft) {
+    throw new Error('story_clarity 재생성 — existingStoryDraft(storyDraft)가 필요합니다');
+  }
 
+  let storyDraft: StoryDraft | undefined;
   let lastErr: unknown;
 
   for (let storyAttempt = 0; storyAttempt <= MAX_STORY_REGEN_ON_FORMAT_FAIL; storyAttempt++) {
-    if (!storyDraft) {
+    if (regenMode === 'format_only') {
+      storyDraft = params.existingStoryDraft;
+    } else if (regenMode === 'story_clarity') {
+      if (storyAttempt === 0) {
+        await reportStage(ctx, '3a 이해도·유머 보완 (storyDraft)');
+        storyDraft = await regenerateStoryDraftForClarity({
+          existing: params.existingStoryDraft!,
+          punchlineIdea,
+          feedback: params.feedback ?? STORY_COMPREHENSION_REGEN_FEEDBACK,
+          model,
+        });
+      } else {
+        await reportStage(ctx, '3a 재생성 (3b 형식 변환 반복 실패)');
+        storyDraft = await generateStoryDraft(
+          {
+            ...ctx,
+            feedback:
+              (ctx.feedback ? `${ctx.feedback} ` : '') +
+              '이전 이야기는 짧은 영상 샷·시간 형식에 맞지 않았다. 같은 펀치라인으로 더 압축된 흐름으로 다시 서술하라.',
+          },
+          model,
+        );
+        storyDraft = await ensureStoryDraftComprehension(ctx, storyDraft, punchlineIdea, model);
+      }
+    } else if (!storyDraft) {
       await reportStage(ctx, '3a단계 자유 서술 (재미)');
       storyDraft = await generateStoryDraft(ctx, model);
+      storyDraft = await ensureStoryDraftComprehension(ctx, storyDraft, punchlineIdea, model);
     } else if (storyAttempt > 0) {
       await reportStage(ctx, '3a단계 재생성 (3b 형식 변환 반복 실패)');
       storyDraft = await generateStoryDraft(
@@ -910,9 +990,10 @@ export async function generateContiFromPunchline(params: {
         },
         model,
       );
+      storyDraft = await ensureStoryDraftComprehension(ctx, storyDraft, punchlineIdea, model);
     }
 
-    const foundation = storyDraftToFoundation(storyDraft);
+    const foundation = storyDraftToFoundation(storyDraft!);
     const shotCtx: PromptContext = { ...ctx, storyDraft, feedback: params.feedback };
 
     try {
@@ -926,7 +1007,11 @@ export async function generateContiFromPunchline(params: {
       return { ...conti, storyDraft };
     } catch (err) {
       lastErr = err;
-      if (err instanceof ContiValidationError && storyAttempt < MAX_STORY_REGEN_ON_FORMAT_FAIL) {
+      if (
+        err instanceof ContiValidationError &&
+        storyAttempt < MAX_STORY_REGEN_ON_FORMAT_FAIL &&
+        regenMode === 'full'
+      ) {
         storyDraft = undefined;
         continue;
       }

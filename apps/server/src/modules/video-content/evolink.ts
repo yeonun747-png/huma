@@ -15,7 +15,7 @@ import {
   normalizeVideoDurationSec,
   SHOT_TIMING_MIN_SEC,
 } from './shot-timing.js';
-import { isInvalidShotContentField, findPunchlineShotIndex } from './conti-validation.js';
+import { isInvalidShotContentField, findPunchlineShotIndex, isGenericDefaultAction } from './conti-validation.js';
 import {
   buildCharacterNameToLabelMap,
   formatEvoLinkCharacterBlock,
@@ -316,10 +316,13 @@ function mapSourceShotIndex(slotIndex: number, slotCount: number, sourceCount: n
 function findLastSubstantiveAction(src: VideoContiShot[]): string | null {
   for (let i = src.length - 1; i >= 0; i--) {
     const action = src[i]?.action?.trim() ?? '';
-    if (action && !isInvalidShotContentField(action)) return action;
+    if (action && !isInvalidShotContentField(action) && !isGenericDefaultAction(action)) return action;
   }
   return null;
 }
+
+/** conti 검증·거부 대상 — Kling/EvoLink 기본 filler action (콘티 저장 금지) */
+export { GENERIC_DEFAULT_ACTION_PHRASES, isGenericDefaultAction } from './conti-validation.js';
 
 function defaultSlotAction(slotIndex: number, totalSlots: number): string {
   if (slotIndex === 0) {
@@ -347,7 +350,7 @@ export function getDefaultShotAction(slotIndex: number, totalSlots = EVOLINK_MAX
 function resolveSlotAction(slotIndex: number, totalSlots: number, src: VideoContiShot[]): string {
   const mapped = src[mapSourceShotIndex(slotIndex, totalSlots, src.length)];
   const action = mapped?.action?.trim() ?? '';
-  if (action && !isInvalidShotContentField(action)) {
+  if (action && !isInvalidShotContentField(action) && !isGenericDefaultAction(action)) {
     if (slotIndex === totalSlots - 1 && src.length < totalSlots) {
       return `${action.slice(0, 50)} 장면이 멀어지며 여운 있게 마무리된다.`;
     }
