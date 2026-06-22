@@ -1,36 +1,50 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { HumaJob } from '@huma/shared';
 import { api } from '@/lib/api';
 import { refreshNavBadges } from '@/lib/nav-badge-events';
 import { formatScheduledAt } from '@/components/queue/job-schedule-form';
 import { monitorJobAccountLabel, monitorJobPlatformLabel } from '@/lib/monitor-account-label';
+import { useShellViewActive } from '@/components/dashboard/shell-view-active';
 
 type MonitorSessions = Awaited<ReturnType<typeof api.monitorSessions>>;
 
 export function MonitorView() {
+  const active = useShellViewActive();
   const [jobs, setJobs] = useState<HumaJob[]>([]);
   const [sessions, setSessions] = useState<MonitorSessions | null>(null);
 
-  const load = useCallback(() => {
-    void api.jobs().then((all) => {
-      const active = all.filter((j) => j.status === 'running' || j.status === 'scheduled' || j.status === 'pending');
-      setJobs(active.slice(0, 4));
-    }).catch(() => setJobs([]));
+  const load = useCallback(
+    (opts?: { force?: boolean }) => {
+      void api
+        .jobs()
+        .then((all) => {
+          const activeJobs = all.filter(
+            (j) => j.status === 'running' || j.status === 'scheduled' || j.status === 'pending',
+          );
+          setJobs(activeJobs.slice(0, 4));
+        })
+        .catch(() => setJobs([]));
 
-    void api.monitorSessions().then((data) => {
-      setSessions(data);
-      refreshNavBadges();
-    }).catch(() => setSessions(null));
-  }, []);
+      void api
+        .monitorSessions()
+        .then((data) => {
+          setSessions(data);
+          if (opts?.force) refreshNavBadges();
+        })
+        .catch(() => setSessions(null));
+    },
+    [],
+  );
 
   useEffect(() => {
-    load();
-    const t = setInterval(load, 5000);
+    if (!active) return;
+    load({ force: true });
+    const t = setInterval(() => load(), 5000);
     return () => clearInterval(t);
-  }, [load]);
+  }, [load, active]);
 
   const liveCards = sessions?.live ?? [];
   const idleCard = sessions?.idle;

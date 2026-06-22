@@ -15,10 +15,11 @@ export function useSidebarBadges(workspace: Workspace, activePath: string) {
   const [pendingJobs, setPendingJobs] = useState(0);
   const [liveAccounts, setLiveAccounts] = useState(0);
 
-  const refresh = useCallback(() => {
+  const refresh = useCallback((opts?: { force?: boolean }) => {
     const scope = { workspace };
+    const force = opts?.force === true;
     void api
-      .navBadges(scope, { force: true })
+      .navBadges(scope, { force })
       .then((b) => {
         setBadges((prev) => ({
           ...prev,
@@ -30,7 +31,7 @@ export function useSidebarBadges(workspace: Workspace, activePath: string) {
       .catch(() => {});
 
     void api
-      .status(scope, { force: true })
+      .status(scope, { force })
       .then((s) => {
         setPendingJobs(s.pendingJobs ?? 0);
         setLiveAccounts(s.liveAccounts ?? 0);
@@ -42,18 +43,18 @@ export function useSidebarBadges(workspace: Workspace, activePath: string) {
     setBadges((prev) => ({ ...prev, queue: 0, video: 0, watcher: 0 }));
     setPendingJobs(0);
     setLiveAccounts(0);
-    refresh();
+    refresh({ force: true });
 
     const pollMs = FAST_ROUTES.has(activePath) ? FAST_POLL_MS : BADGE_POLL_MS;
-    const onRefresh = () => refresh();
+    const onRefresh = () => refresh({ force: true });
 
     window.addEventListener('huma:queue-updated', onRefresh);
     window.addEventListener(NAV_BADGES_REFRESH, onRefresh);
 
-    const poll = window.setInterval(refresh, pollMs);
+    const poll = window.setInterval(() => refresh(), pollMs);
 
     const onVisible = () => {
-      if (document.visibilityState === 'visible') refresh();
+      if (document.visibilityState === 'visible') refresh({ force: true });
     };
     document.addEventListener('visibilitychange', onVisible);
 
@@ -75,7 +76,7 @@ export function useSidebarBadges(workspace: Workspace, activePath: string) {
 
     socket.connect();
     socket.on('log', scheduleRefresh);
-    socket.on('connect', refresh);
+    socket.on('connect', () => refresh({ force: true }));
 
     return () => {
       if (debounce) clearTimeout(debounce);

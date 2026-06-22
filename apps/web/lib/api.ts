@@ -96,6 +96,8 @@ function qs(params: Record<string, string | undefined>) {
 function refreshNavCaches() {
   invalidateApiCache('nav-badges');
   invalidateApiCache('status');
+  invalidateApiCache('jobs-page');
+  invalidateApiCache('dashboard:');
   refreshNavBadges();
 }
 
@@ -137,12 +139,21 @@ export const api = {
     job_type?: string;
     limit?: string;
   }) => request<HumaJob[]>(`/api/jobs${qs(params ?? {})}`),
-  jobsPage: (params: { workspace: string; limit?: string; offset?: string }) =>
-    request<{
-      items: HumaJob[];
-      total: number;
-      stats: { pending: number; running: number; doneToday: number; doneAll: number };
-    }>(`/api/jobs/page${qs(params)}`),
+  jobsPage: (
+    params: { workspace: string; limit?: string; offset?: string },
+    opts?: { force?: boolean },
+  ) =>
+    cachedFetch(
+      `jobs-page:${params.workspace}:${params.limit ?? '50'}:${params.offset ?? '0'}`,
+      4_000,
+      () =>
+        request<{
+          items: HumaJob[];
+          total: number;
+          stats: { pending: number; running: number; doneToday: number; doneAll: number };
+        }>(`/api/jobs/page${qs(params)}`),
+      opts,
+    ),
   createJob: async (body: Partial<HumaJob>) => {
     const job = await request<HumaJob>('/api/jobs', { method: 'POST', body: JSON.stringify(body) });
     refreshNavCaches();
@@ -472,17 +483,27 @@ export const api = {
       { method: 'POST', timeoutMs: 200_000 },
     );
   },
-  logs: (params?: { level?: string; platform?: string; limit?: string }) =>
-    request<Array<Record<string, unknown>>>(`/api/logs${qs(params ?? {})}`),
+  logs: (params?: { level?: string; platform?: string; limit?: string }, opts?: { force?: boolean }) =>
+    cachedFetch(
+      `logs:${params?.level ?? 'all'}:${params?.platform ?? 'all'}:${params?.limit ?? '50'}`,
+      10_000,
+      () => request<Array<Record<string, unknown>>>(`/api/logs${qs(params ?? {})}`),
+      opts,
+    ),
   videoQueue: () => request<HumaVideoQueue[]>('/api/video/queue'),
   createVideo: (body: Record<string, unknown>) =>
     request('/api/video/generate', { method: 'POST', body: JSON.stringify(body) }),
-  videoContentList: (params?: { account_id?: string; workspace?: string }) => {
+  videoContentList: (params?: { account_id?: string; workspace?: string }, opts?: { force?: boolean }) => {
     const q = new URLSearchParams();
     if (params?.account_id) q.set('account_id', params.account_id);
     if (params?.workspace) q.set('workspace', params.workspace);
-    const qs = q.toString();
-    return request<HumaVideoContentHistory[]>(`/api/video-content${qs ? `?${qs}` : ''}`);
+    const qsStr = q.toString();
+    return cachedFetch(
+      `video-content:${params?.workspace ?? 'all'}:${params?.account_id ?? 'all'}`,
+      5_000,
+      () => request<HumaVideoContentHistory[]>(`/api/video-content${qsStr ? `?${qsStr}` : ''}`),
+      opts,
+    );
   },
   videoContentGet: (id: string) => request<HumaVideoContentHistory>(`/api/video-content/${id}`),
   videoContentHistory: (accountId: string) =>
@@ -654,60 +675,66 @@ export const api = {
     request(`/api/platform-accounts/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deletePlatformAccount: (id: string) =>
     request(`/api/platform-accounts/${id}`, { method: 'DELETE' }),
-  dashboardStats: (params?: { period?: 'today' | 'week' | 'month' }) =>
-    request<{
-      pendingJobs: number;
-      activeAccounts: number;
-      errors: number;
-      todayCompleted: number;
-      serviceStats: Array<{ workspace: string; todayJobs: number; pending: number; errors: number; running?: number }>;
-      chart: Array<{ day: string; value: number; isToday?: boolean }>;
-      chartAverage?: number;
-      period?: 'today' | 'week' | 'month';
-      chartLabel?: string;
-      nextPublish?: string | null;
-      nextPublishAt?: string | null;
-      integrated: {
-        todayPublish: number;
-        todayPublishSub: string;
-        queuePending: number;
-        queueSub: string;
-        errors: number;
-        errorsSub: string;
-        activeAccounts: number;
-        totalAccounts: number;
-        accountSub: string;
-      };
-      serviceStatus: Record<
-        string,
-        { icon: string; name: string; detail: string; todayJobs: number; jobsLabel: string; status: 'ok' | 'warn' | 'err' }
-      >;
-      workspacePosts: Record<
-        string,
-        Array<{
-          title: string;
-          meta: string;
-          status: 'done' | 'running' | 'idle' | 'error' | 'warn';
-          statusLabel: string;
-          urlKind: 'link' | 'generating' | 'dash' | 'watcher';
-          url?: string;
-        }>
-      >;
-      roasItems: Array<{
-        title: string;
-        blogUrl: string;
-        landingUrl: string;
-        clicks: number;
-        impressions: number;
-      }>;
-      roasMeta: {
-        configured: boolean;
-        periodDays: number;
-        missingEnv?: string[];
-      };
-      yeonunSocial: Array<{ label: string; current: number; max: number | null }>;
-      pananaStats: { todayPosts: number; activePlatforms: number; errorAccounts: number };
-    }>(`/api/dashboard/stats${qs({ period: params?.period })}`),
+  dashboardStats: (params?: { period?: 'today' | 'week' | 'month' }, opts?: { force?: boolean }) =>
+    cachedFetch(
+      `dashboard:${params?.period ?? 'today'}`,
+      20_000,
+      () =>
+        request<{
+          pendingJobs: number;
+          activeAccounts: number;
+          errors: number;
+          todayCompleted: number;
+          serviceStats: Array<{ workspace: string; todayJobs: number; pending: number; errors: number; running?: number }>;
+          chart: Array<{ day: string; value: number; isToday?: boolean }>;
+          chartAverage?: number;
+          period?: 'today' | 'week' | 'month';
+          chartLabel?: string;
+          nextPublish?: string | null;
+          nextPublishAt?: string | null;
+          integrated: {
+            todayPublish: number;
+            todayPublishSub: string;
+            queuePending: number;
+            queueSub: string;
+            errors: number;
+            errorsSub: string;
+            activeAccounts: number;
+            totalAccounts: number;
+            accountSub: string;
+          };
+          serviceStatus: Record<
+            string,
+            { icon: string; name: string; detail: string; todayJobs: number; jobsLabel: string; status: 'ok' | 'warn' | 'err' }
+          >;
+          workspacePosts: Record<
+            string,
+            Array<{
+              title: string;
+              meta: string;
+              status: 'done' | 'running' | 'idle' | 'error' | 'warn';
+              statusLabel: string;
+              urlKind: 'link' | 'generating' | 'dash' | 'watcher';
+              url?: string;
+            }>
+          >;
+          roasItems: Array<{
+            title: string;
+            blogUrl: string;
+            landingUrl: string;
+            clicks: number;
+            impressions: number;
+          }>;
+          roasMeta: {
+            configured: boolean;
+            periodDays: number;
+            missingEnv?: string[];
+          };
+          yeonunSocial: Array<{ label: string; current: number; max: number | null }>;
+          pananaStats: { todayPosts: number; activePlatforms: number; errorAccounts: number };
+        }>(`/api/dashboard/stats${qs({ period: params?.period })}`),
+      opts,
+    ),
   monitorSessions: () =>
     request<{
       live: Array<
@@ -803,19 +830,25 @@ export const api = {
       sameOrigin: typeof window === 'undefined' ? false : true,
       cache: 'no-store',
     }),
-  seoKeywords: (workspace: string) =>
-    request<{
-      workspace: string;
-      badge: string;
-      configured: boolean;
-      missingEnv?: string[];
-      source: string;
-      ranks: Array<{ rank: string; word: string; vol: string; chg: string; ok: boolean | null }>;
-      pool: string[];
-      table: Array<{ id: string; kw: string; cnt: number; reflect: string; st: string; tone: 'ok' | 'warn' | 'err' }>;
-      crawledAt?: string;
-      cachedAt?: string;
-    }>(`/api/seo/keywords?workspace=${encodeURIComponent(workspace)}`),
+  seoKeywords: (workspace: string, opts?: { force?: boolean }) =>
+    cachedFetch(
+      `seo:${workspace}`,
+      30_000,
+      () =>
+        request<{
+          workspace: string;
+          badge: string;
+          configured: boolean;
+          missingEnv?: string[];
+          source: string;
+          ranks: Array<{ rank: string; word: string; vol: string; chg: string; ok: boolean | null }>;
+          pool: string[];
+          table: Array<{ id: string; kw: string; cnt: number; reflect: string; st: string; tone: 'ok' | 'warn' | 'err' }>;
+          crawledAt?: string;
+          cachedAt?: string;
+        }>(`/api/seo/keywords?workspace=${encodeURIComponent(workspace)}`),
+      opts,
+    ),
   crawlSeo: (workspace: string) =>
     request(`/api/seo/crawl?workspace=${encodeURIComponent(workspace)}`, { method: 'POST' }),
   cafeViralKpi: () =>
@@ -829,22 +862,28 @@ export const api = {
     request<Array<{ title: string; status: string; result_url?: string; workspace: string; completed_at?: string }>>(
       '/api/dashboard/recent'
     ),
-  calendarJobs: (params?: { month?: string; workspace?: string }) =>
-    request<
-      Array<{
-        id: string;
-        title: string;
-        job_type: string;
-        status: string;
-        scheduled_at: string;
-        workspace: string;
-        result_url?: string | null;
-        completed_at?: string | null;
-        content?: string | null;
-        image_urls?: string[] | null;
-        platform?: string | null;
-      }>
-    >(`/api/jobs/calendar${qs(params ?? {})}`),
+  calendarJobs: (params?: { month?: string; workspace?: string }, opts?: { force?: boolean }) =>
+    cachedFetch(
+      `calendar:${params?.month ?? 'all'}:${params?.workspace ?? 'all'}`,
+      15_000,
+      () =>
+        request<
+          Array<{
+            id: string;
+            title: string;
+            job_type: string;
+            status: string;
+            scheduled_at: string;
+            workspace: string;
+            result_url?: string | null;
+            completed_at?: string | null;
+            content?: string | null;
+            image_urls?: string[] | null;
+            platform?: string | null;
+          }>
+        >(`/api/jobs/calendar${qs(params ?? {})}`),
+      opts,
+    ),
   crankScheduler: (opts?: { probe?: boolean }) =>
     request<{
       date_key: string;
@@ -887,32 +926,38 @@ export const api = {
     ),
   detectCafeGrade: (cafeId: string) =>
     request(`/api/cafe-viral/cafes/${cafeId}/detect-grade`, { method: 'POST' }),
-  adsenseStats: (workspace: string) =>
-    request<{
-      configured: boolean;
-      missingEnv?: string[];
-      todayEarnings: number;
-      yesterdayEarnings: number;
-      monthEarnings: number;
-      monthPageViews: number;
-      monthClicks: number;
-      monthImpressions: number;
-      cpc: number;
-      ctr: number;
-      rpm: number;
-      unpaidBalance: number;
-      unpaidBalanceFormatted: string;
-      combinedTotal: number;
-      last7Days: {
-        clicks: { current: number; previous: number; change: number; changePct: number };
-        pageViews: { current: number; previous: number; change: number; changePct: number };
-        impressions: { current: number; previous: number; change: number; changePct: number };
-        cpc: { current: number; previous: number; change: number; changePct: number };
-        rpm: { current: number; previous: number; change: number; changePct: number };
-        ctr: { current: number; previous: number; changePp: number; changePct: number };
-      };
-      monthlyTrend: Array<{ month: string; earnings: number; pageViews: number; rpm: number }>;
-    }>(`/api/publisher-stats?workspace=${encodeURIComponent(workspace)}`, { sameOrigin: true }),
+  adsenseStats: (workspace: string, opts?: { force?: boolean }) =>
+    cachedFetch(
+      `adsense:${workspace}`,
+      60_000,
+      () =>
+        request<{
+          configured: boolean;
+          missingEnv?: string[];
+          todayEarnings: number;
+          yesterdayEarnings: number;
+          monthEarnings: number;
+          monthPageViews: number;
+          monthClicks: number;
+          monthImpressions: number;
+          cpc: number;
+          ctr: number;
+          rpm: number;
+          unpaidBalance: number;
+          unpaidBalanceFormatted: string;
+          combinedTotal: number;
+          last7Days: {
+            clicks: { current: number; previous: number; change: number; changePct: number };
+            pageViews: { current: number; previous: number; change: number; changePct: number };
+            impressions: { current: number; previous: number; change: number; changePct: number };
+            cpc: { current: number; previous: number; change: number; changePct: number };
+            rpm: { current: number; previous: number; change: number; changePct: number };
+            ctr: { current: number; previous: number; changePp: number; changePct: number };
+          };
+          monthlyTrend: Array<{ month: string; earnings: number; pageViews: number; rpm: number }>;
+        }>(`/api/publisher-stats?workspace=${encodeURIComponent(workspace)}`, { sameOrigin: true }),
+      opts,
+    ),
   stopAll: (reason: string) =>
     request('/api/stop-all', { method: 'POST', body: JSON.stringify({ reason }) }),
   advanceJob: (id: string) => request(`/api/jobs/${id}/advance`, { method: 'PATCH' }),

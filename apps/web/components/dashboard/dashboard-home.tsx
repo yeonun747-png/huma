@@ -8,6 +8,7 @@ import { getAccessibleWorkspaces } from '@/lib/constants';
 import { useAuth } from '@/lib/auth-context';
 import { useWorkspace } from '@/components/dashboard/workspace-context';
 import { useDashboardPeriod } from '@/components/dashboard/dashboard-period-context';
+import { useShellViewActive } from '@/components/dashboard/shell-view-active';
 import { roasBarWidth, type PostRow } from '@/lib/dashboard-mock-data';
 import { weekdayColorClass } from '@/lib/format-kst';
 import { cn } from '@/lib/constants';
@@ -86,6 +87,7 @@ function PostsTable({ rows, metaHead }: { rows: PostRow[]; metaHead: string }) {
 }
 
 export function DashboardHome() {
+  const active = useShellViewActive();
   const { admin } = useAuth();
   const { workspace } = useWorkspace();
   const { period } = useDashboardPeriod();
@@ -107,10 +109,11 @@ export function DashboardHome() {
   }, [period, workspace]);
 
   useEffect(() => {
+    if (!active) return;
     load();
     const id = setInterval(load, 60_000);
     return () => clearInterval(id);
-  }, [load]);
+  }, [load, active]);
 
   const WS_ICONS: Record<Workspace, string> = { yeonun: '🔮', quizoasis: '🧠', panana: '🎬' };
 

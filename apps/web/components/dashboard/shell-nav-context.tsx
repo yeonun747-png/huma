@@ -1,6 +1,14 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  startTransition,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 
 type ShellNavContextValue = {
@@ -22,7 +30,9 @@ export function ShellNavProvider({ children }: { children: ReactNode }) {
   const navigate = useCallback(
     (href: string) => {
       if (href === shellPath) return;
-      setShellPath(href);
+      startTransition(() => {
+        setShellPath(href);
+      });
       router.push(href);
     },
     [router, shellPath],

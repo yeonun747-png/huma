@@ -33,8 +33,30 @@ export function isShellRoute(pathname: string): boolean {
   return pathname in SHELL_VIEW_LOADERS;
 }
 
-export function prefetchShellViews(): void {
-  for (const loader of Object.values(SHELL_VIEW_LOADERS)) {
-    void loader();
-  }
+export function prefetchShellView(path: string): void {
+  const loader = SHELL_VIEW_LOADERS[path];
+  if (loader) void loader();
+}
+
+/** 로그인 직후·유휴 시간에 청크를 순차 preload — 17개 동시 다운로드 스파이크 방지 */
+export function prefetchShellViewsIdle(): void {
+  const paths = Object.keys(SHELL_VIEW_LOADERS);
+  let index = 0;
+
+  const schedule = (fn: () => void) => {
+    if (typeof requestIdleCallback !== 'undefined') {
+      requestIdleCallback(fn, { timeout: 4000 });
+    } else {
+      setTimeout(fn, 120 * index);
+    }
+  };
+
+  const step = () => {
+    if (index >= paths.length) return;
+    prefetchShellView(paths[index]!);
+    index += 1;
+    schedule(step);
+  };
+
+  schedule(step);
 }

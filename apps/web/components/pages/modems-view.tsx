@@ -168,10 +168,26 @@ export function ModemsView() {
       if (probeGenRef.current !== gen) return;
       setModems(base);
       setAccounts(acc);
-      void runSlotProbes(base, gen, { silent: true });
     } catch (err: unknown) {
       if (probeGenRef.current !== gen) return;
       const msg = err instanceof Error ? err.message : '프록시 목록 로드 실패';
+      setLoadError(msg);
+    }
+  }, []);
+
+  /** DB 목록 갱신 후 7슬롯 순차 SOCKS probe — 「다시 검사」·복구 후 */
+  const recheckAll = useCallback(async () => {
+    const gen = ++probeGenRef.current;
+    setLoadError(null);
+    try {
+      const [base, acc] = await Promise.all([api.modems(), api.accounts()]);
+      if (probeGenRef.current !== gen) return;
+      setModems(base);
+      setAccounts(acc);
+      await runSlotProbes(base, gen);
+    } catch (err: unknown) {
+      if (probeGenRef.current !== gen) return;
+      const msg = err instanceof Error ? err.message : '프록시 검사 실패';
       setLoadError(msg);
     }
   }, [runSlotProbes]);
@@ -192,7 +208,7 @@ export function ModemsView() {
         throw new Error(res.error ?? '복구 실패');
       }
       await appAlert(res.message ?? '복구 완료. SOCKS 재검사를 실행합니다.');
-      await load();
+      await recheckAll();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '동글 네트워크 복구 실패';
       setLoadError(msg);
@@ -200,7 +216,7 @@ export function ModemsView() {
     } finally {
       setRestoring(false);
     }
-  }, [load]);
+  }, [recheckAll]);
 
   const reconnectSlot = useCallback(async (modem: HumaModem) => {
     const slot = modem.slot_number;
@@ -372,7 +388,7 @@ export function ModemsView() {
             <>
               {' '}
               (
-              <button type="button" className="text-huma-accent underline" onClick={() => void load()}>
+              <button type="button" className="text-huma-accent underline" onClick={() => void recheckAll()}>
                 다시 검사
               </button>
               )

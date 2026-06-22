@@ -1,12 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { EmptyPanel } from '@/components/ui/empty-panel';
 import { useWorkspace } from '@/components/dashboard/workspace-context';
 import { MGrid, MPanel, MStat, MTable, MTag } from '@/components/mockup/primitives';
 import { useRegisterPageAction } from '@/components/dashboard/page-action-context';
+import { useShellViewActive } from '@/components/dashboard/shell-view-active';
 import { SEO_WORKSPACE_URL } from '@/lib/seo-mock-data';
 import { dispatchQueuePrefill } from '@/lib/queue-prefill';
 import type { Workspace } from '@huma/shared';
@@ -19,9 +20,11 @@ export function SeoKeywordsView() {
   const [data, setData] = useState<SeoData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const dataRef = useRef<SeoData | null>(null);
+  dataRef.current = data;
 
   const load = useCallback(() => {
-    setLoading(true);
+    if (!dataRef.current) setLoading(true);
     setError(null);
     api
       .seoKeywords(workspace)
@@ -142,9 +145,11 @@ export function AdsenseView() {
   const [stats, setStats] = useState<Awaited<ReturnType<typeof api.adsenseStats>> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const statsRef = useRef<Awaited<ReturnType<typeof api.adsenseStats>> | null>(null);
+  statsRef.current = stats;
 
   const load = useCallback(() => {
-    setLoading(true);
+    if (!statsRef.current) setLoading(true);
     setError(null);
     // /adsense는 퀴즈오아시스 전용 — workspace 컨텍스트 전환 race 방지
     api.adsenseStats('quizoasis')
@@ -178,7 +183,7 @@ export function AdsenseView() {
     return `이전 7일 대비 ${arrow}${fmtUsd(Math.abs(change))} (${arrow}${Math.abs(changePct).toFixed(1)}%)`;
   };
 
-  if (loading) {
+  if (loading && !stats) {
     return (
       <div className="animate-fadeIn">
         <MPanel title="애드센스 수익">

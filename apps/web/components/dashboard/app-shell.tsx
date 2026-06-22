@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
 import { Sidebar } from '@/components/dashboard/sidebar';
 import { Topbar } from '@/components/dashboard/topbar';
 import { PageActionProvider } from '@/components/dashboard/page-action-context';
@@ -14,6 +15,11 @@ import { isShellRoute } from '@/lib/shell-routes';
 function AppShellInner({ children }: { children: React.ReactNode }) {
   const { shellPath } = useShellNav();
   const meta = getPageMeta(shellPath);
+  const mainRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    mainRef.current?.scrollTo(0, 0);
+  }, [shellPath]);
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -21,7 +27,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar title={meta.title} />
         <main
-          key={shellPath}
+          ref={mainRef}
           className={`flex-1 overflow-y-auto bg-huma-bg px-[18px] py-4 ${meta.contentClass ?? ''}`}
         >
           {isShellRoute(shellPath) ? <ShellContent /> : children}

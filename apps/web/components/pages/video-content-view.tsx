@@ -42,6 +42,7 @@ import { VideoContentHumorBadge } from '@/components/video/video-content-humor-b
 import { VideoContentStoragePanel } from '@/components/video/video-content-storage-panel';
 import { VIDEO_PRIMARY_BTN } from '@/components/video/video-content-ui';
 import { MGrid, MPanel, MTag } from '@/components/mockup/primitives';
+import { useShellViewActive } from '@/components/dashboard/shell-view-active';
 
 const PLATFORMS = [
   { key: 'youtube', label: 'YouTube', captionKey: 'caption_youtube' as const, uploadedKey: 'uploaded_youtube' as const },
@@ -523,6 +524,7 @@ function DetailPanel({
 }
 
 export function VideoContentView() {
+  const shellActive = useShellViewActive();
   const { admin } = useAuth();
   const units = useMemo(() => getAccessibleBusinessUnits(admin), [admin]);
   const [accounts, setAccounts] = useState<HumaAccount[]>([]);
@@ -549,12 +551,15 @@ export function VideoContentView() {
   selectedIdRef.current = selectedId;
   itemsRef.current = items;
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { force?: boolean }) => {
     const [accs, list] = await Promise.all([
       api.accounts(),
-      api.videoContentList({
-        workspace: filterWorkspace || undefined,
-      }),
+      api.videoContentList(
+        {
+          workspace: filterWorkspace || undefined,
+        },
+        { force: opts?.force },
+      ),
     ]);
     setAccounts(accs.filter((a) => a.account_type === 'posting'));
     setItems(list);
@@ -578,11 +583,12 @@ export function VideoContentView() {
   }, [hasProgressItems, bumpStorageRefresh]);
 
   useEffect(() => {
+    if (!shellActive) return;
     void load().catch(() => {});
     const pollMs = hasProgressItems ? 2_000 : 10_000;
-    const t = setInterval(() => void load().catch(() => {}), pollMs);
+    const t = setInterval(() => void load({ force: true }).catch(() => {}), pollMs);
     return () => clearInterval(t);
-  }, [load, hasProgressItems]);
+  }, [load, hasProgressItems, shellActive]);
 
   useEffect(() => {
     const socket = getLogSocket();

@@ -1,13 +1,15 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { Suspense, useMemo, type ComponentType, type ReactNode } from 'react';
+import { Suspense, useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react';
 import { getPageMeta } from '@/lib/page-config';
 import { SHELL_VIEW_LOADERS, isShellRoute } from '@/lib/shell-routes';
 import { useShellNav } from './shell-nav-context';
 import { ShellPageSkeleton } from './shell-page-skeleton';
+import { ShellViewPathProvider } from './shell-view-active';
 
 const viewCache = new Map<string, ComponentType<object>>();
+const MAX_KEEP_ALIVE = 8;
 
 function resolveShellView(path: string): ComponentType<object> | null {
   const loader = SHELL_VIEW_LOADERS[path];
@@ -23,21 +25,55 @@ function resolveShellView(path: string): ComponentType<object> | null {
   return View;
 }
 
-export function ShellContent({ fallback }: { fallback?: ReactNode }) {
-  const { shellPath } = useShellNav();
+function ShellViewSlot({ path, active }: { path: string; active: boolean }) {
+  const View = useMemo(() => resolveShellView(path), [path]);
+  if (!View) return null;
 
-  const View = useMemo(
-    () => (isShellRoute(shellPath) ? resolveShellView(shellPath) : null),
-    [shellPath],
+  const page = (
+    <ShellViewPathProvider path={path}>
+      <View />
+    </ShellViewPathProvider>
   );
 
-  if (!View) return <>{fallback}</>;
+  const inner =
+    path === '/queue' ? (
+      <Suspense fallback={<ShellPageSkeleton title="포스팅 큐 관리" />}>{page}</Suspense>
+    ) : (
+      page
+    );
 
-  const page = <View key={shellPath} />;
+  return (
+    <div
+      className={active ? undefined : 'hidden'}
+      aria-hidden={!active}
+      data-shell-view={path}
+    >
+      {inner}
+    </div>
+  );
+}
 
-  if (shellPath === '/queue') {
-    return <Suspense fallback={<ShellPageSkeleton title="포스팅 큐 관리" />}>{page}</Suspense>;
-  }
+export function ShellContent({ fallback }: { fallback?: ReactNode }) {
+  const { shellPath } = useShellNav();
+  const [visitOrder, setVisitOrder] = useState<string[]>(() =>
+    isShellRoute(shellPath) ? [shellPath] : [],
+  );
 
-  return page;
+  useEffect(() => {
+    if (!isShellRoute(shellPath)) return;
+    setVisitOrder((prev) => {
+      const next = [shellPath, ...prev.filter((p) => p !== shellPath)];
+      return next.slice(0, MAX_KEEP_ALIVE);
+    });
+  }, [shellPath]);
+
+  if (!isShellRoute(shellPath)) return <>{fallback}</>;
+
+  return (
+    <>
+      {visitOrder.map((path) => (
+        <ShellViewSlot key={path} path={path} active={path === shellPath} />
+      ))}
+    </>
+  );
 }

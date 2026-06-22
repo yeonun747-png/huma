@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { NAV_ITEMS, SPEC_NAV_ITEMS, WS_LABEL, cn } from '@/lib/constants';
-import { prefetchShellViews } from '@/lib/shell-routes';
+import { prefetchShellView, prefetchShellViewsIdle } from '@/lib/shell-routes';
 import { useWorkspace } from './workspace-context';
 import { useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
@@ -25,7 +25,7 @@ export function Sidebar() {
   const { badges, pendingJobs, liveAccounts } = useSidebarBadges(workspace, shellPath);
 
   useEffect(() => {
-    prefetchShellViews();
+    prefetchShellViewsIdle();
   }, []);
 
   const commonNav = NAV_ITEMS.filter((n) => n.group === 'common');
@@ -97,6 +97,7 @@ export function Sidebar() {
               key={item.href}
               href={item.href}
               prefetch
+              onMouseEnter={() => prefetchShellView(item.href)}
               onClick={(e) => {
                 e.preventDefault();
                 navigate(item.href);
@@ -137,10 +138,11 @@ export function Sidebar() {
                   key={item.href}
                   href={item.href}
                   prefetch
+                  onMouseEnter={() => prefetchShellView(item.href)}
                   onClick={(e) => {
-                e.preventDefault();
-                navigate(item.href);
-              }}
+                    e.preventDefault();
+                    navigate(item.href);
+                  }}
                   className={active ? 'nav-item-active' : 'nav-item'}
                 >
                   <span className="w-4 shrink-0 text-center text-[13.5px]">{item.icon}</span>
@@ -164,6 +166,7 @@ export function Sidebar() {
               key={item.href}
               href={item.href}
               prefetch
+              onMouseEnter={() => prefetchShellView(item.href)}
               onClick={(e) => {
                 e.preventDefault();
                 navigate(item.href);

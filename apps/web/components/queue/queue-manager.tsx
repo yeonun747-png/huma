@@ -10,6 +10,7 @@ import { useWorkspace } from '@/components/dashboard/workspace-context';
 import { PostingImageModelSettings } from '@/components/settings/posting-image-model-settings';
 import { MGrid, MPanel, MQueueItem, MStat, MTag } from '@/components/mockup/primitives';
 import { useRegisterPageAction } from '@/components/dashboard/page-action-context';
+import { useShellViewActive } from '@/components/dashboard/shell-view-active';
 import { PostViewerModal } from '@/components/viewer/post-viewer-modal';
 import { CrankJobDetailModal } from './crank-job-detail-modal';
 import { parseSocialCrankJobContent } from '@/lib/crank-job-payload';
@@ -174,6 +175,7 @@ function jobSub(job: HumaJob): string {
 }
 
 export function QueueManager() {
+  const shellActive = useShellViewActive();
   const { workspace } = useWorkspace();
   const searchParams = useSearchParams();
   const [jobs, setJobs] = useState<HumaJob[]>([]);
@@ -203,7 +205,7 @@ export function QueueManager() {
   } | null>(null);
   const [accountsTick, setAccountsTick] = useState(0);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { force?: boolean }) => {
     const offset = (page - 1) * pageSize;
 
     const applyCompletedStats = async (base: {
@@ -226,11 +228,14 @@ export function QueueManager() {
     };
 
     try {
-      const result = await api.jobsPage({
-        workspace,
-        limit: String(pageSize),
-        offset: String(offset),
-      });
+      const result = await api.jobsPage(
+        {
+          workspace,
+          limit: String(pageSize),
+          offset: String(offset),
+        },
+        { force: opts?.force },
+      );
       setJobs(result.items);
       setTotal(result.total);
       const stats = await applyCompletedStats(result.stats);
@@ -272,13 +277,14 @@ export function QueueManager() {
   }, [workspace, page, pageSize]);
 
   useEffect(() => {
+    if (!shellActive) return;
     void load();
     setSelectedIds(new Set());
     const id = setInterval(() => {
-      void load();
+      void load({ force: true });
     }, 5000);
     return () => clearInterval(id);
-  }, [load]);
+  }, [load, shellActive]);
 
   useEffect(() => {
     const jobId = searchParams.get('job');
@@ -702,7 +708,9 @@ export function QueueManager() {
                     ? () => handleAbortJob(job)
                     : pausable
                       ? () =>
-                          (job.status === 'paused' ? api.resumeJob(job.id) : api.pauseJob(job.id)).then(load)
+                          (job.status === 'paused' ? api.resumeJob(job.id) : api.pauseJob(job.id)).then(() =>
+                            load({ force: true }),
+                          )
                       : undefined
                 }
                 stopTitle={abortable ? 'LIVE 강제 중단·삭제' : undefined}

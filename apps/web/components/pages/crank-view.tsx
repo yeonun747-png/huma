@@ -27,6 +27,7 @@ import {
 } from '@/components/mockup/primitives';
 import { formatJobErrorLabel } from '@/lib/job-error-label';
 import { useRegisterPageAction } from '@/components/dashboard/page-action-context';
+import { useShellViewActive } from '@/components/dashboard/shell-view-active';
 
 type SchedulerStatus = {
   date_key: string;
@@ -124,6 +125,7 @@ const CRANK_FEED_PERIOD_EMPTY: Record<CrankFeedPeriod, string> = {
 };
 
 export function CrankView() {
+  const shellActive = useShellViewActive();
   const { workspace } = useWorkspace();
   const [tab, setTab] = useState<'feed' | 'ops'>('feed');
   const [serviceFilter, setServiceFilter] = useState<'all' | Workspace>('all');
@@ -249,31 +251,21 @@ export function CrankView() {
     void api.cafeTargets().then(setTargets).catch(() => setTargets([]));
     loadCrankAccounts();
     void loadScheduler();
-    void (async () => {
-      setSyncingProxy(true);
-      try {
-        await api.modems({ probe: true, slots: [6, 7], timeoutMs: 60_000 });
-      } catch {
-        /* probe 실패해도 스케줄러는 표시 */
-      } finally {
-        setSyncingProxy(false);
-      }
-      await loadScheduler({ background: true });
-    })();
     loadCrankFeed();
   }, [loadScheduler, loadCrankFeed, loadCrankAccounts]);
 
   useEffect(() => {
+    if (!shellActive) return;
     load();
     if (schedulerError) return;
     const id = setInterval(() => {
       void loadScheduler({ background: true });
     }, 60_000);
     return () => clearInterval(id);
-  }, [load, loadScheduler, schedulerError]);
+  }, [load, loadScheduler, schedulerError, shellActive]);
 
   useEffect(() => {
-    if (tab !== 'feed') return;
+    if (!shellActive || tab !== 'feed') return;
     const id = setInterval(() => loadCrankFeed(), 10_000);
     const onQueue = () => loadCrankFeed();
     window.addEventListener('huma:queue-updated', onQueue);
@@ -281,7 +273,7 @@ export function CrankView() {
       clearInterval(id);
       window.removeEventListener('huma:queue-updated', onQueue);
     };
-  }, [tab, loadCrankFeed]);
+  }, [tab, loadCrankFeed, shellActive]);
 
   useRegisterPageAction('startCrank', async () => {
     await api.createJob({
