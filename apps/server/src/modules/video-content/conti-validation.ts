@@ -1012,6 +1012,57 @@ export function enforcePunchlineShotMinDuration(conti: VideoConti, minSec = PUNC
   return rebuildShotsFromDurations(conti, durations, total);
 }
 
+/** 대사가 있는 샷 — 발화 시간 확보(무대사 샷에서 우선 차감) */
+export function enforceDialogueShotsMinDuration(conti: VideoConti): {
+  conti: VideoConti;
+  adjusted: boolean;
+} {
+  const shots = asContiShots(conti.shots);
+  if (!shots.length) return { conti, adjusted: false };
+
+  const durations = shots.map((s) => shotDurationSec(s));
+  const total = normalizeVideoDurationSec(conti.duration);
+  let adjusted = false;
+
+  for (let idx = 0; idx < shots.length; idx++) {
+    const dialogue = trimField(shots[idx]!.dialogue);
+    if (!dialogue) continue;
+
+    const requiredSec = minShotDurationForDialogue(dialogue, SHOT_MIN_DURATION_SEC);
+    if (durations[idx]! >= requiredSec) continue;
+
+    let need = requiredSec - durations[idx]!;
+    const donors = durations
+      .map((d, i) => ({
+        i,
+        d,
+        hasDialogue: Boolean(trimField(shots[i]!.dialogue)),
+      }))
+      .filter((x) => x.i !== idx)
+      .sort((a, b) => {
+        if (a.hasDialogue !== b.hasDialogue) return a.hasDialogue ? 1 : -1;
+        return b.d - a.d;
+      });
+
+    for (const donor of donors) {
+      if (need <= 0) break;
+      const donorDialogue = trimField(shots[donor.i]!.dialogue);
+      const floor = donorDialogue
+        ? minShotDurationForDialogue(donorDialogue, SHOT_MIN_DURATION_SEC)
+        : SHOT_MIN_DURATION_SEC;
+      const take = Math.min(need, Math.max(0, donor.d - floor));
+      if (take <= 0) continue;
+      durations[donor.i]! -= take;
+      durations[idx]! += take;
+      need -= take;
+      adjusted = true;
+    }
+  }
+
+  if (!adjusted) return { conti, adjusted: false };
+  return { conti: rebuildShotsFromDurations(conti, durations, total), adjusted: true };
+}
+
 /** endSec 합 = 정수 targetDuration — 펀치라인 보정·LLM 타임라인 후 호출 */
 export function finalizeContiTimeline(conti: VideoConti, targetDuration: number): VideoConti {
   if (!asContiShots(conti.shots).length) {

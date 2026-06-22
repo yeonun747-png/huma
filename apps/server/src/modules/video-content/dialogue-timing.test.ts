@@ -2,14 +2,16 @@ import { describe, expect, it } from 'vitest';
 import {
   countDialogueQuotedChars,
   dialogueCharsPerSec,
+  DIALOGUE_TRIM_CHARS_PER_SEC,
   enforceDialogueOnConti,
   findDialogueTooLongIssue,
   isDialogueTooLongForShot,
   maxDialogueCharsForDuration,
+  maxDialogueTrimCharsForDuration,
   minShotDurationForDialogue,
   trimDialogueToFitShot,
 } from './dialogue-timing.js';
-import { findRawShotQualityIssues } from './conti-validation.js';
+import { findRawShotQualityIssues, enforceDialogueShotsMinDuration } from './conti-validation.js';
 import type { VideoConti, VideoContiShot } from './types.js';
 
 describe('countDialogueQuotedChars', () => {
@@ -38,44 +40,102 @@ describe('isDialogueTooLongForShot', () => {
     dialogue,
   });
 
-  it('flags when chars per second exceeds 5', () => {
-    const dialogue = 'A: "' + '가'.repeat(16) + '"';
+  it('flags when chars per second exceeds 8', () => {
+    const dialogue = 'A: "' + '가'.repeat(21) + '"';
     expect(isDialogueTooLongForShot(shot(dialogue, 0, 2.5))).toBe(true);
-    expect(dialogueCharsPerSec(dialogue, 2.5)).toBeCloseTo(6.4, 1);
+    expect(dialogueCharsPerSec(dialogue, 2.5)).toBeCloseTo(8.4, 1);
   });
 
-  it('passes at exactly 5 chars per second boundary', () => {
-    const dialogue = 'A: "' + '가'.repeat(12) + '"';
+  it('passes at 8 chars per second boundary', () => {
+    const dialogue = 'A: "' + '가'.repeat(20) + '"';
     expect(isDialogueTooLongForShot(shot(dialogue, 0, 2.5))).toBe(false);
-    expect(maxDialogueCharsForDuration(2.5)).toBe(12);
+    expect(maxDialogueCharsForDuration(2.5)).toBe(20);
   });
 
-  it('passes when 13 chars would exceed 5 per sec on 2.5s shot', () => {
-    const dialogue = 'A: "' + '가'.repeat(13) + '"';
-    expect(isDialogueTooLongForShot(shot(dialogue, 0, 2.5))).toBe(true);
+  it('passes narrative setup on 1.5s shot', () => {
+    const dialogue = 'A: "새 상품들 창고에 넣어줘."';
+    expect(isDialogueTooLongForShot(shot(dialogue, 0, 1.5))).toBe(false);
   });
 });
 
 describe('minShotDurationForDialogue', () => {
   it('rounds up to 0.5s steps for long punchline', () => {
-    expect(minShotDurationForDialogue(`B: "${'가'.repeat(18)}"`, 2)).toBe(4);
+    expect(minShotDurationForDialogue(`B: "${'가'.repeat(18)}"`, 2)).toBe(2.5);
   });
 });
 
 describe('trimDialogueToFitShot', () => {
-  it('compresses multi-speaker punchline shot to duration budget', () => {
-    const long =
-      'A: "저기요, 그거 혹시… 저 보려던 건데요?" B: "연운에서 오늘 도움운 좋다고 했거든요. 이 책은 사도 괜찮아요." A: "저 사람… 나 대신 산 건가, 자기 산 건가."';
-    const trimmed = trimDialogueToFitShot(long, 7.5);
-    const max = maxDialogueCharsForDuration(7.5);
+  it('compresses severely overflowing dialogue', () => {
+    const long = `A: "${'가'.repeat(55)}"`;
+    const trimmed = trimDialogueToFitShot(long, 4);
+    const max = maxDialogueTrimCharsForDuration(4);
     expect(trimmed.length).toBeLessThan(long.length);
-    expect(trimmed).toContain('B:');
-    expect(trimmed.replace(/\s/g, '').length).toBeLessThanOrEqual(max * 3);
+    expect(countDialogueQuotedChars(trimmed)).toBeLessThanOrEqual(max);
+  });
+
+  it('prefers complete sentences over mid-word ellipsis', () => {
+    const text = '연운에서 오늘 도움운 좋다고 했거든요. 이 책은 사도 괜찮아요.';
+    const trimmed = trimDialogueToFitShot(`B: "${text}"`, 2, DIALOGUE_TRIM_CHARS_PER_SEC);
+    expect(trimmed).toContain('연운에서');
+    expect(trimmed).not.toMatch(/좋다고\s*…$/);
   });
 });
 
 describe('enforceDialogueOnConti', () => {
-  it('shortens overflowing shot dialogue for 12s video', () => {
+  it('leaves yeonun convenience-store setup dialogue intact', () => {
+    const conti: VideoConti = {
+      characters: [],
+      location: '편의점',
+      lighting: '형광등',
+      timeOfDay: '한낮',
+      cutType: 'multi_shot',
+      duration: 11,
+      scenarioSummary: '편의점 펀치',
+      fullText: '편의점',
+      shots: [
+        {
+          shotNumber: 1,
+          startSec: 0,
+          endSec: 1.5,
+          camera: '미디엄',
+          action: 'A가 손짓한다.',
+          dialogue: 'A: "새 상품들 창고에 넣어줘."',
+        },
+        {
+          shotNumber: 2,
+          startSec: 1.5,
+          endSec: 3,
+          camera: '클로즈업',
+          action: 'B가 폰을 본다.',
+          dialogue: 'B: "어… 사장님, 연운 관재궁 물품 손상 주의래요."',
+        },
+        {
+          shotNumber: 4,
+          startSec: 3,
+          endSec: 6,
+          camera: '클로즈업',
+          action: '진열대 선반이 무너진다.',
+          dialogue: '',
+        },
+        {
+          shotNumber: 5,
+          startSec: 6,
+          endSec: 11,
+          camera: '와이드',
+          action: 'A가 얼굴을 감싼다.',
+          dialogue: 'A: "아 진짜… 관재궁이 이거였구나. 다음엔 그냥 믿을게."',
+        },
+      ],
+    };
+    const { conti: fixed, adjusted } = enforceDialogueOnConti(
+      enforceDialogueShotsMinDuration(conti).conti,
+    );
+    expect(adjusted).toBe(false);
+    expect(fixed.shots[0]!.dialogue).toContain('창고');
+    expect(fixed.shots[1]!.dialogue).toContain('관재궁');
+  });
+
+  it('shortens only severely overflowing punchline shot', () => {
     const conti: VideoConti = {
       characters: [],
       location: '서점',
@@ -89,19 +149,17 @@ describe('enforceDialogueOnConti', () => {
         {
           shotNumber: 4,
           startSec: 4.5,
-          endSec: 12,
+          endSec: 8,
           camera: '미디엄',
           action: '계산대로 걸어간다.',
-          dialogue:
-            'A: "저기요, 그거 혹시… 저 보려던 건데요?" B: "연운에서 오늘 도움운 좋다고 했거든요. 이 책은 사도 괜찮아요." A: "저 사람… 나 대신 산 건가."',
+          dialogue: `A: "${'가'.repeat(50)}"`,
         },
       ],
     };
     const { conti: fixed, adjusted } = enforceDialogueOnConti(conti);
     expect(adjusted).toBe(true);
     const dialogue = fixed.shots[0]!.dialogue ?? '';
-    expect(isDialogueTooLongForShot(fixed.shots[0]!)).toBe(false);
-    expect(dialogue).toMatch(/괜찮|사도|연운/);
+    expect(countDialogueQuotedChars(dialogue)).toBeLessThanOrEqual(maxDialogueTrimCharsForDuration(3.5));
   });
 });
 
@@ -140,7 +198,7 @@ describe('findRawShotQualityIssues dialogue_too_long', () => {
         endSec: 12,
         camera: '투샷',
         action: 'B가 말한다.',
-        dialogue: `B: "이름은 '관운'이야. 잘 어울리지 않아?"`,
+        dialogue: `B: "이름은 '관운'이야. 잘 어울리지 않아? 진짜 말도 안 되게 딱 맞는데."`,
       },
       4,
     );

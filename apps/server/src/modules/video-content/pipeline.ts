@@ -55,6 +55,7 @@ import {
   VideoContentCancelledError,
 } from './conti-cancel.js';
 import { enforceDialogueOnConti } from './dialogue-timing.js';
+import { enforceDialogueShotsMinDuration } from './conti-validation.js';
 
 function contiGenerationSecSince(startedAtIso: string): number {
   const t = new Date(startedAtIso).getTime();
@@ -962,7 +963,8 @@ export async function runVideoProduction(historyId: string): Promise<string> {
     const parsedConti = parseContiFromJson(history.conti_json);
     const baseConditions = conditionsFromHistoryRow(history, history.character_used as string | null);
     const contiJson = history.conti_json as Record<string, unknown>;
-    const dialogueFix = enforceDialogueOnConti(parsedConti);
+    const durationAdjusted = enforceDialogueShotsMinDuration(parsedConti).conti;
+    const dialogueFix = enforceDialogueOnConti(durationAdjusted);
     const conti = dialogueFix.conti;
     if (dialogueFix.adjusted) {
       await logOperation({

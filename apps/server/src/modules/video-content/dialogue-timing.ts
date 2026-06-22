@@ -2,8 +2,11 @@ import type { VideoConti, VideoContiShot } from './types.js';
 import { asContiShots } from './types.js';
 import { parseDialogueSegments, type DialogueSegment } from './subtitle.js';
 
-/** 한국어 발화 — 글자 수 ÷ 샷 시간(초)이 이 값을 초과하면 대사 과다 */
-export const DIALOGUE_MAX_CHARS_PER_SEC = 5;
+/** 검증·프롬프트 — 권장 상한 (한국어 숏폼 발화) */
+export const DIALOGUE_MAX_CHARS_PER_SEC = 8;
+
+/** 렌더 직전 자동 축소 — 검증보다 여유 있게, 심각한 초과만 기계 축소 */
+export const DIALOGUE_TRIM_CHARS_PER_SEC = 10;
 
 function trimField(text: string | undefined | null): string {
   return (text ?? '').trim();
@@ -74,6 +77,11 @@ export function maxDialogueCharsForDuration(durationSec: number): number {
   return Math.floor(durationSec * DIALOGUE_MAX_CHARS_PER_SEC);
 }
 
+export function maxDialogueTrimCharsForDuration(durationSec: number): number {
+  if (durationSec <= 0) return 0;
+  return Math.floor(durationSec * DIALOGUE_TRIM_CHARS_PER_SEC);
+}
+
 export function totalDialogueBudgetForVideo(durationSec: number): number {
   return maxDialogueCharsForDuration(durationSec);
 }
@@ -86,7 +94,7 @@ export function isDialogueTooLongForShot(shot: VideoContiShot): boolean {
   return dialogueCharsPerSec(dialogue, duration) > DIALOGUE_MAX_CHARS_PER_SEC;
 }
 
-/** chars/duration ≤ 5 를 만족하는 최소 샷 길이(0.5초 단위 올림) */
+/** chars/duration ≤ DIALOGUE_MAX_CHARS_PER_SEC 를 만족하는 최소 샷 길이(0.5초 단위 올림) */
 export function minShotDurationForDialogue(dialogue: string, floorSec = 0): number {
   const chars = countDialogueSpokenChars(dialogue);
   if (chars === 0) return floorSec;
@@ -96,11 +104,39 @@ export function minShotDurationForDialogue(dialogue: string, floorSec = 0): numb
 
 function trimTextToCharCount(text: string, maxNoSpace: number): string {
   if (maxNoSpace <= 0) return '…';
+  if (countNoSpaceChars(text) <= maxNoSpace) return text;
+
+  const sentences = text.split(/(?<=[.?!…])\s*/u).filter((s) => s.trim());
+  if (sentences.length > 1) {
+    let kept = '';
+    for (const sent of sentences) {
+      const candidate = kept ? `${kept} ${sent}` : sent;
+      if (countNoSpaceChars(candidate) <= maxNoSpace) kept = candidate;
+      else break;
+    }
+    if (kept && countNoSpaceChars(kept) >= Math.min(8, Math.floor(maxNoSpace * 0.55))) return kept;
+  }
+
+  const clauses = text.split(/(?<=[,，])\s*/u).filter((s) => s.trim());
+  if (clauses.length > 1) {
+    let kept = '';
+    for (const clause of clauses) {
+      const candidate = kept ? `${kept} ${clause}` : clause;
+      if (countNoSpaceChars(candidate) <= maxNoSpace) kept = candidate;
+      else break;
+    }
+    if (kept && countNoSpaceChars(kept) >= Math.min(6, Math.floor(maxNoSpace * 0.5))) return kept;
+  }
+
   let count = 0;
   let out = '';
   for (const ch of text) {
     if (!/\s/u.test(ch)) {
-      if (count >= maxNoSpace) return `${out}…`;
+      if (count >= maxNoSpace) {
+        const trimmed = out.replace(/\s+$/u, '');
+        if (trimmed.length >= 4) return `${trimmed}…`;
+        return '…';
+      }
       count++;
     }
     out += ch;
@@ -130,9 +166,13 @@ function trimSegmentsToBudget(segments: DialogueSegment[], maxChars: number): Di
   const result = segments.map((seg) => ({ ...seg }));
   const punchIdx = punchlineSegmentIndex(result);
   const punchWant = countNoSpaceChars(result[punchIdx]!.text);
+  const minPerOther = Math.min(8, Math.max(5, Math.floor(maxChars * 0.12)));
   const punchAlloc = Math.min(
     punchWant,
-    Math.max(Math.ceil(maxChars * 0.5), Math.min(punchWant, maxChars - Math.max(0, result.length - 1) * 3)),
+    Math.max(
+      Math.ceil(maxChars * 0.45),
+      Math.min(punchWant, maxChars - Math.max(0, result.length - 1) * minPerOther),
+    ),
   );
   let frontBudget = maxChars - punchAlloc;
 
@@ -142,14 +182,14 @@ function trimSegmentsToBudget(segments: DialogueSegment[], maxChars: number): Di
     const othersLeft = result.length - 1 - i;
     const alloc =
       othersLeft > 0
-        ? Math.min(want, Math.max(2, Math.floor(frontBudget / othersLeft)))
+        ? Math.min(want, Math.max(minPerOther, Math.floor(frontBudget / othersLeft)))
         : Math.min(want, frontBudget);
     result[i]!.text = trimTextToCharCount(result[i]!.text, alloc);
     frontBudget -= countNoSpaceChars(result[i]!.text);
   }
 
   const punchBudget = Math.max(
-    4,
+    10,
     maxChars - result.reduce((s, seg, i) => (i === punchIdx ? s : s + countNoSpaceChars(seg.text)), 0),
   );
   result[punchIdx]!.text = trimTextToCharCount(result[punchIdx]!.text, punchBudget);
@@ -157,8 +197,12 @@ function trimSegmentsToBudget(segments: DialogueSegment[], maxChars: number): Di
 }
 
 /** 샷 시간에 맞게 대사 축소 — 마지막 A/B 구간(펀치) 우선 보존 */
-export function trimDialogueToFitShot(dialogue: string, durationSec: number): string {
-  let maxChars = maxDialogueCharsForDuration(durationSec);
+export function trimDialogueToFitShot(
+  dialogue: string,
+  durationSec: number,
+  charsPerSec = DIALOGUE_TRIM_CHARS_PER_SEC,
+): string {
+  let maxChars = Math.floor(durationSec * charsPerSec);
   const segments = parseDialogueSegments(dialogue);
   let result: string;
   if (!segments.length) {
@@ -186,13 +230,12 @@ export function trimDialogueToFitShot(dialogue: string, durationSec: number): st
 
 export function buildDialogueLengthRule(): string {
   return (
-    `각 샷 dialogue는 해당 샷 시간(초)에 맞게 글자 수를 제한한다. ` +
+    `각 샷 dialogue는 scenarioSummary 없이도 그 샷의 사건·정보가 전달되게 완결된 짧은 문장으로 쓴다. ` +
     `인용부호 안 본문 기준 글자 수÷샷 시간이 ${DIALOGUE_MAX_CHARS_PER_SEC}를 넘으면 안 된다 ` +
-    `(2.5초 샷 최대 ${maxDialogueCharsForDuration(2.5)}자, 3초 샷 최대 ${maxDialogueCharsForDuration(3)}자, 7.5초 샷 최대 ${maxDialogueCharsForDuration(7.5)}자). ` +
-    `영상 전체 대사 합도 duration×${DIALOGUE_MAX_CHARS_PER_SEC}자를 넘지 말 것(12초→${totalDialogueBudgetForVideo(12)}자). ` +
+    `(1.5초 샷 최대 ${maxDialogueCharsForDuration(1.5)}자, 3초 샷 최대 ${maxDialogueCharsForDuration(3)}자, 5초 샷 최대 ${maxDialogueCharsForDuration(5)}자). ` +
+    '단어만 남기거나 "…"로 끊긴 불완전 대사 금지. setup·연운 경고·반전은 대사에 핵심 정보를 넣는다. ' +
     '한 샷에 A·B 대사를 여러 줄 넣지 말고 샷을 나누거나 문장을 압축한다. ' +
-    '동작·표정 연기가 많은 샷은 더 짧게 쓴다. 긴 문장은 두 샷으로 나누거나 문장을 압축한다. ' +
-    '시간 안에 다 들어가지 않을 것 같으면 대사를 줄이는 것을 우선한다(행동 묘사는 유지).'
+    '동작·표정 연기가 많은 샷은 더 짧게 쓸 수 있으나, 말이 필요한 샷은 의미가 통하는 최소 길이를 유지한다.'
   );
 }
 
@@ -226,7 +269,7 @@ export function findDialogueTooLongIssue(
   };
 }
 
-/** 샷별·전체 러닝타임 대사량 강제 조정 */
+/** 렌더 직전 — 심각한 초과만 기계 축소 (콘티 검토 화면은 LLM 원문 유지) */
 export function enforceDialogueOnConti(conti: VideoConti): {
   conti: VideoConti;
   adjusted: boolean;
@@ -234,48 +277,20 @@ export function enforceDialogueOnConti(conti: VideoConti): {
 } {
   const warnings: string[] = [];
   let adjusted = false;
-  const totalBudget = totalDialogueBudgetForVideo(conti.duration);
 
-  let shots = asContiShots(conti.shots).map((shot) => {
+  const shots = asContiShots(conti.shots).map((shot) => {
     const dialogue = trimField(shot.dialogue);
     if (!dialogue) return shot;
     const duration = shotDurationSec(shot);
-    const max = maxDialogueCharsForDuration(duration);
+    const trimMax = maxDialogueTrimCharsForDuration(duration);
     const chars = countDialogueSpokenChars(dialogue);
-    if (chars <= max) return shot;
+    if (chars <= trimMax) return shot;
     adjusted = true;
-    warnings.push(`샷 ${shot.shotNumber}: 대사 ${chars}자→${max}자 이내로 자동 축소`);
+    warnings.push(
+      `샷 ${shot.shotNumber}: 대사 ${chars}자→${trimMax}자 이내로 렌더 전 축소 (${DIALOGUE_TRIM_CHARS_PER_SEC}자/초)`,
+    );
     return { ...shot, dialogue: trimDialogueToFitShot(dialogue, duration) };
   });
-
-  let totalChars = shots.reduce(
-    (sum, shot) => sum + (shot.dialogue ? countDialogueSpokenChars(shot.dialogue) : 0),
-    0,
-  );
-
-  if (totalChars > totalBudget && shots.length) {
-    const lastIdx = shots.length - 1;
-    for (let i = 0; i < shots.length && totalChars > totalBudget; i++) {
-      if (i === lastIdx) continue;
-      const shot = shots[i]!;
-      const dialogue = trimField(shot.dialogue);
-      if (!dialogue) continue;
-      const duration = shotDurationSec(shot);
-      const current = countDialogueSpokenChars(dialogue);
-      const over = totalChars - totalBudget;
-      const nextMax = Math.max(3, current - over);
-      const trimmed = trimDialogueToFitShot(dialogue, nextMax / DIALOGUE_MAX_CHARS_PER_SEC);
-      if (trimmed !== dialogue) {
-        shots[i] = { ...shot, dialogue: trimmed };
-        adjusted = true;
-        warnings.push(`샷 ${shot.shotNumber}: 영상 전체 대사 예산(${totalBudget}자) 초과 — 추가 축소`);
-        totalChars = shots.reduce(
-          (sum, s) => sum + (s.dialogue ? countDialogueSpokenChars(s.dialogue) : 0),
-          0,
-        );
-      }
-    }
-  }
 
   return { conti: { ...conti, shots }, adjusted, warnings };
 }

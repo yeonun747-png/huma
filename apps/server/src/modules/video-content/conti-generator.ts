@@ -4,6 +4,7 @@ import { callClaudeJsonWithRetry } from '../../lib/llm-json.js';
 import { getMainClaudeModel, getSubClaudeModel } from '../../lib/ai-engine.js';
 import {
   enforcePunchlineShotMinDuration,
+  enforceDialogueShotsMinDuration,
   finalizeContiTimeline,
   validateCutTypeMatchesRawShots,
   validatePunchlineShotMinDuration,
@@ -33,7 +34,6 @@ import {
   PUNCHLINE_MIN_DURATION_SEC,
   SHOT_CONTENT_MIN_CHARS,
 } from './conti-validation.js';
-import { enforceDialogueOnConti } from './dialogue-timing.js';
 import {
   applyGenericActionNarrativeFallback,
   findGenericActionShotNumbers,
@@ -599,12 +599,12 @@ async function finalizeContiFromParts(
     contentWarnings.push('샷 최소 길이 미달 — 타임라인 자동 재분배 (검토 권장)');
   }
   conti = finalizeContiTimeline(conti, params.conditions.duration);
-
-  const dialogueFix = enforceDialogueOnConti(conti);
-  conti = dialogueFix.conti;
-  if (dialogueFix.adjusted) {
-    contentWarnings.push(...dialogueFix.warnings);
+  const dialogueDurFix = enforceDialogueShotsMinDuration(conti);
+  conti = dialogueDurFix.conti;
+  if (dialogueDurFix.adjusted) {
+    contentWarnings.push('대사 길이에 맞게 샷 시간 자동 재배분');
   }
+  conti = finalizeContiTimeline(conti, params.conditions.duration);
 
   const punchCheck = validatePunchlineShotMinDuration(conti);
   if (!punchCheck.ok) {
