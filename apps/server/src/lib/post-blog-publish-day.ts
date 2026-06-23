@@ -32,13 +32,24 @@ export function isWorkerCompletionStamp(
   return isUntrustedPublishTimestamp(candidate, completedAt);
 }
 
-export function resolveStoredPublishScheduledAt(platformSchedule: unknown): string | null {
+export function resolveStoredPublishScheduledAt(
+  platformSchedule: unknown,
+  completedAt?: string | null,
+): string | null {
   const ps = (platformSchedule as Record<string, unknown> | null) ?? {};
-  for (const key of [RECONCILE_PUBLISH_AT_KEY, PUBLISH_SCHEDULED_AT_KEY] as const) {
-    const v = ps[key];
-    if (typeof v === 'string' && v.trim()) return v;
-  }
-  return null;
+  const reconcile =
+    typeof ps[RECONCILE_PUBLISH_AT_KEY] === 'string' ? (ps[RECONCILE_PUBLISH_AT_KEY] as string) : null;
+  const reserved =
+    typeof ps[PUBLISH_SCHEDULED_AT_KEY] === 'string' ? (ps[PUBLISH_SCHEDULED_AT_KEY] as string) : null;
+
+  const pickReconcile = (iso: string | null | undefined) => {
+    if (!iso?.trim()) return null;
+    if (isUntrustedPublishTimestamp(iso, completedAt ?? null)) return null;
+    return iso;
+  };
+  const pickReserved = (iso: string | null | undefined) => (iso?.trim() ? iso : null);
+
+  return pickReserved(reserved) ?? pickReconcile(reconcile);
 }
 
 /** KST 기준 해당 시각이 오늘 발행인지 */
@@ -70,7 +81,7 @@ export function resolveFinalizePublishAtIso(job: {
   completed_at?: string | null;
   platform_schedule?: unknown;
 }): string {
-  const stored = resolveStoredPublishScheduledAt(job.platform_schedule);
+  const stored = resolveStoredPublishScheduledAt(job.platform_schedule, job.completed_at ?? null);
   if (stored) return stored;
   const scheduled = resolveWorkerPublishAtIso(job);
   if (scheduled && !isUntrustedPublishTimestamp(scheduled, job.completed_at ?? null)) return scheduled;
@@ -83,7 +94,7 @@ export function resolveJobPublishedAtIso(
   postPublishedByUrl?: Map<string, string | null>,
 ): string | null {
   const ps = (job.platform_schedule as Record<string, unknown> | null) ?? {};
-  const stored = resolveStoredPublishScheduledAt(ps);
+  const stored = resolveStoredPublishScheduledAt(ps, job.completed_at);
   if (stored) return stored;
 
   const urlKey = job.result_url?.trim() ? normalizePostUrlKey(job.result_url) : '';
@@ -147,4 +158,85 @@ export async function countTodayPostBlogPublished(accountId: string): Promise<nu
     if (isPublishedTodayKst(publishedAt)) count += 1;
   }
   return count;
+}
+
+export type PublishDayExplainRow = {
+  job_id: string;
+  title: string | null;
+  result_url: string | null;
+  completed_at: string | null;
+  scheduled_at: string | null;
+  reconcile_publish_at: string | null;
+  publish_scheduled_at: string | null;
+  posts_published_at: string | null;
+  resolved_publish_at: string | null;
+  resolved_publish_kst: string | null;
+  counts_today: boolean;
+};
+
+/** 집계 디버그 — 서버가 실제로 쓰는 resolveJobPublishedAtIso 그대로 */
+export async function explainPostBlogPublishDay(
+  accountId: string,
+  now = new Date(),
+): Promise<{ kst_today: string; today_count: number; jobs: PublishDayExplainRow[] }> {
+  const key = accountId.trim();
+  const kstToday = formatKstDateKey(now);
+
+  const { data: jobs, error } = await supabase
+    .from('huma_jobs')
+    .select('id, title, result_url, completed_at, scheduled_at, platform_schedule')
+    .eq('account_id', key)
+    .eq('job_type', 'post_blog')
+    .eq('status', 'completed')
+    .not('result_url', 'is', null);
+
+  if (error) throw new Error(`집계 디버그 실패: ${error.message}`);
+  if (!jobs?.length) {
+    return { kst_today: kstToday, today_count: 0, jobs: [] };
+  }
+
+  const urlKeys = [
+    ...new Set(jobs.map((j) => j.result_url).filter((u): u is string => Boolean(u?.trim())).map(normalizePostUrlKey)),
+  ];
+  const postPublishedByUrl = new Map<string, string | null>();
+  if (urlKeys.length) {
+    const { data: postRows } = await supabase
+      .from('posts')
+      .select('post_url, published_at')
+      .eq('account_id', key);
+    for (const row of postRows ?? []) {
+      const k = normalizePostUrlKey(String(row.post_url ?? ''));
+      if (k && urlKeys.includes(k) && row.published_at) {
+        postPublishedByUrl.set(k, row.published_at as string);
+      }
+    }
+  }
+
+  const rows: PublishDayExplainRow[] = [];
+  let todayCount = 0;
+  for (const job of jobs) {
+    const ps = (job.platform_schedule as Record<string, unknown> | null) ?? {};
+    const urlKey = job.result_url?.trim() ? normalizePostUrlKey(job.result_url) : '';
+    const postsAt = urlKey && postPublishedByUrl.has(urlKey) ? postPublishedByUrl.get(urlKey) : null;
+    const resolved = resolveJobPublishedAtIso(job, postPublishedByUrl);
+    const countsToday = isPublishedTodayKst(resolved, now);
+    if (countsToday) todayCount += 1;
+    rows.push({
+      job_id: job.id as string,
+      title: (job.title as string | null) ?? null,
+      result_url: job.result_url as string,
+      completed_at: (job.completed_at as string | null) ?? null,
+      scheduled_at: (job.scheduled_at as string | null) ?? null,
+      reconcile_publish_at:
+        typeof ps[RECONCILE_PUBLISH_AT_KEY] === 'string' ? (ps[RECONCILE_PUBLISH_AT_KEY] as string) : null,
+      publish_scheduled_at:
+        typeof ps[PUBLISH_SCHEDULED_AT_KEY] === 'string' ? (ps[PUBLISH_SCHEDULED_AT_KEY] as string) : null,
+      posts_published_at: postsAt ?? null,
+      resolved_publish_at: resolved,
+      resolved_publish_kst: resolved ? formatKstDateKey(new Date(resolved)) : null,
+      counts_today: countsToday,
+    });
+  }
+
+  return { kst_today: kstToday, today_count: todayCount, jobs: rows };
 }

@@ -35,6 +35,7 @@ import { readCaptchaHoldScreenshot } from '../lib/captcha-hold-screenshot.js';
 import { submitCaptchaAnswerForJob } from '../lib/captcha-answer-submit.js';
 import { tryReconcilePostBlogJobCompletion } from '../lib/post-blog-reconcile.js';
 import { revertPostBlogCompletion } from '../lib/revert-post-blog-completion.js';
+import { explainPostBlogPublishDay } from '../lib/post-blog-publish-day.js';
 import {
   completeCaptchaHold,
   getCaptchaHold,
@@ -833,6 +834,48 @@ export async function registerJobRoutes(app: FastifyInstance) {
 
     const { data: updated } = await supabase.from('huma_jobs').select('*').eq('id', id).single();
     return updated;
+  });
+
+  /** post_blog 일일 집계 디버그 — 서버가 쓰는 resolve 로직 그대로 노출 */
+  app.get('/api/jobs/debug/publish-day', { preHandler: authMiddleware }, async (request, reply) => {
+    const { workspace, account_id, slot_label } = request.query as {
+      workspace?: string;
+      account_id?: string;
+      slot_label?: string;
+    };
+    const allowedWorkspaces = getWorkspaceFilter(request);
+    if (!workspace || !allowedWorkspaces.includes(workspace)) {
+      return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
+    }
+
+    let accountId = account_id?.trim();
+    if (!accountId && slot_label?.trim()) {
+      const { data: acc } = await supabase
+        .from('huma_accounts')
+        .select('id')
+        .eq('workspace', workspace)
+        .eq('slot_label', slot_label.trim())
+        .maybeSingle();
+      accountId = acc?.id as string | undefined;
+    }
+    if (!accountId) {
+      const picked = await pickPostingAccount(workspace, { advance: false });
+      accountId = picked?.id;
+    }
+    if (!accountId) return reply.code(404).send({ error: '포스팅 계정 없음' });
+
+    const [explain, queueStats] = await Promise.all([
+      explainPostBlogPublishDay(accountId),
+      computeVisibleQueueStats(workspace, kstTodayStartIso()),
+    ]);
+
+    return {
+      account_id: accountId,
+      kst_today: explain.kst_today,
+      today_completed_post_blog: explain.today_count,
+      queue_done_today: queueStats.doneToday,
+      jobs: explain.jobs,
+    };
   });
 
   /** post_blog — 네이버에 이미 발행됐으나 failed 로 남은 job 상태 정정 */
