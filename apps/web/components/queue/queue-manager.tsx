@@ -657,6 +657,8 @@ export function QueueManager() {
             const deletable = isDeletableQueueJob(job);
             const pausable = isPausableQueueJob(job);
             const canReconcilePublish = job.job_type === 'post_blog' && job.status === 'failed';
+            const canRevertPublish =
+              job.job_type === 'post_blog' && job.status === 'completed' && Boolean(job.result_url);
             return (
               <MQueueItem
                 key={job.id}
@@ -706,14 +708,40 @@ export function QueueManager() {
                 }
                 onReconcilePublish={
                   canReconcilePublish
-                    ? () =>
-                        api
-                          .reconcilePublishJob(job.id)
-                          .then((res) => {
+                    ? () => {
+                        void (async () => {
+                          const ok = await appConfirm(
+                            '네이버 블로그에서 동일 제목 글을 찾으면 completed 처리합니다. 실제 오늘 발행이 맞는지 확인했나요?',
+                          );
+                          if (!ok) return;
+                          try {
+                            const res = await api.reconcilePublishJob(job.id);
                             void load({ force: true });
-                            void appAlert(`발행 확인 완료\n${res.result_url}`);
-                          })
-                          .catch((e) => void appAlert((e as Error).message))
+                            await appAlert(`발행 확인 완료\n${res.result_url}`);
+                          } catch (e) {
+                            await appAlert((e as Error).message);
+                          }
+                        })();
+                      }
+                    : undefined
+                }
+                onRevertPublish={
+                  canRevertPublish
+                    ? () => {
+                        void (async () => {
+                          const ok = await appConfirm(
+                            '발행 확인을 취소하고 실패 상태로 되돌립니다. 자동발행 0/1 집계도 복구됩니다.',
+                          );
+                          if (!ok) return;
+                          try {
+                            await api.revertPublishJob(job.id);
+                            void load({ force: true });
+                            await appAlert('발행 확인을 취소했습니다.');
+                          } catch (e) {
+                            await appAlert((e as Error).message);
+                          }
+                        })();
+                      }
                     : undefined
                 }
                 onStop={

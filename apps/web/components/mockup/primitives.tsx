@@ -150,6 +150,7 @@ export function MQueueItem({
   onClick,
   onAdvance,
   onReconcilePublish,
+  onRevertPublish,
   onStop,
   onDelete,
   stopTitle,
@@ -167,6 +168,7 @@ export function MQueueItem({
   onClick?: () => void;
   onAdvance?: () => void;
   onReconcilePublish?: () => void;
+  onRevertPublish?: () => void;
   onStop?: () => void;
   onDelete?: () => void;
   stopTitle?: string;
@@ -215,6 +217,19 @@ export function MQueueItem({
       </div>
       <div className="m-qi-r">
         {tagSlot ?? <MTag tone={tagTone}>{tag}</MTag>}
+        {onRevertPublish ? (
+          <button
+            type="button"
+            className="m-q-btn stop"
+            title="발행 확인 취소 (완료 → 실패)"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRevertPublish();
+            }}
+          >
+            ↩
+          </button>
+        ) : null}
         {onReconcilePublish ? (
           <button
             type="button"

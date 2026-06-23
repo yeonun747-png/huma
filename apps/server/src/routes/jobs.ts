@@ -34,6 +34,7 @@ import { normalizeUploadedImagesInput, persistSingleJobImageDataUrl } from '../l
 import { readCaptchaHoldScreenshot } from '../lib/captcha-hold-screenshot.js';
 import { submitCaptchaAnswerForJob } from '../lib/captcha-answer-submit.js';
 import { tryReconcilePostBlogJobCompletion } from '../lib/post-blog-reconcile.js';
+import { revertPostBlogCompletion } from '../lib/revert-post-blog-completion.js';
 import {
   completeCaptchaHold,
   getCaptchaHold,
@@ -850,6 +851,9 @@ export async function registerJobRoutes(app: FastifyInstance) {
     if (job.job_type !== 'post_blog') {
       return reply.code(400).send({ error: 'post_blog 작업만 지원합니다' });
     }
+    if (job.status !== 'failed') {
+      return reply.code(400).send({ error: 'failed 상태 job만 발행 확인할 수 있습니다' });
+    }
 
     const resultUrl = await tryReconcilePostBlogJobCompletion(id);
     if (!resultUrl) {
@@ -858,6 +862,33 @@ export async function registerJobRoutes(app: FastifyInstance) {
 
     const { data: updated } = await supabase.from('huma_jobs').select('*').eq('id', id).single();
     return { ok: true, result_url: resultUrl, job: updated };
+  });
+
+  /** post_blog — ✓ 발행 확인을 잘못 눌렀을 때 completed 되돌리기 */
+  app.post('/api/jobs/:id/revert-publish', { preHandler: authMiddleware }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const allowedWorkspaces = getWorkspaceFilter(request);
+    const access = await assertJobWorkspaceAccess(id, allowedWorkspaces);
+    if (!access.ok) return reply.code(access.status).send({ error: access.error });
+
+    const { data: job } = await supabase
+      .from('huma_jobs')
+      .select('job_type, status')
+      .eq('id', id)
+      .maybeSingle();
+    if (!job) return reply.code(404).send({ error: '작업 없음' });
+    if (job.job_type !== 'post_blog') {
+      return reply.code(400).send({ error: 'post_blog 작업만 지원합니다' });
+    }
+    if (job.status !== 'completed') {
+      return reply.code(400).send({ error: 'completed 상태 job만 취소할 수 있습니다' });
+    }
+
+    const ok = await revertPostBlogCompletion(id);
+    if (!ok) return reply.code(409).send({ error: '발행 완료 취소 실패' });
+
+    const { data: updated } = await supabase.from('huma_jobs').select('*').eq('id', id).single();
+    return { ok: true, job: updated };
   });
 
   /** 캡차 정답 원격 입력 — VNC 한글 IME 불필요 (웹에서 입력 → Playwright insertText 주입) */

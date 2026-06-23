@@ -973,6 +973,10 @@ export const api = {
     request<{ ok: boolean; result_url: string; job: HumaJob }>(`/api/jobs/${id}/reconcile-publish`, {
       method: 'POST',
     }),
+  revertPublishJob: (id: string) =>
+    request<{ ok: boolean; job: HumaJob }>(`/api/jobs/${id}/revert-publish`, {
+      method: 'POST',
+    }),
   resumeAll: () => request('/api/resume-all', { method: 'POST' }),
   getCaptchaDrillStatus: () =>
     request<{ enabled: boolean; activeJobId: string | null }>('/api/system/captcha-drill', {
