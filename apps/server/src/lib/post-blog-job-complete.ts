@@ -4,9 +4,10 @@ import { scheduleRepeatIfNeeded } from './repeat-scheduler.js';
 import { purgePostBlogStorageMedia } from './cleanup-post-blog-storage.js';
 import { recordPublishedPost } from '../modules/blog-check/post-record.js';
 import {
+  PUBLISH_SCHEDULED_AT_KEY,
   RECONCILE_PUBLISH_AT_KEY,
   RECONCILED_FROM_FAILED_KEY,
-  resolveWorkerPublishAtIso,
+  resolveFinalizePublishAtIso,
 } from './post-blog-publish-day.js';
 
 export type FinalizePostBlogOpts = {
@@ -31,7 +32,7 @@ export async function finalizePostBlogJob(
 
   const publishedAt =
     opts?.publishedAt?.trim() ||
-    (opts?.reconciledFromFailed ? null : resolveWorkerPublishAtIso(job) || new Date().toISOString());
+    (opts?.reconciledFromFailed ? null : resolveFinalizePublishAtIso(job));
   if (opts?.reconciledFromFailed && !publishedAt) {
     throw new Error('발행 시각을 확인할 수 없어 완료 처리할 수 없습니다');
   }
@@ -46,7 +47,10 @@ export async function finalizePostBlogJob(
           [RECONCILED_FROM_FAILED_KEY]: true,
           [RECONCILE_PUBLISH_AT_KEY]: publishedAt,
         }
-      : job.platform_schedule;
+      : {
+          ...prevPs,
+          [PUBLISH_SCHEDULED_AT_KEY]: publishedAt,
+        };
 
   await purgePostBlogStorageMedia(job.image_urls as string[] | null, {
     jobId,
@@ -62,7 +66,7 @@ export async function finalizePostBlogJob(
       error_message: null,
       started_at: job.started_at ?? completedAt,
       image_urls: null,
-      ...(opts?.reconciledFromFailed ? { platform_schedule } : {}),
+      platform_schedule,
     })
     .eq('id', jobId);
 

@@ -22,6 +22,7 @@ import {
 import { isNaverBlogOnlyMode } from '../../../lib/activity-control.js';
 import { resolveFeaturedBlogImageUrl } from '../../../lib/blog-image-placement.js';
 import { planNextPostBlogScheduledAt } from '../../../lib/posting-slot-planner.js';
+import { PUBLISH_SCHEDULED_AT_KEY } from '../../../lib/post-blog-publish-day.js';
 import { assertAccountPostingQuota, assertAccountPostingQuotaBeforeGeneration } from '../../../lib/posting-daily-status.js';
 import {
   assertPostingSimilarityPasses,
@@ -123,6 +124,14 @@ async function insertJob(row: Record<string, unknown>): Promise<JobRecord> {
   const { data, error } = await supabase.from('huma_jobs').insert(row).select().single();
   if (error || !data) throw new Error(error?.message ?? '작업 등록 실패');
   return data as JobRecord;
+}
+
+function mergeBlogPlatformSchedule(
+  schedule: PlatformSchedule | undefined,
+  blogAt: string,
+): Record<string, unknown> {
+  const prev = (schedule as Record<string, unknown> | undefined) ?? {};
+  return { ...prev, [PUBLISH_SCHEDULED_AT_KEY]: blogAt };
 }
 
 function resolveStatus(scheduledAt: string) {
@@ -263,6 +272,7 @@ async function runTypeA(
     platform: 'naver',
     content_type: 'A',
     scheduled_at: blogAt,
+    platform_schedule: mergeBlogPlatformSchedule(schedule, blogAt),
     repeat_rule: repeat_rule ?? null,
     status: resolveStatus(blogAt),
     retry_count: 0,
@@ -339,6 +349,7 @@ async function runTypeB(
     content_type: 'B',
     video_model: videoModel,
     scheduled_at: blogAt,
+    platform_schedule: mergeBlogPlatformSchedule(schedule, blogAt),
     repeat_rule: repeat_rule ?? null,
     status: isNaverBlogOnlyMode() ? resolveStatus(blogAt) : 'paused',
     retry_count: 0,

@@ -1,6 +1,7 @@
 import { supabase } from '../middleware/auth.js';
 import { logOperation } from './log-emitter.js';
 import { enqueueHumaJob, type JobRecord } from './job-scheduler.js';
+import { PUBLISH_SCHEDULED_AT_KEY } from './post-blog-publish-day.js';
 
 /** VNC CAPTCHA 해결 후 post_blog·cafe 발행 자동화 재개 */
 export async function resumePostingAfterCaptcha(jobId: string, accountId: string): Promise<void> {
@@ -14,9 +15,13 @@ export async function resumePostingAfterCaptcha(jobId: string, accountId: string
     .eq('id', accountId);
 
   const prevPs = (job.platform_schedule as Record<string, unknown> | null) ?? {};
+  const publishScheduledAt =
+    (typeof prevPs[PUBLISH_SCHEDULED_AT_KEY] === 'string' ? prevPs[PUBLISH_SCHEDULED_AT_KEY] : null) ??
+    (job.scheduled_at as string | null);
   const platform_schedule = {
     ...prevPs,
     _resumeAfterCaptcha: true,
+    ...(publishScheduledAt ? { [PUBLISH_SCHEDULED_AT_KEY]: publishScheduledAt } : {}),
   };
 
   const now = new Date().toISOString();

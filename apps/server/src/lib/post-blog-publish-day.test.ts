@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   isPublishedTodayKst,
+  isWorkerCompletionStamp,
   resolveJobPublishedAtIso,
 } from './post-blog-publish-day.js';
 import { formatKstDateKey } from './posting-daily-target.js';
@@ -13,6 +14,14 @@ describe('isPublishedTodayKst', () => {
     expect(isPublishedTodayKst(todayPublish, now)).toBe(true);
     expect(isPublishedTodayKst(yesterday, now)).toBe(false);
     expect(formatKstDateKey(new Date(todayPublish))).toBe('2026-06-23');
+  });
+});
+
+describe('isWorkerCompletionStamp', () => {
+  it('detects scheduled_at overwritten to worker finish time', () => {
+    const finish = '2026-06-23T21:42:25.000Z';
+    expect(isWorkerCompletionStamp(finish, finish)).toBe(true);
+    expect(isWorkerCompletionStamp('2026-06-23T11:34:23.000Z', finish)).toBe(false);
   });
 });
 
@@ -38,19 +47,33 @@ describe('resolveJobPublishedAtIso', () => {
     expect(iso).toBeNull();
   });
 
-  it('prefers scheduled_at over posts/completed_at stamped at worker finish', () => {
+  it('uses _publish_scheduled_at over worker-stamped scheduled/posts', () => {
     const scheduled = '2026-06-23T11:34:23.000Z';
     const workerFinish = '2026-06-23T21:42:25.000Z';
     const iso = resolveJobPublishedAtIso(
       {
         result_url: 'https://blog.naver.com/roast8431/224324945642',
-        scheduled_at: scheduled,
+        scheduled_at: workerFinish,
         completed_at: workerFinish,
-        platform_schedule: null,
+        platform_schedule: { _publish_scheduled_at: scheduled },
       },
       new Map([['https://blog.naver.com/roast8431/224324945642', workerFinish]]),
     );
     expect(iso).toBe(scheduled);
     expect(isPublishedTodayKst(iso, new Date('2026-06-24T10:00:00+09:00'))).toBe(false);
+  });
+
+  it('ignores worker completion stamps when no stored publish time', () => {
+    const workerFinish = '2026-06-23T21:42:25.000Z';
+    const iso = resolveJobPublishedAtIso(
+      {
+        result_url: 'https://blog.naver.com/roast8431/224324945642',
+        scheduled_at: workerFinish,
+        completed_at: workerFinish,
+        platform_schedule: null,
+      },
+      new Map([['https://blog.naver.com/roast8431/224324945642', workerFinish]]),
+    );
+    expect(iso).toBeNull();
   });
 });

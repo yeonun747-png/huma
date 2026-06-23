@@ -4,6 +4,31 @@ import { formatKstDateKey } from './posting-daily-target.js';
 
 export const RECONCILE_PUBLISH_AT_KEY = '_reconcile_publish_at';
 export const RECONCILED_FROM_FAILED_KEY = '_reconciled_from_failed';
+/** post_blog 등록 시 네이버 예약 발행 시각 — CAPTCHA/앞당기기로 scheduled_at이 바뀌어도 유지 */
+export const PUBLISH_SCHEDULED_AT_KEY = '_publish_scheduled_at';
+
+const COMPLETION_STAMP_MS = 15 * 60_000;
+
+/** completed_at과 같은 워커 처리 시각인지 (예약 발행일로 쓰면 안 됨) */
+export function isWorkerCompletionStamp(
+  candidate: string,
+  completedAt: string | null | undefined,
+): boolean {
+  if (!completedAt?.trim()) return false;
+  const a = new Date(candidate).getTime();
+  const b = new Date(completedAt).getTime();
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+  return Math.abs(a - b) < COMPLETION_STAMP_MS;
+}
+
+export function resolveStoredPublishScheduledAt(platformSchedule: unknown): string | null {
+  const ps = (platformSchedule as Record<string, unknown> | null) ?? {};
+  for (const key of [RECONCILE_PUBLISH_AT_KEY, PUBLISH_SCHEDULED_AT_KEY] as const) {
+    const v = ps[key];
+    if (typeof v === 'string' && v.trim()) return v;
+  }
+  return null;
+}
 
 /** KST 기준 해당 시각이 오늘 발행인지 */
 export function isPublishedTodayKst(iso: string | null | undefined, now = new Date()): boolean {
@@ -20,7 +45,7 @@ type JobPublishRow = {
   platform_schedule: unknown;
 };
 
-/** 워커 완료 시 — post_blog 예약 발행 시각(scheduled_at) */
+/** post_blog scheduled_at 컬럼 */
 export function resolveWorkerPublishAtIso(job: { scheduled_at?: string | null }): string | null {
   const scheduled = job.scheduled_at?.trim();
   if (!scheduled) return null;
@@ -29,28 +54,41 @@ export function resolveWorkerPublishAtIso(job: { scheduled_at?: string | null })
   return scheduled;
 }
 
+export function resolveFinalizePublishAtIso(job: {
+  scheduled_at?: string | null;
+  completed_at?: string | null;
+  platform_schedule?: unknown;
+}): string {
+  const stored = resolveStoredPublishScheduledAt(job.platform_schedule);
+  if (stored) return stored;
+  const scheduled = resolveWorkerPublishAtIso(job);
+  if (scheduled && !isWorkerCompletionStamp(scheduled, job.completed_at ?? null)) return scheduled;
+  return new Date().toISOString();
+}
+
 /** 일일 집계·revert 판단용 — 네이버 실제 발행 시각 우선 */
 export function resolveJobPublishedAtIso(
   job: JobPublishRow,
   postPublishedByUrl?: Map<string, string | null>,
 ): string | null {
   const ps = (job.platform_schedule as Record<string, unknown> | null) ?? {};
-  const reconcileAt =
-    typeof ps[RECONCILE_PUBLISH_AT_KEY] === 'string' ? (ps[RECONCILE_PUBLISH_AT_KEY] as string) : null;
-  if (reconcileAt?.trim()) return reconcileAt;
-
-  const scheduledAt = resolveWorkerPublishAtIso(job);
-  if (scheduledAt) return scheduledAt;
+  const stored = resolveStoredPublishScheduledAt(ps);
+  if (stored) return stored;
 
   const urlKey = job.result_url?.trim() ? normalizePostUrlKey(job.result_url) : '';
   if (urlKey && postPublishedByUrl?.has(urlKey)) {
     const fromPost = postPublishedByUrl.get(urlKey);
-    if (fromPost) return fromPost;
+    if (fromPost && !isWorkerCompletionStamp(fromPost, job.completed_at)) return fromPost;
   }
+
+  const scheduledAt = resolveWorkerPublishAtIso(job);
+  if (scheduledAt && !isWorkerCompletionStamp(scheduledAt, job.completed_at)) return scheduledAt;
 
   if (ps[RECONCILED_FROM_FAILED_KEY] === true) return null;
 
-  return job.completed_at?.trim() || null;
+  const completed = job.completed_at?.trim();
+  if (completed && !isWorkerCompletionStamp(completed, completed)) return completed;
+  return null;
 }
 
 export function isReconciledFromFailed(platformSchedule: unknown): boolean {
