@@ -1,5 +1,6 @@
 import { supabase } from '../middleware/auth.js';
-import { scheduleRepeatIfNeeded, type JobRecord } from './job-scheduler.js';
+import type { JobRecord } from './job-scheduler.js';
+import { scheduleRepeatIfNeeded } from './repeat-scheduler.js';
 import { purgePostBlogStorageMedia } from './cleanup-post-blog-storage.js';
 import { recordPublishedPost } from '../modules/blog-check/post-record.js';
 
