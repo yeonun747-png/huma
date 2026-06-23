@@ -3,7 +3,11 @@ import type { JobRecord } from './job-scheduler.js';
 import { scheduleRepeatIfNeeded } from './repeat-scheduler.js';
 import { purgePostBlogStorageMedia } from './cleanup-post-blog-storage.js';
 import { recordPublishedPost } from '../modules/blog-check/post-record.js';
-import { RECONCILE_PUBLISH_AT_KEY, RECONCILED_FROM_FAILED_KEY } from './post-blog-publish-day.js';
+import {
+  RECONCILE_PUBLISH_AT_KEY,
+  RECONCILED_FROM_FAILED_KEY,
+  resolveWorkerPublishAtIso,
+} from './post-blog-publish-day.js';
 
 export type FinalizePostBlogOpts = {
   /** 네이버 실제 발행 시각 — reconcile 시 필수 */
@@ -27,7 +31,7 @@ export async function finalizePostBlogJob(
 
   const publishedAt =
     opts?.publishedAt?.trim() ||
-    (opts?.reconciledFromFailed ? null : new Date().toISOString());
+    (opts?.reconciledFromFailed ? null : resolveWorkerPublishAtIso(job) || new Date().toISOString());
   if (opts?.reconciledFromFailed && !publishedAt) {
     throw new Error('발행 시각을 확인할 수 없어 완료 처리할 수 없습니다');
   }

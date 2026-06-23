@@ -37,4 +37,20 @@ describe('resolveJobPublishedAtIso', () => {
     });
     expect(iso).toBeNull();
   });
+
+  it('prefers scheduled_at over posts/completed_at stamped at worker finish', () => {
+    const scheduled = '2026-06-23T11:34:23.000Z';
+    const workerFinish = '2026-06-23T21:42:25.000Z';
+    const iso = resolveJobPublishedAtIso(
+      {
+        result_url: 'https://blog.naver.com/roast8431/224324945642',
+        scheduled_at: scheduled,
+        completed_at: workerFinish,
+        platform_schedule: null,
+      },
+      new Map([['https://blog.naver.com/roast8431/224324945642', workerFinish]]),
+    );
+    expect(iso).toBe(scheduled);
+    expect(isPublishedTodayKst(iso, new Date('2026-06-24T10:00:00+09:00'))).toBe(false);
+  });
 });

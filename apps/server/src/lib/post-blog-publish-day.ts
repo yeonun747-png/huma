@@ -16,8 +16,18 @@ export function isPublishedTodayKst(iso: string | null | undefined, now = new Da
 type JobPublishRow = {
   result_url: string | null;
   completed_at: string | null;
+  scheduled_at?: string | null;
   platform_schedule: unknown;
 };
+
+/** 워커 완료 시 — post_blog 예약 발행 시각(scheduled_at) */
+export function resolveWorkerPublishAtIso(job: { scheduled_at?: string | null }): string | null {
+  const scheduled = job.scheduled_at?.trim();
+  if (!scheduled) return null;
+  const t = new Date(scheduled).getTime();
+  if (!Number.isFinite(t)) return null;
+  return scheduled;
+}
 
 /** 일일 집계·revert 판단용 — 네이버 실제 발행 시각 우선 */
 export function resolveJobPublishedAtIso(
@@ -28,6 +38,9 @@ export function resolveJobPublishedAtIso(
   const reconcileAt =
     typeof ps[RECONCILE_PUBLISH_AT_KEY] === 'string' ? (ps[RECONCILE_PUBLISH_AT_KEY] as string) : null;
   if (reconcileAt?.trim()) return reconcileAt;
+
+  const scheduledAt = resolveWorkerPublishAtIso(job);
+  if (scheduledAt) return scheduledAt;
 
   const urlKey = job.result_url?.trim() ? normalizePostUrlKey(job.result_url) : '';
   if (urlKey && postPublishedByUrl?.has(urlKey)) {
@@ -52,7 +65,7 @@ export async function countTodayPostBlogPublished(accountId: string): Promise<nu
 
   const { data: jobs, error } = await supabase
     .from('huma_jobs')
-    .select('id, result_url, completed_at, platform_schedule')
+    .select('id, result_url, completed_at, scheduled_at, platform_schedule')
     .eq('account_id', key)
     .eq('job_type', 'post_blog')
     .eq('status', 'completed')
