@@ -31,11 +31,12 @@ export type AutoPublishStatus = {
 export const AUTO_PUBLISH_BTN_CLASS =
   'btn-primary btn-sm shrink-0 whitespace-nowrap px-2.5 py-1 disabled:cursor-not-allowed disabled:opacity-40';
 
-/** OFF — 퀴즈·파나나·연운 공통 분홍 활성 버튼 */
+/** OFF — 퀴즈·파나나·연운 공통 분홍(워크스페이스 accent) 활성 버튼 */
 export const AUTO_PUBLISH_BTN_OFF_CLASS = AUTO_PUBLISH_BTN_CLASS;
 
+/** ON — accent2 링·글로우 (emerald 대신 워크스페이스 accent 계열) */
 export const AUTO_PUBLISH_BTN_ON_CLASS =
-  'btn-primary btn-sm shrink-0 whitespace-nowrap px-2.5 py-1 ring-2 ring-emerald-400/70 disabled:cursor-not-allowed disabled:opacity-40';
+  'btn-primary btn-sm auto-publish-btn--on shrink-0 whitespace-nowrap px-2.5 py-1 disabled:cursor-not-allowed disabled:opacity-40';
 
 export function resolveAutoPublishButtonClass(enabled: boolean): string {
   return enabled ? AUTO_PUBLISH_BTN_ON_CLASS : AUTO_PUBLISH_BTN_CLASS;
@@ -53,6 +54,131 @@ export function formatAutoPublishButtonLabel(
   if (opts?.publishing) return '처리 중…';
   const prefix = opts?.enabled ? '⚡ ON' : '⚡ 자동발행';
   return `${prefix} ${done}/${quota}`;
+}
+
+function formatNextSlotTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+}
+
+function resolvePlannedTotal(status: AutoPublishStatus): number | null {
+  const raw = status.auto_publish_planned_count ?? status.daily_target;
+  if (raw == null || raw === 0) return null;
+  return raw;
+}
+
+/** ON 상태 스케줄·진행률 한 줄 요약 */
+export function formatAutoPublishScheduleLine(status: AutoPublishStatus): string {
+  const planned = resolvePlannedTotal(status);
+  const done = status.today_completed ?? 0;
+  const skipped = status.today_skipped ?? 0;
+  const parts: string[] = [];
+
+  if (status.auto_publish_next_slot_at) {
+    parts.push(`다음 등록 ${formatNextSlotTime(status.auto_publish_next_slot_at)}`);
+  } else if (planned != null && done >= planned) {
+    parts.push('오늘 계획 등록 완료 · 실행 대기');
+  } else if (status.block_message) {
+    parts.push(status.block_message);
+  } else if (status.auto_publish_enabled) {
+    parts.push('슬롯 계산 중…');
+  }
+
+  if (status.in_flight && status.in_flight > 0) {
+    parts.push(`파이프라인 ${status.in_flight}건`);
+  }
+  if (skipped > 0) {
+    parts.push(`유사도 스킵 ${skipped}`);
+  }
+  return parts.join(' · ') || '스케줄러 대기';
+}
+
+export function buildAutoPublishTitle(
+  status: AutoPublishStatus | null,
+  opts: { syncing?: boolean; enabled: boolean; label?: string },
+): string {
+  if (opts.syncing) return '발행 현황 불러오는 중…';
+  if (!status) return '자동발행';
+  const accountHint = opts.label ? `${opts.label} · ` : '';
+  if (opts.enabled) {
+    return `${accountHint}자동발행 ON · ${formatAutoPublishScheduleLine(status)}`;
+  }
+  const warmupHint = status.warmup_cap != null ? ` · 워밍업 상한 ${status.warmup_cap}건` : '';
+  return `${accountHint}클릭하여 자동발행 ON · 평일 4~5건${warmupHint}${
+    status.block_message ? ` (${status.block_message})` : ''
+  }`;
+}
+
+type AutoPublishChipProps = {
+  status: AutoPublishStatus;
+  enabled: boolean;
+  busy: boolean;
+  label?: string;
+  syncing?: boolean;
+  onToggle: () => void;
+};
+
+/** 자동발행 버튼 + ON 시 진행률·다음 슬롯 시각 */
+export function AutoPublishChip({
+  status,
+  enabled,
+  busy,
+  label,
+  syncing,
+  onToggle,
+}: AutoPublishChipProps) {
+  const done = status.today_completed ?? 0;
+  const quota = status.auto_publish_planned_count ?? (status.daily_target ? status.daily_target : '—');
+  const planned = resolvePlannedTotal(status);
+  const progressPct =
+    planned != null && planned > 0 ? Math.min(100, Math.round((done / planned) * 100)) : null;
+  const scheduleLine = enabled ? formatAutoPublishScheduleLine(status) : null;
+
+  return (
+    <div
+      className={`auto-publish-chip flex shrink-0 flex-col gap-0.5 py-1 pl-2 pr-1 ${enabled ? 'auto-publish-chip--on' : ''}`}
+    >
+      <div className="flex items-center gap-1">
+        {label ? (
+          <span
+            className={`shrink-0 font-mono text-[10px] font-bold tracking-tight ${
+              enabled ? 'text-[var(--acc2)]' : 'text-huma-t3'
+            }`}
+            title={label}
+          >
+            {label}
+          </span>
+        ) : null}
+        <button
+          type="button"
+          className={resolveAutoPublishButtonClass(enabled)}
+          disabled={isAutoPublishButtonDisabled({ busy })}
+          title={buildAutoPublishTitle(status, { syncing, enabled, label })}
+          onClick={onToggle}
+        >
+          {formatAutoPublishButtonLabel(done, quota, { publishing: busy, enabled })}
+        </button>
+      </div>
+      {enabled && scheduleLine ? (
+        <div className="flex min-w-0 items-center gap-1.5 pl-0.5 pr-0.5" aria-live="polite">
+          {progressPct != null ? (
+            <div
+              className="auto-publish-progress-track shrink-0"
+              title={`오늘 ${done}/${planned}건 완료`}
+              role="progressbar"
+              aria-valuenow={done}
+              aria-valuemin={0}
+              aria-valuemax={planned ?? 0}
+            >
+              <div className="auto-publish-progress-fill" style={{ width: `${progressPct}%` }} />
+            </div>
+          ) : null}
+          <span className="truncate font-mono text-[9px] leading-tight text-[var(--acc2)]">{scheduleLine}</span>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 const publishStatusCache = new Map<string, AutoPublishStatus>();
@@ -168,10 +294,7 @@ export function AutoPublishButton({ workspace, onDone, refreshToken = 0 }: AutoP
         await loadStatus();
       }
       if (res.enabled) {
-        const planned = res.planned_count ?? daily?.auto_publish_planned_count ?? daily?.daily_target;
-        await appAlert(
-          `자동발행 ON\n오늘 계획 ${planned}건 · 남은 ${res.remaining_today ?? '—'}건\n스케줄러가 간격을 맞춰 등록합니다`,
-        );
+        /* ON — 칩 UI에 계획·다음 슬롯 표시, 모달 생략 */
       } else {
         await appAlert('자동발행 OFF — 대기 중인 자동 작업은 취소됩니다');
       }
@@ -184,55 +307,29 @@ export function AutoPublishButton({ workspace, onDone, refreshToken = 0 }: AutoP
     }
   };
 
-  const done = status?.today_completed ?? 0;
-  const quota =
-    status?.auto_publish_planned_count ?? (status?.daily_target ? status.daily_target : '—');
   const enabled = status?.auto_publish_enabled ?? false;
-  const label = status?.account_label?.trim();
-  const accountHint = label ? ` · ${label}` : '';
-  const warmupHint =
-    status?.warmup_cap != null ? ` · 워밍업 상한 ${status.warmup_cap}건` : '';
-  const skippedHint =
-    status?.today_skipped && status.today_skipped > 0 ? ` · 유사도 스킵 ${status.today_skipped}건` : '';
-  const nextHint = status?.auto_publish_next_slot_at
-    ? ` · 다음 ${new Date(status.auto_publish_next_slot_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`
-    : enabled
-      ? ' · 오늘 계획 완료 또는 야간 대기'
-      : '';
 
-  const title = syncing
-    ? '발행 현황 불러오는 중…'
-    : enabled
-      ? `자동발행 ON${accountHint}${nextHint}${skippedHint}`
-      : `클릭하여 자동발행 ON · 평일 4~5건${warmupHint}${
-          status?.block_message ? ` (${status.block_message})` : ''
-        }${skippedHint}`;
-
-  return (
-    <div
-      className={`flex shrink-0 items-center gap-1 rounded-md border border-transparent bg-huma-bg2/80 py-0.5 pl-2 pr-0.5 ${
-        enabled ? 'ring-1 ring-emerald-500/30' : ''
-      }`}
-    >
-      {label ? (
-        <span
-          className={`shrink-0 font-mono text-[10px] font-bold tracking-tight ${
-            enabled ? 'text-emerald-400' : 'text-huma-t3'
-          }`}
-          title={label}
-        >
-          {label}
-        </span>
-      ) : null}
+  if (!status) {
+    return (
       <button
         type="button"
-        className={resolveAutoPublishButtonClass(enabled)}
-        disabled={isAutoPublishButtonDisabled({ busy: toggling })}
-        title={title}
+        className={AUTO_PUBLISH_BTN_CLASS}
+        disabled={syncing || toggling}
+        title={syncing ? '발행 현황 불러오는 중…' : '자동발행'}
         onClick={() => void handleToggle()}
       >
-        {formatAutoPublishButtonLabel(done, quota, { publishing: toggling, enabled })}
+        {formatAutoPublishButtonLabel(0, '—', { publishing: toggling || syncing })}
       </button>
-    </div>
+    );
+  }
+
+  return (
+    <AutoPublishChip
+      status={status}
+      enabled={enabled}
+      busy={toggling}
+      syncing={syncing}
+      onToggle={() => void handleToggle()}
+    />
   );
 }
