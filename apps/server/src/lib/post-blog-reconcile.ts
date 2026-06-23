@@ -68,6 +68,17 @@ function reconcileWindowStart(iso: string | null | undefined): number {
   return t - 30 * 60 * 1000;
 }
 
+/** reconcile — job 시각 이후·현재 이전에 실제 발행된 글만 인정 */
+export function isPublishedInReconcileWindow(
+  publishedAt: string | null | undefined,
+  sinceMs: number,
+): boolean {
+  if (!publishedAt?.trim()) return false;
+  const at = new Date(publishedAt).getTime();
+  if (!Number.isFinite(at)) return false;
+  return at >= sinceMs && at <= Date.now() + 60_000;
+}
+
 /**
  * 워커 실패 직전 — 블로그에 동일 제목 글이 이미 올라갔으면 completed로 정정.
  * (동글 SOCKS 오류 등으로 completeJob 전에 failed 된 케이스)
@@ -88,6 +99,8 @@ export async function tryReconcilePostBlogJobCompletion(jobId: string): Promise<
   const sinceMs = reconcileWindowStart(
     (job.started_at as string | null) ?? (job.scheduled_at as string | null) ?? (job.created_at as string | null),
   );
+  const createdMs = new Date(job.created_at as string).getTime();
+  const windowStartMs = Number.isFinite(createdMs) ? Math.max(sinceMs, createdMs - 5 * 60_000) : sinceMs;
 
   const { data: account } = await supabase
     .from('huma_accounts')
@@ -107,8 +120,7 @@ export async function tryReconcilePostBlogJobCompletion(jobId: string): Promise<
 
   for (const row of dbPosts ?? []) {
     if (normalizePostTitleForMatch(String(row.title ?? '')) !== expectedTitle) continue;
-    const at = row.published_at ? new Date(row.published_at as string).getTime() : 0;
-    if (at && at < sinceMs) continue;
+    if (!isPublishedInReconcileWindow(row.published_at as string | null, windowStartMs)) continue;
     const url = String(row.post_url ?? '').trim();
     if (!url) continue;
     const ok = await finalizePostBlogJob(jobId, url);
@@ -126,8 +138,7 @@ export async function tryReconcilePostBlogJobCompletion(jobId: string): Promise<
   const livePosts = await fetchPublicNaverBlogPostList(blogId, 30);
   for (const post of livePosts) {
     if (normalizePostTitleForMatch(post.title) !== expectedTitle) continue;
-    const at = post.publishedAt ? new Date(post.publishedAt).getTime() : Date.now();
-    if (at < sinceMs) continue;
+    if (!isPublishedInReconcileWindow(post.publishedAt, windowStartMs)) continue;
     const ok = await finalizePostBlogJob(jobId, post.postUrl);
     if (ok) {
       await logOperation({

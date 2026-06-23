@@ -121,6 +121,8 @@ export async function countTodayPostBlogCompleted(accountId: string): Promise<nu
 
     .eq('status', 'completed')
 
+    .not('result_url', 'is', null)
+
     .gte('completed_at', kstTodayStartIso());
 
 
