@@ -5,11 +5,17 @@ import { refreshNavBadges } from '@/lib/nav-badge-events';
 const API_BASE = process.env.NEXT_PUBLIC_HUMA_API_URL ?? 'http://localhost:3100';
 
 function resolveRequestUrl(path: string, sameOrigin?: boolean): string {
+  const apiPath = path.startsWith('/') ? path : `/${path}`;
   if (sameOrigin && typeof window !== 'undefined') {
-    return new URL(path, window.location.origin).href;
+    return new URL(apiPath, window.location.origin).href;
   }
-  if (sameOrigin) return path;
-  return `${API_BASE}${path}`;
+  if (sameOrigin) return apiPath;
+  // 브라우저 — Vercel/로컬 동일 출처 프록시 → i7 (LAN IP·CORS·혼합콘텐츠 회피)
+  if (typeof window !== 'undefined') {
+    const proxyPath = apiPath.replace(/^\/api\//, '');
+    return new URL(`/api/huma/${proxyPath}`, window.location.origin).href;
+  }
+  return `${API_BASE}${apiPath}`;
 }
 
 function getToken(): string | null {
@@ -49,9 +55,11 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       : '';
     const target = sameOrigin
       ? typeof window !== 'undefined'
-        ? `${window.location.origin} → HUMA_API_URL`
+        ? `${window.location.origin} (동일 출처)`
         : '동일 출처 프록시'
-      : API_BASE;
+      : typeof window !== 'undefined'
+        ? `${window.location.origin}/api/huma → HUMA_API_URL`
+        : API_BASE;
     const isTimeout =
       err instanceof Error &&
       (err.name === 'AbortError' || err.name === 'TimeoutError');
