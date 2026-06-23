@@ -18,6 +18,7 @@ import { listYeonunProducts } from '../modules/video-content/yeonun-product-pick
 
 import { getPostingReservedToday } from './posting-quota-reserve.js';
 import { countTodaySimilaritySkipped } from './posting-content-similarity.js';
+import { countTodayPostBlogPublished } from './post-blog-publish-day.js';
 
 
 
@@ -102,35 +103,7 @@ export function kstTodayStartIso(date = new Date()): string {
 
 
 export async function countTodayPostBlogCompleted(accountId: string): Promise<number> {
-
-  const key = accountId.trim();
-
-  if (!key) return 0;
-
-
-
-  const { count, error } = await supabase
-
-    .from('huma_jobs')
-
-    .select('*', { count: 'exact', head: true })
-
-    .eq('account_id', key)
-
-    .eq('job_type', 'post_blog')
-
-    .eq('status', 'completed')
-
-    .not('result_url', 'is', null)
-
-    .gte('completed_at', kstTodayStartIso());
-
-
-
-  if (error) throw new Error(`오늘 발행 집계 실패: ${error.message}`);
-
-  return count ?? 0;
-
+  return countTodayPostBlogPublished(accountId);
 }
 
 

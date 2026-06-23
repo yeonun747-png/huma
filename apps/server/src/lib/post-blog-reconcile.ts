@@ -123,7 +123,10 @@ export async function tryReconcilePostBlogJobCompletion(jobId: string): Promise<
     if (!isPublishedInReconcileWindow(row.published_at as string | null, windowStartMs)) continue;
     const url = String(row.post_url ?? '').trim();
     if (!url) continue;
-    const ok = await finalizePostBlogJob(jobId, url);
+    const ok = await finalizePostBlogJob(jobId, url, {
+      publishedAt: row.published_at as string,
+      reconciledFromFailed: true,
+    });
     if (ok) {
       await logOperation({
         level: 'info',
@@ -139,7 +142,10 @@ export async function tryReconcilePostBlogJobCompletion(jobId: string): Promise<
   for (const post of livePosts) {
     if (normalizePostTitleForMatch(post.title) !== expectedTitle) continue;
     if (!isPublishedInReconcileWindow(post.publishedAt, windowStartMs)) continue;
-    const ok = await finalizePostBlogJob(jobId, post.postUrl);
+    const ok = await finalizePostBlogJob(jobId, post.postUrl, {
+      publishedAt: post.publishedAt,
+      reconciledFromFailed: true,
+    });
     if (ok) {
       await logOperation({
         level: 'info',

@@ -884,8 +884,12 @@ export async function registerJobRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'completed 상태 job만 취소할 수 있습니다' });
     }
 
-    const ok = await revertPostBlogCompletion(id);
-    if (!ok) return reply.code(409).send({ error: '발행 완료 취소 실패' });
+    try {
+      const ok = await revertPostBlogCompletion(id);
+      if (!ok) return reply.code(409).send({ error: '발행 완료 취소 실패' });
+    } catch (err) {
+      return reply.code(400).send({ error: (err as Error).message });
+    }
 
     const { data: updated } = await supabase.from('huma_jobs').select('*').eq('id', id).single();
     return { ok: true, job: updated };
