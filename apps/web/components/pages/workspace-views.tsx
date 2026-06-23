@@ -7,12 +7,19 @@ import { EmptyPanel } from '@/components/ui/empty-panel';
 import { useWorkspace } from '@/components/dashboard/workspace-context';
 import { MGrid, MPanel, MStat, MTable, MTag } from '@/components/mockup/primitives';
 import { useRegisterPageAction } from '@/components/dashboard/page-action-context';
-import { useShellViewActive } from '@/components/dashboard/shell-view-active';
 import { SEO_WORKSPACE_URL } from '@/lib/seo-mock-data';
 import { dispatchQueuePrefill } from '@/lib/queue-prefill';
 import type { Workspace } from '@huma/shared';
 
 type SeoData = Awaited<ReturnType<typeof api.seoKeywords>>;
+
+function normalizeSeoStatusLabel(st: string): string {
+  return st === '보강필요' ? '보강' : st;
+}
+
+function normalizeSeoReflect(text: string): string {
+  return text.replace(/보강필요/g, '보강');
+}
 
 export function SeoKeywordsView() {
   const { workspace } = useWorkspace();
@@ -117,23 +124,45 @@ export function SeoKeywordsView() {
       </MGrid>
 
       <MPanel title="콘텐츠 ↔ 키워드 연결 맵">
-        <p className="mb-3 text-[11.5px] leading-relaxed text-huma-t3">
-          <strong className="text-huma-t2">상태</strong>는 주력 키워드별 누적 발행수 기준입니다 —{' '}
-          <MTag tone="ok">최상</MTag> 10건 이상 · <MTag tone="ok">양호</MTag> 5~9건 ·{' '}
-          <MTag tone="warn">보강필요</MTag> 2~4건 · <MTag tone="err">부족</MTag> 0~1건
+        <p className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-huma-t3">
+          <strong className="shrink-0 text-huma-t2">상태</strong>
+          <span className="text-huma-t4">·</span>
+          <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap">
+            <MTag tone="ok">최상</MTag>
+            <span>10건+</span>
+          </span>
+          <span className="text-huma-t4">·</span>
+          <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap">
+            <MTag tone="ok">양호</MTag>
+            <span>5~9건</span>
+          </span>
+          <span className="text-huma-t4">·</span>
+          <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap">
+            <MTag tone="warn">보강</MTag>
+            <span>2~4건</span>
+          </span>
+          <span className="text-huma-t4">·</span>
+          <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap">
+            <MTag tone="err">부족</MTag>
+            <span>0~1건</span>
+          </span>
         </p>
         {d.table.length === 0 ? (
           <EmptyPanel message="발행 콘텐츠 없음" />
         ) : (
           <MTable
             head={['상품·콘텐츠 ID', '주력 키워드', '발행수', '→ SEO 반영', '상태']}
-            rows={d.table.map((r) => [
-              <span key="id" className="font-mono text-[12px]">{r.id}</span>,
-              r.kw,
-              <span key="c" className="font-mono">{r.cnt}</span>,
-              <span key="ref" className="text-[11.5px] text-huma-t3">{r.reflect}</span>,
-              <MTag key="st" tone={r.tone}>{r.st}</MTag>,
-            ])}
+            rows={d.table.map((r) => {
+              const st = normalizeSeoStatusLabel(r.st);
+              const reflect = normalizeSeoReflect(r.reflect);
+              return [
+                <span key="id" className="font-mono text-[12px]">{r.id}</span>,
+                r.kw,
+                <span key="c" className="font-mono">{r.cnt}</span>,
+                <span key="ref" className="whitespace-nowrap text-[11.5px] text-huma-t3">{reflect}</span>,
+                <MTag key="st" tone={r.tone} className="whitespace-nowrap">{st}</MTag>,
+              ];
+            })}
           />
         )}
       </MPanel>

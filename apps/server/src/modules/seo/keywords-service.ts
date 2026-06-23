@@ -37,12 +37,20 @@ function changeFromPosition(position: number): { chg: string; ok: boolean | null
 function mapTone(cnt: number): { st: string; tone: 'ok' | 'warn' | 'err' } {
   if (cnt >= 10) return { st: '최상', tone: 'ok' };
   if (cnt >= 5) return { st: '양호', tone: 'ok' };
-  if (cnt >= 2) return { st: '보강필요', tone: 'warn' };
+  if (cnt >= 2) return { st: '보강', tone: 'warn' };
   return { st: '부족', tone: 'err' };
 }
 
-/** 캐시 무효화 — 키워드풀 정책 변경 시 증가 */
-const SEO_POOL_VERSION = 2;
+function normalizeSeoMapRows(rows: SeoMapRow[]): SeoMapRow[] {
+  return rows.map((row) => {
+    const st = row.st === '보강필요' ? '보강' : row.st;
+    const reflect = row.reflect.replace(/보강필요/g, '보강');
+    return st === row.st && reflect === row.reflect ? row : { ...row, st, reflect };
+  });
+}
+
+/** 캐시 무효화 — 키워드풀·상태 라벨 정책 변경 시 증가 */
+const SEO_POOL_VERSION = 3;
 
 function resolveWorkspaceKeywordPool(
   ws: Workspace,
@@ -191,7 +199,7 @@ export async function buildSeoKeywords(workspace: string) {
     ranks = await buildRanksFromJobs(workspace);
   }
   const pool = await loadKeywordPool(workspace);
-  const table = await buildContentMap(workspace);
+  const table = normalizeSeoMapRows(await buildContentMap(workspace));
 
   return {
     workspace,
@@ -231,7 +239,10 @@ export async function getSeoKeywords(workspace: string) {
   const ranksOk = Array.isArray(cachedRanks);
   const versionOk = cached?.poolVersion === SEO_POOL_VERSION;
   if (poolOk && ranksOk && versionOk) {
-    return { ...cached, cachedAt: data?.updated_at };
+    const table = Array.isArray(cached?.table)
+      ? normalizeSeoMapRows(cached.table as SeoMapRow[])
+      : cached?.table;
+    return { ...cached, table, cachedAt: data?.updated_at };
   }
   return buildSeoKeywords(workspace);
 }

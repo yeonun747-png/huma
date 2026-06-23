@@ -29,7 +29,7 @@ export const SEO_DATA: Record<
     table: [
       { id: 'dream-lastnight', kw: '꿈해몽, 꿈의미', cnt: 24, reflect: '포스팅 3건 → 순위 #7', st: '최상', tone: 'ok' },
       { id: 'reunion-maybe', kw: '재회사주, 재회가능성', cnt: 12, reflect: '포스팅 2건 → 인덱싱', st: '양호', tone: 'ok' },
-      { id: 'career-timing', kw: '이직사주, 승진운', cnt: 8, reflect: '포스팅 1건 → 반영중', st: '보강필요', tone: 'warn' },
+      { id: 'career-timing', kw: '이직사주, 승진운', cnt: 8, reflect: '포스팅 1건 → 반영중', st: '보강', tone: 'warn' },
       { id: 'zimi-chart', kw: '자미두수풀이', cnt: 5, reflect: '신규 → 인덱싱 대기', st: '부족', tone: 'err' },
     ],
   },
@@ -50,7 +50,7 @@ export const SEO_DATA: Record<
     table: [
       { id: 'mbti-test', kw: 'MBTI 테스트, 16유형', cnt: 38, reflect: '포스팅 5건 → 순위 #3', st: '최상', tone: 'ok' },
       { id: 'attachment-type', kw: '애착유형, attachment style', cnt: 21, reflect: '포스팅 3건 → 순위 #7', st: '양호', tone: 'ok' },
-      { id: 'career-aptitude', kw: '직업적성, career test', cnt: 14, reflect: '포스팅 2건 → 반영중', st: '보강필요', tone: 'warn' },
+      { id: 'career-aptitude', kw: '직업적성, career test', cnt: 14, reflect: '포스팅 2건 → 반영중', st: '보강', tone: 'warn' },
       { id: 'love-conflict', kw: '연애갈등, 연애 MBTI', cnt: 9, reflect: '신규 → 인덱싱 대기', st: '부족', tone: 'err' },
     ],
   },
@@ -68,7 +68,7 @@ export const SEO_DATA: Record<
     ],
     table: [
       { id: 'ai-character-chat', kw: 'AI 캐릭터 채팅, AI친구', cnt: 18, reflect: '포스팅 3건 → 순위 #4', st: '양호', tone: 'ok' },
-      { id: 'ai-emotional', kw: '감성 AI, AI 대화앱', cnt: 9, reflect: '포스팅 1건 → 인덱싱중', st: '보강필요', tone: 'warn' },
+      { id: 'ai-emotional', kw: '감성 AI, AI 대화앱', cnt: 9, reflect: '포스팅 1건 → 인덱싱중', st: '보강', tone: 'warn' },
     ],
   },
 };
