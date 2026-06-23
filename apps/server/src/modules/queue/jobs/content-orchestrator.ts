@@ -245,7 +245,9 @@ async function runTypeA(
   const featuredImage = resolveFeaturedBlogImageUrl(imageUrls);
 
   const blogLink = normalizeBlogLinkUrl(workspace, sourceUrl);
-  if (accountId) await assertAccountPostingQuota(workspace, accountId);
+  if (accountId) {
+    await assertAccountPostingQuota(workspace, accountId, { excludeJobId: params.parentJobId });
+  }
   const blogAt = await resolveBlogScheduledAt(auto_scheduled, accountId, schedule, scheduled_at);
   const blogJob = await insertJob({
     workspace,
@@ -314,7 +316,9 @@ async function runTypeB(
   const featuredImage = resolveFeaturedBlogImageUrl(imageUrls);
 
   const blogLink = normalizeBlogLinkUrl(workspace, sourceUrl);
-  if (accountId) await assertAccountPostingQuota(workspace, accountId);
+  if (accountId) {
+    await assertAccountPostingQuota(workspace, accountId, { excludeJobId: params.parentJobId });
+  }
   const blogAt = await resolveBlogScheduledAt(auto_scheduled, accountId, schedule, scheduled_at);
   const threadsAt = platformTime(auto_scheduled, schedule, 'threads', scheduled_at);
   const twitterAt = platformTime(auto_scheduled, schedule, 'x', scheduled_at);
@@ -460,7 +464,11 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput): P
     throw new Error('포스팅 계정이 없어 유사도 검사·발행을 진행할 수 없습니다');
   }
   if (postingAccountForQuota?.id && !dryRun) {
-    await assertAccountPostingQuotaBeforeGeneration(input.workspace, postingAccountForQuota.id);
+    await assertAccountPostingQuotaBeforeGeneration(
+      input.workspace,
+      postingAccountForQuota.id,
+      input.parentJobId,
+    );
   }
 
   const shouldAutoDecide = input.content_type_auto !== false && !contentType;
@@ -833,7 +841,9 @@ export async function promoteDryRunToPublish(parentJobId: string) {
   const contentType = (job.content_type ?? 'A') as ContentType;
   const autoScheduled = job.auto_scheduled !== false;
   if (postingAccount?.id) {
-    await assertAccountPostingQuota(job.workspace as string, postingAccount.id);
+    await assertAccountPostingQuota(job.workspace as string, postingAccount.id, {
+      excludeJobId: parentJobId,
+    });
   }
   const baseScheduledAt =
     autoScheduled && schedule?.naver_blog

@@ -133,7 +133,10 @@ export async function countTodayPostBlogCompleted(accountId: string): Promise<nu
 
 
 
-export async function countInFlightPostingPipeline(accountId: string): Promise<number> {
+export async function countInFlightPostingPipeline(
+  accountId: string,
+  opts?: { excludeJobId?: string },
+): Promise<number> {
 
   const key = accountId.trim();
 
@@ -141,39 +144,47 @@ export async function countInFlightPostingPipeline(accountId: string): Promise<n
 
   const since = kstTodayStartIso();
 
+  const excludeId = opts?.excludeJobId?.trim();
 
 
-  const [contentRes, blogRes] = await Promise.all([
 
-    supabase
+  let contentQuery = supabase
 
-      .from('huma_jobs')
+    .from('huma_jobs')
 
-      .select('*', { count: 'exact', head: true })
+    .select('*', { count: 'exact', head: true })
 
-      .eq('account_id', key)
+    .eq('account_id', key)
 
-      .eq('job_type', 'content_full')
+    .eq('job_type', 'content_full')
 
-      .in('status', ['pending', 'scheduled', 'running'])
+    .in('status', ['pending', 'scheduled', 'running'])
 
-      .gte('created_at', since),
+    .gte('created_at', since);
 
-    supabase
+  if (excludeId) contentQuery = contentQuery.neq('id', excludeId);
 
-      .from('huma_jobs')
 
-      .select('*', { count: 'exact', head: true })
 
-      .eq('account_id', key)
+  let blogQuery = supabase
 
-      .eq('job_type', 'post_blog')
+    .from('huma_jobs')
 
-      .in('status', ['pending', 'scheduled', 'running', 'awaiting_captcha'])
+    .select('*', { count: 'exact', head: true })
 
-      .gte('created_at', since),
+    .eq('account_id', key)
 
-  ]);
+    .eq('job_type', 'post_blog')
+
+    .in('status', ['pending', 'scheduled', 'running', 'awaiting_captcha'])
+
+    .gte('created_at', since);
+
+  if (excludeId) blogQuery = blogQuery.neq('id', excludeId);
+
+
+
+  const [contentRes, blogRes] = await Promise.all([contentQuery, blogQuery]);
 
 
 
@@ -551,11 +562,47 @@ export async function assertAccountPostingQuota(
 
   accountId: string,
 
+  opts?: { excludeJobId?: string },
+
 ): Promise<void> {
 
   const status = await getAutoPublishStatus(workspace, accountId);
 
   if (status.can_publish) return;
+
+
+
+  const excludeJobId = opts?.excludeJobId?.trim();
+
+  if (excludeJobId) {
+
+    const pipeline_jobs = await countInFlightPostingPipeline(accountId, { excludeJobId });
+
+    const reserved_slots = await getPostingReservedToday(accountId);
+
+    if (
+
+      !isPostingQuotaOvercommitted(
+
+        status.today_completed,
+
+        pipeline_jobs,
+
+        reserved_slots,
+
+        status.daily_target,
+
+        status.today_skipped,
+
+      )
+
+    ) {
+
+      return;
+
+    }
+
+  }
 
 
 
@@ -585,6 +632,8 @@ export async function assertAccountPostingQuotaBeforeGeneration(
   workspace: string,
 
   accountId: string,
+
+  excludeJobId?: string,
 
 ): Promise<void> {
 
@@ -618,7 +667,9 @@ export async function assertAccountPostingQuotaBeforeGeneration(
 
 
 
-  const pipeline_jobs = await countInFlightPostingPipeline(accountId);
+  const pipeline_jobs = await countInFlightPostingPipeline(accountId, {
+    excludeJobId: excludeJobId?.trim() || undefined,
+  });
 
   const reserved_slots = await getPostingReservedToday(accountId);
 

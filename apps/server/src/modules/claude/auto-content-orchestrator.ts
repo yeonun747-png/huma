@@ -169,21 +169,29 @@ export async function executeContentFull(humaJobId: string) {
     ? job.image_urls.filter((u): u is string => typeof u === 'string' && Boolean(u.trim()))
     : [];
 
-  const result = await runContentOrchestrator({
-    workspace: job.workspace,
-    title: job.title ?? '',
-    sourceUrl: job.link_url ?? '',
-    synopsis: job.content ?? undefined,
-    uploadedImageUrls,
-    content_type: job.content_type_auto ? undefined : (job.content_type as ContentType | undefined),
-    content_type_auto: job.content_type_auto ?? true,
-    auto_scheduled: job.auto_scheduled ?? true,
-    video_model: job.video_model ?? undefined,
-    platform_schedule: job.platform_schedule ?? undefined,
-    scheduled_at: job.scheduled_at ?? new Date().toISOString(),
-    repeat_rule: job.repeat_rule,
-    parentJobId: humaJobId,
-  });
+  let result;
+  try {
+    result = await runContentOrchestrator({
+      workspace: job.workspace,
+      title: job.title ?? '',
+      sourceUrl: job.link_url ?? '',
+      synopsis: job.content ?? undefined,
+      uploadedImageUrls,
+      content_type: job.content_type_auto ? undefined : (job.content_type as ContentType | undefined),
+      content_type_auto: job.content_type_auto ?? true,
+      auto_scheduled: job.auto_scheduled ?? true,
+      video_model: job.video_model ?? undefined,
+      platform_schedule: job.platform_schedule ?? undefined,
+      scheduled_at: job.scheduled_at ?? new Date().toISOString(),
+      repeat_rule: job.repeat_rule,
+      parentJobId: humaJobId,
+    });
+  } catch (err) {
+    if (isAutoPublishJob(job.platform_schedule) && job.account_id) {
+      await replanAutoPublishSlot(job.account_id as string, job.workspace as string).catch(() => undefined);
+    }
+    throw err;
+  }
 
   if (result.similaritySkipped) {
     const prevPs = (job.platform_schedule as Record<string, unknown> | null) ?? {};
