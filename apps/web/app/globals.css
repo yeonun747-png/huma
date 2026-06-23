@@ -205,21 +205,35 @@
   }
 
   .auto-publish-chip {
-    @apply rounded-md border border-huma-bdr2 transition-colors duration-300;
+    @apply gap-1.5 rounded-lg border border-huma-bdr2 transition-colors duration-300;
+    padding: 8px 10px;
     background: color-mix(in srgb, var(--bg2) 80%, transparent);
   }
 
   .auto-publish-chip--on {
-    border-color: color-mix(in srgb, var(--acc2) 45%, transparent);
-    background: color-mix(in srgb, var(--glow) 80%, var(--bg2));
-    box-shadow: 0 0 14px var(--glow);
+    border-color: color-mix(in srgb, var(--acc2) 40%, transparent);
+    background: color-mix(in srgb, var(--glow) 70%, var(--bg2));
+    box-shadow: 0 0 12px var(--glow);
     animation: auto-publish-chip-glow 2.4s ease-in-out infinite;
   }
 
+  .auto-publish-chip-row {
+    min-height: 26px;
+  }
+
+  .auto-publish-chip-label {
+    min-width: 2.25rem;
+  }
+
+  .auto-publish-chip-meta {
+    padding-left: 2px;
+    padding-right: 2px;
+  }
+
   .auto-publish-btn--on {
-    box-shadow: 0 0 10px color-mix(in srgb, var(--acc2) 55%, transparent);
-    outline: 2px solid color-mix(in srgb, var(--acc2) 75%, transparent);
-    outline-offset: 1px;
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--acc2) 65%, transparent),
+      0 0 8px color-mix(in srgb, var(--acc2) 40%, transparent);
   }
 
   .auto-publish-progress-track {

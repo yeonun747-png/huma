@@ -76,7 +76,7 @@ export function formatAutoPublishScheduleLine(status: AutoPublishStatus): string
   const parts: string[] = [];
 
   if (status.auto_publish_next_slot_at) {
-    parts.push(`다음 등록 ${formatNextSlotTime(status.auto_publish_next_slot_at)}`);
+    parts.push(`다음 큐 등록 ${formatNextSlotTime(status.auto_publish_next_slot_at)}`);
   } else if (planned != null && done >= planned) {
     parts.push('오늘 계획 등록 완료 · 실행 대기');
   } else if (status.block_message) {
@@ -102,7 +102,11 @@ export function buildAutoPublishTitle(
   if (!status) return '자동발행';
   const accountHint = opts.label ? `${opts.label} · ` : '';
   if (opts.enabled) {
-    return `${accountHint}자동발행 ON · ${formatAutoPublishScheduleLine(status)}`;
+    const line = formatAutoPublishScheduleLine(status);
+    const hint = status.auto_publish_next_slot_at
+      ? ' (해당 시각에 큐에 작업 등록 → AI 작성 후 발행 예약)'
+      : '';
+    return `${accountHint}자동발행 ON · ${line}${hint}`;
   }
   const warmupHint = status.warmup_cap != null ? ` · 워밍업 상한 ${status.warmup_cap}건` : '';
   return `${accountHint}클릭하여 자동발행 ON · 평일 4~5건${warmupHint}${
@@ -137,12 +141,12 @@ export function AutoPublishChip({
 
   return (
     <div
-      className={`auto-publish-chip flex shrink-0 flex-col gap-0.5 py-1 pl-2 pr-1 ${enabled ? 'auto-publish-chip--on' : ''}`}
+      className={`auto-publish-chip flex shrink-0 flex-col ${enabled ? 'auto-publish-chip--on' : ''}`}
     >
-      <div className="flex items-center gap-1">
+      <div className="auto-publish-chip-row flex items-center gap-2">
         {label ? (
           <span
-            className={`shrink-0 font-mono text-[10px] font-bold tracking-tight ${
+            className={`auto-publish-chip-label shrink-0 font-mono text-[10px] font-bold tracking-tight ${
               enabled ? 'text-[var(--acc2)]' : 'text-huma-t3'
             }`}
             title={label}
@@ -161,7 +165,7 @@ export function AutoPublishChip({
         </button>
       </div>
       {enabled && scheduleLine ? (
-        <div className="flex min-w-0 items-center gap-1.5 pl-0.5 pr-0.5" aria-live="polite">
+        <div className="auto-publish-chip-meta flex min-w-0 items-center gap-1.5" aria-live="polite">
           {progressPct != null ? (
             <div
               className="auto-publish-progress-track shrink-0"
@@ -174,7 +178,7 @@ export function AutoPublishChip({
               <div className="auto-publish-progress-fill" style={{ width: `${progressPct}%` }} />
             </div>
           ) : null}
-          <span className="truncate font-mono text-[9px] leading-tight text-[var(--acc2)]">{scheduleLine}</span>
+          <span className="truncate font-mono text-[9px] leading-snug text-huma-t2">{scheduleLine}</span>
         </div>
       ) : null}
     </div>
