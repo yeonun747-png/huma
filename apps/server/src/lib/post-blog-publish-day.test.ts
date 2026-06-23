@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   isPublishedTodayKst,
-  isWorkerCompletionStamp,
+  isUntrustedPublishTimestamp,
   resolveJobPublishedAtIso,
 } from './post-blog-publish-day.js';
 import { formatKstDateKey } from './posting-daily-target.js';
@@ -17,11 +17,17 @@ describe('isPublishedTodayKst', () => {
   });
 });
 
-describe('isWorkerCompletionStamp', () => {
+describe('isUntrustedPublishTimestamp', () => {
   it('detects scheduled_at overwritten to worker finish time', () => {
     const finish = '2026-06-23T21:42:25.000Z';
-    expect(isWorkerCompletionStamp(finish, finish)).toBe(true);
-    expect(isWorkerCompletionStamp('2026-06-23T11:34:23.000Z', finish)).toBe(false);
+    expect(isUntrustedPublishTimestamp(finish, finish)).toBe(true);
+    expect(isUntrustedPublishTimestamp('2026-06-23T11:34:23.000Z', finish)).toBe(false);
+  });
+
+  it('rejects scheduled_at later than completed_at', () => {
+    const publish = '2026-06-23T11:34:23.000Z';
+    const workerFinish = '2026-06-23T21:42:25.000Z';
+    expect(isUntrustedPublishTimestamp(workerFinish, publish)).toBe(true);
   });
 });
 
@@ -75,5 +81,18 @@ describe('resolveJobPublishedAtIso', () => {
       new Map([['https://blog.naver.com/roast8431/224324945642', workerFinish]]),
     );
     expect(iso).toBeNull();
+  });
+
+  it('ignores scheduled_at later than backdated completed_at (partial SQL fix)', () => {
+    const publish = '2026-06-23T11:34:23.000Z';
+    const workerFinish = '2026-06-23T21:42:25.000Z';
+    const iso = resolveJobPublishedAtIso({
+      result_url: 'https://blog.naver.com/roast8431/224324945642',
+      scheduled_at: workerFinish,
+      completed_at: publish,
+      platform_schedule: { _publish_scheduled_at: publish },
+    });
+    expect(iso).toBe(publish);
+    expect(isPublishedTodayKst(iso, new Date('2026-06-24T10:00:00+09:00'))).toBe(false);
   });
 });

@@ -9,16 +9,27 @@ export const PUBLISH_SCHEDULED_AT_KEY = '_publish_scheduled_at';
 
 const COMPLETION_STAMP_MS = 15 * 60_000;
 
-/** completed_at과 같은 워커 처리 시각인지 (예약 발행일로 쓰면 안 됨) */
+/** completed_at과 같거나, 완료보다 늦은 시각 — 예약 발행일로 쓰면 안 됨 */
+export function isUntrustedPublishTimestamp(
+  candidate: string | null | undefined,
+  completedAt: string | null | undefined,
+): boolean {
+  if (!candidate?.trim()) return true;
+  const a = new Date(candidate).getTime();
+  if (!Number.isFinite(a)) return true;
+  if (!completedAt?.trim()) return false;
+  const b = new Date(completedAt).getTime();
+  if (!Number.isFinite(b)) return false;
+  if (Math.abs(a - b) < COMPLETION_STAMP_MS) return true;
+  return a > b + 5 * 60_000;
+}
+
+/** @deprecated use isUntrustedPublishTimestamp */
 export function isWorkerCompletionStamp(
   candidate: string,
   completedAt: string | null | undefined,
 ): boolean {
-  if (!completedAt?.trim()) return false;
-  const a = new Date(candidate).getTime();
-  const b = new Date(completedAt).getTime();
-  if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
-  return Math.abs(a - b) < COMPLETION_STAMP_MS;
+  return isUntrustedPublishTimestamp(candidate, completedAt);
 }
 
 export function resolveStoredPublishScheduledAt(platformSchedule: unknown): string | null {
@@ -62,7 +73,7 @@ export function resolveFinalizePublishAtIso(job: {
   const stored = resolveStoredPublishScheduledAt(job.platform_schedule);
   if (stored) return stored;
   const scheduled = resolveWorkerPublishAtIso(job);
-  if (scheduled && !isWorkerCompletionStamp(scheduled, job.completed_at ?? null)) return scheduled;
+  if (scheduled && !isUntrustedPublishTimestamp(scheduled, job.completed_at ?? null)) return scheduled;
   return new Date().toISOString();
 }
 
@@ -78,16 +89,16 @@ export function resolveJobPublishedAtIso(
   const urlKey = job.result_url?.trim() ? normalizePostUrlKey(job.result_url) : '';
   if (urlKey && postPublishedByUrl?.has(urlKey)) {
     const fromPost = postPublishedByUrl.get(urlKey);
-    if (fromPost && !isWorkerCompletionStamp(fromPost, job.completed_at)) return fromPost;
+    if (fromPost && !isUntrustedPublishTimestamp(fromPost, job.completed_at)) return fromPost;
   }
 
   const scheduledAt = resolveWorkerPublishAtIso(job);
-  if (scheduledAt && !isWorkerCompletionStamp(scheduledAt, job.completed_at)) return scheduledAt;
+  if (scheduledAt && !isUntrustedPublishTimestamp(scheduledAt, job.completed_at)) return scheduledAt;
 
   if (ps[RECONCILED_FROM_FAILED_KEY] === true) return null;
 
   const completed = job.completed_at?.trim();
-  if (completed && !isWorkerCompletionStamp(completed, completed)) return completed;
+  if (completed && !isUntrustedPublishTimestamp(completed, completed)) return completed;
   return null;
 }
 

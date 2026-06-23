@@ -208,25 +208,6 @@ export function QueueManager() {
   const load = useCallback(async (opts?: { force?: boolean }) => {
     const offset = (page - 1) * pageSize;
 
-    const applyCompletedStats = async (base: {
-      pending: number;
-      running: number;
-      doneToday: number;
-      doneAll: number;
-    }) => {
-      try {
-        const completed = await api.jobs({ workspace, status: 'completed', limit: '500' });
-        const visible = completed.filter((j) => !isContentFullPipelineShell(j));
-        return {
-          ...base,
-          doneToday: visible.filter((j) => isSameKstDay(j.completed_at)).length,
-          doneAll: visible.length,
-        };
-      } catch {
-        return base;
-      }
-    };
-
     try {
       const result = await api.jobsPage(
         {
@@ -238,8 +219,7 @@ export function QueueManager() {
       );
       setJobs(result.items);
       setTotal(result.total);
-      const stats = await applyCompletedStats(result.stats);
-      setStats(stats);
+      setStats(result.stats);
       setLoadError(null);
       setAccountsTick((n) => n + 1);
       if (typeof window !== 'undefined') {
