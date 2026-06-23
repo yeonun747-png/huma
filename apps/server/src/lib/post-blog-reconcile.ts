@@ -1,0 +1,144 @@
+import { supabase } from '../middleware/auth.js';
+import { extractBlogIdFromUrl, normalizeBlogPostUrl } from '../modules/blog-check/blog-url.js';
+import { logOperation } from './log-emitter.js';
+import { finalizePostBlogJob } from './post-blog-job-complete.js';
+
+export function normalizePostTitleForMatch(title: string): string {
+  return title.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+interface NaverListItem {
+  logNo?: number | string;
+  title?: string;
+  titleWithInspectMessage?: string;
+  addDate?: number | string;
+}
+
+/** 공개 블로그 API — Playwright/동글 없이 최근 글 목록 */
+export async function fetchPublicNaverBlogPostList(
+  blogId: string,
+  limit = 25,
+): Promise<Array<{ postUrl: string; title: string; publishedAt: string | null }>> {
+  const id = blogId.trim();
+  if (!id) return [];
+
+  const apiUrl = `https://m.blog.naver.com/api/blogs/${encodeURIComponent(id)}/post-list?categoryNo=0&itemCount=${limit}&page=1`;
+  const res = await fetch(apiUrl, {
+    headers: {
+      Accept: 'application/json',
+      Referer: `https://m.blog.naver.com/${id}`,
+      'User-Agent':
+        'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+    },
+    signal: AbortSignal.timeout(15_000),
+  }).catch(() => null);
+
+  if (!res?.ok) return [];
+
+  const body = (await res.json().catch(() => null)) as {
+    isSuccess?: boolean;
+    result?: { items?: NaverListItem[] };
+  } | null;
+
+  if (!body?.isSuccess || !body.result?.items?.length) return [];
+
+  return body.result.items
+    .map((item) => {
+      const postNo = String(item.logNo ?? '').trim();
+      if (!postNo) return null;
+      const title = (item.titleWithInspectMessage ?? item.title ?? '').trim();
+      let publishedAt: string | null = null;
+      if (item.addDate != null) {
+        const ms = typeof item.addDate === 'number' ? item.addDate : Number(item.addDate);
+        if (Number.isFinite(ms) && ms > 0) publishedAt = new Date(ms).toISOString();
+      }
+      return {
+        postUrl: normalizeBlogPostUrl(id, postNo),
+        title,
+        publishedAt,
+      };
+    })
+    .filter((x): x is { postUrl: string; title: string; publishedAt: string | null } => x != null);
+}
+
+function reconcileWindowStart(iso: string | null | undefined): number {
+  if (!iso) return Date.now() - 6 * 60 * 60 * 1000;
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return Date.now() - 6 * 60 * 60 * 1000;
+  return t - 30 * 60 * 1000;
+}
+
+/**
+ * 워커 실패 직전 — 블로그에 동일 제목 글이 이미 올라갔으면 completed로 정정.
+ * (동글 SOCKS 오류 등으로 completeJob 전에 failed 된 케이스)
+ */
+export async function tryReconcilePostBlogJobCompletion(jobId: string): Promise<string | null> {
+  const { data: job } = await supabase
+    .from('huma_jobs')
+    .select('id, job_type, status, result_url, title, account_id, scheduled_at, started_at, created_at')
+    .eq('id', jobId)
+    .maybeSingle();
+
+  if (!job || job.job_type !== 'post_blog') return null;
+  if (job.status === 'completed' && job.result_url?.trim()) return job.result_url.trim();
+
+  const expectedTitle = normalizePostTitleForMatch(String(job.title ?? ''));
+  if (!expectedTitle || !job.account_id) return null;
+
+  const sinceMs = reconcileWindowStart(
+    (job.started_at as string | null) ?? (job.scheduled_at as string | null) ?? (job.created_at as string | null),
+  );
+
+  const { data: account } = await supabase
+    .from('huma_accounts')
+    .select('blog_url, naver_id')
+    .eq('id', job.account_id)
+    .maybeSingle();
+
+  const blogId = extractBlogIdFromUrl(account?.blog_url as string | null, account?.naver_id as string | null);
+  if (!blogId) return null;
+
+  const { data: dbPosts } = await supabase
+    .from('posts')
+    .select('post_url, title, published_at')
+    .eq('account_id', job.account_id)
+    .order('published_at', { ascending: false })
+    .limit(30);
+
+  for (const row of dbPosts ?? []) {
+    if (normalizePostTitleForMatch(String(row.title ?? '')) !== expectedTitle) continue;
+    const at = row.published_at ? new Date(row.published_at as string).getTime() : 0;
+    if (at && at < sinceMs) continue;
+    const url = String(row.post_url ?? '').trim();
+    if (!url) continue;
+    const ok = await finalizePostBlogJob(jobId, url);
+    if (ok) {
+      await logOperation({
+        level: 'info',
+        message: `[post_blog] 블로그 발행 확인(posts) — failed → completed`,
+        job_id: jobId,
+        account_id: job.account_id as string,
+      });
+      return url;
+    }
+  }
+
+  const livePosts = await fetchPublicNaverBlogPostList(blogId, 30);
+  for (const post of livePosts) {
+    if (normalizePostTitleForMatch(post.title) !== expectedTitle) continue;
+    const at = post.publishedAt ? new Date(post.publishedAt).getTime() : Date.now();
+    if (at < sinceMs) continue;
+    const ok = await finalizePostBlogJob(jobId, post.postUrl);
+    if (ok) {
+      await logOperation({
+        level: 'info',
+        message: `[post_blog] 블로그 발행 확인(네이버 API) — failed → completed`,
+        job_id: jobId,
+        account_id: job.account_id as string,
+      });
+      return post.postUrl;
+    }
+  }
+
+  return null;
+}

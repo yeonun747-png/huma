@@ -6,6 +6,7 @@ import { enqueueHumaJob, type JobRecord } from './job-scheduler.js';
 export async function resumePostingAfterCaptcha(jobId: string, accountId: string): Promise<void> {
   const { data: job } = await supabase.from('huma_jobs').select('*').eq('id', jobId).maybeSingle();
   if (!job) throw new Error('JOB_NOT_FOUND');
+  if (job.status === 'completed' && job.result_url?.trim()) return;
 
   await supabase
     .from('huma_accounts')

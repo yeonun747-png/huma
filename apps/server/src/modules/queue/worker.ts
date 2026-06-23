@@ -82,6 +82,9 @@ import {
   isScheduledCrankPayload,
 } from '../../lib/crank-worker-defer.js';
 import { purgePostBlogStorageMedia } from '../../lib/cleanup-post-blog-storage.js';
+import { finalizePostBlogJob } from '../../lib/post-blog-job-complete.js';
+import { isPostingConnectionError } from '../../lib/posting-connection-error.js';
+import { tryReconcilePostBlogJobCompletion } from '../../lib/post-blog-reconcile.js';
 
 async function getTodayCount(accountId: string, field: 'post_count_today' | 'crank_count_today'): Promise<number> {
   const { data } = await supabase.from('huma_accounts').select(`${field}`).eq('id', accountId).single();
@@ -99,13 +102,19 @@ async function incrementAccountCount(accountId: string, field: 'post_count_today
 }
 
 async function completeJob(jobId: string, resultUrl?: string) {
-  const { data: job } = await supabase.from('huma_jobs').select('*').eq('id', jobId).single();
+  const { data: job } = await supabase.from('huma_jobs').select('job_type').eq('id', jobId).single();
+  if (job?.job_type === 'post_blog' && resultUrl?.trim()) {
+    await finalizePostBlogJob(jobId, resultUrl);
+    return;
+  }
+
+  const { data: fullJob } = await supabase.from('huma_jobs').select('*').eq('id', jobId).single();
   const published = Boolean(resultUrl?.trim());
 
-  if (job?.job_type === 'post_blog' && published) {
-    await purgePostBlogStorageMedia(job.image_urls as string[] | null, {
+  if (fullJob?.job_type === 'post_blog' && published) {
+    await purgePostBlogStorageMedia(fullJob.image_urls as string[] | null, {
       jobId,
-      accountId: job.account_id as string | undefined,
+      accountId: fullJob.account_id as string | undefined,
     });
   }
 
@@ -115,25 +124,25 @@ async function completeJob(jobId: string, resultUrl?: string) {
       status: 'completed',
       ...(resultUrl ? { result_url: resultUrl } : {}),
       completed_at: new Date().toISOString(),
-      ...(job?.job_type === 'post_blog' && published ? { image_urls: null } : {}),
+      ...(fullJob?.job_type === 'post_blog' && published ? { image_urls: null } : {}),
     })
     .eq('id', jobId);
 
-  if (job?.job_type === 'post_blog' && published && resultUrl?.trim() && job.account_id) {
+  if (fullJob?.job_type === 'post_blog' && published && resultUrl?.trim() && fullJob.account_id) {
     await recordPublishedPost({
-      accountId: job.account_id as string,
+      accountId: fullJob.account_id as string,
       resultUrl,
-      title: job.title as string | null,
-      content: job.content as string | null,
-      linkUrl: job.link_url as string | null,
-      imageUrls: job.image_urls as string[] | null,
+      title: fullJob.title as string | null,
+      content: fullJob.content as string | null,
+      linkUrl: fullJob.link_url as string | null,
+      imageUrls: fullJob.image_urls as string[] | null,
       publishedAt: new Date().toISOString(),
-      workspace: job.workspace as string | null,
-      hasVideo: job.content_type === 'B',
+      workspace: fullJob.workspace as string | null,
+      hasVideo: fullJob.content_type === 'B',
     });
   }
 
-  if (job) await scheduleRepeatIfNeeded(job as import('../../lib/job-scheduler.js').JobRecord);
+  if (fullJob) await scheduleRepeatIfNeeded(fullJob as import('../../lib/job-scheduler.js').JobRecord);
 }
 
 const PLAYWRIGHT_JOBS = ['post_blog', 'cafe_new_post', 'cafe_reply'];
@@ -781,6 +790,30 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
           type === 'video_content_conti' ||
           type === 'video_content_render' ||
           type === 'video_content_generate';
+        if (humaJobId && type === 'post_blog') {
+          const msg = (err as Error).message ?? '';
+          const reconciledUrl = await tryReconcilePostBlogJobCompletion(humaJobId).catch(() => null);
+          if (reconciledUrl) {
+            if (accountId) await incrementAccountCount(accountId, dailyCountField(type));
+            await logOperation({
+              level: 'info',
+              message: `[post_blog] 네이버 발행 확인 — 오류 무시·완료 처리 (${reconciledUrl})`,
+              job_id: humaJobId,
+              account_id: accountId,
+            });
+            return;
+          }
+          if (!advanceRequested && isPostingConnectionError(msg)) {
+            await deferHumaJob(job, humaJobId, 5 * 60 * 1000, {
+              reason: 'PROXY_CONNECTION',
+              accountId,
+              token,
+              logMessage: `[post_blog] 동글/프록시 연결 실패 — 5분 후 재시도`,
+              level: 'warn',
+            });
+            throw new DelayedError();
+          }
+        }
         if (humaJobId) {
           await supabase
             .from('huma_jobs')

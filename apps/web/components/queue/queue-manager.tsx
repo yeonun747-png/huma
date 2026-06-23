@@ -656,6 +656,7 @@ export function QueueManager() {
             const abortable = isAbortableQueueJob(job);
             const deletable = isDeletableQueueJob(job);
             const pausable = isPausableQueueJob(job);
+            const canReconcilePublish = job.job_type === 'post_blog' && job.status === 'failed';
             return (
               <MQueueItem
                 key={job.id}
@@ -699,6 +700,18 @@ export function QueueManager() {
                           .then(() => {
                             void load();
                             void appAlert('앞당김 — 큐에 등록했습니다. 잠시 후 LIVE로 바뀌는지 확인하세요.');
+                          })
+                          .catch((e) => void appAlert((e as Error).message))
+                    : undefined
+                }
+                onReconcilePublish={
+                  canReconcilePublish
+                    ? () =>
+                        api
+                          .reconcilePublishJob(job.id)
+                          .then((res) => {
+                            void load({ force: true });
+                            void appAlert(`발행 확인 완료\n${res.result_url}`);
                           })
                           .catch((e) => void appAlert((e as Error).message))
                     : undefined

@@ -969,6 +969,10 @@ export const api = {
   stopAll: (reason: string) =>
     request('/api/stop-all', { method: 'POST', body: JSON.stringify({ reason }) }),
   advanceJob: (id: string) => request(`/api/jobs/${id}/advance`, { method: 'PATCH' }),
+  reconcilePublishJob: (id: string) =>
+    request<{ ok: boolean; result_url: string; job: HumaJob }>(`/api/jobs/${id}/reconcile-publish`, {
+      method: 'POST',
+    }),
   resumeAll: () => request('/api/resume-all', { method: 'POST' }),
   getCaptchaDrillStatus: () =>
     request<{ enabled: boolean; activeJobId: string | null }>('/api/system/captcha-drill', {

@@ -149,6 +149,7 @@ export function MQueueItem({
   workspaceBorder,
   onClick,
   onAdvance,
+  onReconcilePublish,
   onStop,
   onDelete,
   stopTitle,
@@ -165,6 +166,7 @@ export function MQueueItem({
   workspaceBorder?: 'yeonun' | 'quizoasis' | 'panana';
   onClick?: () => void;
   onAdvance?: () => void;
+  onReconcilePublish?: () => void;
   onStop?: () => void;
   onDelete?: () => void;
   stopTitle?: string;
@@ -213,6 +215,19 @@ export function MQueueItem({
       </div>
       <div className="m-qi-r">
         {tagSlot ?? <MTag tone={tagTone}>{tag}</MTag>}
+        {onReconcilePublish ? (
+          <button
+            type="button"
+            className="m-q-btn run"
+            title="네이버 발행 확인·완료 처리"
+            onClick={(e) => {
+              e.stopPropagation();
+              onReconcilePublish();
+            }}
+          >
+            ✓
+          </button>
+        ) : null}
         {onAdvance ? (
           <button
             type="button"
