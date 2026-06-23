@@ -21,8 +21,8 @@ describe('isPostingQuotaOvercommitted', () => {
     expect(isPostingQuotaOvercommitted(0, 1, 1, 1)).toBe(true);
   });
 
-  it('allows post_blog after content_full when only in-flight job is self (target 1)', () => {
-    // 실행 중 content_full 1건은 목표와 같아도 초과가 아님 — assertAccountPostingQuota가 excludeJobId로 재검사
+  it('allows quota when only in-flight job is self at daily target (target 1)', () => {
+    // content_full 등록·post_blog 발행 시각 — 자기 job 제외 시 pipeline 0 → 허용
     expect(isPostingQuotaOvercommitted(0, 0, 0, 1)).toBe(false);
     expect(isPostingQuotaOvercommitted(0, 1, 0, 1)).toBe(false);
   });

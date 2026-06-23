@@ -362,7 +362,9 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         }
         const workspace = payload.workspace as string | undefined;
         if (accountId && workspace && type === 'post_blog' && !advanceRequested) {
-          await assertAccountPostingQuota(workspace, accountId);
+          await assertAccountPostingQuota(workspace, accountId, {
+            excludeJobId: humaJobId ?? undefined,
+          });
         }
         if (type === 'post_blog' && accountId && !advanceRequested) {
           const crossWait = await checkCrossPostingStagger(accountId);
