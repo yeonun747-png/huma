@@ -130,7 +130,7 @@ export function pairTotalBytes(pair: VideoContentStoragePair): number {
   return (pair.subtitled?.bytes ?? 0) + (pair.source?.bytes ?? 0);
 }
 
-/** 작업별로 자막본·원본을 묶어 반환 (용량 큰 작업 우선) */
+/** 작업별로 자막본·원본을 묶어 반환 (최근 생성순 — 그리드 맨 좌측이 최신) */
 export function groupStorageFiles(items: VideoContentStorageItem[]): VideoContentStoragePair[] {
   return items
     .filter((item) => item.hasSubtitled || item.hasSource)
@@ -145,7 +145,7 @@ export function groupStorageFiles(items: VideoContentStorageItem[]): VideoConten
       subtitled: item.hasSubtitled ? storageFileFromItem(item, 'subtitled') : null,
       source: item.hasSource ? storageFileFromItem(item, 'source') : null,
     }))
-    .sort((a, b) => pairTotalBytes(b) - pairTotalBytes(a));
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
 
 /** @deprecated groupStorageFiles 사용 */
