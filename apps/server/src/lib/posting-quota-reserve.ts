@@ -93,3 +93,20 @@ export async function clearOrphanPostingReservations(
   }
   return cleared;
 }
+
+/** 자동발행 OFF/ON 시 고아 예약 즉시 제거 */
+export async function resetPostingQuotaReservation(accountId: string): Promise<void> {
+  const key = accountId.trim();
+  if (!key) return;
+
+  const kstDate = formatKstDateKey();
+  const { error } = await supabase
+    .from('huma_accounts')
+    .update({
+      posting_reserved_today: 0,
+      posting_reserved_kst_date: kstDate,
+    })
+    .eq('id', key);
+
+  if (error) throw new Error(`예약 슬롯 초기화 실패: ${error.message}`);
+}

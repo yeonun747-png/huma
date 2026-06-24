@@ -36,6 +36,7 @@ import { submitCaptchaAnswerForJob } from '../lib/captcha-answer-submit.js';
 import { tryReconcilePostBlogJobCompletion } from '../lib/post-blog-reconcile.js';
 import { revertPostBlogCompletion } from '../lib/revert-post-blog-completion.js';
 import { explainPostBlogPublishDay } from '../lib/post-blog-publish-day.js';
+import { diagnoseAutoPublishWorkspace } from '../lib/auto-publish-diagnosis.js';
 import {
   completeCaptchaHold,
   getCaptchaHold,
@@ -876,6 +877,22 @@ export async function registerJobRoutes(app: FastifyInstance) {
       queue_done_today: queueStats.doneToday,
       jobs: explain.jobs,
     };
+  });
+
+  /** 자동발행 due 차단 원인 진단 — 연운1~3 비교용 */
+  app.get('/api/jobs/debug/auto-publish', { preHandler: authMiddleware }, async (request, reply) => {
+    const { workspace, slot_label } = request.query as {
+      workspace?: string;
+      slot_label?: string;
+    };
+    const allowedWorkspaces = getWorkspaceFilter(request);
+    if (!workspace || !allowedWorkspaces.includes(workspace)) {
+      return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
+    }
+
+    const slotLabels = slot_label?.trim() ? [slot_label.trim()] : undefined;
+    const accounts = await diagnoseAutoPublishWorkspace(workspace, slotLabels);
+    return { workspace, accounts };
   });
 
   /** post_blog — 네이버에 이미 발행됐으나 failed 로 남은 job 상태 정정 */

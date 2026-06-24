@@ -12,10 +12,13 @@ import {
 import {
   countInFlightPostingPipeline,
   getAutoPublishStatus,
+  kstTodayStartIso,
 } from './posting-daily-status.js';
 import {
   clearOrphanPostingReservations,
   getPostingReservedToday,
+  isOrphanPostingReservation,
+  resetPostingQuotaReservation,
 } from './posting-quota-reserve.js';
 import { postingSlotByWorkspace } from './dongle-slots.js';
 import { randomBetween } from './utils.js';
@@ -132,29 +135,53 @@ export async function loadAutoPublishAccountState(accountId: string): Promise<Au
   };
 }
 
-async function cancelPendingAutoPublishJobs(accountId: string): Promise<number> {
-  const { data: rows } = await supabase
-    .from('huma_jobs')
-    .select('id, platform_schedule, status')
-    .eq('account_id', accountId)
-    .eq('job_type', 'content_full')
-    .in('status', ['pending', 'scheduled']);
+/** 자동발행 OFF — 당일 자동발행 job·고아 예약 정리 */
+async function cancelAutoPublishJobsOnDisable(
+  accountId: string,
+): Promise<{ content: number; blog: number }> {
+  const since = kstTodayStartIso();
+  let content = 0;
+  let blog = 0;
 
-  const ids = (rows ?? [])
-    .filter((r) => isAutoPublishJob(r.platform_schedule))
-    .map((r) => r.id as string);
+  const specs = [
+    {
+      jobType: 'content_full' as const,
+      statuses: ['pending', 'scheduled', 'running'],
+    },
+    {
+      jobType: 'post_blog' as const,
+      statuses: ['pending', 'scheduled', 'running', 'awaiting_captcha'],
+    },
+  ];
 
-  if (!ids.length) return 0;
+  for (const spec of specs) {
+    const { data: rows } = await supabase
+      .from('huma_jobs')
+      .select('id, platform_schedule')
+      .eq('account_id', accountId)
+      .eq('job_type', spec.jobType)
+      .in('status', spec.statuses)
+      .gte('created_at', since);
 
-  await supabase
-    .from('huma_jobs')
-    .update({
-      status: 'failed',
-      error_message: '자동발행 OFF — 대기 작업 취소',
-    })
-    .in('id', ids);
+    const ids = (rows ?? [])
+      .filter((r) => isAutoPublishJob(r.platform_schedule))
+      .map((r) => r.id as string);
 
-  return ids.length;
+    if (!ids.length) continue;
+
+    await supabase
+      .from('huma_jobs')
+      .update({
+        status: 'failed',
+        error_message: '자동발행 OFF — 대기·처리 중 작업 취소',
+      })
+      .in('id', ids);
+
+    if (spec.jobType === 'content_full') content = ids.length;
+    else blog = ids.length;
+  }
+
+  return { content, blog };
 }
 
 async function persistAutoPublishPlan(
@@ -214,6 +241,8 @@ export async function enableAutoPublish(workspace: string, accountId: string): P
 
   if (!account) throw new Error('포스팅 계정을 찾을 수 없습니다');
 
+  await resetPostingQuotaReservation(accountId);
+
   const kstDate = formatKstDateKey();
   const planned = await resolveAutoPublishPlannedCountForDay(
     accountId,
@@ -260,9 +289,10 @@ export async function enableAutoPublish(workspace: string, accountId: string): P
   return state;
 }
 
-/** 자동발행 OFF — 대기 중 자동 content_full 취소 */
+/** 자동발행 OFF — 대기·처리 중 자동 job 취소 + 예약 슬롯 초기화 */
 export async function disableAutoPublish(workspace: string, accountId: string): Promise<AutoPublishAccountState> {
-  const cancelled = await cancelPendingAutoPublishJobs(accountId);
+  const cancelled = await cancelAutoPublishJobsOnDisable(accountId);
+  await resetPostingQuotaReservation(accountId);
 
   const { data: account } = await supabase
     .from('huma_accounts')
@@ -279,7 +309,8 @@ export async function disableAutoPublish(workspace: string, accountId: string): 
 
   await logOperation({
     level: 'info',
-    message: `[auto-publish] OFF account=${accountId} cancelled=${cancelled}`,
+    message:
+      `[auto-publish] OFF account=${accountId} cancelled_content=${cancelled.content} cancelled_blog=${cancelled.blog} reserved_reset=1`,
     workspace,
     account_id: accountId,
   });
@@ -411,16 +442,10 @@ export async function triggerDueAutoPublishJobs(): Promise<number> {
         continue;
       }
 
-      let publishStatus = await getAutoPublishStatus(workspace, accountId);
-      const pipelineJobs = await countInFlightPostingPipeline(accountId);
-      const reservedSlots = await getPostingReservedToday(accountId);
+      let pipelineJobs = await countInFlightPostingPipeline(accountId);
+      let reservedSlots = await getPostingReservedToday(accountId);
 
-      if (
-        !publishStatus.can_publish &&
-        publishStatus.block_reason === 'IN_FLIGHT' &&
-        pipelineJobs === 0 &&
-        reservedSlots > 0
-      ) {
+      if (isOrphanPostingReservation(pipelineJobs, reservedSlots)) {
         const cleared = await clearOrphanPostingReservations(accountId, pipelineJobs);
         if (cleared > 0) {
           await logOperation({
@@ -429,9 +454,11 @@ export async function triggerDueAutoPublishJobs(): Promise<number> {
             workspace,
             account_id: accountId,
           });
-          publishStatus = await getAutoPublishStatus(workspace, accountId);
+          reservedSlots = 0;
         }
       }
+
+      const publishStatus = await getAutoPublishStatus(workspace, accountId);
 
       if (!publishStatus.can_publish) {
         const nextSlot = await resolveBlockedAutoPublishNextSlot(
