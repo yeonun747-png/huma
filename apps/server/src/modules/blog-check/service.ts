@@ -35,7 +35,7 @@ import {
   type BlogCheckScanMode,
 } from './constants.js';
 import { computeBlogIndexScore, scrapeBlogStats } from './index-score.js';
-import { scrapePostContentStats, scrapePostTitle } from './post-content-scraper.js';
+import { scrapePostContentStats } from './post-content-scraper.js';
 import type { PostExposureStatus } from './exposure-status.js';
 import { rankToExposureStatus } from './exposure-status.js';
 import { notifyBlogCheckCaptcha, notifyBlogCheckIndexParseFailed } from './notify.js';
@@ -645,7 +645,16 @@ async function resolveScannablePosts(
   if (missing.length === 0) return selected;
 
   const supplemental = await loadPostRowsByNos(accountId, blogId, workspace, missing);
-  if (supplemental.length === 0) return selected;
+  if (supplemental.length === 0) {
+    if (mode === 'posts') {
+      await logOperation({
+        level: 'warn',
+        message: `[blog-check] posts 모드 대상 없음 — postNos=${[...want].join(',')} blogId=${blogId}`,
+        account_id: accountId,
+      });
+    }
+    return selected;
+  }
 
   const merged = new Map<string, PostRow>();
   for (const p of selected) {
@@ -797,7 +806,8 @@ async function estimateTotalSteps(
       scanDate,
     );
     total += countScannablePosts(selected);
-    const skipIndex = mode !== 'full' && (await hasTodayBlogIndex(acc.id, scanDate));
+    const skipIndex =
+      mode === 'posts' || (mode === 'delta' && (await hasTodayBlogIndex(acc.id, scanDate)));
     if (!skipIndex) total += 1;
   }
   return total;
@@ -893,10 +903,6 @@ async function computePostScanResult(
   if (!postNo) throw new Error('post_no 없음');
 
   const title = post.title?.trim() || '—';
-  const crawled = await scrapePostContentStats(page, blogId, postNo);
-  const liveTitle = (await scrapePostTitle(page))?.trim();
-  const searchTitle = liveTitle && liveTitle.length >= title.length ? liveTitle : title;
-  const rankResult = await checkPostExposure(page, blogId, postNo, searchTitle);
   const hasStoredContent = post.char_count > 0 || post.img_count > 0;
   const fromPost: PostContentStats = {
     char_count: post.char_count,
@@ -911,6 +917,21 @@ async function computePostScanResult(
     int_link_count: post.int_link_count,
     ext_link_count: hasStoredContent && !post.ext_link_cleared ? post.ext_link_count : 0,
   };
+
+  // 노출 순위는 search.naver.com(nexearch) — 본문 크롤보다 먼저 (본문 hang 시에도 강함/약함 반영)
+  const rankResult = await checkPostExposure(page, blogId, postNo, title);
+
+  let crawled = emptyPostContentStats();
+  try {
+    crawled = await scrapePostContentStats(page, blogId, postNo);
+  } catch (err) {
+    if (err instanceof BlogCheckCaptchaError) throw err;
+    await logOperation({
+      level: 'warn',
+      message: `[blog-check] 본문 크롤 실패 (${blogId}/${postNo}) — 노출만 반영: ${(err as Error).message}`,
+    });
+  }
+
   const contentStats =
     crawled.char_count >= 80
       ? {
@@ -1016,7 +1037,8 @@ async function scanAccountWorkItem(
     statusMap,
     scanDate,
   );
-  const skipIndex = mode !== 'full' && (await hasTodayBlogIndex(acc.id, scanDate));
+  const skipIndex =
+    mode === 'posts' || (mode === 'delta' && (await hasTodayBlogIndex(acc.id, scanDate)));
 
   let parsed: Awaited<ReturnType<typeof scrapeBlogStats>> | null = null;
   if (!skipIndex) {

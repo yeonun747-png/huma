@@ -623,13 +623,15 @@ export async function scrapePostContentStats(
   blogId: string,
   postNo: string,
 ): Promise<PostContentStats> {
+  const mobileUrl = mobilePostViewUrl(blogId, postNo);
   const desktopUrl = `https://blog.naver.com/PostView.naver?blogId=${encodeURIComponent(blogId)}&logNo=${encodeURIComponent(postNo)}`;
-  let stats = await navigateAndScrape(page, desktopUrl, blogId, postNo);
+  // blog-check 브라우저는 모바일 UA — m.blog 우선(데스크톱 PostView+iframe은 Xvfb에서 hang·타임아웃 빈발)
+  let stats = await navigateAndScrape(page, mobileUrl, blogId, postNo);
 
   if (stats.char_count < CONTENT_MIN_CHARS) {
     stats = mergePostContentStats(
       stats,
-      await navigateAndScrape(page, mobilePostViewUrl(blogId, postNo), blogId, postNo),
+      await navigateAndScrape(page, desktopUrl, blogId, postNo),
     );
   }
 
