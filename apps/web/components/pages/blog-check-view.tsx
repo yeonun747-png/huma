@@ -627,7 +627,7 @@ export function BlogCheckView() {
                         <div
                           key={i}
                           className="spark-bar spark-bar-null"
-                          title={`${DAYS[d.getDay()]}: 미스캔`}
+                          title={`${DAYS[d.getDay()]}: 해당일 발행·스캔 없음`}
                         />
                       );
                     }

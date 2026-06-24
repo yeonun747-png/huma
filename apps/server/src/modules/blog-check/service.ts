@@ -232,6 +232,53 @@ export function trendDirection(trend: (number | null)[]): TrendDirection {
   return '안정';
 }
 
+/** 최근 7일 KST 날짜 키 (오늘 포함) */
+export function lastSevenKstDayKeys(now = new Date()): string[] {
+  const dayKeys: string[] = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - (6 - i));
+    dayKeys.push(formatKstDateKey(d));
+  }
+  return dayKeys;
+}
+
+/**
+ * 7일 누락 추이 — 발행일(KST)별 최신 노출 뱃지 기준.
+ * (스캔 실행일 scanned_at 이 아님 — 하루만 스캔해도 금요일 발행분 등이 반영됨)
+ */
+export function buildSevenDayMissTrendFromPosts(
+  posts: Array<{ post_no?: string | null; post_url?: string; published_at: string }>,
+  statusByPostNo: Map<string, { status: string }>,
+  now = new Date(),
+): (number | null)[] {
+  const dayKeys = lastSevenKstDayKeys(now);
+  const daySet = new Set(dayKeys);
+  const missByDay = new Map<string, number>();
+  const coveredByDay = new Map<string, number>();
+
+  for (const post of posts) {
+    const postNo = post.post_no ?? extractPostNoFromUrl(post.post_url ?? '');
+    if (!postNo) continue;
+
+    const pubDay = formatKstDateKey(new Date(post.published_at));
+    if (!daySet.has(pubDay)) continue;
+
+    const st = statusByPostNo.get(postNo);
+    if (!st) continue;
+
+    coveredByDay.set(pubDay, (coveredByDay.get(pubDay) ?? 0) + 1);
+    if (st.status === 'miss') {
+      missByDay.set(pubDay, (missByDay.get(pubDay) ?? 0) + 1);
+    }
+  }
+
+  return dayKeys.map((day) => {
+    if ((coveredByDay.get(day) ?? 0) === 0) return null;
+    return missByDay.get(day) ?? 0;
+  });
+}
+
 async function listActivePostingAccounts(accountId?: string): Promise<AccountRow[]> {
   const withSessionStatus = 'id, name, naver_id, blog_url, workspace, slot_label, proxy_port, session_status';
   const withoutSessionStatus =
@@ -720,40 +767,15 @@ async function insertBlogIndexHistory(
   }
 }
 
-/** 7일 추이 — 스캔 안 한 날은 null (현재 blogId 글만) */
+/** @deprecated use buildSevenDayMissTrendFromPosts — 스캔일 집계는 하루 스캔 시 추이 불가 */
 async function buildSevenDayMissTrend(accountId: string, blogId?: string | null): Promise<(number | null)[]> {
-  const dayKeys: string[] = [];
-  for (let i = 0; i < 7; i++) {
-    const d = new Date();
-    d.setDate(d.getDate() - (6 - i));
-    dayKeys.push(formatKstDateKey(d));
+  const recentPosts = await fetchRecentPosts(accountId, { blogId });
+  const statusMap = await fetchLatestStatusByPostNo(accountId, blogId);
+  const statusByPostNo = new Map<string, { status: string }>();
+  for (const [postNo, row] of statusMap) {
+    statusByPostNo.set(postNo, { status: String(row.status) });
   }
-
-  const { data, error } = await supabase
-    .from('blog_post_status')
-    .select('post_no, post_url, scanned_at, status')
-    .eq('account_id', accountId)
-    .gte('scanned_at', dayKeys[0]);
-
-  if (error) return dayKeys.map(() => null);
-
-  const scannedDays = new Set<string>();
-  const missByDay = new Map<string, number>();
-
-  for (const row of data ?? []) {
-    const postNo = String(row.post_no ?? '');
-    if (blogId && row.post_url && !postBelongsToBlog(String(row.post_url), blogId)) continue;
-    const day = String(row.scanned_at).slice(0, 10);
-    scannedDays.add(day);
-    if (row.status === 'miss') {
-      missByDay.set(day, (missByDay.get(day) ?? 0) + 1);
-    }
-  }
-
-  return dayKeys.map((day) => {
-    if (!scannedDays.has(day)) return null;
-    return missByDay.get(day) ?? 0;
-  });
+  return buildSevenDayMissTrendFromPosts(recentPosts, statusByPostNo);
 }
 
 interface ScanWorkItem {
@@ -1647,7 +1669,11 @@ export async function buildBlogCheckAccountsResponse(allowedWorkspaces: string[]
 
     const totalPosts = recentPosts.length;
     const missRate = totalPosts > 0 ? Math.round((missCount / totalPosts) * 100) : 0;
-    const trend = await buildSevenDayMissTrend(acc.id, blogId);
+    const statusByPostNo = new Map<string, { status: string }>();
+    for (const [postNo, row] of statusMap) {
+      statusByPostNo.set(postNo, { status: String(row.status) });
+    }
+    const trend = buildSevenDayMissTrendFromPosts(recentPosts, statusByPostNo);
     const idxScore = await fetchLatestIdxScoreForBlog(acc.id, blogId, totalPosts);
 
     result.push({
