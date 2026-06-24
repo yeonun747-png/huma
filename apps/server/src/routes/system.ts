@@ -12,6 +12,7 @@ import {
 } from '../modules/watcher/captcha-drill.js';
 import { sendTelegramTest } from '../modules/watcher/telegram.js';
 import { getVncRuntimeStatus } from '../modules/watcher/vnc-status.js';
+import { resolveEarliestNextPublishAt } from '../lib/next-publish-schedule.js';
 import type { Workspace } from '@huma/shared';
 
 export async function registerSystemRoutes(app: FastifyInstance) {
@@ -34,24 +35,15 @@ export async function registerSystemRoutes(app: FastifyInstance) {
       { count: runningJobs },
       { count: activeAccounts },
       { count: errors },
-      { data: nextScheduled },
     ] = await Promise.all([
       supabase.from('huma_jobs').select('*', { count: 'exact', head: true }).in('workspace', workspaces).eq('status', 'pending'),
       supabase.from('huma_jobs').select('*', { count: 'exact', head: true }).in('workspace', workspaces).eq('status', 'scheduled'),
       supabase.from('huma_jobs').select('*', { count: 'exact', head: true }).in('workspace', workspaces).eq('status', 'running'),
       supabase.from('huma_accounts').select('*', { count: 'exact', head: true }).in('workspace', workspaces).eq('is_active', true),
       supabase.from('huma_logs').select('*', { count: 'exact', head: true }).in('workspace', workspaces).eq('level', 'ERROR').gte('created_at', new Date(Date.now() - 86400000).toISOString()),
-      supabase
-        .from('huma_jobs')
-        .select('scheduled_at')
-        .in('workspace', workspaces)
-        .in('status', ['pending', 'scheduled'])
-        .not('scheduled_at', 'is', null)
-        .gt('scheduled_at', new Date().toISOString())
-        .order('scheduled_at', { ascending: true })
-        .limit(1)
-        .maybeSingle(),
     ]);
+
+    const nextScheduled = await resolveEarliestNextPublishAt(workspaces);
 
     return {
       healthy: !paused,
@@ -60,7 +52,7 @@ export async function registerSystemRoutes(app: FastifyInstance) {
       pendingJobs: (pendingJobs ?? 0) + (scheduledJobs ?? 0),
       queued: (pendingJobs ?? 0) + (scheduledJobs ?? 0),
       liveAccounts: runningJobs ?? 0,
-      nextScheduled: nextScheduled?.scheduled_at ?? null,
+      nextScheduled,
       activeAccounts: activeAccounts ?? 0,
       errors: errors ?? 0,
       paused,

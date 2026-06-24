@@ -13,6 +13,7 @@ import {
   parseDashboardPeriod,
 } from '../lib/dashboard-period.js';
 import { buildContentPerformanceItems } from '../lib/content-performance.js';
+import { resolveEarliestNextPublishAt } from '../lib/next-publish-schedule.js';
 import {
   fetchSearchConsoleTopPages,
   getMissingSearchConsoleEnvKeys,
@@ -57,7 +58,6 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
       { count: activeAccounts },
       { count: totalAccounts },
       { count: periodErrors },
-      { data: nextScheduled },
       { data: periodJobs },
       { data: prevPeriodJobs },
       { data: chartJobs },
@@ -72,16 +72,6 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
       supabase.from('huma_accounts').select('*', { count: 'exact', head: true }).in('workspace', workspaces).eq('is_active', true),
       supabase.from('huma_accounts').select('*', { count: 'exact', head: true }).in('workspace', workspaces),
       supabase.from('huma_logs').select('*', { count: 'exact', head: true }).in('workspace', workspaces).eq('level', 'ERROR').gte('created_at', range.start).lte('created_at', range.end),
-      supabase
-        .from('huma_jobs')
-        .select('scheduled_at')
-        .in('workspace', workspaces)
-        .in('status', ['pending', 'scheduled'])
-        .not('scheduled_at', 'is', null)
-        .gt('scheduled_at', new Date().toISOString())
-        .order('scheduled_at', { ascending: true })
-        .limit(1)
-        .maybeSingle(),
       supabase
         .from('huma_jobs')
         .select(publishJobSelect)
@@ -284,6 +274,8 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
       .filter((p) => p.workspace === 'panana')
       .reduce((s, p) => s + (p.post_count_today ?? 0), 0);
 
+    const nextPublishAt = await resolveEarliestNextPublishAt(workspaces);
+
     return {
       pendingJobs: (pendingJobs ?? 0) + (scheduledJobs ?? 0),
       activeAccounts: activeAccounts ?? 0,
@@ -307,8 +299,8 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
         todayPublish: adjustedPeriodCompleted,
         todayPublishSub: periodSub,
         queuePending: (pendingJobs ?? 0) + (scheduledJobs ?? 0),
-        queueSub: formatKstYmdHm(nextScheduled?.scheduled_at)
-          ? `다음 ${formatKstYmdHm(nextScheduled?.scheduled_at)}`
+        queueSub: formatKstYmdHm(nextPublishAt)
+          ? `다음 ${formatKstYmdHm(nextPublishAt)}`
           : '스케줄 없음',
         errors: periodErrors ?? 0,
         errorsSub: period === 'today' ? `Layer4·오류 ${periodErrors ?? 0}` : `${period === 'week' ? '주간' : '월간'} 오류 ${periodErrors ?? 0}`,
@@ -316,8 +308,8 @@ export async function registerDashboardRoutes(app: FastifyInstance) {
         totalAccounts: totalAccounts ?? 0,
         accountSub: errorAccountName ? `⚠ ${errorAccountName} 세션오류 →` : `${activeAccounts ?? 0}개 활성`,
       },
-      nextPublish: formatKstYmdHm(nextScheduled?.scheduled_at),
-      nextPublishAt: nextScheduled?.scheduled_at ?? null,
+      nextPublish: formatKstYmdHm(nextPublishAt),
+      nextPublishAt,
       serviceStatus,
       workspacePosts,
       roasItems,

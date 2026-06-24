@@ -21,7 +21,7 @@ async function tickAutoPublishScheduler(): Promise<void> {
   }
 
   const now = Date.now();
-  if (now - lastAutoPublishTickAt < 45_000) return;
+  if (now - lastAutoPublishTickAt < 20_000) return;
   lastAutoPublishTickAt = now;
 
   const triggered = await triggerDueAutoPublishJobs();

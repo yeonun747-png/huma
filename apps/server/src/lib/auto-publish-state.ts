@@ -11,6 +11,33 @@ import {
 } from './auto-publish-slot-planner.js';
 import { getAutoPublishStatus } from './posting-daily-status.js';
 import { postingSlotByWorkspace } from './dongle-slots.js';
+import { randomBetween } from './utils.js';
+
+/** 파이프라인 처리 중 — 최소 간격 재계산 없이 짧게 재시도 */
+export function deferAutoPublishRetryIso(minMinutes = 2, maxMinutes = 4): string {
+  return new Date(Date.now() + randomBetween(minMinutes, maxMinutes) * 60_000).toISOString();
+}
+
+async function resolveBlockedAutoPublishNextSlot(
+  publishStatus: Awaited<ReturnType<typeof getAutoPublishStatus>>,
+  input: { accountId: string; plannedCount: number; consumedCount: number },
+): Promise<string | null> {
+  const reason = publishStatus.block_reason;
+  if (reason === 'IN_FLIGHT') {
+    return deferAutoPublishRetryIso();
+  }
+  if (reason === 'QUOTA' && input.consumedCount >= input.plannedCount) {
+    return null;
+  }
+  if (reason === 'CACHE_EMPTY' || reason === 'POSTING_DISABLED') {
+    return new Date(Date.now() + 15 * 60_000).toISOString();
+  }
+  return planNextAutoPublishTriggerAt({
+    accountId: input.accountId,
+    plannedCount: input.plannedCount,
+    consumedCount: input.consumedCount,
+  });
+}
 
 export interface AutoPublishAccountState {
   id: string;
@@ -311,7 +338,7 @@ export async function triggerDueAutoPublishJobs(): Promise<number> {
 
     const publishStatus = await getAutoPublishStatus(workspace, accountId);
     if (!publishStatus.can_publish) {
-      const nextSlot = await planNextAutoPublishTriggerAt({
+      const nextSlot = await resolveBlockedAutoPublishNextSlot(publishStatus, {
         accountId,
         plannedCount: planned,
         consumedCount: consumed,
