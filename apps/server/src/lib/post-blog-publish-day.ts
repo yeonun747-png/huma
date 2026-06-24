@@ -94,8 +94,16 @@ export function resolveJobPublishedAtIso(
   postPublishedByUrl?: Map<string, string | null>,
 ): string | null {
   const ps = (job.platform_schedule as Record<string, unknown> | null) ?? {};
+  const reconciled = ps[RECONCILED_FROM_FAILED_KEY] === true;
+  const reservedPublish =
+    typeof ps[PUBLISH_SCHEDULED_AT_KEY] === 'string' ? (ps[PUBLISH_SCHEDULED_AT_KEY] as string).trim() : '';
+  if (reservedPublish) return reservedPublish;
+
   const stored = resolveStoredPublishScheduledAt(ps, job.completed_at);
-  if (stored) return stored;
+  if (stored) {
+    if (reconciled && isUntrustedPublishTimestamp(stored, job.completed_at)) return null;
+    return stored;
+  }
 
   const urlKey = job.result_url?.trim() ? normalizePostUrlKey(job.result_url) : '';
   if (urlKey && postPublishedByUrl?.has(urlKey)) {

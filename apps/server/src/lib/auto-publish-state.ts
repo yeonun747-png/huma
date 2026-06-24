@@ -19,6 +19,8 @@ import {
   getPostingReservedToday,
   isOrphanPostingReservation,
   resetPostingQuotaReservation,
+  reservePostingQuotaSlot,
+  releasePostingQuotaSlot,
 } from './posting-quota-reserve.js';
 import { postingSlotByWorkspace } from './dongle-slots.js';
 import { randomBetween } from './utils.js';
@@ -523,6 +525,27 @@ export async function triggerDueAutoPublishJobs(): Promise<number> {
       }
 
       try {
+        const reserveOk = await reservePostingQuotaSlot(accountId);
+        if (!reserveOk) {
+          await persistAutoPublishPlan(accountId, {
+            enabled: true,
+            kst_date: kstDate,
+            planned_count: planned,
+            next_slot_at: null,
+          });
+          await logOperation({
+            level: 'warn',
+            message:
+              `[auto-publish] due stopped account=${state.label ?? accountId} reserve denied ` +
+              `(TS completed=${publishStatus.today_completed}/${publishStatus.daily_target} ` +
+              `consumed=${consumed}/${planned}) — Supabase v3_66 SQL 적용·잘못된 completed job 정리 확인`,
+            workspace,
+            account_id: accountId,
+          });
+          continue;
+        }
+        await releasePostingQuotaSlot(accountId);
+
         const { registerAutoContentJobs } = await import('../modules/claude/auto-content-orchestrator.js');
         await registerAutoContentJobs({
           workspace,
@@ -550,13 +573,15 @@ export async function triggerDueAutoPublishJobs(): Promise<number> {
           next_slot_at: nextSlot,
         });
       } catch (err) {
+        const msg = (err as Error).message;
+        const quotaHit = /한도|목표|도달|QUOTA/i.test(msg);
         await logOperation({
           level: 'warn',
-          message: `[auto-publish] 트리거 실패 — ${(err as Error).message}`,
+          message: `[auto-publish] 트리거 실패 — ${msg}`,
           workspace,
           account_id: accountId,
         });
-        const retryAt = deferAutoPublishRetryIso(2, 4);
+        const retryAt = quotaHit ? null : deferAutoPublishRetryIso(2, 4);
         await persistAutoPublishPlan(accountId, {
           enabled: true,
           kst_date: kstDate,

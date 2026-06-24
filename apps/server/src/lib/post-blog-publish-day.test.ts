@@ -83,6 +83,19 @@ describe('resolveJobPublishedAtIso', () => {
     expect(iso).toBeNull();
   });
 
+  it('ignores untrusted reconcile stamp on reconciled failed jobs', () => {
+    const workerFinish = '2026-06-23T21:42:25.000Z';
+    const iso = resolveJobPublishedAtIso({
+      result_url: 'https://blog.naver.com/x/1',
+      completed_at: workerFinish,
+      platform_schedule: {
+        _reconcile_publish_at: workerFinish,
+        _reconciled_from_failed: true,
+      },
+    });
+    expect(iso).toBeNull();
+  });
+
   it('prefers trusted _publish_scheduled_at over untrusted _reconcile_publish_at', () => {
     const publish = '2026-06-23T11:34:23.000Z';
     const workerFinish = '2026-06-23T21:42:25.000Z';
