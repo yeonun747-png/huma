@@ -9,7 +9,14 @@ import {
   planNextAutoPublishTriggerAt,
   resolveAutoPublishPlannedCountForDay,
 } from './auto-publish-slot-planner.js';
-import { getAutoPublishStatus } from './posting-daily-status.js';
+import {
+  countInFlightPostingPipeline,
+  getAutoPublishStatus,
+} from './posting-daily-status.js';
+import {
+  clearOrphanPostingReservations,
+  getPostingReservedToday,
+} from './posting-quota-reserve.js';
 import { postingSlotByWorkspace } from './dongle-slots.js';
 import { randomBetween } from './utils.js';
 
@@ -404,7 +411,28 @@ export async function triggerDueAutoPublishJobs(): Promise<number> {
         continue;
       }
 
-      const publishStatus = await getAutoPublishStatus(workspace, accountId);
+      let publishStatus = await getAutoPublishStatus(workspace, accountId);
+      const pipelineJobs = await countInFlightPostingPipeline(accountId);
+      const reservedSlots = await getPostingReservedToday(accountId);
+
+      if (
+        !publishStatus.can_publish &&
+        publishStatus.block_reason === 'IN_FLIGHT' &&
+        pipelineJobs === 0 &&
+        reservedSlots > 0
+      ) {
+        const cleared = await clearOrphanPostingReservations(accountId, pipelineJobs);
+        if (cleared > 0) {
+          await logOperation({
+            level: 'warn',
+            message: `[auto-publish] orphan posting_reserved_today cleared=${cleared} account=${state.label ?? accountId} (pipeline=0)`,
+            workspace,
+            account_id: accountId,
+          });
+          publishStatus = await getAutoPublishStatus(workspace, accountId);
+        }
+      }
+
       if (!publishStatus.can_publish) {
         const nextSlot = await resolveBlockedAutoPublishNextSlot(
           publishStatus,
@@ -421,14 +449,15 @@ export async function triggerDueAutoPublishJobs(): Promise<number> {
           planned_count: planned,
           next_slot_at: nextSlot,
         });
-        if (publishStatus.block_reason === 'IN_FLIGHT') {
-          await logOperation({
-            level: 'info',
-            message: `[auto-publish] due 재시도 — 파이프라인 처리 중 (${state.label ?? accountId}) next=${nextSlot}`,
-            workspace,
-            account_id: accountId,
-          });
-        }
+        await logOperation({
+          level: 'info',
+          message:
+            `[auto-publish] due blocked account=${state.label ?? accountId} reason=${publishStatus.block_reason ?? 'UNKNOWN'} ` +
+            `completed=${publishStatus.today_completed}/${publishStatus.daily_target} ` +
+            `pipeline=${pipelineJobs} reserved=${reservedSlots} consumed=${consumed}/${planned} next=${nextSlot}`,
+          workspace,
+          account_id: accountId,
+        });
         continue;
       }
 

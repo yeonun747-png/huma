@@ -70,3 +70,26 @@ export async function getPostingReservedToday(accountId: string): Promise<number
   if (data?.posting_reserved_kst_date !== kstDate) return 0;
   return (data?.posting_reserved_today as number | undefined) ?? 0;
 }
+
+/**
+ * 파이프라인 job 없이 posting_reserved_today만 남은 고아 예약 해제.
+ * IN_FLIGHT(예약 N건 · pipeline 0) → due 시 2~4분 defer만 반복하는 원인.
+ */
+export function isOrphanPostingReservation(pipelineJobs: number, reservedSlots: number): boolean {
+  return pipelineJobs === 0 && reservedSlots > 0;
+}
+
+export async function clearOrphanPostingReservations(
+  accountId: string,
+  pipelineJobs: number,
+): Promise<number> {
+  const reserved = await getPostingReservedToday(accountId);
+  if (!isOrphanPostingReservation(pipelineJobs, reserved)) return 0;
+
+  let cleared = 0;
+  for (let i = 0; i < reserved; i++) {
+    await releasePostingQuotaSlot(accountId);
+    cleared++;
+  }
+  return cleared;
+}
