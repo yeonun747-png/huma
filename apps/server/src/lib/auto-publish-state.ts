@@ -18,6 +18,35 @@ export function deferAutoPublishRetryIso(minMinutes = 2, maxMinutes = 4): string
   return new Date(Date.now() + randomBetween(minMinutes, maxMinutes) * 60_000).toISOString();
 }
 
+const SHORT_SLOT_CLAIM_MS = 5 * 60_000;
+
+/**
+ * 미래에 잡힌 다음 슬롯을 더 늦은 시각으로 밀지 않음.
+ * due 처리 직후 짧은 클레임(2~4분) 구간은 정상 다음 슬롯으로 교체 허용.
+ */
+export function coalesceAutoPublishNextSlot(
+  existing: string | null | undefined,
+  proposed: string | null,
+  now = Date.now(),
+): string | null {
+  if (proposed == null) return null;
+  if (!existing) return proposed;
+
+  const existingMs = new Date(existing).getTime();
+  const proposedMs = new Date(proposed).getTime();
+  if (existingMs <= now + 60_000) return proposed;
+
+  const isShortClaim = existingMs <= now + SHORT_SLOT_CLAIM_MS;
+  if (isShortClaim) return proposed;
+  if (proposedMs > existingMs) return existing;
+  return proposed;
+}
+
+function isFutureAutoPublishSlot(at: string | null | undefined, now = Date.now()): boolean {
+  if (!at) return false;
+  return new Date(at).getTime() > now + 60_000;
+}
+
 async function resolveBlockedAutoPublishNextSlot(
   publishStatus: Awaited<ReturnType<typeof getAutoPublishStatus>>,
   input: { accountId: string; plannedCount: number; consumedCount: number },
@@ -119,13 +148,26 @@ async function persistAutoPublishPlan(
     next_slot_at: string | null;
   },
 ): Promise<void> {
+  let nextSlotAt = patch.next_slot_at;
+  if (nextSlotAt != null) {
+    const { data: row } = await supabase
+      .from('huma_accounts')
+      .select('auto_publish_next_slot_at')
+      .eq('id', accountId)
+      .maybeSingle();
+    nextSlotAt = coalesceAutoPublishNextSlot(
+      (row?.auto_publish_next_slot_at as string | null) ?? null,
+      nextSlotAt,
+    );
+  }
+
   const { error } = await supabase
     .from('huma_accounts')
     .update({
       auto_publish_enabled: patch.enabled,
       auto_publish_kst_date: patch.kst_date,
       auto_publish_planned_count: patch.planned_count,
-      auto_publish_next_slot_at: patch.next_slot_at,
+      auto_publish_next_slot_at: nextSlotAt,
     })
     .eq('id', accountId);
 
@@ -257,6 +299,16 @@ export async function replanAutoPublishSlot(accountId: string, workspace: string
   const state = await loadAutoPublishAccountState(accountId);
   if (!state?.enabled) return;
 
+  if (isFutureAutoPublishSlot(state.next_slot_at)) {
+    await logOperation({
+      level: 'info',
+      message: `[auto-publish] replan skipped — future slot preserved (${state.next_slot_at})`,
+      workspace,
+      account_id: accountId,
+    });
+    return;
+  }
+
   const kstDate = formatKstDateKey();
   const planned =
     state.kst_date === kstDate && state.planned_count != null
@@ -309,6 +361,14 @@ export async function triggerDueAutoPublishJobs(): Promise<number> {
             state.kst_date,
             state.planned_count,
           );
+
+    // 동시 tick 중복 트리거 방지 — 짧은 클레임으로 슬롯 선점
+    await persistAutoPublishPlan(accountId, {
+      enabled: true,
+      kst_date: kstDate,
+      planned_count: planned,
+      next_slot_at: deferAutoPublishRetryIso(),
+    });
 
     const consumed = await countAutoPublishConsumedToday(accountId);
     if (consumed >= planned) {
