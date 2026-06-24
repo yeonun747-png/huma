@@ -129,6 +129,8 @@ async function collectIntegratedSearchResultHrefs(page: Page): Promise<string[]>
     const hrefs: string[] = [];
     const seenUrl = new Set<string>();
     const excludedMetaAreas = new Set(['abL_rtX', 'kwX_ndT']);
+    /** 2026 nexearch 모바일 — 통합검색 유기 블로그 SERP 블록 */
+    const organicFenderAreas = new Set(['urB_coR', 'urB_boR', 'ugB_bsR', 'ugB_b1R']);
 
     const decodeHref = (raw: string | null | undefined): string => {
       const trimmed = (raw ?? '').trim();
@@ -141,6 +143,8 @@ async function collectIntegratedSearchResultHrefs(page: Page): Promise<string[]>
       }
       return trimmed;
     };
+
+    const isBlogHref = (href: string): boolean => /blog\.naver\.com/i.test(href);
 
     const isBlockedHref = (href: string): boolean =>
       !href ||
@@ -175,23 +179,32 @@ async function collectIntegratedSearchResultHrefs(page: Page): Promise<string[]>
     };
 
     const pickPrimaryLink = (block: Element): string | null => {
-      const heatmap = block.querySelector('a[data-heatmap-target=".link"][href*="blog.naver.com"]');
-      if (heatmap) {
-        const href = decodeHref(heatmap.getAttribute('href'));
-        if (href && !isBlockedHref(href)) return href;
-      }
-      const heatmapAny = block.querySelector('a[data-heatmap-target=".link"]');
-      if (heatmapAny) {
-        const href = decodeHref(heatmapAny.getAttribute('href'));
+      const blogHeatmap = block.querySelector('a[data-heatmap-target=".link"][href*="blog.naver.com"]');
+      if (blogHeatmap) {
+        const href = decodeHref(blogHeatmap.getAttribute('href'));
         if (href && !isBlockedHref(href)) return href;
       }
       const selectors = [
+        'a.api_txt_lines.total_tit[href*="blog.naver.com"]',
+        'a.title_link[href*="blog.naver.com"]',
+        'a.link_tit[href*="blog.naver.com"]',
+        'a[data-heatmap-target=".link"][href*="blog.naver.com"]',
         'a.api_txt_lines.total_tit',
         'a.link_tit',
         'a.title_link',
         '.title_area a[href^="http"]',
         'a[href^="http"]',
       ];
+      for (const sel of selectors) {
+        const el = block.querySelector(sel);
+        const href = decodeHref(el?.getAttribute('href'));
+        if (href && !isBlockedHref(href) && isBlogHref(href)) return href;
+      }
+      const heatmapAny = block.querySelector('a[data-heatmap-target=".link"]');
+      if (heatmapAny) {
+        const href = decodeHref(heatmapAny.getAttribute('href'));
+        if (href && !isBlockedHref(href) && isBlogHref(href)) return href;
+      }
       for (const sel of selectors) {
         const el = block.querySelector(sel);
         const href = decodeHref(el?.getAttribute('href'));
@@ -214,15 +227,29 @@ async function collectIntegratedSearchResultHrefs(page: Page): Promise<string[]>
       if (href) pushHref(href);
     };
 
-    for (const root of document.querySelectorAll('[data-fender-root="true"]')) {
-      if (isExcludedFenderBlock(root)) continue;
+    const pushFenderRoot = (root: Element) => {
+      if (isExcludedFenderBlock(root)) return;
       const href = pickPrimaryLink(root);
       if (href) pushHref(href);
+    };
+
+    for (const root of document.querySelectorAll('[data-fender-root="true"]')) {
+      const area = root.getAttribute('data-meta-area');
+      if (!area || !organicFenderAreas.has(area)) continue;
+      pushFenderRoot(root);
+    }
+
+    if (hrefs.length === 0) {
+      for (const root of document.querySelectorAll('[data-fender-root="true"]')) {
+        pushFenderRoot(root);
+      }
     }
 
     if (hrefs.length === 0) {
       for (const block of document.querySelectorAll('.fds-web-normal-doc-root')) {
-        pushBlock(block, { skipFenderExclude: true });
+        const area = fenderRoot(block)?.getAttribute('data-meta-area');
+        if (area && excludedMetaAreas.has(area)) continue;
+        pushBlock(block);
       }
     }
 

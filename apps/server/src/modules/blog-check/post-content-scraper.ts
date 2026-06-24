@@ -602,6 +602,22 @@ async function navigateAndScrape(
   return mergePostContentStats(stats, engagement);
 }
 
+/** PostView·m.blog 본문 페이지 — 노출 검색용 실제 제목 */
+export async function scrapePostTitle(page: Page): Promise<string | null> {
+  return page
+    .evaluate(() => {
+      const og = document.querySelector('meta[property="og:title"]')?.getAttribute('content')?.trim();
+      if (og) return og.replace(/\s*:\s*네이버\s*블로그\s*$/i, '').trim() || null;
+      const se =
+        document.querySelector('.se_title .pcol1, .se-title-text, .tit_h3, #title_1')?.textContent?.trim() ??
+        null;
+      if (se) return se;
+      const docTitle = document.title?.replace(/\s*:\s*네이버\s*블로그\s*$/i, '').trim();
+      return docTitle || null;
+    })
+    .catch(() => null);
+}
+
 export async function scrapePostContentStats(
   page: Page,
   blogId: string,

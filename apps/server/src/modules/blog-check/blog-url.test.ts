@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalBlogPostUrl, postBelongsToBlog } from './blog-url.js';
+import { canonicalBlogPostUrl, postBelongsToBlog, postNoFromDbRow } from './blog-url.js';
 
 describe('postBelongsToBlog', () => {
   it('matches PostView.naver?blogId= URLs', () => {
@@ -13,6 +13,26 @@ describe('postBelongsToBlog', () => {
 
   it('rejects other blogs', () => {
     expect(postBelongsToBlog('https://blog.naver.com/other/2234567890', 'yeonun1')).toBe(false);
+  });
+});
+
+describe('postNoFromDbRow', () => {
+  it('falls back to post_url when post_no column is empty', () => {
+    expect(
+      postNoFromDbRow({
+        post_no: null,
+        post_url: 'https://blog.naver.com/yeonun2/224212849946',
+      }),
+    ).toBe('224212849946');
+  });
+
+  it('prefers post_no column when set', () => {
+    expect(
+      postNoFromDbRow({
+        post_no: '111',
+        post_url: 'https://blog.naver.com/yeonun2/224212849946',
+      }),
+    ).toBe('111');
   });
 });
 

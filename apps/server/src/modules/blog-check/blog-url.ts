@@ -44,8 +44,20 @@ export function extractPostNoFromUrl(postUrl: string): string | null {
   if (logNo?.[1]) return logNo[1];
   const path = trimmed.match(/blog\.naver\.com\/[^/?#]+\/(\d+)/i);
   if (path?.[1]) return path[1];
+  const mobile = trimmed.match(/m\.blog\.naver\.com\/[^/?#]+\/(\d+)/i);
+  if (mobile?.[1]) return mobile[1];
   const m = trimmed.match(POST_NO_RE);
   return m?.[1] ?? null;
+}
+
+/** posts 테이블 row — post_no 컬럼 비어 있어도 URL에서 보정 */
+export function postNoFromDbRow(row: {
+  post_no?: string | null;
+  post_url?: string | null;
+}): string | null {
+  const fromCol = String(row.post_no ?? '').trim();
+  if (fromCol) return fromCol;
+  return extractPostNoFromUrl(String(row.post_url ?? ''));
 }
 
 export function normalizePostUrlKey(postUrl: string): string {

@@ -15,6 +15,7 @@ import {
   extractPostNoFromUrl,
   parseBlogCheckSearchQuery,
   postBelongsToBlog,
+  postNoFromDbRow,
   postRowMergeKey,
   resolveExtLinkCount,
 } from './blog-url.js';
@@ -34,7 +35,7 @@ import {
   type BlogCheckScanMode,
 } from './constants.js';
 import { computeBlogIndexScore, scrapeBlogStats } from './index-score.js';
-import { scrapePostContentStats } from './post-content-scraper.js';
+import { scrapePostContentStats, scrapePostTitle } from './post-content-scraper.js';
 import type { PostExposureStatus } from './exposure-status.js';
 import { rankToExposureStatus } from './exposure-status.js';
 import { notifyBlogCheckCaptcha, notifyBlogCheckIndexParseFailed } from './notify.js';
@@ -176,11 +177,12 @@ async function persistCrawledPostStats(
   post: PostRow,
   stats: PostContentStats,
 ): Promise<void> {
+  const postNo = post.post_no ?? extractPostNoFromUrl(post.post_url);
   const { error } = await supabase.from('posts').upsert(
     {
       account_id: accountId,
       post_url: post.post_url,
-      post_no: post.post_no,
+      post_no: postNo,
       title: post.title,
       published_at: post.published_at,
       char_count: stats.char_count,
@@ -502,8 +504,8 @@ async function fetchLatestStatusByPostNo(
     validPostNos = new Set(
       (posts ?? [])
         .filter((p) => postBelongsToBlog(String(p.post_url ?? ''), blogId))
-        .map((p) => String(p.post_no ?? '').trim())
-        .filter(Boolean),
+        .map((p) => postNoFromDbRow(p))
+        .filter((n): n is string => Boolean(n)),
     );
   }
 
@@ -588,6 +590,89 @@ export function selectPostsForScan(
   return scannable;
 }
 
+/** posts 모드 — 최근 10건 목록에 없어도 DB·jobs에서 post_no로 보강 */
+async function loadPostRowsByNos(
+  accountId: string,
+  blogId: string,
+  workspace: string | null,
+  postNos: string[],
+): Promise<PostRow[]> {
+  const want = new Set(postNos.map(String));
+  const found = new Map<string, PostRow>();
+
+  const { data: fromPosts } = await supabase.from('posts').select('*').eq('account_id', accountId);
+  for (const row of (fromPosts ?? []) as PostRow[]) {
+    const no = postNoFromDbRow(row);
+    if (!no || !want.has(no) || !postBelongsToBlog(row.post_url, blogId)) continue;
+    const normalizedUrl = canonicalBlogPostUrl(row.post_url);
+    found.set(no, {
+      ...(row as PostRow),
+      post_url: normalizedUrl,
+      post_no: no,
+      ...statsFromDbRow(row as unknown as Record<string, unknown>, workspace),
+    });
+  }
+
+  const stillMissing = [...want].filter((n) => !found.has(n));
+  if (stillMissing.length === 0) return [...found.values()];
+
+  const { data: jobs } = await supabase
+    .from('huma_jobs')
+    .select(
+      'result_url, title, content, link_url, image_urls, content_type, completed_at, scheduled_at, created_at',
+    )
+    .eq('account_id', accountId)
+    .eq('job_type', 'post_blog')
+    .eq('status', 'completed')
+    .not('result_url', 'is', null)
+    .order('completed_at', { ascending: false })
+    .limit(80);
+
+  for (const job of jobs ?? []) {
+    const postUrl = canonicalBlogPostUrl(String(job.result_url ?? '').trim());
+    const no = extractPostNoFromUrl(postUrl);
+    if (!no || !stillMissing.includes(no) || found.has(no) || !postBelongsToBlog(postUrl, blogId)) continue;
+    found.set(no, jobToPostRow(accountId, job as JobPostSource, workspace, postUrl));
+  }
+
+  return [...found.values()];
+}
+
+async function resolveScannablePosts(
+  accountId: string,
+  blogId: string,
+  workspace: string | null,
+  posts: PostRow[],
+  options: BlogCheckScanOptions,
+  statusMap: Map<string, StatusRow>,
+  scanDate: string,
+): Promise<PostRow[]> {
+  let selected = selectPostsForScan(posts, options, statusMap, scanDate);
+  const mode = normalizeBlogCheckScanMode(options.mode);
+  if (mode !== 'posts' || !options.postNos?.length) return selected;
+
+  const want = new Set(options.postNos.map(String));
+  const have = new Set(
+    selected.map((p) => postNoFromRow(p)).filter((n): n is string => Boolean(n)),
+  );
+  const missing = [...want].filter((n) => !have.has(n));
+  if (missing.length === 0) return selected;
+
+  const supplemental = await loadPostRowsByNos(accountId, blogId, workspace, missing);
+  if (supplemental.length === 0) return selected;
+
+  const merged = new Map<string, PostRow>();
+  for (const p of selected) {
+    const no = postNoFromRow(p);
+    if (no) merged.set(no, p);
+  }
+  for (const p of supplemental) {
+    const no = postNoFromRow(p);
+    if (no) merged.set(no, p);
+  }
+  return [...merged.values()];
+}
+
 async function hasTodayBlogIndex(accountId: string, scanDate: string): Promise<boolean> {
   const { data } = await supabase
     .from('blog_index_history')
@@ -658,8 +743,8 @@ async function buildSevenDayMissTrend(accountId: string, blogId?: string | null)
     validPostNos = new Set(
       (posts ?? [])
         .filter((p) => postBelongsToBlog(String(p.post_url ?? ''), blogId))
-        .map((p) => String(p.post_no ?? '').trim())
-        .filter(Boolean),
+        .map((p) => postNoFromDbRow(p))
+        .filter((n): n is string => Boolean(n)),
     );
   }
 
@@ -730,7 +815,15 @@ async function estimateTotalSteps(
     if (!blogId) continue;
     const posts = await fetchRecentPosts(acc.id, { blogId, refreshIfMissing: false });
     const statusMap = await fetchLatestStatusByPostNo(acc.id, blogId);
-    const selected = selectPostsForScan(posts, options, statusMap, scanDate);
+    const selected = await resolveScannablePosts(
+      acc.id,
+      blogId,
+      acc.workspace,
+      posts,
+      options,
+      statusMap,
+      scanDate,
+    );
     total += countScannablePosts(selected);
     const skipIndex = mode !== 'full' && (await hasTodayBlogIndex(acc.id, scanDate));
     if (!skipIndex) total += 1;
@@ -829,7 +922,9 @@ async function computePostScanResult(
 
   const title = post.title?.trim() || '—';
   const crawled = await scrapePostContentStats(page, blogId, postNo);
-  const rankResult = await checkPostExposure(page, blogId, postNo, title);
+  const liveTitle = (await scrapePostTitle(page))?.trim();
+  const searchTitle = liveTitle && liveTitle.length >= title.length ? liveTitle : title;
+  const rankResult = await checkPostExposure(page, blogId, postNo, searchTitle);
   const hasStoredContent = post.char_count > 0 || post.img_count > 0;
   const fromPost: PostContentStats = {
     char_count: post.char_count,
@@ -871,6 +966,19 @@ async function scanSinglePost(
   if (!postNo) return false;
 
   const { contentStats, exposure } = await computePostScanResult(page, blogId, post);
+
+  const { error: clearErr } = await supabase
+    .from('blog_post_status')
+    .delete()
+    .eq('account_id', acc.id)
+    .eq('post_no', postNo);
+  if (clearErr) {
+    await logOperation({
+      level: 'warn',
+      message: `[blog-check] 이전 스캔 상태 삭제 실패: ${clearErr.message}`,
+      account_id: acc.id,
+    });
+  }
 
   const { error: insErr } = await supabase.from('blog_post_status').insert({
     account_id: acc.id,
@@ -927,7 +1035,15 @@ async function scanAccountWorkItem(
   let scannedPosts = 0;
 
   const statusMap = await fetchLatestStatusByPostNo(acc.id, blogId);
-  const scannablePosts = selectPostsForScan(posts, options, statusMap, scanDate);
+  const scannablePosts = await resolveScannablePosts(
+    acc.id,
+    blogId,
+    acc.workspace,
+    posts,
+    options,
+    statusMap,
+    scanDate,
+  );
   const skipIndex = mode !== 'full' && (await hasTodayBlogIndex(acc.id, scanDate));
 
   let parsed: Awaited<ReturnType<typeof scrapeBlogStats>> | null = null;
@@ -968,24 +1084,6 @@ async function scanAccountWorkItem(
     }
 
     await onStep(acc.id, label);
-  }
-
-  const postNosToClear = scannablePosts
-    .map((p) => postNoFromRow(p))
-    .filter((n): n is string => Boolean(n));
-  if (postNosToClear.length > 0) {
-    const { error: clearErr } = await supabase
-      .from('blog_post_status')
-      .delete()
-      .eq('account_id', acc.id)
-      .in('post_no', postNosToClear);
-    if (clearErr) {
-      await logOperation({
-        level: 'warn',
-        message: `[blog-check] 이전 스캔 상태 삭제 실패: ${clearErr.message}`,
-        account_id: acc.id,
-      });
-    }
   }
 
   if (scannablePosts.length === 0) {
