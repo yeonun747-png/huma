@@ -1,4 +1,5 @@
 import { ensureHttpsUrl } from '../../lib/blog-link.js';
+import { parseBlogCheckSearchQuery } from '@huma/shared';
 import { blogIdFromBlogHref, postNoFromBlogHref } from './exposure-rank.js';
 
 const BLOG_ID_RE = /blog\.naver\.com\/([^/?#]+)/i;
@@ -26,9 +27,11 @@ export function canonicalBlogPostUrl(postUrl: string): string {
 }
 
 export function extractBlogIdFromUrl(blogUrl: string | null | undefined, naverId?: string | null): string | null {
-  if (blogUrl) {
-    const m = blogUrl.match(BLOG_ID_RE);
-    if (m?.[1] && !['PostView', 'PostList', 'profile'].includes(m[1])) return m[1];
+  if (blogUrl?.trim()) {
+    const fromUrl = blogUrl.match(BLOG_ID_RE);
+    if (fromUrl?.[1] && !['PostView', 'PostList', 'profile'].includes(fromUrl[1])) return fromUrl[1];
+    const fromBare = parseBlogCheckSearchQuery(blogUrl);
+    if (fromBare) return fromBare;
   }
   const id = naverId?.trim();
   return id || null;

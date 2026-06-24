@@ -488,31 +488,17 @@ async function fetchLatestStatusByPostNo(
   const { data, error } = await supabase
     .from('blog_post_status')
     .select(
-      'post_no, status, rank, scanned_at, chars, img_count, video_count, quote_count, comment_count, like_count, gif_count, map_count, hidden_count, int_link_count, ext_link_count',
+      'post_no, post_url, status, rank, scanned_at, chars, img_count, video_count, quote_count, comment_count, like_count, gif_count, map_count, hidden_count, int_link_count, ext_link_count',
     )
     .eq('account_id', accountId)
     .order('scanned_at', { ascending: false });
 
   if (error) throw new Error(error.message);
 
-  let validPostNos: Set<string> | null = null;
-  if (blogId) {
-    const { data: posts } = await supabase
-      .from('posts')
-      .select('post_no, post_url')
-      .eq('account_id', accountId);
-    validPostNos = new Set(
-      (posts ?? [])
-        .filter((p) => postBelongsToBlog(String(p.post_url ?? ''), blogId))
-        .map((p) => postNoFromDbRow(p))
-        .filter((n): n is string => Boolean(n)),
-    );
-  }
-
   const map = new Map<string, StatusRow>();
   for (const row of data ?? []) {
     const postNo = String(row.post_no);
-    if (validPostNos && !validPostNos.has(postNo)) continue;
+    if (blogId && row.post_url && !postBelongsToBlog(String(row.post_url), blogId)) continue;
     if (!map.has(postNo)) {
       const status = resolveExposureStatusFromRow(row as StatusRow);
       map.set(postNo, { ...(row as StatusRow), status });
@@ -734,23 +720,9 @@ async function buildSevenDayMissTrend(accountId: string, blogId?: string | null)
     dayKeys.push(formatKstDateKey(d));
   }
 
-  let validPostNos: Set<string> | null = null;
-  if (blogId) {
-    const { data: posts } = await supabase
-      .from('posts')
-      .select('post_no, post_url')
-      .eq('account_id', accountId);
-    validPostNos = new Set(
-      (posts ?? [])
-        .filter((p) => postBelongsToBlog(String(p.post_url ?? ''), blogId))
-        .map((p) => postNoFromDbRow(p))
-        .filter((n): n is string => Boolean(n)),
-    );
-  }
-
   const { data, error } = await supabase
     .from('blog_post_status')
-    .select('post_no, scanned_at, status')
+    .select('post_no, post_url, scanned_at, status')
     .eq('account_id', accountId)
     .gte('scanned_at', dayKeys[0]);
 
@@ -761,7 +733,7 @@ async function buildSevenDayMissTrend(accountId: string, blogId?: string | null)
 
   for (const row of data ?? []) {
     const postNo = String(row.post_no ?? '');
-    if (validPostNos && !validPostNos.has(postNo)) continue;
+    if (blogId && row.post_url && !postBelongsToBlog(String(row.post_url), blogId)) continue;
     const day = String(row.scanned_at).slice(0, 10);
     scannedDays.add(day);
     if (row.status === 'miss') {

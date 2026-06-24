@@ -146,6 +146,10 @@ async function collectIntegratedSearchResultHrefs(page: Page): Promise<string[]>
 
     const isBlogHref = (href: string): boolean => /blog\.naver\.com/i.test(href);
 
+    const isBlogPostHref = (href: string): boolean =>
+      isBlogHref(href) &&
+      (/\/(\d{6,})(?:[/?#]|$)/.test(href) || /[?&]logNo=\d+/i.test(href));
+
     const isBlockedHref = (href: string): boolean =>
       !href ||
       href.startsWith('javascript:') ||
@@ -156,7 +160,7 @@ async function collectIntegratedSearchResultHrefs(page: Page): Promise<string[]>
     const isNonOrganicBlock = (block: Element): boolean => {
       if (
         block.closest(
-          '[class*="sp_ad"], [class*="power_link"], [class*="ad_area"], [class*="ad_wrap"], [id*="power_link"], [class*="sp_ai"], [class*="api_ai"], [class*="ai_area"], [class*="related_question"], [class*="sp_nquiz"], [class*="brand_search"]',
+          '#power_link_body, [id*="power_link"], [class*="power_link"], [class*="sp_ad"], [class*="ad_area"], [class*="ad_wrap"], [class*="sp_ai"], [class*="api_ai"], [class*="ai_area"], [class*="related_question"], [class*="sp_nquiz"], [class*="brand_search"]',
         )
       ) {
         return true;
@@ -214,6 +218,7 @@ async function collectIntegratedSearchResultHrefs(page: Page): Promise<string[]>
     };
 
     const pushHref = (href: string) => {
+      if (isBlogHref(href) && !isBlogPostHref(href)) return;
       const normalized = href.replace(/\/$/, '');
       if (seenUrl.has(normalized)) return;
       seenUrl.add(normalized);
@@ -229,6 +234,13 @@ async function collectIntegratedSearchResultHrefs(page: Page): Promise<string[]>
 
     const pushFenderRoot = (root: Element) => {
       if (isExcludedFenderBlock(root)) return;
+      const docs = root.querySelectorAll('.fds-web-normal-doc-root');
+      if (docs.length > 0) {
+        for (const doc of docs) {
+          pushBlock(doc);
+        }
+        return;
+      }
       const href = pickPrimaryLink(root);
       if (href) pushHref(href);
     };
@@ -249,19 +261,21 @@ async function collectIntegratedSearchResultHrefs(page: Page): Promise<string[]>
       for (const block of document.querySelectorAll('.fds-web-normal-doc-root')) {
         const area = fenderRoot(block)?.getAttribute('data-meta-area');
         if (area && excludedMetaAreas.has(area)) continue;
+        if (area && !organicFenderAreas.has(area)) continue;
         pushBlock(block);
       }
     }
 
     if (hrefs.length === 0) {
       for (const li of document.querySelectorAll('ul.lst_total > li, ul.lst_view > li')) {
+        if (li.closest('#power_link_body, [class*="power_link"], [id*="power_link"]')) continue;
         pushBlock(li);
       }
     }
 
     if (hrefs.length === 0) {
       for (const block of document.querySelectorAll('#main_pack .view_wrap, #main_pack .total_wrap, .view_wrap, .total_wrap')) {
-        if (block.closest('ul.lst_total, ul.lst_view')) continue;
+        if (block.closest('ul.lst_total, ul.lst_view, #power_link_body, [class*="power_link"]')) continue;
         pushBlock(block);
       }
     }

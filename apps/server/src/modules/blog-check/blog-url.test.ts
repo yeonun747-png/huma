@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalBlogPostUrl, postBelongsToBlog, postNoFromDbRow } from './blog-url.js';
+import { canonicalBlogPostUrl, extractBlogIdFromUrl, postBelongsToBlog, postNoFromDbRow } from './blog-url.js';
 
 describe('postBelongsToBlog', () => {
   it('matches PostView.naver?blogId= URLs', () => {
@@ -13,6 +13,20 @@ describe('postBelongsToBlog', () => {
 
   it('rejects other blogs', () => {
     expect(postBelongsToBlog('https://blog.naver.com/other/2234567890', 'yeonun1')).toBe(false);
+  });
+});
+
+describe('extractBlogIdFromUrl', () => {
+  it('parses full blog URL', () => {
+    expect(extractBlogIdFromUrl('https://blog.naver.com/monument1067')).toBe('monument1067');
+  });
+
+  it('parses bare blog id without falling back to naver login id', () => {
+    expect(extractBlogIdFromUrl('monument1067', 'shared_naver_login')).toBe('monument1067');
+  });
+
+  it('falls back to naver_id only when blog_url is empty', () => {
+    expect(extractBlogIdFromUrl(null, 'shared_naver_login')).toBe('shared_naver_login');
   });
 });
 
