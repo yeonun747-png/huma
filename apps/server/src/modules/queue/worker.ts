@@ -753,9 +753,11 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
             postNos?: string[] | null;
           };
           const result = await executeBlogCheckJob(bcPayload);
+          const postNos = bcPayload.postNos?.filter(Boolean) ?? [];
           await logOperation({
-            level: 'info',
-            message: `[blog-check] 스캔 완료 — 계정 ${result.scannedAccounts} · 포스트 ${result.scannedPosts}`,
+            level: postNos.length > 0 && result.scannedPosts === 0 ? 'warn' : 'info',
+            message: `[blog-check] 스캔 완료 — 계정 ${result.scannedAccounts} · 포스트 ${result.scannedPosts}${postNos.length ? ` (요청 postNos=${postNos.join(',')})` : ''}`,
+            account_id: bcPayload.accountId ?? accountId,
           });
         }
 

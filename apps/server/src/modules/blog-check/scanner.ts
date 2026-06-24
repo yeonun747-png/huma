@@ -1,11 +1,11 @@
 import type { Page } from 'playwright';
 import { createBrowser } from '../playwright/browser.js';
 import { isNaverCaptchaVisible } from '../../lib/naver-captcha-vision.js';
+import { PLAYWRIGHT_NAV_TIMEOUT_MS } from '../../lib/playwright-nav-timeout.js';
 import { integratedSearchUrl } from '../../lib/naver-search-links.js';
 import { randomBetween, sleep } from '../../lib/utils.js';
 import {
   BLOG_CHECK_FRAME_TIMEOUT_MS,
-  BLOG_CHECK_NAV_TIMEOUT_MS,
   BLOG_CHECK_PAGE_SETTLE_MS,
   BLOG_CHECK_SCAN_DELAY_MAX_MS,
   BLOG_CHECK_SCAN_DELAY_MIN_MS,
@@ -35,8 +35,27 @@ export function randomScanDelayMs(): number {
 }
 
 export async function setupBlogCheckPage(page: Page): Promise<void> {
-  page.setDefaultTimeout(BLOG_CHECK_NAV_TIMEOUT_MS);
-  page.setDefaultNavigationTimeout(BLOG_CHECK_NAV_TIMEOUT_MS);
+  page.setDefaultTimeout(PLAYWRIGHT_NAV_TIMEOUT_MS);
+  page.setDefaultNavigationTimeout(PLAYWRIGHT_NAV_TIMEOUT_MS);
+}
+
+/** nexearch·m.blog — domcontentloaded hang 시 commit 폴백 (i7 Xvfb·LTE) */
+export async function navigateBlogCheck(page: Page, url: string): Promise<void> {
+  const timeout = PLAYWRIGHT_NAV_TIMEOUT_MS;
+  try {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
+  } catch (err) {
+    const msg = String((err as Error).message ?? err);
+    if (!/timeout/i.test(msg)) throw err;
+    await page.goto(url, { waitUntil: 'commit', timeout }).catch(() => {});
+    await page.waitForLoadState('domcontentloaded', { timeout: 30_000 }).catch(() => {});
+  }
+  await page
+    .locator('#main_pack, [data-fender-root="true"], .view_wrap, body')
+    .first()
+    .waitFor({ state: 'attached', timeout: BLOG_CHECK_SEARCH_WAIT_MS })
+    .catch(() => {});
+  await sleep(BLOG_CHECK_SEARCH_SETTLE_MS);
 }
 
 /** m.blog PostView·본문 크롤용 모바일 UA (데스크톱 UA는 m.blog 본문 미렌더) */
@@ -58,6 +77,8 @@ export async function withBlogCheckBrowser<T>(
     isMobile: true,
     hasTouch: true,
   });
+  context.setDefaultTimeout(PLAYWRIGHT_NAV_TIMEOUT_MS);
+  context.setDefaultNavigationTimeout(PLAYWRIGHT_NAV_TIMEOUT_MS);
 
   try {
     const page = await context.newPage();
@@ -89,8 +110,7 @@ export async function checkPostIndexedBySite(
 ): Promise<boolean> {
   const query = `site:blog.naver.com/${blogId}/${postNo}`;
   const url = integratedSearchUrl(query);
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
-  await sleep(BLOG_CHECK_SEARCH_SETTLE_MS);
+  await navigateBlogCheck(page, url);
 
   if (await detectBlogCheckCaptcha(page)) {
     throw new BlogCheckCaptchaError(blogId);
@@ -298,8 +318,7 @@ async function collectTitleSearchHrefs(
 
   for (let pageIdx = 0; pageIdx < BLOG_SEARCH_RANK_PAGES; pageIdx++) {
     const start = pageIdx * BLOG_SEARCH_PAGE_SIZE + 1;
-    await page.goto(integratedSearchUrl(query, start), { waitUntil: 'domcontentloaded' });
-    await sleep(BLOG_CHECK_SEARCH_SETTLE_MS);
+    await navigateBlogCheck(page, integratedSearchUrl(query, start));
 
     if (await detectBlogCheckCaptcha(page)) {
       throw new BlogCheckCaptchaError('');
@@ -357,7 +376,7 @@ export async function checkPostExposure(
     if (err instanceof BlogCheckCaptchaError) {
       throw new BlogCheckCaptchaError(blogId);
     }
-    throw err;
+    hrefs = [];
   }
 
   const rank = findPostRankInHrefs(hrefs, blogId, postNo);

@@ -8,7 +8,7 @@ import {
   BLOG_CHECK_PAGE_SETTLE_MS,
 } from './constants.js';
 import { type PostContentStats, mergePostContentStats } from './content-stats.js';
-import { BlogCheckCaptchaError, detectBlogCheckCaptcha } from './scanner.js';
+import { BlogCheckCaptchaError, detectBlogCheckCaptcha, navigateBlogCheck } from './scanner.js';
 
 /** SmartEditor 본문 후보 — post-view 내부만 사용 (페이지 chrome 제외) */
 const CONTENT_ROOT_SELECTORS = [
@@ -582,7 +582,7 @@ async function navigateAndScrape(
     )
     .catch(() => null);
 
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  await navigateBlogCheck(page, url);
 
   if (await detectBlogCheckCaptcha(page)) {
     throw new BlogCheckCaptchaError(blogId);

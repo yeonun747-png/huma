@@ -1589,11 +1589,19 @@ export async function executeBlogCheckJob(payload: BlogCheckJobPayload) {
     postNos: payload.postNos?.filter(Boolean) ?? undefined,
   };
   try {
-    return await runBlogCheckScan(
+    const result = await runBlogCheckScan(
       payload.accountId ?? undefined,
       options,
       payload.blogId ?? undefined,
     );
+    if (options.postNos?.length && result.scannedPosts === 0) {
+      await logOperation({
+        level: 'warn',
+        message: `[blog-check] 단건 스캔 종료 — 포스트 0건 처리 (postNos=${options.postNos.join(',')})`,
+        account_id: payload.accountId ?? undefined,
+      });
+    }
+    return result;
   } finally {
     await releaseBlogCheckScanLock();
     await clearScanProgress();
