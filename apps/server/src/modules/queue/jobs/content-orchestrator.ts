@@ -23,6 +23,8 @@ import { isNaverBlogOnlyMode } from '../../../lib/activity-control.js';
 import { resolveFeaturedBlogImageUrl } from '../../../lib/blog-image-placement.js';
 import { planNextPostBlogScheduledAt } from '../../../lib/posting-slot-planner.js';
 import { PUBLISH_SCHEDULED_AT_KEY } from '../../../lib/post-blog-publish-day.js';
+import { isAutoPublishJob } from '../../../lib/auto-publish-state.js';
+import { randomBetween } from '../../../lib/utils.js';
 import { assertAccountPostingQuota, assertAccountPostingQuotaBeforeGeneration } from '../../../lib/posting-daily-status.js';
 import {
   assertPostingSimilarityPasses,
@@ -193,16 +195,24 @@ function platformTime(
   return resolvePlatformScheduledAt(platform, schedule, fallback);
 }
 
+/** 자동발행 — 슬롯은 content_full 트리거 시각에 이미 잡힘, post_blog는 생성 직후 발행 */
+function immediatePostBlogScheduledAt(): string {
+  return new Date(Date.now() + randomBetween(2, 8) * 60_000).toISOString();
+}
+
 async function resolveBlogScheduledAt(
   autoScheduled: boolean,
   accountId: string | null | undefined,
-  schedule: PlatformSchedule | undefined,
+  schedule: PlatformSchedule | Record<string, unknown> | undefined,
   fallback: string,
 ): Promise<string> {
+  if (isAutoPublishJob(schedule)) {
+    return immediatePostBlogScheduledAt();
+  }
   if (autoScheduled && accountId?.trim()) {
     return planNextPostBlogScheduledAt(accountId.trim());
   }
-  return platformTime(autoScheduled, schedule, 'naver_blog', fallback);
+  return platformTime(autoScheduled, schedule as PlatformSchedule | undefined, 'naver_blog', fallback);
 }
 
 async function enqueueVideoPipeline(
