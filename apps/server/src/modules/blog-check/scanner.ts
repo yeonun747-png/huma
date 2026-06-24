@@ -5,6 +5,7 @@ import { integratedSearchUrl } from '../../lib/naver-search-links.js';
 import { randomBetween, sleep } from '../../lib/utils.js';
 import {
   BLOG_CHECK_FRAME_TIMEOUT_MS,
+  BLOG_CHECK_NAV_TIMEOUT_MS,
   BLOG_CHECK_PAGE_SETTLE_MS,
   BLOG_CHECK_SCAN_DELAY_MAX_MS,
   BLOG_CHECK_SCAN_DELAY_MIN_MS,
@@ -34,16 +35,8 @@ export function randomScanDelayMs(): number {
 }
 
 export async function setupBlogCheckPage(page: Page): Promise<void> {
-  page.setDefaultTimeout(8_000);
-  page.setDefaultNavigationTimeout(8_000);
-  await page.route('**/*', (route) => {
-    const type = route.request().resourceType();
-    if (type === 'image' || type === 'media' || type === 'font') {
-      void route.abort();
-      return;
-    }
-    void route.continue();
-  });
+  page.setDefaultTimeout(BLOG_CHECK_NAV_TIMEOUT_MS);
+  page.setDefaultNavigationTimeout(BLOG_CHECK_NAV_TIMEOUT_MS);
 }
 
 /** m.blog PostView·본문 크롤용 모바일 UA (데스크톱 UA는 m.blog 본문 미렌더) */

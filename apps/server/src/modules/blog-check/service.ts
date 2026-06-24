@@ -767,7 +767,11 @@ function countScannablePosts(posts: PostRow[]): number {
   return posts.filter((p) => p.post_no ?? extractPostNoFromUrl(p.post_url)).length;
 }
 
-async function prepareAccountWorkItem(acc: AccountRow, page: Page): Promise<ScanWorkItem | null> {
+async function prepareAccountWorkItem(
+  acc: AccountRow,
+  page: Page,
+  options?: BlogCheckScanOptions,
+): Promise<ScanWorkItem | null> {
   const blogId = resolveBlogId(acc.blog_url, acc.naver_id);
   if (!blogId) {
     await logOperation({
@@ -779,7 +783,27 @@ async function prepareAccountWorkItem(acc: AccountRow, page: Page): Promise<Scan
   }
 
   const label = acc.name || acc.slot_label || acc.naver_id;
-  await refreshBlogPostListCache(acc.id, blogId, page);
+  const mode = normalizeBlogCheckScanMode(options?.mode);
+
+  // 단건(posts) 스캔 — m.blog 목록 갱신 생략(빈 화면·타임아웃 후 조기 종료 방지), DB·jobs에서 직접 로드
+  if (mode === 'posts' && options?.postNos?.length) {
+    const fromDb = await loadPostRowsByNos(acc.id, blogId, acc.workspace, options.postNos);
+    if (fromDb.length > 0) {
+      return { acc, blogId, label, posts: fromDb };
+    }
+    const cached = await fetchRecentPosts(acc.id, { blogId, refreshIfMissing: false });
+    return { acc, blogId, label, posts: cached };
+  }
+
+  try {
+    await refreshBlogPostListCache(acc.id, blogId, page);
+  } catch (err) {
+    await logOperation({
+      level: 'warn',
+      message: `[blog-check] 글 목록 갱신 실패 — 캐시/DB 폴백: ${(err as Error).message}`,
+      account_id: acc.id,
+    });
+  }
   const posts = await fetchRecentPosts(acc.id, { page, blogId });
   return { acc, blogId, label, posts };
 }
@@ -922,14 +946,16 @@ async function computePostScanResult(
   const rankResult = await checkPostExposure(page, blogId, postNo, title);
 
   let crawled = emptyPostContentStats();
-  try {
-    crawled = await scrapePostContentStats(page, blogId, postNo);
-  } catch (err) {
-    if (err instanceof BlogCheckCaptchaError) throw err;
-    await logOperation({
-      level: 'warn',
-      message: `[blog-check] 본문 크롤 실패 (${blogId}/${postNo}) — 노출만 반영: ${(err as Error).message}`,
-    });
+  if (!hasStoredContent) {
+    try {
+      crawled = await scrapePostContentStats(page, blogId, postNo);
+    } catch (err) {
+      if (err instanceof BlogCheckCaptchaError) throw err;
+      await logOperation({
+        level: 'warn',
+        message: `[blog-check] 본문 크롤 실패 (${blogId}/${postNo}) — 노출만 반영: ${(err as Error).message}`,
+      });
+    }
   }
 
   const contentStats =
@@ -1028,7 +1054,7 @@ async function scanAccountWorkItem(
   let scannedPosts = 0;
 
   const statusMap = await fetchLatestStatusByPostNo(acc.id, blogId);
-  const scannablePosts = await resolveScannablePosts(
+  let scannablePosts = await resolveScannablePosts(
     acc.id,
     blogId,
     acc.workspace,
@@ -1081,9 +1107,15 @@ async function scanAccountWorkItem(
   }
 
   if (scannablePosts.length === 0) {
+    if (mode === 'posts' && options.postNos?.length) {
+      scannablePosts = await loadPostRowsByNos(acc.id, blogId, acc.workspace, options.postNos);
+    }
+  }
+
+  if (scannablePosts.length === 0) {
     await logOperation({
       level: 'info',
-      message: `[blog-check] ${label} — 스캔 대상 없음 (mode=${mode})`,
+      message: `[blog-check] ${label} — 스캔 대상 없음 (mode=${mode}${options.postNos?.length ? ` postNos=${options.postNos.join(',')}` : ''})`,
       account_id: acc.id,
     });
     return { scannedPosts: 0, aborted: accountAborted };
@@ -1110,7 +1142,14 @@ async function scanAccountWorkItem(
       );
 
       for (const outcome of outcomes) {
-        if (outcome.error && !outcome.captcha) throw outcome.error;
+        if (outcome.error && !outcome.captcha) {
+          await logOperation({
+            level: 'error',
+            message: `[blog-check] 포스트 스캔 실패: ${outcome.error.message}`,
+            account_id: acc.id,
+          });
+          if (mode !== 'posts') throw outcome.error;
+        }
         if (outcome.scanned) scannedPosts += 1;
         await onStep(acc.id, label);
       }
@@ -1437,7 +1476,7 @@ export async function runBlogCheckScan(
 
   const runAccountScan = async (acc: AccountRow) => {
     await withBlogCheckBrowser(async (page) => {
-      const item = await prepareAccountWorkItem(acc, page);
+      const item = await prepareAccountWorkItem(acc, page, scanOptions);
       if (!item) return;
       const result = await scanAccountWorkItem(page, item, scanDate, onStep, scanOptions);
       scannedPosts += result.scannedPosts;
@@ -1453,7 +1492,7 @@ export async function runBlogCheckScan(
   } else {
     await withBlogCheckBrowser(async (page) => {
       for (const acc of accounts) {
-        const item = await prepareAccountWorkItem(acc, page);
+        const item = await prepareAccountWorkItem(acc, page, scanOptions);
         if (!item) continue;
         const result = await scanAccountWorkItem(page, item, scanDate, onStep, scanOptions);
         scannedPosts += result.scannedPosts;

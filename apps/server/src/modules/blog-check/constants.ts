@@ -28,6 +28,9 @@ export const BLOG_CHECK_FRAME_TIMEOUT_MS = 4_000;
 /** 네이버 검색 locator 대기 (ms) */
 export const BLOG_CHECK_SEARCH_WAIT_MS = 2_500;
 
+/** Playwright navigation·action 기본 타임아웃 (ms) — m.blog·nexearch */
+export const BLOG_CHECK_NAV_TIMEOUT_MS = 20_000;
+
 /** reaction 모듈·공감 DOM 보조 대기 (ms) — API 0일 때만 */
 export const BLOG_CHECK_ENGAGEMENT_WAIT_MS = 1_500;
 
