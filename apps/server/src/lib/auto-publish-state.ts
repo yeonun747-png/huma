@@ -13,6 +13,9 @@ import { getAutoPublishStatus } from './posting-daily-status.js';
 import { postingSlotByWorkspace } from './dongle-slots.js';
 import { randomBetween } from './utils.js';
 
+/** 동시 tick이 같은 계정 due 슬롯을 중복 처리하지 않도록 (DB next_slot_at은 건드리지 않음) */
+const autoPublishDueProcessing = new Set<string>();
+
 /** 파이프라인 처리 중 — 최소 간격 재계산 없이 짧게 재시도 */
 export function deferAutoPublishRetryIso(minMinutes = 2, maxMinutes = 4): string {
   return new Date(Date.now() + randomBetween(minMinutes, maxMinutes) * 60_000).toISOString();
@@ -50,16 +53,24 @@ function isFutureAutoPublishSlot(at: string | null | undefined, now = Date.now()
 async function resolveBlockedAutoPublishNextSlot(
   publishStatus: Awaited<ReturnType<typeof getAutoPublishStatus>>,
   input: { accountId: string; plannedCount: number; consumedCount: number },
+  dueSlotAt?: string | null,
 ): Promise<string | null> {
   const reason = publishStatus.block_reason;
   if (reason === 'IN_FLIGHT') {
     return deferAutoPublishRetryIso();
   }
-  if (reason === 'QUOTA' && input.consumedCount >= input.plannedCount) {
-    return null;
+  if (reason === 'QUOTA') {
+    if (input.consumedCount >= input.plannedCount) return null;
+    // 일일 post_blog 목표는 찼지만 자동발행 planned가 남음 — 멀리 재배치하지 않고 짧게 재시도
+    return deferAutoPublishRetryIso(5, 15);
   }
+  if (reason === 'HARD_CAP') return null;
   if (reason === 'CACHE_EMPTY' || reason === 'POSTING_DISABLED') {
     return new Date(Date.now() + 15 * 60_000).toISOString();
+  }
+  // due 슬롯이 막혔을 때 전체 재계산은 슬롯을 멀리 밀 수 있음 — 짧은 재시도 우선
+  if (dueSlotAt && new Date(dueSlotAt).getTime() <= Date.now() + 60_000) {
+    return deferAutoPublishRetryIso(3, 8);
   }
   return planNextAutoPublishTriggerAt({
     accountId: input.accountId,
@@ -349,110 +360,122 @@ export async function triggerDueAutoPublishJobs(): Promise<number> {
   for (const state of enabled) {
     if (!state.next_slot_at) continue;
     if (new Date(state.next_slot_at).getTime() > now) continue;
+    if (autoPublishDueProcessing.has(state.id)) continue;
 
     const workspace = state.workspace;
     const accountId = state.id;
-    const kstDate = formatKstDateKey();
-    let planned =
-      state.kst_date === kstDate && state.planned_count != null
-        ? state.planned_count
-        : await resolveAutoPublishPlannedCountForDay(
-            accountId,
-            state.kst_date,
-            state.planned_count,
-          );
-
-    // 동시 tick 중복 트리거 방지 — 짧은 클레임으로 슬롯 선점
-    await persistAutoPublishPlan(accountId, {
-      enabled: true,
-      kst_date: kstDate,
-      planned_count: planned,
-      next_slot_at: deferAutoPublishRetryIso(),
-    });
-
-    const consumed = await countAutoPublishConsumedToday(accountId);
-    if (consumed >= planned) {
-      await persistAutoPublishPlan(accountId, {
-        enabled: true,
-        kst_date: kstDate,
-        planned_count: planned,
-        next_slot_at: null,
-      });
-      continue;
-    }
-
-    if (await isNightBanActive()) {
-      const nextSlot = await planNextAutoPublishTriggerAt({
-        accountId,
-        plannedCount: planned,
-        consumedCount: consumed,
-      });
-      await persistAutoPublishPlan(accountId, {
-        enabled: true,
-        kst_date: kstDate,
-        planned_count: planned,
-        next_slot_at: nextSlot,
-      });
-      continue;
-    }
-
-    const publishStatus = await getAutoPublishStatus(workspace, accountId);
-    if (!publishStatus.can_publish) {
-      const nextSlot = await resolveBlockedAutoPublishNextSlot(publishStatus, {
-        accountId,
-        plannedCount: planned,
-        consumedCount: consumed,
-      });
-      await persistAutoPublishPlan(accountId, {
-        enabled: true,
-        kst_date: kstDate,
-        planned_count: planned,
-        next_slot_at: nextSlot,
-      });
-      continue;
-    }
+    const dueSlotAt = state.next_slot_at;
+    autoPublishDueProcessing.add(accountId);
 
     try {
-      const { registerAutoContentJobs } = await import('../modules/claude/auto-content-orchestrator.js');
-      await registerAutoContentJobs({
-        workspace,
-        account_id: accountId,
-        auto_schedule: true,
-        content_type_auto: true,
-        auto_publish: true,
-      });
-      triggered++;
-
-      const consumedAfter = consumed + 1;
-      const nextSlot =
-        consumedAfter >= planned
-          ? null
-          : await planNextAutoPublishTriggerAt({
+      const kstDate = formatKstDateKey();
+      let planned =
+        state.kst_date === kstDate && state.planned_count != null
+          ? state.planned_count
+          : await resolveAutoPublishPlannedCountForDay(
               accountId,
-              plannedCount: planned,
-              consumedCount: consumedAfter,
-            });
+              state.kst_date,
+              state.planned_count,
+            );
 
-      await persistAutoPublishPlan(accountId, {
-        enabled: true,
-        kst_date: kstDate,
-        planned_count: planned,
-        next_slot_at: nextSlot,
-      });
-    } catch (err) {
-      await logOperation({
-        level: 'warn',
-        message: `[auto-publish] 트리거 실패 — ${(err as Error).message}`,
-        workspace,
-        account_id: accountId,
-      });
-      const retryAt = new Date(Date.now() + 15 * 60_000).toISOString();
-      await persistAutoPublishPlan(accountId, {
-        enabled: true,
-        kst_date: kstDate,
-        planned_count: planned,
-        next_slot_at: retryAt,
-      });
+      const consumed = await countAutoPublishConsumedToday(accountId);
+      if (consumed >= planned) {
+        await persistAutoPublishPlan(accountId, {
+          enabled: true,
+          kst_date: kstDate,
+          planned_count: planned,
+          next_slot_at: null,
+        });
+        continue;
+      }
+
+      if (await isNightBanActive()) {
+        const nextSlot = await planNextAutoPublishTriggerAt({
+          accountId,
+          plannedCount: planned,
+          consumedCount: consumed,
+        });
+        await persistAutoPublishPlan(accountId, {
+          enabled: true,
+          kst_date: kstDate,
+          planned_count: planned,
+          next_slot_at: nextSlot,
+        });
+        continue;
+      }
+
+      const publishStatus = await getAutoPublishStatus(workspace, accountId);
+      if (!publishStatus.can_publish) {
+        const nextSlot = await resolveBlockedAutoPublishNextSlot(
+          publishStatus,
+          {
+            accountId,
+            plannedCount: planned,
+            consumedCount: consumed,
+          },
+          dueSlotAt,
+        );
+        await persistAutoPublishPlan(accountId, {
+          enabled: true,
+          kst_date: kstDate,
+          planned_count: planned,
+          next_slot_at: nextSlot,
+        });
+        if (publishStatus.block_reason === 'IN_FLIGHT') {
+          await logOperation({
+            level: 'info',
+            message: `[auto-publish] due 재시도 — 파이프라인 처리 중 (${state.label ?? accountId}) next=${nextSlot}`,
+            workspace,
+            account_id: accountId,
+          });
+        }
+        continue;
+      }
+
+      try {
+        const { registerAutoContentJobs } = await import('../modules/claude/auto-content-orchestrator.js');
+        await registerAutoContentJobs({
+          workspace,
+          account_id: accountId,
+          auto_schedule: true,
+          content_type_auto: true,
+          auto_publish: true,
+        });
+        triggered++;
+
+        const consumedAfter = consumed + 1;
+        const nextSlot =
+          consumedAfter >= planned
+            ? null
+            : await planNextAutoPublishTriggerAt({
+                accountId,
+                plannedCount: planned,
+                consumedCount: consumedAfter,
+              });
+
+        await persistAutoPublishPlan(accountId, {
+          enabled: true,
+          kst_date: kstDate,
+          planned_count: planned,
+          next_slot_at: nextSlot,
+        });
+      } catch (err) {
+        await logOperation({
+          level: 'warn',
+          message: `[auto-publish] 트리거 실패 — ${(err as Error).message}`,
+          workspace,
+          account_id: accountId,
+        });
+        const retryAt = new Date(Date.now() + 15 * 60_000).toISOString();
+        await persistAutoPublishPlan(accountId, {
+          enabled: true,
+          kst_date: kstDate,
+          planned_count: planned,
+          next_slot_at: retryAt,
+        });
+      }
+    } finally {
+      autoPublishDueProcessing.delete(accountId);
     }
   }
 
