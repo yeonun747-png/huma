@@ -767,17 +767,6 @@ async function insertBlogIndexHistory(
   }
 }
 
-/** @deprecated use buildSevenDayMissTrendFromPosts — 스캔일 집계는 하루 스캔 시 추이 불가 */
-async function buildSevenDayMissTrend(accountId: string, blogId?: string | null): Promise<(number | null)[]> {
-  const recentPosts = await fetchRecentPosts(accountId, { blogId });
-  const statusMap = await fetchLatestStatusByPostNo(accountId, blogId);
-  const statusByPostNo = new Map<string, { status: string }>();
-  for (const [postNo, row] of statusMap) {
-    statusByPostNo.set(postNo, { status: String(row.status) });
-  }
-  return buildSevenDayMissTrendFromPosts(recentPosts, statusByPostNo);
-}
-
 interface ScanWorkItem {
   acc: AccountRow;
   blogId: string;
