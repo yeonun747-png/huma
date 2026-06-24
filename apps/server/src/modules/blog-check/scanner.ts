@@ -236,10 +236,12 @@ async function collectIntegratedSearchResultHrefs(page: Page): Promise<string[]>
       if (isExcludedFenderBlock(root)) return;
       const docs = root.querySelectorAll('.fds-web-normal-doc-root');
       if (docs.length > 0) {
+        const sizeBefore = hrefs.length;
         for (const doc of docs) {
           pushBlock(doc);
         }
-        return;
+        // doc-root만 있고 링크는 루트 heatmap에만 있는 FDS 블록 폴백
+        if (hrefs.length > sizeBefore) return;
       }
       const href = pickPrimaryLink(root);
       if (href) pushHref(href);
