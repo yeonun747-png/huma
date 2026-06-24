@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   coalesceAutoPublishNextSlot,
   deferAutoPublishRetryIso,
+  resolveBlockedAutoPublishNextSlot,
 } from './auto-publish-state.js';
 
 describe('deferAutoPublishRetryIso', () => {
@@ -11,6 +12,30 @@ describe('deferAutoPublishRetryIso', () => {
     const ms = new Date(iso).getTime() - before;
     expect(ms).toBeGreaterThanOrEqual(2 * 60_000 - 50);
     expect(ms).toBeLessThanOrEqual(4 * 60_000 + 50);
+  });
+});
+
+describe('resolveBlockedAutoPublishNextSlot', () => {
+  it('QUOTA returns null — no 5~15min defer loop', async () => {
+    const result = await resolveBlockedAutoPublishNextSlot(
+      {
+        workspace: 'yeonun',
+        today_completed: 1,
+        today_skipped: 0,
+        daily_target: 1,
+        weekday_base: 4,
+        remaining: 0,
+        hard_cap: 99,
+        can_publish: false,
+        block_reason: 'QUOTA',
+        auto_pick_ready: true,
+        is_weekend: false,
+        in_flight: 0,
+      },
+      { accountId: 'acc-3', plannedCount: 2, consumedCount: 1 },
+      '2026-06-25T08:26:00+09:00',
+    );
+    expect(result).toBeNull();
   });
 });
 

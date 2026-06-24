@@ -66,7 +66,7 @@ function isFutureAutoPublishSlot(at: string | null | undefined, now = Date.now()
   return new Date(at).getTime() > now + 60_000;
 }
 
-async function resolveBlockedAutoPublishNextSlot(
+export async function resolveBlockedAutoPublishNextSlot(
   publishStatus: Awaited<ReturnType<typeof getAutoPublishStatus>>,
   input: { accountId: string; plannedCount: number; consumedCount: number },
   dueSlotAt?: string | null,
@@ -76,9 +76,8 @@ async function resolveBlockedAutoPublishNextSlot(
     return deferAutoPublishRetryIso();
   }
   if (reason === 'QUOTA') {
-    if (input.consumedCount >= input.plannedCount) return null;
-    // 일일 post_blog 목표는 찼지만 자동발행 planned가 남음 — 멀리 재배치하지 않고 짧게 재시도
-    return deferAutoPublishRetryIso(5, 15);
+    // 일일 post_blog 목표 도달 — 당일 재시도해도 열리지 않음 (planned>daily_target 잔존 시 무한 defer 방지)
+    return null;
   }
   if (reason === 'HARD_CAP') return null;
   if (reason === 'CACHE_EMPTY' || reason === 'POSTING_DISABLED') {
@@ -477,6 +476,25 @@ export async function triggerDueAutoPublishJobs(): Promise<number> {
       const publishStatus = await getAutoPublishStatus(workspace, accountId);
 
       if (!publishStatus.can_publish) {
+        if (publishStatus.block_reason === 'QUOTA') {
+          await persistAutoPublishPlan(accountId, {
+            enabled: true,
+            kst_date: kstDate,
+            planned_count: planned,
+            next_slot_at: null,
+          });
+          await logOperation({
+            level: 'warn',
+            message:
+              `[auto-publish] due stopped account=${state.label ?? accountId} QUOTA ` +
+              `completed=${publishStatus.today_completed}/${publishStatus.daily_target} ` +
+              `planned=${planned} consumed=${consumed} (no further defer)`,
+            workspace,
+            account_id: accountId,
+          });
+          continue;
+        }
+
         const nextSlot = await resolveBlockedAutoPublishNextSlot(
           publishStatus,
           {
@@ -538,7 +556,7 @@ export async function triggerDueAutoPublishJobs(): Promise<number> {
           workspace,
           account_id: accountId,
         });
-        const retryAt = new Date(Date.now() + 15 * 60_000).toISOString();
+        const retryAt = deferAutoPublishRetryIso(2, 4);
         await persistAutoPublishPlan(accountId, {
           enabled: true,
           kst_date: kstDate,

@@ -202,9 +202,10 @@ export async function resolveAutoPublishPlannedCountForDay(
   date = new Date(),
 ): Promise<number> {
   const kstDate = formatKstDateKey(date);
-  if (storedDate === kstDate && storedPlanned != null && storedPlanned > 0) {
-    return storedPlanned;
-  }
   const warmupDay = await loadAccountWarmupDay(accountId);
-  return getDailyPostingTarget(accountId, date, { warmupDay }).target;
+  const dailyTarget = getDailyPostingTarget(accountId, date, { warmupDay }).target;
+  if (storedDate === kstDate && storedPlanned != null && storedPlanned > 0) {
+    return Math.min(storedPlanned, dailyTarget);
+  }
+  return dailyTarget;
 }
