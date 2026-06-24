@@ -1,8 +1,4 @@
-import {
-  avoidCrossPostingCollision,
-  CROSS_POSTING_STAGGER_MS,
-  listCrossPostingOccupiedTimes,
-} from './posting-cross-stagger.js';
+import { avoidCrossPostingCollision } from './posting-cross-stagger.js';
 import {
   countInFlightPostingPipeline,
   countTodayPostBlogCompleted,
@@ -23,6 +19,9 @@ import {
 import { ABSOLUTE_MIN_PUBLISH_INTERVAL_HOURS } from './posting-warmup.js';
 import { randomBetween } from './utils.js';
 import { supabase } from '../middleware/auth.js';
+
+/** 자동발행 content_full 등록 — 다른 계정 트리거와만 2분 간격 (CAPTCHA 10분은 post_blog 실행 시 적용) */
+export const AUTO_PUBLISH_PEER_STAGGER_MS = 2 * 60_000;
 
 function kstNowParts(date = new Date()): { y: number; m: number; d: number; hour: number; minute: number } {
   const fmt = new Intl.DateTimeFormat('en-CA', {
@@ -163,15 +162,18 @@ export async function planNextAutoPublishTriggerAt(
 
   candidate = await ensureActivePostingWindow(candidate, activeHours);
 
-  const crossOccupied = await listCrossPostingOccupiedTimes(accountId);
   const peerTriggers = await listPeerAutoPublishNextSlots(accountId);
-  candidate = avoidCrossPostingCollision(candidate, [...crossOccupied, ...peerTriggers], CROSS_POSTING_STAGGER_MS);
+  candidate = avoidCrossPostingCollision(
+    candidate,
+    peerTriggers,
+    AUTO_PUBLISH_PEER_STAGGER_MS,
+  );
 
   if (candidate.getTime() <= now + 60_000) {
     candidate = avoidCrossPostingCollision(
       await ensureActivePostingWindow(new Date(now + randomBetween(2, 8) * 60_000), activeHours),
-      [...crossOccupied, ...peerTriggers],
-      CROSS_POSTING_STAGGER_MS,
+      peerTriggers,
+      AUTO_PUBLISH_PEER_STAGGER_MS,
     );
   }
 

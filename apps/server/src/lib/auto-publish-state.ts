@@ -33,6 +33,12 @@ export function deferAutoPublishRetryIso(minMinutes = 2, maxMinutes = 4): string
 
 const SHORT_SLOT_CLAIM_MS = 5 * 60_000;
 
+function isRecentDueRetrySlot(at: string | null | undefined, now = Date.now()): boolean {
+  if (!at) return false;
+  const ms = new Date(at).getTime();
+  return ms >= now - SHORT_SLOT_CLAIM_MS && ms <= now + SHORT_SLOT_CLAIM_MS;
+}
+
 /**
  * 미래에 잡힌 다음 슬롯을 더 늦은 시각으로 밀지 않음.
  * due 처리 직후 짧은 클레임(2~4분) 구간은 정상 다음 슬롯으로 교체 허용.
@@ -352,6 +358,16 @@ export async function replanAutoPublishSlot(accountId: string, workspace: string
     await logOperation({
       level: 'info',
       message: `[auto-publish] replan skipped — future slot preserved (${state.next_slot_at})`,
+      workspace,
+      account_id: accountId,
+    });
+    return;
+  }
+
+  if (isRecentDueRetrySlot(state.next_slot_at)) {
+    await logOperation({
+      level: 'info',
+      message: `[auto-publish] replan skipped — due retry slot preserved (${state.next_slot_at})`,
       workspace,
       account_id: accountId,
     });
