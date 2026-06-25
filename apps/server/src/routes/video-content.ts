@@ -1,7 +1,5 @@
 import type { FastifyInstance } from 'fastify';
 import { createReadStream, existsSync } from 'fs';
-import { rm, unlink } from 'fs/promises';
-import { join } from 'path';
 import { authMiddleware, getWorkspaceFilter, supabase } from '../middleware/auth.js';
 import { mapAccountDbError } from '../lib/account-errors.js';
 import { enqueueJob } from '../modules/queue/producer.js';
@@ -14,14 +12,16 @@ import {
 } from '../modules/video-content/pipeline.js';
 import { cancelVideoContentJob } from '../modules/video-content/conti-cancel.js';
 import { hasEvoLinkApiKey } from '../modules/video-content/evolink.js';
-import { videoContentFinalPath, videoContentSourcePath, resolveStoredVideoPath } from '../modules/video-content/paths.js';
-import { ensureVideoThumbnail, removeVideoContentThumb } from '../modules/video-content/thumbnail.js';
+import { resolveStoredVideoPath } from '../modules/video-content/paths.js';
+import { ensureVideoThumbnail } from '../modules/video-content/thumbnail.js';
 import {
   bulkDeleteVideoContentFiles,
   deleteVideoContentFileForHistory,
   getVideoContentStorageSettings,
   getVideoContentStorageStats,
   listVideoContentStorageItems,
+  removeAllVideoContentFilesForHistory,
+  removeVideoContentHistoryIfNoFiles,
   runVideoContentStorageAutoCleanup,
   updateVideoContentStorageSettings,
   type StorageListFilter,
@@ -89,30 +89,6 @@ async function accountHasBusyHistory(
   if (excludeHistoryId) query = query.neq('id', excludeHistoryId);
   const { data } = await query;
   return (data?.length ?? 0) > 0;
-}
-
-async function removeVideoContentFiles(
-  historyId: string,
-  videoFilePath: string | null,
-  sourceVideoPath?: string | null,
-): Promise<void> {
-  if (videoFilePath && existsSync(videoFilePath)) {
-    await unlink(videoFilePath).catch(() => {});
-  }
-  const defaultFinal = videoContentFinalPath(historyId);
-  if (existsSync(defaultFinal)) {
-    await unlink(defaultFinal).catch(() => {});
-  }
-  const sourcePath = sourceVideoPath || videoContentSourcePath(historyId);
-  if (sourcePath && existsSync(sourcePath)) {
-    await unlink(sourcePath).catch(() => {});
-  }
-  await removeVideoContentThumb(historyId, 'subtitled');
-  await removeVideoContentThumb(historyId, 'source');
-  const tmpDir = join(process.cwd(), 'tmp', 'video-content', historyId);
-  if (existsSync(tmpDir)) {
-    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-  }
 }
 
 function mapVideoContentListRow(
@@ -297,7 +273,11 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
       return reply.code(409).send({ error: '진행 중인 작업은 삭제할 수 없습니다' });
     }
 
-    await removeVideoContentFiles(id, existing.video_file_path, existing.source_video_path);
+    await removeAllVideoContentFilesForHistory({
+      historyId: id,
+      videoFilePath: existing.video_file_path,
+      sourceVideoPath: existing.source_video_path,
+    });
 
     const { error } = await supabase.from('huma_video_content_history').delete().eq('id', id);
     if (error) return reply.code(400).send({ error: error.message });
@@ -510,8 +490,8 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
       .maybeSingle();
     if (!row) return reply.code(404).send({ error: '없음' });
     if (!allowed.includes(row.workspace)) return reply.code(403).send({ error: '권한 없음' });
-    if (row.status !== 'completed') {
-      return reply.code(409).send({ error: '완료된 작업만 파일을 개별 삭제할 수 있습니다' });
+    if (IN_PROGRESS_STATUSES.includes(row.status as (typeof IN_PROGRESS_STATUSES)[number])) {
+      return reply.code(409).send({ error: '진행 중인 작업은 파일을 삭제할 수 없습니다' });
     }
 
     await deleteVideoContentFileForHistory({
@@ -520,7 +500,8 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
       videoFilePath: row.video_file_path,
       sourceVideoPath: row.source_video_path,
     });
-    return { ok: true, deleted: target };
+    const historyRemoved = await removeVideoContentHistoryIfNoFiles(id);
+    return { ok: true, deleted: target, historyRemoved };
   });
 
   app.get('/api/video-content/storage/stats', { preHandler: authMiddleware }, async (request) => {

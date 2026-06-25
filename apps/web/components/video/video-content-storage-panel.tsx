@@ -8,6 +8,7 @@ import {
   STORAGE_FILTER_LABEL,
   groupStorageFiles,
   formatStorageBytes,
+  pairTotalBytes,
   type VideoContentStorageFile,
   type VideoContentStoragePair,
   type VideoContentStorageFilter,
@@ -143,12 +144,14 @@ export function VideoContentStoragePanel({
   refreshToken,
   onOpenItem,
   onRefresh,
+  onListRefresh,
 }: {
   filterWorkspace: string;
   accounts: HumaAccount[];
   refreshToken: number;
   onOpenItem: (id: string) => void;
   onRefresh: () => void;
+  onListRefresh: () => void | Promise<void>;
 }) {
   const [stats, setStats] = useState<VideoContentStorageStats | null>(null);
   const [settings, setSettings] = useState<VideoContentStorageSettings | null>(null);
@@ -161,6 +164,7 @@ export function VideoContentStoragePanel({
   const [playFile, setPlayFile] = useState<VideoContentStorageFile | null>(null);
   const [saving, setSaving] = useState(false);
   const [runningCleanup, setRunningCleanup] = useState(false);
+  const [deletingFileKey, setDeletingFileKey] = useState<string | null>(null);
   const [numDrafts, setNumDrafts] = useState<Record<StorageNumKey, string>>({
     ssdCapGb: '50',
     warnPercent: '80',
@@ -252,11 +256,42 @@ export function VideoContentStoragePanel({
         `정리 완료 — 원본 ${result.deletedSources}건, 자막본 ${result.deletedSubtitled}건 · ${formatStorageBytes(result.freedBytes)} 확보`,
       );
       onRefresh();
+      void onListRefresh();
       await Promise.all([loadStats(), loadFiles()]);
     } catch (e) {
       await appAlert(e instanceof Error ? e.message : '정리 실패');
     } finally {
       setRunningCleanup(false);
+    }
+  };
+
+  const handleDeleteFile = async (file: VideoContentStorageFile) => {
+    const pair = pairs.find((p) => p.historyId === file.historyId);
+    const accountName = videoContentDisplayName(file.account_id, accounts);
+    const totalBytes = pair ? pairTotalBytes(pair) : file.bytes;
+    const hasBoth = Boolean(pair?.subtitled && pair?.source);
+    const fileLabel = hasBoth ? '자막본·원본' : file.label;
+    if (
+      !(await appConfirm(
+        `${accountName} · ${fileLabel} (${formatStorageBytes(totalBytes)})\n\nSSD 보관 mp4와 완료 탭 작업을 함께 삭제할까요?\n되돌릴 수 없습니다.`,
+        { title: '보관 파일 삭제', destructive: true, confirmLabel: '삭제' },
+      ))
+    ) {
+      return;
+    }
+    setDeletingFileKey(file.historyId);
+    if (playFile?.historyId === file.historyId) {
+      setPlayFile(null);
+    }
+    try {
+      await api.deleteVideoContent(file.historyId);
+      await onListRefresh();
+      onRefresh();
+      await Promise.all([loadStats(), loadFiles()]);
+    } catch (e) {
+      await appAlert(e instanceof Error ? e.message : '삭제 실패');
+    } finally {
+      setDeletingFileKey(null);
     }
   };
 
@@ -399,8 +434,10 @@ export function VideoContentStoragePanel({
               <VideoContentStorageFileGrid
                 pairs={pairs}
                 accountLabel={(id) => videoContentDisplayName(id, accounts)}
+                deletingKey={deletingFileKey}
                 onPlay={setPlayFile}
                 onOpenJob={onOpenItem}
+                onDeleteFile={(file) => void handleDeleteFile(file)}
               />
             )}
           </div>
@@ -422,6 +459,7 @@ export function VideoContentStoragePanel({
         onClose={() => setShowModal(false)}
         onDone={() => {
           onRefresh();
+          void onListRefresh();
           void Promise.all([loadStats(), loadFiles()]);
         }}
         onOpenItem={(id) => {

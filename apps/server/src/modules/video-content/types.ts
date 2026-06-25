@@ -229,7 +229,7 @@ ${VIDEO_SCREEN_TEXT_RENDERING_CONSTRAINT}`,
 };
 
 export const SERVICE_URLS: Record<Workspace, string> = {
-  yeonun: 'https://yeonun.kr',
+  yeonun: 'https://yeonun.com',
   quizoasis: 'https://quizoasis.com',
   panana: 'https://panana.kr',
 };

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { HumaAccount, HumaVideoContentHistory } from '@huma/shared';
 import { api } from '@/lib/api';
-import { appAlert, appConfirm } from '@/lib/app-dialog';
+import { appAlert, appConfirm, appToast } from '@/lib/app-dialog';
 import { useAuth } from '@/lib/auth-context';
 import { getAccessibleBusinessUnits } from '@/lib/admin-scope';
 import { WORKSPACES } from '@/lib/constants';
@@ -40,16 +40,26 @@ import { ContiPreview, type ShotDialogueDraft } from '@/components/video/conti-p
 import { ShortformVideoModelSettings } from '@/components/settings/shortform-video-model-settings';
 import { VideoContentHumorBadge } from '@/components/video/video-content-humor-badge';
 import { VideoContentStoragePanel } from '@/components/video/video-content-storage-panel';
-import { VIDEO_PRIMARY_BTN } from '@/components/video/video-content-ui';
+import { VIDEO_DETAIL_ACTION_BTN, VIDEO_PLATFORM_TAB_BTN, VIDEO_PRIMARY_BTN } from '@/components/video/video-content-ui';
 import { MGrid, MPanel, MTag } from '@/components/mockup/primitives';
+import { SocialPlatformIcon, type SocialPlatformKey } from '@/components/video/social-platform-icon';
 import { useShellViewActive } from '@/components/dashboard/shell-view-active';
 
-const PLATFORMS = [
-  { key: 'youtube', label: 'YouTube', captionKey: 'caption_youtube' as const, uploadedKey: 'uploaded_youtube' as const },
-  { key: 'tiktok', label: 'TikTok', captionKey: 'caption_tiktok' as const, uploadedKey: 'uploaded_tiktok' as const },
-  { key: 'instagram', label: 'Instagram', captionKey: 'caption_instagram' as const, uploadedKey: 'uploaded_instagram' as const },
-  { key: 'threads', label: 'Threads', captionKey: 'caption_threads' as const, uploadedKey: 'uploaded_threads' as const },
-  { key: 'x', label: 'X', captionKey: 'caption_x' as const, uploadedKey: 'uploaded_x' as const },
+const PLATFORMS: Array<{
+  key: SocialPlatformKey;
+  label: string;
+  captionKey:
+    | 'caption_youtube'
+    | 'caption_tiktok'
+    | 'caption_instagram'
+    | 'caption_threads'
+    | 'caption_x';
+}> = [
+  { key: 'youtube', label: 'YouTube', captionKey: 'caption_youtube' },
+  { key: 'tiktok', label: 'TikTok', captionKey: 'caption_tiktok' },
+  { key: 'instagram', label: 'Instagram', captionKey: 'caption_instagram' },
+  { key: 'threads', label: 'Threads', captionKey: 'caption_threads' },
+  { key: 'x', label: 'X', captionKey: 'caption_x' },
 ];
 
 function useVideoBlob(
@@ -164,24 +174,20 @@ function CompletedDetail({
   item,
   conti,
   accountName,
-  deleting,
   reburning,
   videoRefreshKey,
   onReburn,
-  onDelete,
   onRefresh,
 }: {
   item: HumaVideoContentHistory;
   conti: ReturnType<typeof parseContiPreview>;
   accountName?: string;
-  deleting: boolean;
   reburning: boolean;
   videoRefreshKey: number;
   onReburn: () => void;
-  onDelete: () => void;
   onRefresh: () => void;
 }) {
-  const [tab, setTab] = useState('youtube');
+  const [tab, setTab] = useState<SocialPlatformKey>('youtube');
   const [showConti, setShowConti] = useState(false);
   const [videoVariant, setVideoVariant] = useState<'subtitled' | 'source'>('subtitled');
   const { url: videoUrl, loadError: videoLoadError } = useVideoBlob(
@@ -214,7 +220,7 @@ function CompletedDetail({
 
   const copyText = async (text: string) => {
     await navigator.clipboard.writeText(text);
-    await appAlert('클립보드에 복사되었습니다');
+    appToast('클립보드에 복사되었습니다');
   };
 
   return (
@@ -222,16 +228,6 @@ function CompletedDetail({
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="text-[13px] font-semibold text-huma-t">{accountName ?? item.account_id.slice(0, 8)}</div>
         <VideoContentHumorBadge humor={item.self_assessed_humor} />
-        {isDeletableVideoContent(item.status) ? (
-          <button
-            type="button"
-            className="btn-ghost btn-sm text-huma-err"
-            disabled={deleting}
-            onClick={onDelete}
-          >
-            {deleting ? '삭제 중…' : '작업 삭제'}
-          </button>
-        ) : null}
       </div>
 
       <div className="flex flex-wrap gap-1">
@@ -259,7 +255,7 @@ function CompletedDetail({
         <p className="rounded border border-huma-bdr bg-huma-bg2 px-3 py-6 text-center text-[11px] text-huma-t3">
           {videoVariant === 'source'
             ? '원본 파일 없음 (이전 작업이거나 삭제됨)'
-            : '자막본 없음 — 원본에서 「자막만 다시 입히기」 가능'}
+            : '자막본 없음 — 원본에서 「자막 다시 입히기」 가능'}
         </p>
       ) : (
         <p className="text-[11px] text-huma-t3">영상 로드 중…</p>
@@ -267,8 +263,17 @@ function CompletedDetail({
 
       <div className="flex flex-wrap gap-1">
         {PLATFORMS.map((p) => (
-          <button key={p.key} type="button" className={`m-af ${tab === p.key ? 'e' : ''}`} onClick={() => setTab(p.key)}>
-            {p.label}
+          <button
+            key={p.key}
+            type="button"
+            className={`${VIDEO_PLATFORM_TAB_BTN} ${tab === p.key ? 'e' : ''}`}
+            title={p.label}
+            onClick={() => setTab(p.key)}
+          >
+            <span className="inline-flex items-center gap-1">
+              <SocialPlatformIcon platform={p.key} size={13} />
+              {p.label}
+            </span>
           </button>
         ))}
       </div>
@@ -282,32 +287,32 @@ function CompletedDetail({
       ) : null}
       <div className="flex flex-wrap gap-2">
         {conti ? (
-          <button type="button" className="btn-ghost btn-sm" onClick={() => setShowConti((v) => !v)}>
+          <button type="button" className={VIDEO_DETAIL_ACTION_BTN} onClick={() => setShowConti((v) => !v)}>
             {showConti ? '📝 콘티 닫기' : '📝 콘티 보기'}
           </button>
         ) : null}
         <button
           type="button"
-          className={`btn-ghost btn-sm ${reburning ? 'animate-pulse' : ''}`}
+          className={`${VIDEO_DETAIL_ACTION_BTN} ${reburning ? 'animate-pulse' : ''}`}
           disabled={!hasSource || reburning}
           title={hasSource ? undefined : '원본이 보관된 작업만 가능 (신규 생성분부터)'}
           onClick={onReburn}
         >
-          {reburning ? '💬 자막 입히는 중…' : '💬 자막만 다시 입히기'}
+          {reburning ? '💬 자막 입히는 중…' : '💬 자막 다시 입히기'}
         </button>
         <button
           type="button"
-          className="btn-ghost btn-sm"
+          className={VIDEO_DETAIL_ACTION_BTN}
           disabled={videoVariant === 'source' ? !hasSource : !hasSubtitled}
           onClick={() => void api.downloadVideoContent(item.id, videoVariant === 'source' ? 'source' : undefined)}
         >
           {videoVariant === 'source' ? '⬇️ 원본 다운로드' : '⬇️ 자막본 다운로드'}
         </button>
-        <button type="button" className="btn-ghost btn-sm" onClick={() => void copyText(captionText)}>
+        <button type="button" className={VIDEO_DETAIL_ACTION_BTN} onClick={() => void copyText(captionText)}>
           📋 캡션 복사
         </button>
         {firstComment ? (
-          <button type="button" className="btn-ghost btn-sm" onClick={() => void copyText(firstComment)}>
+          <button type="button" className={VIDEO_DETAIL_ACTION_BTN} onClick={() => void copyText(firstComment)}>
             첫 댓글 복사
           </button>
         ) : null}
@@ -321,21 +326,6 @@ function CompletedDetail({
           />
         </div>
       ) : null}
-
-      <div className="flex flex-wrap gap-2 border-t border-huma-bdr pt-2">
-        {PLATFORMS.map((p) => (
-          <label key={p.key} className="flex items-center gap-1 text-[10px] text-huma-t2">
-            <input
-              type="checkbox"
-              checked={Boolean(item[p.uploadedKey])}
-              onChange={(e) =>
-                void api.updateVideoContentUpload(item.id, { [`uploaded_${p.key}`]: e.target.checked }).then(onRefresh)
-              }
-            />
-            {p.label} 업로드 완료
-          </label>
-        ))}
-      </div>
     </div>
   );
 }
@@ -408,10 +398,8 @@ function DetailPanel({
         item={full}
         conti={conti}
         accountName={accountName}
-        deleting={deleting}
         reburning={reburning}
         videoRefreshKey={videoRefreshKey}
-        onDelete={onDelete}
         onReburn={onReburn}
         onRefresh={onRefresh}
       />
@@ -776,6 +764,7 @@ export function VideoContentView() {
       await api.deleteVideoContent(selectedId);
       setSelectedId(null);
       setDetail(null);
+      bumpStorageRefresh();
       await load();
     } catch (e) {
       await appAlert(e instanceof Error ? e.message : '삭제 실패');
@@ -1085,6 +1074,13 @@ export function VideoContentView() {
         accounts={accounts}
         refreshToken={storageRefreshToken}
         onRefresh={() => void refreshSelectedDetail()}
+        onListRefresh={async () => {
+          const list = await load();
+          if (selectedId && !list.some((i) => i.id === selectedId)) {
+            setSelectedId(null);
+            setDetail(null);
+          }
+        }}
         onOpenItem={(id) => {
           setSelectedId(id);
           setActiveTab('done');

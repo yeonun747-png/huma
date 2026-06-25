@@ -1,10 +1,11 @@
 import { existsSync, statSync } from 'fs';
-import { unlink } from 'fs/promises';
+import { rm, unlink } from 'fs/promises';
+import { join } from 'path';
 import type { Workspace } from '@huma/shared';
 import { supabase } from '../../middleware/auth.js';
 import { logOperation } from '../../lib/log-emitter.js';
 import { getSetting, updateSetting } from '../../lib/settings.js';
-import { videoContentFinalPath, videoContentSourcePath, resolveStoredVideoPath } from './paths.js';
+import { resolveStoredVideoPath } from './paths.js';
 import { removeVideoContentThumb } from './thumbnail.js';
 
 export const VIDEO_CONTENT_STORAGE_SETTING_KEY = 'video_content_storage';
@@ -307,16 +308,68 @@ export async function deleteVideoContentFileForHistory(params: {
 }): Promise<void> {
   const { historyId, target } = params;
   if (target === 'source') {
-    const path = params.sourceVideoPath || videoContentSourcePath(historyId);
+    const path = resolveStoredVideoPath(historyId, params.sourceVideoPath, 'source');
     if (existsSync(path)) await unlink(path).catch(() => {});
     await removeVideoContentThumb(historyId, 'source');
     await supabase.from('huma_video_content_history').update({ source_video_path: null }).eq('id', historyId);
     return;
   }
-  const path = params.videoFilePath || videoContentFinalPath(historyId);
+  const path = resolveStoredVideoPath(historyId, params.videoFilePath, 'final');
   if (existsSync(path)) await unlink(path).catch(() => {});
   await removeVideoContentThumb(historyId, 'subtitled');
   await supabase.from('huma_video_content_history').update({ video_file_path: null }).eq('id', historyId);
+}
+
+/** 작업 삭제 시 SSD 원본·자막본 mp4·썸네일·임시 폴더 전부 제거 */
+export async function removeAllVideoContentFilesForHistory(params: {
+  historyId: string;
+  videoFilePath?: string | null;
+  sourceVideoPath?: string | null;
+}): Promise<void> {
+  const { historyId } = params;
+  const files = resolveFileState({
+    id: historyId,
+    video_file_path: params.videoFilePath,
+    source_video_path: params.sourceVideoPath,
+  });
+  if (files.hasSubtitled) {
+    await deleteVideoContentFileForHistory({
+      historyId,
+      target: 'subtitled',
+      videoFilePath: params.videoFilePath,
+    });
+  }
+  if (files.hasSource) {
+    await deleteVideoContentFileForHistory({
+      historyId,
+      target: 'source',
+      sourceVideoPath: params.sourceVideoPath,
+    });
+  }
+  const tmpDir = join(process.cwd(), 'tmp', 'video-content', historyId);
+  if (existsSync(tmpDir)) {
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+function historyHasAnyVideoFiles(row: HistoryRow): boolean {
+  const files = resolveFileState(row);
+  return files.hasSubtitled || files.hasSource;
+}
+
+/** SSD 개별 삭제 후 mp4가 모두 없으면 완료 탭 작업 기록도 제거 */
+export async function removeVideoContentHistoryIfNoFiles(historyId: string): Promise<boolean> {
+  const { data: row } = await supabase
+    .from('huma_video_content_history')
+    .select('id, video_file_path, source_video_path')
+    .eq('id', historyId)
+    .maybeSingle();
+  if (!row) return false;
+  if (historyHasAnyVideoFiles(row as HistoryRow)) return false;
+
+  const { error } = await supabase.from('huma_video_content_history').delete().eq('id', historyId);
+  if (error) throw new Error(error.message);
+  return true;
 }
 
 export async function bulkDeleteVideoContentFiles(params: {

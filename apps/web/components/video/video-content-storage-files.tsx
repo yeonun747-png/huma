@@ -98,7 +98,9 @@ function StorageThumbnail({
   accountName,
   typeLabel,
   sizeLabel,
+  deleting,
   onClick,
+  onDelete,
 }: {
   historyId: string;
   variant: 'subtitled' | 'source';
@@ -106,7 +108,9 @@ function StorageThumbnail({
   accountName: string;
   typeLabel: string;
   sizeLabel: string;
+  deleting?: boolean;
   onClick: () => void;
+  onDelete: () => void;
 }) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -129,20 +133,37 @@ function StorageThumbnail({
   }, [historyId, variant]);
 
   return (
-    <button
-      type="button"
-      className="group relative aspect-[9/16] w-full overflow-hidden rounded-md border border-huma-bdr bg-black"
-      onClick={onClick}
-    >
-      {url ? (
-        <img src={url} alt="" className="h-full w-full object-cover transition group-hover:opacity-90" />
-      ) : (
-        <div
-          className={`flex h-full w-full items-center justify-center text-[10px] text-huma-t4 ${failed ? '' : 'animate-pulse bg-huma-bg3'}`}
-        >
-          {failed ? '썸네일 없음' : '…'}
-        </div>
-      )}
+    <div className="group relative aspect-[9/16] w-full overflow-hidden rounded-md border border-huma-bdr bg-black">
+      <button
+        type="button"
+        className="absolute inset-0 z-[2] w-full"
+        onClick={onClick}
+        aria-label={`${typeLabel} 재생`}
+      >
+        {url ? (
+          <img src={url} alt="" className="h-full w-full object-cover transition group-hover:opacity-90" />
+        ) : (
+          <div
+            className={`flex h-full w-full items-center justify-center text-[10px] text-huma-t4 ${failed ? '' : 'animate-pulse bg-huma-bg3'}`}
+          >
+            {failed ? '썸네일 없음' : '…'}
+          </div>
+        )}
+        <span className="absolute inset-0 z-[1] flex items-center justify-center bg-black/0 text-[24px] text-white opacity-0 transition group-hover:bg-black/30 group-hover:opacity-100">
+          ▶
+        </span>
+      </button>
+      <button
+        type="button"
+        className="absolute left-1 top-1 z-20 rounded bg-huma-err px-1.5 py-0.5 text-[9px] font-semibold leading-none text-white shadow-md hover:brightness-90 disabled:opacity-50"
+        disabled={deleting}
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete();
+        }}
+      >
+        {deleting ? '…' : '삭제'}
+      </button>
       {durationLabel ? (
         <span className="pointer-events-none absolute right-1 top-1 z-10 rounded bg-black/85 px-1.5 py-0.5 font-mono text-[9px] font-bold leading-none text-white shadow-md">
           {durationLabel}
@@ -153,23 +174,24 @@ function StorageThumbnail({
           {accountName} · {typeLabel} · {sizeLabel}
         </p>
       </div>
-      <span className="absolute inset-0 z-[1] flex items-center justify-center bg-black/0 text-[24px] text-white opacity-0 transition group-hover:bg-black/30 group-hover:opacity-100">
-        ▶
-      </span>
-    </button>
+    </div>
   );
 }
 
 export function VideoContentStorageFileGrid({
   pairs,
   accountLabel,
+  deletingKey,
   onPlay,
   onOpenJob,
+  onDeleteFile,
 }: {
   pairs: VideoContentStoragePair[];
   accountLabel: (accountId: string) => string;
+  deletingKey?: string | null;
   onPlay: (file: VideoContentStorageFile) => void;
   onOpenJob: (historyId: string) => void;
+  onDeleteFile: (file: VideoContentStorageFile) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState(() => resolveStorageGridLayout(0, pairs.length));
@@ -238,7 +260,9 @@ export function VideoContentStorageFileGrid({
                     accountName={accountLabel(file.account_id)}
                     typeLabel={file.label}
                     sizeLabel={formatStorageBytes(file.bytes)}
+                    deleting={deletingKey === file.historyId}
                     onClick={() => onPlay(file)}
+                    onDelete={() => onDeleteFile(file)}
                   />
                 ))}
               </div>

@@ -2,7 +2,7 @@ import type { HumaVideoContentHistory } from '@huma/shared';
 
 export type VideoContentTab = 'review' | 'progress' | 'done' | 'failed';
 
-export const VIDEO_CONTENT_LIST_PAGE_SIZE = 5;
+export const VIDEO_CONTENT_LIST_PAGE_SIZE = 7;
 
 export function listPageSizeForVideoContentTab(_tab: VideoContentTab): number {
   return VIDEO_CONTENT_LIST_PAGE_SIZE;

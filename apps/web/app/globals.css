@@ -1848,3 +1848,24 @@
 .vc-progress-indeterminate {
   animation: vc-progress-slide 1.5s ease-in-out infinite;
 }
+
+.app-toast {
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--bg3);
+  border: 1px solid var(--bdr);
+  font-size: 12.5px;
+  color: var(--t);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.app-toast-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 650;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}

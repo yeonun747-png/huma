@@ -31,6 +31,10 @@ export type AppDialogOptions = {
   destructive?: boolean;
 };
 
+export type AppToastOptions = {
+  durationMs?: number;
+};
+
 export type AppDialogApi = {
   alert: (message: string, options?: AppDialogOptions) => Promise<void>;
   confirm: (message: string, options?: AppDialogOptions) => Promise<boolean>;
@@ -40,6 +44,7 @@ export type AppDialogApi = {
 const AppDialogContext = createContext<AppDialogApi | null>(null);
 
 let globalDialogApi: AppDialogApi | null = null;
+let globalToastApi: ((message: string, durationMs?: number) => void) | null = null;
 
 function fallbackAlert(message: string) {
   if (typeof window !== 'undefined') window.alert(message);
@@ -53,6 +58,14 @@ function fallbackConfirm(message: string): boolean {
 function fallbackPrompt(message: string, defaultValue = ''): string | null {
   if (typeof window !== 'undefined') return window.prompt(message, defaultValue);
   return null;
+}
+
+export function appToast(message: string, options?: AppToastOptions): void {
+  const durationMs = options?.durationMs ?? 1000;
+  if (globalToastApi) {
+    globalToastApi(message, durationMs);
+    return;
+  }
 }
 
 export function appAlert(message: string, options?: AppDialogOptions): Promise<void> {
@@ -214,6 +227,14 @@ export function AppDialogProvider({ children }: { children: ReactNode }) {
   const queueRef = useRef<DialogRequest[]>([]);
   const currentRef = useRef<DialogRequest | null>(null);
   const [current, setCurrent] = useState<DialogRequest | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showToast = useCallback((message: string, durationMs = 1000) => {
+    setToast(message);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), durationMs);
+  }, []);
 
   const showNext = useCallback(() => {
     const next = queueRef.current.shift() ?? null;
@@ -259,15 +280,25 @@ export function AppDialogProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     globalDialogApi = api;
+    globalToastApi = showToast;
     return () => {
       globalDialogApi = null;
+      globalToastApi = null;
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     };
-  }, [api]);
+  }, [api, showToast]);
 
   return (
     <AppDialogContext.Provider value={api}>
       {children}
       {current ? <AppDialogModal request={current} onClose={finish} /> : null}
+      {toast ? (
+        <div className="app-toast-layer">
+          <div className="app-toast animate-fadeIn" role="status">
+            {toast}
+          </div>
+        </div>
+      ) : null}
     </AppDialogContext.Provider>
   );
 }

@@ -542,7 +542,7 @@ export const api = {
       method: 'POST',
     }),
   deleteVideoContentFile: (id: string, target: 'source' | 'subtitled') =>
-    request<{ ok: boolean; deleted: string }>(
+    request<{ ok: boolean; deleted: string; historyRemoved?: boolean }>(
       `/api/video-content/${id}/video-file?target=${encodeURIComponent(target)}`,
       { method: 'DELETE' },
     ),
