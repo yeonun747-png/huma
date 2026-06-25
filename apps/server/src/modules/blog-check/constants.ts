@@ -7,6 +7,9 @@ export const BLOG_CHECK_SCAN_CONCURRENCY = 2;
 /** delta 모드 — 최근 N시간 이내 발행 + 오늘 미스캔 글 대상 */
 export const BLOG_CHECK_DELTA_HOURS = 24;
 
+/** post_blog 발행 후 운영자 미스캔 클릭 없을 때 자동 단건 스캔 */
+export const BLOG_CHECK_AUTO_SCAN_AFTER_PUBLISH_MS = 10 * 60 * 1000;
+
 export type BlogCheckScanMode = 'full' | 'delta' | 'posts';
 
 /** 포스트 간 스캔 간격 (ms) — 배치 사이에만 적용 */

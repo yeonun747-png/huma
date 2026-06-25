@@ -47,6 +47,7 @@ import {
   recoverStaleBlogCheckScanLock,
   releaseBlogCheckScanLock,
 } from './scan-lock.js';
+import { cancelScheduledAutoBlogPostScan } from './schedule-auto-post-scan.js';
 import { clearScanProgress, getScanProgress, setScanProgress, type BlogCheckScanProgress } from './scan-progress.js';
 import {
   BlogCheckCaptchaError,
@@ -565,6 +566,8 @@ export interface BlogCheckJobPayload {
   blogId?: string | null;
   mode?: BlogCheckScanMode | string | null;
   postNos?: string[] | null;
+  /** post_blog 발행 10분 후 자동 예약 — 이미 스캔됐으면 skip */
+  autoScheduled?: boolean;
 }
 
 export interface BlogCheckLookupResult {
@@ -1535,6 +1538,13 @@ export async function requestBlogCheckScan(
   }
 
   const mode = normalizeBlogCheckScanMode(options.mode);
+
+  if (accountId && mode === 'posts' && options.postNos?.length) {
+    await Promise.all(
+      options.postNos.map((postNo) => cancelScheduledAutoBlogPostScan(accountId, postNo)),
+    );
+  }
+
   const queued = await tryEnqueueJob(
     {
       type: 'blog_check',
@@ -1595,9 +1605,27 @@ export async function executeBlogCheckJob(payload: BlogCheckJobPayload) {
       throw new Error('SCAN_ALREADY_RUNNING');
     }
   }
+
+  let postNos = payload.postNos?.filter(Boolean) ?? undefined;
+
+  if (payload.autoScheduled && payload.accountId && postNos?.length) {
+    const statusMap = await fetchLatestStatusByPostNo(payload.accountId);
+    const pending = postNos.filter((postNo) => !statusMap.has(postNo));
+    if (pending.length === 0) {
+      await logOperation({
+        level: 'info',
+        message: `[blog-check] 자동 스캔 생략 — 이미 노출 등급 있음 (postNos=${postNos.join(',')})`,
+        account_id: payload.accountId,
+      }).catch(() => undefined);
+      await releaseBlogCheckScanLock();
+      return { scannedAccounts: 0, scannedPosts: 0, skippedAlreadyScanned: true };
+    }
+    postNos = pending;
+  }
+
   const options: BlogCheckScanOptions = {
     mode: normalizeBlogCheckScanMode(payload.mode),
-    postNos: payload.postNos?.filter(Boolean) ?? undefined,
+    postNos,
   };
   try {
     const result = await runBlogCheckScan(

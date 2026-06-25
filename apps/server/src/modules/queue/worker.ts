@@ -751,12 +751,16 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
             blogId?: string | null;
             mode?: string | null;
             postNos?: string[] | null;
+            autoScheduled?: boolean;
           };
           const result = await executeBlogCheckJob(bcPayload);
           const postNos = bcPayload.postNos?.filter(Boolean) ?? [];
+          const skipped = 'skippedAlreadyScanned' in result && result.skippedAlreadyScanned;
           await logOperation({
-            level: postNos.length > 0 && result.scannedPosts === 0 ? 'warn' : 'info',
-            message: `[blog-check] 스캔 완료 — 계정 ${result.scannedAccounts} · 포스트 ${result.scannedPosts}${postNos.length ? ` (요청 postNos=${postNos.join(',')})` : ''}`,
+            level: skipped ? 'info' : postNos.length > 0 && result.scannedPosts === 0 ? 'warn' : 'info',
+            message: skipped
+              ? `[blog-check] 자동 스캔 생략 — 이미 스캔됨 (postNos=${postNos.join(',')})`
+              : `[blog-check] 스캔 완료 — 계정 ${result.scannedAccounts} · 포스트 ${result.scannedPosts}${postNos.length ? ` (요청 postNos=${postNos.join(',')})` : ''}${bcPayload.autoScheduled ? ' [자동]' : ''}`,
             account_id: bcPayload.accountId ?? accountId,
           });
         }

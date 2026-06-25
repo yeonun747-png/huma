@@ -145,8 +145,9 @@ export const PlaywrightPostingReplay = memo(function PlaywrightPostingReplay({
   const mouseRef = useRef({ x: 0, y: 0 });
 
   const ws = workspace ?? 'yeonun';
-  const insertLink = linkUrl?.trim() ?? '';
-  const showLinkStep = Boolean(insertLink);
+  /** postNaverBlog()는 OG·툴바 링크 삽입 없음 — 본문·후행 이미지만 */
+  const showLinkStep = false;
+  const insertLink = '';
   const simBody = body;
   const viewportLabel = previewViewportLabel(viewportSeed ?? `${ws}-${title.length}`);
 
@@ -183,7 +184,7 @@ export const PlaywrightPostingReplay = memo(function PlaywrightPostingReplay({
     const img = document.createElement('img');
     img.src = url;
     img.alt = '본문 삽입 이미지';
-    img.className = 'mx-auto max-h-[360px] rounded object-contain';
+    img.className = 'mx-auto max-h-[min(480px,55vh)] w-auto max-w-full rounded object-contain';
     img.decoding = 'async';
     wrap.appendChild(label);
     wrap.appendChild(img);

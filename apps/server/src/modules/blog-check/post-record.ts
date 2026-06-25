@@ -2,6 +2,7 @@ import { supabase } from '../../middleware/auth.js';
 import { clearBlogPostListCacheForAccount } from './blog-post-list.js';
 import { canonicalBlogPostUrl, extractPostNoFromUrl } from './blog-url.js';
 import { parsePostContentStats } from './content-stats.js';
+import { scheduleAutoBlogPostScan } from './schedule-auto-post-scan.js';
 
 export interface RecordPublishedPostInput {
   accountId: string;
@@ -58,4 +59,12 @@ export async function recordPublishedPost(input: RecordPublishedPostInput): Prom
   }
 
   await clearBlogPostListCacheForAccount(input.accountId);
+
+  if (postNo) {
+    await scheduleAutoBlogPostScan({
+      accountId: input.accountId,
+      postNo,
+      publishedAt,
+    });
+  }
 }

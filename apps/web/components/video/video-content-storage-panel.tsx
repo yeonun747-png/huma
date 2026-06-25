@@ -35,6 +35,108 @@ function usageBarClass(level: VideoContentStorageStats['warnLevel']): string {
   return 'bg-huma-ok';
 }
 
+type StorageNumKey =
+  | 'ssdCapGb'
+  | 'warnPercent'
+  | 'autoDeleteSourceDaysAfterUpload'
+  | 'autoDeleteSubtitledDays';
+
+function parseStorageSettingNum(key: StorageNumKey, raw: string, fallback: number): number {
+  const n = Number.parseInt(raw.trim(), 10);
+  if (!Number.isFinite(n)) return fallback;
+  switch (key) {
+    case 'ssdCapGb':
+      return Math.max(1, n);
+    case 'warnPercent':
+      return Math.min(100, Math.max(50, n));
+    case 'autoDeleteSourceDaysAfterUpload':
+    case 'autoDeleteSubtitledDays':
+      return Math.max(0, n);
+  }
+}
+
+function StoragePolicyNumberInput({
+  label,
+  hint,
+  value,
+  min,
+  max,
+  disabled,
+  onChange,
+  onCommit,
+}: {
+  label: string;
+  hint?: string;
+  value: string;
+  min?: number;
+  max?: number;
+  disabled?: boolean;
+  onChange: (raw: string) => void;
+  onCommit: (raw?: string) => void;
+}) {
+  const parsed = Number.parseInt(value.trim(), 10);
+  const base = Number.isFinite(parsed) ? parsed : (min ?? 0);
+  const atMin = min != null && base <= min;
+  const atMax = max != null && base >= max;
+
+  const stepBy = (delta: number) => {
+    if (disabled) return;
+    let next = base + delta;
+    if (min != null) next = Math.max(min, next);
+    if (max != null) next = Math.min(max, next);
+    const nextStr = String(next);
+    onChange(nextStr);
+    onCommit(nextStr);
+  };
+
+  return (
+    <label className="block text-huma-t3">
+      {label}
+      <div className="m-num-field">
+        <input
+          type="number"
+          min={min}
+          max={max}
+          className="m-num-input"
+          value={value}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              (e.currentTarget as HTMLInputElement).blur();
+            }
+          }}
+          onBlur={() => onCommit(value)}
+        />
+        <div className="m-num-stepper" aria-hidden={disabled}>
+          <button
+            type="button"
+            className="m-num-step"
+            tabIndex={-1}
+            disabled={disabled || atMax}
+            aria-label={`${label} 증가`}
+            onClick={() => stepBy(1)}
+          >
+            ▲
+          </button>
+          <button
+            type="button"
+            className="m-num-step"
+            tabIndex={-1}
+            disabled={disabled || atMin}
+            aria-label={`${label} 감소`}
+            onClick={() => stepBy(-1)}
+          >
+            ▼
+          </button>
+        </div>
+      </div>
+      {hint ? <span className="text-[10px] text-huma-t4">{hint}</span> : null}
+    </label>
+  );
+}
+
 export function VideoContentStoragePanel({
   filterWorkspace,
   accounts,
@@ -59,6 +161,12 @@ export function VideoContentStoragePanel({
   const [playFile, setPlayFile] = useState<VideoContentStorageFile | null>(null);
   const [saving, setSaving] = useState(false);
   const [runningCleanup, setRunningCleanup] = useState(false);
+  const [numDrafts, setNumDrafts] = useState<Record<StorageNumKey, string>>({
+    ssdCapGb: '50',
+    warnPercent: '80',
+    autoDeleteSourceDaysAfterUpload: '7',
+    autoDeleteSubtitledDays: '90',
+  });
 
   const loadStats = useCallback(async () => {
     setLoading(true);
@@ -96,6 +204,16 @@ export function VideoContentStoragePanel({
     void loadFiles();
   }, [loadFiles, refreshToken]);
 
+  useEffect(() => {
+    if (!settings) return;
+    setNumDrafts({
+      ssdCapGb: String(settings.ssdCapGb),
+      warnPercent: String(settings.warnPercent),
+      autoDeleteSourceDaysAfterUpload: String(settings.autoDeleteSourceDaysAfterUpload),
+      autoDeleteSubtitledDays: String(settings.autoDeleteSubtitledDays),
+    });
+  }, [settings]);
+
   const playAccountLabel = useMemo(() => {
     if (!playFile) return '';
     return videoContentDisplayName(playFile.account_id, accounts);
@@ -107,11 +225,22 @@ export function VideoContentStoragePanel({
     try {
       const res = await api.updateVideoContentStorageSettings({ ...settings, ...patch });
       setSettings(res.settings);
+      const data = await api.videoContentStorageStats(filterWorkspace || undefined);
+      setStats(data.stats);
     } catch (e) {
       await appAlert(e instanceof Error ? e.message : '설정 저장 실패');
     } finally {
       setSaving(false);
     }
+  };
+
+  const commitNumDraft = async (key: StorageNumKey, raw?: string) => {
+    if (!settings) return;
+    const text = raw ?? numDrafts[key];
+    const parsed = parseStorageSettingNum(key, text, settings[key]);
+    setNumDrafts((d) => ({ ...d, [key]: String(parsed) }));
+    if (parsed === settings[key]) return;
+    await saveSettings({ [key]: parsed });
   };
 
   const runCleanupNow = async () => {
@@ -223,58 +352,43 @@ export function VideoContentStoragePanel({
                   />
                   자동 정리 활성 (매일 04:30 KST)
                 </label>
+                <p className="text-[10px] text-huma-t4">숫자 입력 후 Enter 또는 포커스 아웃 시 저장됩니다.</p>
                 <div className="grid gap-2 sm:grid-cols-2">
-                  <label className="block text-huma-t3">
-                    SSD 상한 (GB)
-                    <input
-                      type="number"
-                      min={1}
-                      className="m-model-select mt-1 w-full"
-                      value={st.ssdCapGb}
-                      disabled={saving}
-                      onChange={(e) => void saveSettings({ ssdCapGb: Number(e.target.value) || 50 })}
-                    />
-                  </label>
-                  <label className="block text-huma-t3">
-                    경고 (%)
-                    <input
-                      type="number"
-                      min={50}
-                      max={100}
-                      className="m-model-select mt-1 w-full"
-                      value={st.warnPercent}
-                      disabled={saving}
-                      onChange={(e) => void saveSettings({ warnPercent: Number(e.target.value) || 80 })}
-                    />
-                  </label>
-                  <label className="block text-huma-t3">
-                    원본 삭제 (업로드 완료 후 일)
-                    <input
-                      type="number"
-                      min={0}
-                      className="m-model-select mt-1 w-full"
-                      value={st.autoDeleteSourceDaysAfterUpload}
-                      disabled={saving}
-                      onChange={(e) =>
-                        void saveSettings({ autoDeleteSourceDaysAfterUpload: Number(e.target.value) || 0 })
-                      }
-                    />
-                    <span className="text-[10px] text-huma-t4">0 = 비활성</span>
-                  </label>
-                  <label className="block text-huma-t3">
-                    자막본 삭제 (완료 후 일)
-                    <input
-                      type="number"
-                      min={0}
-                      className="m-model-select mt-1 w-full"
-                      value={st.autoDeleteSubtitledDays}
-                      disabled={saving}
-                      onChange={(e) =>
-                        void saveSettings({ autoDeleteSubtitledDays: Number(e.target.value) || 0 })
-                      }
-                    />
-                    <span className="text-[10px] text-huma-t4">0 = 비활성 · 콘티·캡션 유지</span>
-                  </label>
+                  <StoragePolicyNumberInput
+                    label="SSD 상한 (GB)"
+                    value={numDrafts.ssdCapGb}
+                    min={1}
+                    disabled={saving}
+                    onChange={(raw) => setNumDrafts((d) => ({ ...d, ssdCapGb: raw }))}
+                    onCommit={(raw) => void commitNumDraft('ssdCapGb', raw)}
+                  />
+                  <StoragePolicyNumberInput
+                    label="경고 (%)"
+                    value={numDrafts.warnPercent}
+                    min={50}
+                    max={100}
+                    disabled={saving}
+                    onChange={(raw) => setNumDrafts((d) => ({ ...d, warnPercent: raw }))}
+                    onCommit={(raw) => void commitNumDraft('warnPercent', raw)}
+                  />
+                  <StoragePolicyNumberInput
+                    label="원본 삭제 (업로드 완료 후 일)"
+                    hint="0 = 비활성"
+                    value={numDrafts.autoDeleteSourceDaysAfterUpload}
+                    min={0}
+                    disabled={saving}
+                    onChange={(raw) => setNumDrafts((d) => ({ ...d, autoDeleteSourceDaysAfterUpload: raw }))}
+                    onCommit={(raw) => void commitNumDraft('autoDeleteSourceDaysAfterUpload', raw)}
+                  />
+                  <StoragePolicyNumberInput
+                    label="자막본 삭제 (완료 후 일)"
+                    hint="0 = 비활성 · 콘티·캡션 유지"
+                    value={numDrafts.autoDeleteSubtitledDays}
+                    min={0}
+                    disabled={saving}
+                    onChange={(raw) => setNumDrafts((d) => ({ ...d, autoDeleteSubtitledDays: raw }))}
+                    onCommit={(raw) => void commitNumDraft('autoDeleteSubtitledDays', raw)}
+                  />
                 </div>
               </div>
             ) : null}

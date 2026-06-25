@@ -24,7 +24,6 @@ import { resolveFeaturedBlogImageUrl } from '../../../lib/blog-image-placement.j
 import { planNextPostBlogScheduledAt } from '../../../lib/posting-slot-planner.js';
 import { PUBLISH_SCHEDULED_AT_KEY } from '../../../lib/post-blog-publish-day.js';
 import { isAutoPublishJob } from '../../../lib/auto-publish-state.js';
-import { randomBetween } from '../../../lib/utils.js';
 import { assertAccountPostingQuota, assertAccountPostingQuotaBeforeGeneration } from '../../../lib/posting-daily-status.js';
 import {
   assertPostingSimilarityPasses,
@@ -195,9 +194,9 @@ function platformTime(
   return resolvePlatformScheduledAt(platform, schedule, fallback);
 }
 
-/** 자동발행 — 슬롯은 content_full 트리거 시각에 이미 잡힘, post_blog는 생성 직후 발행 */
+/** 자동발행 — content_full 슬롯이 이미 유일한 발행 시각이므로 post_blog는 생성 직후 즉시 큐 */
 function immediatePostBlogScheduledAt(): string {
-  return new Date(Date.now() + randomBetween(2, 8) * 60_000).toISOString();
+  return new Date().toISOString();
 }
 
 async function resolveBlogScheduledAt(

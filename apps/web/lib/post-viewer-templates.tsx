@@ -1,6 +1,6 @@
 import type { ContentType, Workspace } from '@huma/shared';
 import { formatKstDateTime } from '@/lib/format-kst';
-import { formatBlogLinkLabel, normalizeBlogLink, resolveBlogLinkUrl, sanitizeBlogPostForNaver } from '@/lib/naver-post-sanitize';
+import { normalizeBlogLink, sanitizeBlogPostForNaver } from '@/lib/naver-post-sanitize';
 
 export type PostViewerTemplate = {
   accent: string;
@@ -82,19 +82,6 @@ export function mergePostViewerTemplate(overrides: PostViewerOverrides): PostVie
   };
 }
 
-function PostViewerBlogLink({ label, workspace }: { label: string; workspace?: string | null }) {
-  const ws = workspace ?? 'yeonun';
-  const href = resolveBlogLinkUrl(ws, label, label);
-  const text = formatBlogLinkLabel(href, ws);
-  return (
-    <p className="mb-3 text-[13px] leading-relaxed">
-      <a href={href} target="_blank" rel="noreferrer" className="text-[#5b7fff] underline">
-        {text}
-      </a>
-    </p>
-  );
-}
-
 export function PostViewerArticle({
   template,
   isLive,
@@ -137,12 +124,11 @@ export function PostViewerArticle({
           : template.body}
         {isLive && liveBody ? <span className="m-cursor-blink inline-block" /> : null}
       </p>
-      {blogLink ? <PostViewerBlogLink label={blogLink} workspace={overrides?.workspace} /> : null}
       {imageUrl ? (
         <img
           src={imageUrl}
           alt=""
-          className="mb-3 max-h-[180px] w-full rounded-md object-cover"
+          className="mb-3 mx-auto max-h-[min(520px,70vh)] w-full rounded-md object-contain"
         />
       ) : (
         <div
