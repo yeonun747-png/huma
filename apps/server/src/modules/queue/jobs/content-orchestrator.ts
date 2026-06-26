@@ -21,7 +21,6 @@ import {
 } from '../../claude/content-preview.js';
 import { isNaverBlogOnlyMode } from '../../../lib/activity-control.js';
 import { resolveFeaturedBlogImageUrl } from '../../../lib/blog-image-placement.js';
-import { planNextPostBlogScheduledAt } from '../../../lib/posting-slot-planner.js';
 import { PUBLISH_SCHEDULED_AT_KEY } from '../../../lib/post-blog-publish-day.js';
 import { isAutoPublishJob } from '../../../lib/auto-publish-state.js';
 import { assertAccountPostingQuota, assertAccountPostingQuotaBeforeGeneration } from '../../../lib/posting-daily-status.js';
@@ -194,22 +193,19 @@ function platformTime(
   return resolvePlatformScheduledAt(platform, schedule, fallback);
 }
 
-/** 자동발행 — content_full 슬롯이 이미 유일한 발행 시각이므로 post_blog는 생성 직후 즉시 큐 */
+/** content_full 등록 시각에 슬롯이 이미 배정됨 — Claude·Imagen 준비 완료 후 즉시 발행 큐 */
 function immediatePostBlogScheduledAt(): string {
   return new Date().toISOString();
 }
 
-async function resolveBlogScheduledAt(
+function resolveBlogScheduledAt(
   autoScheduled: boolean,
   accountId: string | null | undefined,
   schedule: PlatformSchedule | Record<string, unknown> | undefined,
   fallback: string,
-): Promise<string> {
-  if (isAutoPublishJob(schedule)) {
+): string {
+  if (isAutoPublishJob(schedule) || (autoScheduled && accountId?.trim())) {
     return immediatePostBlogScheduledAt();
-  }
-  if (autoScheduled && accountId?.trim()) {
-    return planNextPostBlogScheduledAt(accountId.trim());
   }
   return platformTime(autoScheduled, schedule as PlatformSchedule | undefined, 'naver_blog', fallback);
 }
@@ -266,7 +262,7 @@ async function runTypeA(
   if (accountId) {
     await assertAccountPostingQuota(workspace, accountId, { excludeJobId: params.parentJobId });
   }
-  const blogAt = await resolveBlogScheduledAt(auto_scheduled, accountId, schedule, scheduled_at);
+  const blogAt = resolveBlogScheduledAt(auto_scheduled, accountId, schedule, scheduled_at);
   const blogJob = await insertJob({
     workspace,
     account_id: accountId,
@@ -338,7 +334,7 @@ async function runTypeB(
   if (accountId) {
     await assertAccountPostingQuota(workspace, accountId, { excludeJobId: params.parentJobId });
   }
-  const blogAt = await resolveBlogScheduledAt(auto_scheduled, accountId, schedule, scheduled_at);
+  const blogAt = resolveBlogScheduledAt(auto_scheduled, accountId, schedule, scheduled_at);
   const threadsAt = platformTime(auto_scheduled, schedule, 'threads', scheduled_at);
   const twitterAt = platformTime(auto_scheduled, schedule, 'x', scheduled_at);
   const videoAt = platformTime(auto_scheduled, schedule, 'tiktok', scheduled_at);
@@ -453,10 +449,12 @@ async function persistAutoDecision(
   const prev = (job?.platform_schedule as Record<string, unknown> | null) ?? {};
   const wasDryRun = prev._dry_run === true;
   const autoPick = prev._auto_pick;
+  const wasAutoPublish = prev._auto_publish === true;
   const platformSchedule = {
     ...decision.platform_schedule,
     ...(wasDryRun ? { _dry_run: true } : {}),
     ...(autoPick ? { _auto_pick: autoPick } : {}),
+    ...(wasAutoPublish ? { _auto_publish: true } : {}),
   };
 
   await supabase

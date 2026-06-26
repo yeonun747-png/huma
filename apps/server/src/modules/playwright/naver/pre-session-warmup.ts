@@ -96,7 +96,16 @@ async function quickWarmupGlance(page: Page, accountType: WarmupAccountType): Pr
   await humanSleep(accountType === 'posting' ? 300 : 1500, accountType === 'posting' ? 1000 : 4000);
 }
 
-/** 방문 페이지에서 naver 내부 메뉴·탭 클릭 (posting: 1~2회 필수) */
+/** 로그인 워밍업(light/full) 시 GNB·검색 탭 중 쇼핑 링크 식별 */
+function isShoppingNavLink(href: string, text: string): boolean {
+  const h = href.toLowerCase();
+  const t = text.trim();
+  if (/shopping\.naver\.com|\/shopping\b|brand\.naver\.com\/n\/shopping/i.test(h)) return true;
+  if (t.includes('쇼핑')) return true;
+  return false;
+}
+
+/** 방문 페이지에서 naver 내부 메뉴·탭 클릭 (posting: 1~2회 필수, 쇼핑 탭 제외) */
 async function maybeBrowseInPageMenus(page: Page, accountType: WarmupAccountType): Promise<void> {
   if (accountType !== 'posting') return;
   const clicks = randomBetween(1, 2);
@@ -107,16 +116,21 @@ async function maybeBrowseInPageMenus(page: Page, accountType: WarmupAccountType
   const count = await menuLinks.count().catch(() => 0);
   if (count === 0) return;
 
-  const indices = shuffle([...Array.from({ length: Math.min(count, 12) }, (_, i) => i)]).slice(
-    0,
-    clicks,
-  );
+  const indices = shuffle([...Array.from({ length: Math.min(count, 12) }, (_, i) => i)]);
+  let clicked = 0;
   for (const idx of indices) {
+    if (clicked >= clicks) break;
     const link = menuLinks.nth(idx);
     if (!(await link.isVisible({ timeout: 1200 }).catch(() => false))) continue;
+
+    const href = (await link.getAttribute('href').catch(() => '')) ?? '';
+    const text = (await link.innerText().catch(() => '')) ?? '';
+    if (isShoppingNavLink(href, text)) continue;
+
     await link.click({ timeout: 6000 }).catch(() => {});
     await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => {});
     await quickWarmupGlance(page, accountType);
+    clicked += 1;
   }
 }
 
