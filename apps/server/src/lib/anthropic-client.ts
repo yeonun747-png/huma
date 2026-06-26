@@ -65,32 +65,55 @@ export async function askClaude(prompt: string, maxTokens = 100): Promise<string
   return askClaudeWithModel({ prompt, max_tokens: maxTokens });
 }
 
-/** Claude Sonnet Vision — CAPTCHA 이미지 해석 */
+/** Claude Sonnet Vision — CAPTCHA 이미지 해석 (단일·다중 이미지) */
 export async function askClaudeVision(params: {
   model?: string;
   system?: string;
   question: string;
-  imageBase64: string;
+  imageBase64?: string;
+  images?: Array<{ base64: string; mediaType?: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp' }>;
   mediaType?: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
   max_tokens?: number;
 }): Promise<string | null> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return null;
 
-  const mediaType = params.mediaType ?? 'image/png';
+  const defaultMedia = params.mediaType ?? 'image/png';
+  const imageBlocks: Array<{
+    type: 'image';
+    source: { type: 'base64'; media_type: string; data: string };
+  }> = [];
+
+  if (params.images?.length) {
+    for (const img of params.images) {
+      imageBlocks.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: img.mediaType ?? defaultMedia,
+          data: img.base64,
+        },
+      });
+    }
+  } else if (params.imageBase64) {
+    imageBlocks.push({
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: defaultMedia,
+        data: params.imageBase64,
+      },
+    });
+  }
+
+  if (!imageBlocks.length) return null;
+
   return askClaudeWithModel({
     model: params.model ?? 'claude-sonnet-4-6',
     max_tokens: params.max_tokens ?? 256,
     system: params.system,
     content: [
-      {
-        type: 'image',
-        source: {
-          type: 'base64',
-          media_type: mediaType,
-          data: params.imageBase64,
-        },
-      },
+      ...imageBlocks,
       {
         type: 'text',
         text: params.question,

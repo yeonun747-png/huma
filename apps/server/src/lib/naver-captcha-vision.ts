@@ -129,6 +129,16 @@ const CONFIRM_SELECTORS = [
 ];
 
 import { pickNaverLoginCaptchaPage } from './naver-login-session.js';
+import {
+  captureAllCaptchaReceiptImagesPng,
+  captureCaptchaRegionPng,
+  captureFullCaptchaImagePng,
+} from './naver-captcha-capture.js';
+import {
+  buildReceiptCaptchaVisionSystemPrompt,
+  buildReceiptCaptchaVisionUserPrompt,
+  normalizeCaptchaTextAnswer,
+} from './naver-captcha-receipt-prompt.js';
 
 /** CAPTCHA·비번 재입력 대상 — ID/전화번호 탭 우선(QR 중복 탭 제외) */
 export async function pickNaverCaptchaPage(context: BrowserContext): Promise<Page | undefined> {
@@ -279,36 +289,52 @@ async function detectCaptchaType(page: Page): Promise<CaptchaType> {
 }
 
 function isReceiptLikeCaptcha(question: string): boolean {
-  return /영수증|잘린|절취|가격|개수|총합|품목|물건|메뉴|용량|ml|빈\s*칸|위치|구매한|가게|마켓|주소|상호|한글|개당|합계|\[\?\]/.test(
+  return /영수증|잘린|절취|가격|개수|총합|품목|물건|메뉴|용량|ml|빈\s*칸|위치|구매한|가게|마켓|주소|상호|한글|개당|합계|\[\?\]|총\s*몇|결제\s*금액|할인|행사|지점|매장|단가|수량/.test(
     question,
   );
 }
+
+type CaptchaVisionImages = Array<{ base64: string; mediaType: 'image/png' | 'image/jpeg' }>;
 
 async function captureCaptchaScreenshot(
   page: Page,
   type: CaptchaType,
   question = '',
-): Promise<{ base64: string; mediaType: 'image/png' | 'image/jpeg' } | null> {
-  const root = await locateCaptchaRoot(page);
+): Promise<CaptchaVisionImages | null> {
+  await page.bringToFront().catch(() => {});
+  const root = await locateActiveCaptchaRoot(page);
+  const captureRoot = root ?? (await locateCaptchaRoot(page));
+
+  const toPayload = (bufs: Buffer[]): CaptchaVisionImages =>
+    bufs.map((buf) => ({ base64: buf.toString('base64'), mediaType: 'image/png' as const }));
 
   if (type === 'text' && (isReceiptLikeCaptcha(question) || page.url().includes('nidlogin'))) {
-    const buf = await root.screenshot({ type: 'png' }).catch(() => null);
-    if (buf?.length) return { base64: buf.toString('base64'), mediaType: 'image/png' };
+    const receiptImgs = await captureAllCaptchaReceiptImagesPng(page);
+    if (receiptImgs.length) return toPayload(receiptImgs.slice(0, 3));
+
+    const region = await captureCaptchaRegionPng(page, captureRoot);
+    if (region?.length) return toPayload([region]);
   }
 
   if (type === 'text') {
+    const receiptImgs = await captureAllCaptchaReceiptImagesPng(page);
+    if (receiptImgs.length) return toPayload(receiptImgs.slice(0, 3));
+
     for (const sel of CAPTCHA_IMAGE_SELECTORS) {
       const img = page.locator(sel).first();
       if (await img.isVisible().catch(() => false)) {
-        const buf = await img.screenshot({ type: 'png' }).catch(() => null);
-        if (buf?.length) return { base64: buf.toString('base64'), mediaType: 'image/png' };
+        const buf = await img.screenshot({ type: 'png', animations: 'disabled' }).catch(() => null);
+        if (buf?.length) return toPayload([buf]);
       }
     }
   }
 
-  const buf = await root.screenshot({ type: 'png' }).catch(() => null);
+  const region = await captureCaptchaRegionPng(page, captureRoot);
+  if (region?.length) return toPayload([region]);
+
+  const buf = await captureRoot.screenshot({ type: 'png', animations: 'disabled' }).catch(() => null);
   if (!buf?.length) return null;
-  return { base64: buf.toString('base64'), mediaType: 'image/png' };
+  return toPayload([buf]);
 }
 
 async function readCaptchaQuestion(page: Page): Promise<string> {
@@ -391,12 +417,18 @@ function parseVisionSolveResult(
       : undefined;
     const dragPx = json.dragPx != null ? Number(json.dragPx) : undefined;
     const dragPercent = json.dragPercent != null ? Number(json.dragPercent) : undefined;
-    const answer =
+    const answerRaw =
       typeof json.answer === 'string'
         ? json.answer.trim()
         : typeof json.answer === 'number'
           ? String(json.answer)
           : undefined;
+
+    if (json.insufficient === true || json.insufficient === 'true') return null;
+    if (typeof json.missing === 'string' && json.missing.trim() && !answerRaw) return null;
+
+    const answer = answerRaw ? normalizeCaptchaTextAnswer(answerRaw, question) : undefined;
+
     if (type === 'grid' && cells?.length) return { type: 'grid', cells };
     if (type === 'slider' && (dragPx != null || dragPercent != null)) {
       return { type: 'slider', dragPx, dragPercent };
@@ -414,32 +446,36 @@ function parseVisionSolveResult(
 
     if (asksKoreanText) {
       const hangul = raw.match(/[가-힣]{2,}/)?.[0];
-      if (hangul) return { type: 'text', answer: hangul };
+      if (hangul) return { type: 'text', answer: normalizeCaptchaTextAnswer(hangul, question) };
       return null;
     }
 
     if (asksNumber) {
       const digitMatch = raw.match(/\d+/);
-      if (digitMatch) return { type: 'text', answer: digitMatch[0] };
+      if (digitMatch) return { type: 'text', answer: normalizeCaptchaTextAnswer(digitMatch[0], question) };
     }
 
     const hangul = raw.match(/[가-힣]{2,}/)?.[0];
-    if (hangul) return { type: 'text', answer: hangul };
+    if (hangul) return { type: 'text', answer: normalizeCaptchaTextAnswer(hangul, question) };
     const alnum = raw.replace(/[^0-9a-zA-Z가-힣]/g, '');
-    if (alnum.length) return { type: 'text', answer: alnum.slice(0, 32) };
+    if (alnum.length) {
+      return { type: 'text', answer: normalizeCaptchaTextAnswer(alnum.slice(0, 32), question) };
+    }
   }
   return null;
 }
 
 async function solveCaptchaWithVision(
-  imageBase64: string,
-  mediaType: 'image/png' | 'image/jpeg',
+  images: CaptchaVisionImages,
   question: string,
   type: CaptchaType,
   meta: { cellCount?: number; trackWidthPx?: number },
 ): Promise<VisionSolveResult | null> {
+  if (!images.length) return null;
+
   let system: string;
   let prompt: string;
+  let maxTokens: number;
 
   if (type === 'grid') {
     system = `You solve Naver image-grid CAPTCHA. Return ONLY JSON, no markdown.
@@ -448,6 +484,7 @@ Format: {"type":"grid","cells":[1,3,5]}
 - Click ALL tiles matching the Korean instruction.
 - Receipt/torn-receipt tiles: match the EXACT store name, menu, or item category asked — not a similar word from another tile.`;
     prompt = `Question: ${question}\nGrid has ${meta.cellCount ?? 'unknown'} clickable tiles numbered 1..N row-major.`;
+    maxTokens = 192;
   } else if (type === 'slider') {
     system = `You solve Naver slide-puzzle CAPTCHA. Return ONLY JSON, no markdown.
 Format: {"type":"slider","dragPx":127} OR {"type":"slider","dragPercent":0.62}
@@ -455,47 +492,32 @@ Format: {"type":"slider","dragPx":127} OR {"type":"slider","dragPercent":0.62}
 - dragPercent: fraction of track width (0-1) if exact pixels unclear.
 - Slider track width ≈ ${meta.trackWidthPx ?? 300}px.`;
     prompt = `Question: ${question}\nFind how far to drag the slider handle horizontally to complete the puzzle.`;
+    maxTokens = 128;
   } else {
     const receiptLike = isReceiptLikeCaptcha(question);
-    system = receiptLike
-      ? `You solve Naver login CAPTCHA with virtual receipt/store images in ONE screenshot.
-Layout (stitch left→right if torn strips):
-- LEFT: product names OR store address lines (Korean).
-- RIGHT (if present): table 가격 | 개수 | 총합 — row N left matches row N right.
-Rules — read the green Korean question EXACTLY:
-1. Price/name/quantity (split receipt):
-   - "한 개 당 가격" / minimum price → MIN in 가격 column only (e.g. 100).
-   - "가장 가격이 싼 물건의 이름" → Korean product name on min-price row.
-   - "개수" / "몇 개" → 개수 column.
-2. Capacity/volume (single receipt image):
-   - "용량" / "몇 ml" / "하나 당 용량" → read ml from product text e.g. "토마토즙 (용량 100ml)" → "100". NOT from price table.
-   - Example: "구매한 토마토즙 하나 당 용량은 몇 ml" → "100".
-3. Address blank fill:
-   - "가게 위치" / "빈 칸" / "[?]" in address → missing Korean road/street between 시·군·구 and number.
-   - Example: "원주시 평창군 [?] 397" with receipt showing "원주시 평창군 솔뫼로 397" → "솔뫼로".
-4. Return ONLY JSON: {"type":"text","answer":"..."}
-   - Numbers: digits only (no ml, no commas).
-   - Korean text: exact characters from receipt (가-힣).`
-      : `You solve Naver Korean login CAPTCHA images. Return ONLY JSON: {"type":"text","answer":"..."}
+    if (receiptLike) {
+      system = buildReceiptCaptchaVisionSystemPrompt();
+      prompt = buildReceiptCaptchaVisionUserPrompt(question, images.length);
+      maxTokens = 1024;
+    } else {
+      system = `You solve Naver Korean login CAPTCHA images. Return ONLY JSON: {"type":"text","answer":"..."}
 Rules:
 - Store address blank [?]: fill missing Korean road name from receipt address line.
 - Product capacity ml: extract number from parentheses e.g. "(용량 100ml)" → "100".
-- Torn receipt: stitch fragments; match question to correct column or product line.
+- Torn receipt: stitch vertical fragments top→bottom; match question to correct column or product line.
 - Korean names: copy EXACT from image (가-힣).
 - Digits only when question asks for number/count/amount/capacity.`;
-    prompt = receiptLike
-      ? `Question (green text): ${question}
-Read ALL receipt strips and column headers in the screenshot. Return JSON with the single correct answer.`
-      : `Question: ${question}\nRead the full captcha image including all receipt fragments.`;
+      prompt = `Question: ${question}\nRead the full captcha image including all receipt fragments.`;
+      maxTokens = 384;
+    }
   }
 
   const raw = await askClaudeVision({
     model: VISION_MODEL,
     system,
     question: prompt,
-    imageBase64,
-    mediaType,
-    max_tokens: type === 'grid' ? 192 : type === 'text' ? 256 : 128,
+    images,
+    max_tokens: maxTokens,
   });
   return parseVisionSolveResult(raw, type, question);
 }
@@ -816,13 +838,13 @@ export async function tryAutoSolveNaverCaptcha(
       });
 
       const shot = await captureCaptchaScreenshot(page, captchaType, question);
-      if (!shot) break;
+      if (!shot?.length) break;
 
       const root = await locateCaptchaRoot(page);
       const cells = captchaType === 'grid' ? await findGridCells(root) : [];
       const trackW = captchaType === 'slider' ? await getSliderTrackWidth(page, root) : undefined;
 
-      const solved = await solveCaptchaWithVision(shot.base64, shot.mediaType, question, captchaType, {
+      const solved = await solveCaptchaWithVision(shot, question, captchaType, {
         cellCount: cells.length || undefined,
         trackWidthPx: trackW,
       });
@@ -876,21 +898,26 @@ export async function tryAutoSolveNaverCaptcha(
   return 'failed';
 }
 
-/** CAPTCHA hold·텔레그램·웹 UI용 PNG — nidlogin #captcha 전체 → #captchaimg → 활성 루트 → 로그인 패널 → 뷰포트 */
+/** CAPTCHA hold·텔레그램·웹 UI용 PNG — union clip + 원본 이미지 펼침 */
 export async function captureNaverCaptchaPng(page: Page): Promise<Buffer | null> {
-  await page.bringToFront().catch(() => {});
+  const activeRoot = await locateActiveCaptchaRoot(page);
+  if (activeRoot) {
+    const region = await captureCaptchaRegionPng(page, activeRoot);
+    if (region && region.length > 800) return region;
+  }
 
   const isNidLogin = page.url().includes('nidlogin') || page.url().includes('nid.naver.com');
   if (isNidLogin) {
     for (const sel of ['#captcha', '#cptch', '.captcha_wrap']) {
       const captcha = page.locator(sel).first();
       if (!(await captcha.isVisible({ timeout: 500 }).catch(() => false))) continue;
-      const box = await captcha.boundingBox().catch(() => null);
-      if (!box || box.width < 100 || box.height < 60) continue;
-      const buf = await captcha.screenshot({ type: 'png', animations: 'disabled' }).catch(() => null);
-      if (buf && buf.length > 1200) return buf;
+      const region = await captureCaptchaRegionPng(page, captcha);
+      if (region && region.length > 1200) return region;
     }
   }
+
+  const fullImg = await captureFullCaptchaImagePng(page);
+  if (fullImg && fullImg.length > 400) return fullImg;
 
   for (const sel of ['#captchaimg', '#captcha img', 'img[id*="captcha"]', 'img[src*="captcha"]']) {
     const img = page.locator(sel).first();
@@ -899,15 +926,6 @@ export async function captureNaverCaptchaPng(page: Page): Promise<Buffer | null>
     if (!box || box.width < 60 || box.height < 20) continue;
     const buf = await img.screenshot({ type: 'png', animations: 'disabled' }).catch(() => null);
     if (buf && buf.length > 400) return buf;
-  }
-
-  const activeRoot = await locateActiveCaptchaRoot(page);
-  if (activeRoot) {
-    const box = await activeRoot.boundingBox().catch(() => null);
-    if (box && box.width >= 100 && box.height >= 60) {
-      const buf = await activeRoot.screenshot({ type: 'png', animations: 'disabled' }).catch(() => null);
-      if (buf && buf.length > 800) return buf;
-    }
   }
 
   if (page.url().includes('nidlogin')) {
