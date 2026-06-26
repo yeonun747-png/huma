@@ -193,9 +193,12 @@ function platformTime(
   return resolvePlatformScheduledAt(platform, schedule, fallback);
 }
 
-/** content_full 등록 시각에 슬롯이 이미 배정됨 — Claude·Imagen 준비 완료 후 즉시 발행 큐 */
-function immediatePostBlogScheduledAt(): string {
-  return new Date().toISOString();
+/** Claude·Imagen 준비 완료 후 post_blog 발행까지 고정 버퍼(분) */
+export const POST_BLOG_PREP_BUFFER_MINUTES = 5;
+
+/** content_full 파이프라인 — 준비 완료 시각 기준 발행 예약 (재랜덤 슬롯 없음) */
+function postBlogScheduledAfterPrep(): string {
+  return new Date(Date.now() + POST_BLOG_PREP_BUFFER_MINUTES * 60_000).toISOString();
 }
 
 function resolveBlogScheduledAt(
@@ -205,7 +208,7 @@ function resolveBlogScheduledAt(
   fallback: string,
 ): string {
   if (isAutoPublishJob(schedule) || (autoScheduled && accountId?.trim())) {
-    return immediatePostBlogScheduledAt();
+    return postBlogScheduledAfterPrep();
   }
   return platformTime(autoScheduled, schedule as PlatformSchedule | undefined, 'naver_blog', fallback);
 }

@@ -566,7 +566,7 @@ export interface BlogCheckJobPayload {
   blogId?: string | null;
   mode?: BlogCheckScanMode | string | null;
   postNos?: string[] | null;
-  /** post_blog 발행 10분 후 자동 예약 — 이미 스캔됐으면 skip */
+  /** post_blog 발행 완료 직후 자동 예약(완료+20분) — 이미 스캔됐으면 skip */
   autoScheduled?: boolean;
 }
 

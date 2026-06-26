@@ -64,7 +64,6 @@ export async function recordPublishedPost(input: RecordPublishedPostInput): Prom
     await scheduleAutoBlogPostScan({
       accountId: input.accountId,
       postNo,
-      publishedAt,
     });
   }
 }

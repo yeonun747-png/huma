@@ -6,24 +6,21 @@ export function autoBlogPostScanJobId(accountId: string, postNo: string): string
   return `blog-check-auto-${accountId}-${postNo}`;
 }
 
-/** 발행 시각 기준 10분 후까지 남은 ms */
-export function computeAutoBlogPostScanDelayMs(publishedAt: string, nowMs = Date.now()): number {
-  const anchor = Date.parse(publishedAt);
-  if (!Number.isFinite(anchor)) return BLOG_CHECK_AUTO_SCAN_AFTER_PUBLISH_MS;
-  return Math.max(0, anchor + BLOG_CHECK_AUTO_SCAN_AFTER_PUBLISH_MS - nowMs);
+/** 발행 완료 직후 호출 — 완료 시각부터 N분 후 스캔 (posts.published_at·예약 시각과 무관) */
+export function computeAutoBlogPostScanDelayMs(): number {
+  return BLOG_CHECK_AUTO_SCAN_AFTER_PUBLISH_MS;
 }
 
-/** post_blog 발행 직후 — 미스캔 버튼 대신 10분 뒤 단건 스캔 예약 */
+/** post_blog 발행 완료 직후 — 미스캔 버튼 대신 완료 시각 + 20분 뒤 단건 스캔 예약 */
 export async function scheduleAutoBlogPostScan(input: {
   accountId: string;
   postNo: string;
-  publishedAt: string;
 }): Promise<void> {
   const postNo = input.postNo.trim();
   const accountId = input.accountId.trim();
   if (!postNo || !accountId) return;
 
-  const delay = computeAutoBlogPostScanDelayMs(input.publishedAt);
+  const delay = computeAutoBlogPostScanDelayMs();
   const jobId = autoBlogPostScanJobId(accountId, postNo);
   await cancelScheduledAutoBlogPostScan(accountId, postNo);
   const queued = await tryEnqueueJob(
@@ -42,7 +39,7 @@ export async function scheduleAutoBlogPostScan(input: {
   if (queued) {
     await logOperation({
       level: 'info',
-      message: `[blog-check] 발행+10분 자동 스캔 예약 — postNo=${postNo} (${Math.round(delay / 1000)}초 후)`,
+      message: `[blog-check] 발행+20분 자동 스캔 예약 — postNo=${postNo} (${Math.round(delay / 1000)}초 후)`,
       account_id: accountId,
     }).catch(() => undefined);
   }
