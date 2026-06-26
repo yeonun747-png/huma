@@ -42,17 +42,14 @@ export function resolveWorkspaceServiceMention(workspace: string): WorkspaceServ
   return WORKSPACE_SERVICE_MENTIONS[key] ?? WORKSPACE_SERVICE_MENTIONS.yeonun;
 }
 
-/** Claude 본문 생성용 — 도메인 포함 / 서비스명만 랜덤 */
+/** Claude 본문 생성용 — 서비스 한글명만 */
 export function workspaceServiceMentionPromptGuide(workspace: string): string {
   const m = resolveWorkspaceServiceMention(workspace);
-  return `서비스 언급은 본문 1~2회. 글마다 아래 둘 중 하나를 랜덤 선택 (같은 글 안에서는 한 형식만 통일):
-- 「${m.withDomain.trim()}」 (${m.domainLabel} 점 앞뒤 공백·서비스명 앞뒤 공백 유지)
-- 「${m.nameOnly}」만 (도메인 없이 서비스명만)
-https·${m.domainLabel.replace(/\s/g, '')}·전체 URL 금지`;
+  return `서비스 언급은 본문 1~2회, 항상 「${m.nameOnly}」만 (도메인·괄호·URL·https 금지)`;
 }
 
 /** 계정 페르소나·시스템 프롬프트용 한 줄 요약 */
 export function workspaceServiceMentionRuleLine(workspace: string): string {
   const m = resolveWorkspaceServiceMention(workspace);
-  return `서비스 언급: 「${m.withDomain.trim()}」 또는 「${m.nameOnly}」만 — 글마다 둘 중 랜덤 (${m.domainLabel} 점 앞뒤 공백, https·bare URL 금지)`;
+  return `서비스 언급: 「${m.nameOnly}」만 — 도메인·(${m.domainLabel}) 등 괄호 형식·https·bare URL 금지`;
 }

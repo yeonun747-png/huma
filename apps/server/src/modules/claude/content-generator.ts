@@ -322,7 +322,7 @@ function fallbackContent(
       '',
       urlSummary.slice(0, summaryLen),
       '',
-      `${resolveWorkspaceServiceMention(input.workspace).withDomain.trim()}에서 확인`,
+      `${resolveWorkspaceServiceMention(input.workspace).nameOnly}에서 확인`,
     ].join('\n'),
     input.workspace,
   );
