@@ -2,6 +2,7 @@ import { formatKstDateKey } from './posting-daily-target.js';
 import { getKstClock } from './crank-schedule-config.js';
 import { getSystemPaused } from './system-pause.js';
 import { rolloverAutoPublishDay, triggerDueAutoPublishJobs } from './auto-publish-state.js';
+import { runDonglePreSlotHealthChecks } from './dongle-pre-slot-health.js';
 import { logOperation } from './log-emitter.js';
 
 let lastAutoPublishDayKey = '';
@@ -29,6 +30,14 @@ async function tickAutoPublishScheduler(): Promise<void> {
     await logOperation({
       level: 'info',
       message: `[auto-publish-scheduler] content_full ${triggered}건 등록`,
+    });
+  }
+
+  const dongleRecovered = await runDonglePreSlotHealthChecks();
+  if (dongleRecovered > 0) {
+    await logOperation({
+      level: 'info',
+      message: `[auto-publish-scheduler] 다음 큐 10분 전 동글 사전 복구 ${dongleRecovered}건`,
     });
   }
 }

@@ -1,4 +1,3 @@
-import { execSync } from 'child_process';
 import { supabase } from '../../middleware/auth.js';
 import { logOperation } from '../../lib/log-emitter.js';
 import { sleep } from '../../lib/utils.js';
@@ -10,20 +9,8 @@ import { setCachedAtPort } from '../../lib/dongle-at-cache.js';
 import { resetLteModem } from '../../lib/modem-lte-reset.js';
 import { resetPhoneCrank } from '../../lib/modem-phone-reset.js';
 import { isPhoneCrankSlot, resolvePhoneSerial } from '../../lib/phone-crank.js';
-import { applyDonglePolicyRoute } from '../../lib/restore-dongle-network.js';
-
-function sync3proxyExternalIp(proxyPort: number, newIp: string): void {
-  if (process.platform === 'win32') return;
-  try {
-    execSync(
-      `sed -i -E 's/^(socks|proxy) -p${proxyPort} .*/socks -p${proxyPort} -i127.0.0.1 -e${newIp}/' /etc/3proxy/3proxy.cfg`,
-      { stdio: 'pipe' },
-    );
-    execSync('systemctl reload 3proxy', { stdio: 'pipe' });
-  } catch {
-    // dev 환경(WSL/로컬)에서는 3proxy 미설치일 수 있음
-  }
-}
+import { applyDonglePolicyRoute } from '../../lib/dongle-policy-route.js';
+import { sync3proxyExternalIp } from '../../lib/dongle-socks-recover.js';
 
 export interface ReconnectResult {
   success: boolean;
