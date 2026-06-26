@@ -1,6 +1,6 @@
 import type { Page } from 'playwright';
 import { supabase } from '../../middleware/auth.js';
-import { formatKstDateKey, getKstClock } from '../../lib/crank-schedule-config.js';
+import { formatKstDateKey } from '../../lib/crank-schedule-config.js';
 import { logOperation } from '../../lib/log-emitter.js';
 import { sleep } from '../../lib/utils.js';
 import { tryEnqueueJob } from '../queue/producer.js';
@@ -1791,21 +1791,4 @@ export async function buildBlogCheckPostsByBlogResponse(blogId: string) {
     scannedAt: cache?.scannedAt ?? null,
     posts: cache?.posts ?? [],
   };
-}
-
-let lastScheduledKey = '';
-
-/** 매일 09:00 KST — blog-check-daily */
-export function startBlogCheckScheduler(): void {
-  const tick = () => {
-    const { hour, minute } = getKstClock();
-    if (hour !== 9 || minute !== 0) return;
-    const key = formatKstDateKey();
-    if (lastScheduledKey === key) return;
-    lastScheduledKey = key;
-    requestBlogCheckScan().catch((err) => console.error('[blog-check-scheduler]', err));
-  };
-
-  setInterval(tick, 30_000);
-  tick();
 }
