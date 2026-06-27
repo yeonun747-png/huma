@@ -243,12 +243,12 @@ export async function runSocialCrank(
 
     await setCrankSessionProgress(jobId, '브라우저 기동');
     context = (await createBrowserForAccount(accountCtx)).context;
+    await applyCrankResourceBlocking(context);
 
     try {
       if (resumeAfterCaptcha) {
         await setCrankSessionProgress(jobId, '세션 확인', 'CAPTCHA 후 재개');
         await ensurePhoneCrankTether(modemSession.proxyPort);
-        await applyCrankResourceBlocking(context);
         await ensureNaverLoggedIn(context, accountId, { profilePath: accountCtx.profile_path });
       } else {
         const warmupPage = await acquireWorkflowPage(context);
@@ -260,7 +260,6 @@ export async function runSocialCrank(
         await preSessionWarmup(warmupPage, persona, 'crank', undefined, { express: expressWarmup });
         await closeExtraTabsExcept(context, warmupPage);
         await ensurePhoneCrankTether(modemSession.proxyPort);
-        await applyCrankResourceBlocking(context);
 
         await setCrankSessionProgress(jobId, '로그인');
         await naverLogin(context, accountId, {

@@ -5,6 +5,7 @@ import { acquireAccount, releaseAccount } from './account-lock.js';
 import { logOperation } from './log-emitter.js';
 import { loadAccountForBrowser } from '../modules/playwright/account-loader.js';
 import { closeBrowserContext, createBrowserForAccount } from '../modules/playwright/browser.js';
+import { applyNaverResourceBlocking } from '../modules/playwright/naver/naver-resource-block.js';
 import { acquireModem, releaseModem, type ModemSession } from '../modules/proxy/manager.js';
 import { enforceVncWindowBounds } from './vnc-window-guard.js';
 import { setVncFocusPort } from './vnc-tile-state.js';
@@ -110,6 +111,7 @@ export async function startPostingRemoteAccess(accountId: string): Promise<{
 
     const accountCtx = await loadAccountForBrowser(accountId, modemSession.proxyPort);
     const { context } = await createBrowserForAccount(accountCtx);
+    await applyNaverResourceBlocking(context, 'vnc_lite').catch(() => {});
 
     const pages = [...context.pages()];
     const page = pages[0] ?? (await context.newPage());
