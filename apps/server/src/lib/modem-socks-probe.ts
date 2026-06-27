@@ -50,7 +50,7 @@ export function curlSubprocessEnv(): NodeJS.ProcessEnv {
 
 /** check-socks-proxy.sh 와 동일 — curl --socks5-hostname (axios는 SOCKS5 미지원) */
 export const MODEM_SOCKS_PROBE_URL =
-  process.env.HUMA_MODEM_SOCKS_PROBE_URL?.trim() || 'https://www.naver.com/favicon.ico';
+  process.env.HUMA_MODEM_SOCKS_PROBE_URL?.trim() || 'https://www.naver.com';
 
 const SOCKS_IPIFY_WARM_URL = 'https://api.ipify.org';
 

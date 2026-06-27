@@ -18,6 +18,10 @@ export function resolvePostingDongleInterface(
   slotNumber: number,
   interfaceName?: string | null,
 ): string | null {
+  // restore-dongle-by-subnet.sh 갱신 conf 우선 — DB eth0/eth1 시드값이 USB 재열거와 어긋나면 route 오적용
+  const fromConf = readDongleInterfaceFromConf(slotNumber);
+  if (fromConf) return fromConf;
+
   if (
     interfaceName &&
     !isPlaceholderInterfaceName(interfaceName) &&
@@ -25,7 +29,7 @@ export function resolvePostingDongleInterface(
   ) {
     return interfaceName;
   }
-  return readDongleInterfaceFromConf(slotNumber);
+  return null;
 }
 
 /**
@@ -90,26 +94,12 @@ export function reapplyPostingDonglePolicyRoutes(
   return { applied, failed };
 }
 
-/** probe 직전 — conf iface + policy route + ARP warm */
+/** probe 직전 — conf iface ARP warm (policy route는 reapplyPostingDonglePolicyRoutes 일괄 적용) */
 export function preparePostingDongleForProbe(
   slotNumber: number,
   interfaceName?: string | null,
 ): void {
-  if (process.platform === 'win32') return;
-  if (slotNumber < 1 || slotNumber > 5) return;
-
-  const iface = resolvePostingDongleInterface(slotNumber, interfaceName);
-  if (!iface) {
-    warmPostingDonglePath(slotNumber, interfaceName);
-    return;
-  }
-
-  warmPostingDonglePath(slotNumber, iface);
-  try {
-    applyDonglePolicyRoute(iface, 10_000 + slotNumber);
-  } catch {
-    /* probe에서 SOCKS 실패로 잡힘 */
-  }
+  warmPostingDonglePath(slotNumber, interfaceName);
 }
 
 export function isPostingDongleProxyPort(proxyPort: number): boolean {

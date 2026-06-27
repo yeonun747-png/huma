@@ -80,6 +80,9 @@ export async function applyModemProxyProbe(
   }
 
   if (ifaceIp) patch.current_ip = ifaceIp;
+  if (probeIface && modem.slot_number <= 5 && health.ok) {
+    patch.interface_name = probeIface;
+  }
 
   if (options?.persist !== false && modem.id) {
     await persistModemProbePatch(modem.id, patch);
