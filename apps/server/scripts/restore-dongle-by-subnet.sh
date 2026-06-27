@@ -21,9 +21,10 @@ dongle_usb_path() {
   readlink -f "/sys/class/net/${iface}/device" 2>/dev/null || echo "zz-fallback-${iface}"
 }
 
+# ZTE 허브 동글만 192.168.{n}.100 — 실폰 RNDIS(192.168.42.x 등)는 제외
 is_rndis_dongle_ip() {
   local ip="$1"
-  [[ "$ip" =~ ^192\.168\.[0-9]+\.[0-9]+$ ]]
+  [[ "$ip" =~ ^192\.168\.[0-9]+\.100$ ]]
 }
 
 echo "=== 1) DHCP (eth/enx) ==="
@@ -56,7 +57,7 @@ for iface in "${IFACES[@]}"; do
   ip_full=$(ip -4 addr show dev "$iface" 2>/dev/null | grep -oP '(?<=inet\s)\d+\.\d+\.\d+\.\d+' | head -1)
   [ -z "$ip_full" ] && continue
   if ! is_rndis_dongle_ip "$ip_full"; then
-    echo "  ⊘ ${iface} ${ip_full} — 실폰 테더(192.168 아님), 스킵"
+    echo "  ⊘ ${iface} ${ip_full} — 실폰 테더(ZTE 동글 192.168.*.100 아님), 스킵"
     continue
   fi
   usb=$(dongle_usb_path "$iface")
