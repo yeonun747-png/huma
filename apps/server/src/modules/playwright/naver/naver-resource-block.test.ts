@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import {
   isBlogEditorOrPublishContext,
   isLoginOrCaptchaUrl,
+  isLightweightImageUrl,
   shouldAbortNaverResource,
+  shouldBlockHeavyImage,
 } from './naver-resource-block.js';
 
 describe('isLoginOrCaptchaUrl', () => {
@@ -13,6 +15,13 @@ describe('isLoginOrCaptchaUrl', () => {
 
   it('matches captcha path', () => {
     expect(isLoginOrCaptchaUrl('https://nid.naver.com/captcha?rand=abc')).toBe(true);
+  });
+});
+
+describe('isLightweightImageUrl', () => {
+  it('allows favicon and svg', () => {
+    expect(isLightweightImageUrl('https://s.pstatic.net/ico/favicon.ico')).toBe(true);
+    expect(isLightweightImageUrl('https://ssl.pstatic.net/icon/logo.svg')).toBe(true);
   });
 });
 
@@ -28,17 +37,20 @@ describe('isBlogEditorOrPublishContext', () => {
   });
 });
 
+describe('shouldBlockHeavyImage', () => {
+  it('blocks jpg but allows ico', () => {
+    expect(shouldBlockHeavyImage('https://s.pstatic.net/news/banner.jpg', 'image')).toBe(true);
+    expect(shouldBlockHeavyImage('https://s.pstatic.net/ico/favicon.ico', 'image')).toBe(false);
+  });
+});
+
 describe('shouldAbortNaverResource', () => {
   it('always blocks ad hosts', () => {
-    expect(
-      shouldAbortNaverResource('https://ader.naver.com/foo', 'script', 'workflow'),
-    ).toBe(true);
+    expect(shouldAbortNaverResource('https://ader.naver.com/foo', 'script')).toBe(true);
   });
 
   it('allows captcha images on nid', () => {
-    expect(
-      shouldAbortNaverResource('https://nid.naver.com/captcha?rand=1', 'image', 'workflow'),
-    ).toBe(false);
+    expect(shouldAbortNaverResource('https://nid.naver.com/captcha?rand=1', 'image')).toBe(false);
   });
 
   it('allows editor scripts', () => {
@@ -46,39 +58,50 @@ describe('shouldAbortNaverResource', () => {
       shouldAbortNaverResource(
         'https://ssl.pstatic.net/static/se/editor.js',
         'script',
-        'workflow',
         'https://blog.naver.com/yeonun1/postwrite',
       ),
     ).toBe(false);
   });
 
-  it('blocks naver home images', () => {
-    expect(
-      shouldAbortNaverResource('https://s.pstatic.net/ico/favicon.ico', 'image', 'warmup'),
-    ).toBe(true);
+  it('allows CSS and fonts on naver home', () => {
+    expect(shouldAbortNaverResource('https://ssl.pstatic.net/static/common.css', 'stylesheet')).toBe(
+      false,
+    );
+    expect(shouldAbortNaverResource('https://ssl.pstatic.net/static/font.woff2', 'font')).toBe(false);
   });
 
-  it('blocks naver home stylesheets', () => {
-    expect(
-      shouldAbortNaverResource('https://ssl.pstatic.net/static/common.css', 'stylesheet', 'warmup'),
-    ).toBe(true);
+  it('allows icons but blocks photo banners (remote and automation same rule)', () => {
+    expect(shouldAbortNaverResource('https://s.pstatic.net/ico/favicon.ico', 'image')).toBe(false);
+    expect(shouldAbortNaverResource('https://s.pstatic.net/news/banner.jpg', 'image')).toBe(true);
   });
 
-  it('blocks blog post decorative images but allows script', () => {
+  it('blocks media everywhere', () => {
+    expect(shouldAbortNaverResource('https://tv.naver.com/embed/mp4', 'media')).toBe(true);
+  });
+
+  it('blog post read allows CSS but blocks thumbnails', () => {
+    expect(
+      shouldAbortNaverResource(
+        'https://ssl.pstatic.net/skin/blog.css',
+        'stylesheet',
+        'https://blog.naver.com/yeonun1/2234567890',
+      ),
+    ).toBe(false);
     expect(
       shouldAbortNaverResource(
         'https://blogfiles.pstatic.net/thumb.jpg',
         'image',
-        'workflow',
         'https://blog.naver.com/yeonun1/2234567890',
       ),
     ).toBe(true);
+  });
+
+  it('editor allows uploaded blogfiles images', () => {
     expect(
       shouldAbortNaverResource(
-        'https://ssl.pstatic.net/js/like.js',
-        'script',
-        'workflow',
-        'https://m.blog.naver.com/yeonun1/2234567890',
+        'https://blogfiles.pstatic.net/2024/photo.jpg',
+        'image',
+        'https://blog.naver.com/yeonun1/postwrite',
       ),
     ).toBe(false);
   });

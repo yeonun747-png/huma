@@ -111,7 +111,7 @@ export async function startPostingRemoteAccess(accountId: string): Promise<{
 
     const accountCtx = await loadAccountForBrowser(accountId, modemSession.proxyPort);
     const { context } = await createBrowserForAccount(accountCtx);
-    await applyNaverResourceBlocking(context, 'vnc_lite').catch(() => {});
+    await applyNaverResourceBlocking(context).catch(() => {});
 
     const pages = [...context.pages()];
     const page = pages[0] ?? (await context.newPage());
