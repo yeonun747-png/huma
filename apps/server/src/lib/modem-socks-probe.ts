@@ -2,6 +2,8 @@ import { execFile } from 'node:child_process';
 import { accessSync, constants } from 'node:fs';
 import { promisify } from 'node:util';
 
+import { isPostingDongleProxyPort } from './dongle-route-warm.js';
+
 const execFileAsync = promisify(execFile);
 
 function resolveCurlBin(): string {
@@ -47,13 +49,19 @@ export function curlSubprocessEnv(): NodeJS.ProcessEnv {
 }
 
 /** check-socks-proxy.sh 와 동일 — curl --socks5-hostname (axios는 SOCKS5 미지원) */
+export const MODEM_SOCKS_PROBE_URL =
+  process.env.HUMA_MODEM_SOCKS_PROBE_URL?.trim() || 'https://www.naver.com/favicon.ico';
+
+const SOCKS_IPIFY_WARM_URL = 'https://api.ipify.org';
+
 async function probeModemSocksOnce(
   proxyPort: number,
   timeoutMs: number,
+  targetUrl = MODEM_SOCKS_PROBE_URL,
 ): Promise<{ ok: boolean; ms: number | null }> {
   const start = Date.now();
-  const maxSec = Math.max(10, Math.ceil(timeoutMs / 1000));
-  const connectSec = Math.min(20, Math.max(10, Math.floor(timeoutMs / 3000)));
+  const maxSec = Math.max(8, Math.ceil(timeoutMs / 1000));
+  const connectSec = Math.min(12, Math.max(5, Math.floor(timeoutMs / 4000)));
   try {
     const { stdout } = await execFileAsync(
       CURL_BIN,
@@ -70,7 +78,7 @@ async function probeModemSocksOnce(
         String(maxSec),
         '--socks5-hostname',
         `127.0.0.1:${proxyPort}`,
-        'https://www.naver.com',
+        targetUrl,
       ],
       {
         timeout: timeoutMs + 8000,
@@ -90,10 +98,17 @@ async function probeModemSocksOnce(
 /** 재부팅·cold SOCKS 직후 첫 naver 요청은 수 초~10초+ — 워밍 후 재측정 */
 const PROBE_WARM_RETRY_MS = 2_500;
 
+async function warmPostingDongleSocks(proxyPort: number, timeoutMs: number): Promise<void> {
+  if (!isPostingDongleProxyPort(proxyPort)) return;
+  await probeModemSocksOnce(proxyPort, Math.min(timeoutMs, 20_000), SOCKS_IPIFY_WARM_URL);
+}
+
 export async function probeModemSocks(
   proxyPort: number,
   timeoutMs = MODEM_SOCKS_PROBE_TIMEOUT_MS,
 ): Promise<{ ok: boolean; ms: number | null }> {
+  await warmPostingDongleSocks(proxyPort, timeoutMs);
+
   const hardMs = timeoutMs + 3000;
   const once = () =>
     Promise.race([

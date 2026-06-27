@@ -1,7 +1,9 @@
 import { execFileSync } from 'node:child_process';
 
+import { applyDonglePolicyRoute } from './dongle-policy-route.js';
 import { readInterfaceIp } from './dongle-health.js';
 import { isPlaceholderInterfaceName, readDongleInterfaceFromConf } from './dongle-interfaces.js';
+import { proxyPortToSlot } from './modem-ports.js';
 
 /** ZTE RNDIS 동글 게이트웨이 (huma-dongle-routes.sh 와 동일) */
 export function guessDongleGateway(ip: string): string | null {
@@ -51,4 +53,70 @@ export function warmPostingDonglePath(slotNumber: number, interfaceName?: string
   } catch {
     /* best effort */
   }
+}
+
+/**
+ * i7 재부팅 후 /etc/huma/dongle-slot-interfaces.conf 기준 policy routing 재적용.
+ * 실폰(enx)은 별도 — 허브 동글 1~5만. ping warm 포함.
+ */
+export function reapplyPostingDonglePolicyRoutes(
+  log?: (msg: string) => void,
+): { applied: number; failed: number } {
+  if (process.platform === 'win32') return { applied: 0, failed: 0 };
+
+  let applied = 0;
+  let failed = 0;
+
+  for (let slot = 1; slot <= 5; slot += 1) {
+    const iface = readDongleInterfaceFromConf(slot);
+    if (!iface) {
+      log?.(`[dongle-route] 슬롯${slot} iface conf 없음 — 스킵`);
+      failed += 1;
+      continue;
+    }
+
+    warmPostingDonglePath(slot, iface);
+
+    try {
+      applyDonglePolicyRoute(iface, 10_000 + slot);
+      log?.(`[dongle-route] 슬롯${slot} ${iface} → table ${10_000 + slot} policy route OK`);
+      applied += 1;
+    } catch (err) {
+      log?.(`[dongle-route] 슬롯${slot} ${iface} policy route 실패: ${(err as Error).message}`);
+      failed += 1;
+    }
+  }
+
+  return { applied, failed };
+}
+
+/** probe 직전 — conf iface + policy route + ARP warm */
+export function preparePostingDongleForProbe(
+  slotNumber: number,
+  interfaceName?: string | null,
+): void {
+  if (process.platform === 'win32') return;
+  if (slotNumber < 1 || slotNumber > 5) return;
+
+  const iface = resolvePostingDongleInterface(slotNumber, interfaceName);
+  if (!iface) {
+    warmPostingDonglePath(slotNumber, interfaceName);
+    return;
+  }
+
+  warmPostingDonglePath(slotNumber, iface);
+  try {
+    applyDonglePolicyRoute(iface, 10_000 + slotNumber);
+  } catch {
+    /* probe에서 SOCKS 실패로 잡힘 */
+  }
+}
+
+export function isPostingDongleProxyPort(proxyPort: number): boolean {
+  return proxyPort >= 10_001 && proxyPort <= 10_005;
+}
+
+export function postingSlotFromProxyPort(proxyPort: number): number | null {
+  if (!isPostingDongleProxyPort(proxyPort)) return null;
+  return proxyPortToSlot(proxyPort);
 }

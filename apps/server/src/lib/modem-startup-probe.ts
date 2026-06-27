@@ -1,6 +1,6 @@
 import { supabase } from '../middleware/auth.js';
 import { runRestoreDongleNetwork } from './restore-dongle-network.js';
-import { warmPostingDonglePath } from './dongle-route-warm.js';
+import { reapplyPostingDonglePolicyRoutes } from './dongle-route-warm.js';
 import { applyModemProxyProbe, shouldRunModemProxyProbe } from './modem-proxy-probe.js';
 import { probeModemsWithConcurrency } from './modem-socks-probe.js';
 import { PHONE_CRANK_SLOTS } from './phone-crank.js';
@@ -30,9 +30,8 @@ export async function probePhysicalModemsOnStartup(
       log(`[modem-startup-probe] restore 실패: ${restored.error ?? 'unknown'}`);
     }
   } else {
-    for (let slot = 1; slot <= 5; slot += 1) {
-      warmPostingDonglePath(slot);
-    }
+    const { applied, failed } = reapplyPostingDonglePolicyRoutes((msg) => log(msg));
+    log(`[modem-startup-probe] policy route 재적용 ${applied}슬롯 OK${failed ? ` · ${failed} 실패` : ''}`);
   }
 
   const { data, error } = await supabase

@@ -392,7 +392,7 @@ export function ModemsView() {
       <MPanel title="RESIDENTIAL PROXY · 계정별 고정 IP">
         <p className="mb-2 font-mono text-[10.5px] text-huma-t3">
           허브 동글 1~5 · 직결 실폰 6~7 · 슬롯별 SOCKS+공인IP+지역 순차 probe (슬롯당 최대 ~90초) ·
-          재부팅 직후 동글 1~5는 첫 naver SOCKS가 cold start로 ~10s 나올 수 있음(실폰은 enx 직결·빠름) ·
+          재부팅 직후 동글 1~5는 policy route 미적용 시 SOCKS 지연 — 서버 기동·「다시 검사」 시 conf 기준 route 재적용 ·
           연운(:10001~10003) · 파나나(:10004) · 퀴즈(:10005) · C-Rank 실폰(:10006~10007)
           {probingSlot != null ? (
             <span className="text-huma-accent"> · 동글 {probingSlot} 검사중</span>
