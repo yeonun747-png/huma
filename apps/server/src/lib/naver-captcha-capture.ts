@@ -49,6 +49,66 @@ async function waitForCaptchaImageReady(page: Page): Promise<void> {
   await sleep(200);
 }
 
+/** 로그인 페이지·캡cha DOM·영수증 img 렌더 안정 후 캡처 (느린 LTE에서 빈/잘린 캡처 방지) */
+export async function waitForCaptchaUiStable(page: Page, timeoutMs = 20_000): Promise<void> {
+  await page.bringToFront().catch(() => {});
+
+  await page
+    .waitForFunction(
+      () => {
+        const root =
+          document.querySelector('#captcha') ??
+          document.querySelector('#cptch') ??
+          document.querySelector('.captcha_wrap');
+        if (!root) return false;
+        const rect = root.getBoundingClientRect();
+        if (rect.width < 80 || rect.height < 40) return false;
+
+        const img =
+          (document.querySelector('#captchaimg') as HTMLImageElement | null) ??
+          (root.querySelector('img') as HTMLImageElement | null);
+        if (!img) return Boolean(root.textContent?.trim());
+        return Boolean(img.complete && img.naturalWidth > 24 && img.naturalHeight > 16);
+      },
+      { timeout: timeoutMs },
+    )
+    .catch(() => {});
+
+  await waitForCaptchaImageReady(page);
+
+  let lastW = 0;
+  let lastH = 0;
+  let stable = 0;
+  const deadline = Date.now() + Math.min(timeoutMs, 8_000);
+
+  while (Date.now() < deadline && stable < 2) {
+    const size = await page
+      .evaluate(() => {
+        const img =
+          (document.querySelector('#captchaimg') as HTMLImageElement | null) ??
+          (document.querySelector('#captcha img') as HTMLImageElement | null);
+        if (!img) {
+          const root = document.querySelector('#captcha');
+          const r = root?.getBoundingClientRect();
+          return { w: r?.width ?? 0, h: r?.height ?? 0 };
+        }
+        return { w: img.naturalWidth, h: img.naturalHeight };
+      })
+      .catch(() => ({ w: 0, h: 0 }));
+
+    if (size.w > 0 && size.w === lastW && size.h === lastH) {
+      stable += 1;
+    } else {
+      stable = 0;
+      lastW = size.w;
+      lastH = size.h;
+    }
+    await sleep(250);
+  }
+
+  await sleep(350);
+}
+
 /** overflow:hidden으로 잘린 영수증 이미지를 natural 크기로 펼침 */
 async function resetCaptchaScrollAndExpand(page: Page): Promise<void> {
   await page

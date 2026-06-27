@@ -1,5 +1,6 @@
 import { supabase } from '../middleware/auth.js';
 import { readInterfaceIp } from './dongle-health.js';
+import { warmPostingDonglePath, resolvePostingDongleInterface } from './dongle-route-warm.js';
 import { fetchModemPublicGeo } from './modem-geo.js';
 import { probeModemSocks } from './modem-socks-probe.js';
 
@@ -42,11 +43,18 @@ export async function applyModemProxyProbe(
   modem: ModemProbeInput,
   options?: { persist?: boolean },
 ): Promise<ModemProbeOutput> {
+  if (modem.slot_number >= 1 && modem.slot_number <= 5) {
+    warmPostingDonglePath(modem.slot_number, modem.interface_name);
+  }
+
   const health = await probeModemSocks(modem.proxy_port);
+  const probeIface = resolvePostingDongleInterface(modem.slot_number, modem.interface_name);
   const ifaceIp =
-    modem.interface_name && !modem.interface_name.startsWith('dongle')
-      ? readInterfaceIp(modem.interface_name)
-      : null;
+    probeIface && modem.slot_number <= 5
+      ? readInterfaceIp(probeIface)
+      : modem.interface_name && !modem.interface_name.startsWith('dongle')
+        ? readInterfaceIp(modem.interface_name)
+        : null;
 
   const patch: Record<string, unknown> = { response_ms: health.ms };
   let nextStatus = modem.status;

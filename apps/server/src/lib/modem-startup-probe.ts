@@ -1,7 +1,15 @@
 import { supabase } from '../middleware/auth.js';
+import { runRestoreDongleNetwork } from './restore-dongle-network.js';
+import { warmPostingDonglePath } from './dongle-route-warm.js';
 import { applyModemProxyProbe, shouldRunModemProxyProbe } from './modem-proxy-probe.js';
 import { probeModemsWithConcurrency } from './modem-socks-probe.js';
 import { PHONE_CRANK_SLOTS } from './phone-crank.js';
+import { sleep } from './utils.js';
+
+const STARTUP_DELAY_MS = (() => {
+  const raw = Number(process.env.HUMA_MODEM_STARTUP_DELAY_MS);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 25_000;
+})();
 
 /** i7 재부팅 후 stale idle·public_ip 제거 — SOCKS 실패 시 error 반영 */
 export async function probePhysicalModemsOnStartup(
@@ -9,6 +17,23 @@ export async function probePhysicalModemsOnStartup(
 ): Promise<void> {
   if (process.platform === 'win32') return;
   if (process.env.HUMA_MODEM_STARTUP_PROBE === 'false') return;
+
+  if (STARTUP_DELAY_MS > 0) {
+    log(`[modem-startup-probe] USB·동글 준비 대기 ${Math.round(STARTUP_DELAY_MS / 1000)}s`);
+    await sleep(STARTUP_DELAY_MS);
+  }
+
+  if (process.env.HUMA_MODEM_STARTUP_RESTORE === 'true') {
+    log('[modem-startup-probe] restore-dongle-by-subnet 실행');
+    const restored = runRestoreDongleNetwork();
+    if (!restored.ok) {
+      log(`[modem-startup-probe] restore 실패: ${restored.error ?? 'unknown'}`);
+    }
+  } else {
+    for (let slot = 1; slot <= 5; slot += 1) {
+      warmPostingDonglePath(slot);
+    }
+  }
 
   const { data, error } = await supabase
     .from('huma_modems')

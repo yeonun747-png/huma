@@ -87,6 +87,9 @@ async function probeModemSocksOnce(
   }
 }
 
+/** 재부팅·cold SOCKS 직후 첫 naver 요청은 수 초~10초+ — 워밍 후 재측정 */
+const PROBE_WARM_RETRY_MS = 2_500;
+
 export async function probeModemSocks(
   proxyPort: number,
   timeoutMs = MODEM_SOCKS_PROBE_TIMEOUT_MS,
@@ -101,7 +104,16 @@ export async function probeModemSocks(
     ]);
 
   const first = await once();
-  if (first.ok) return first;
+  if (first.ok) {
+    if (first.ms != null && first.ms >= PROBE_WARM_RETRY_MS) {
+      await new Promise((r) => setTimeout(r, 350));
+      const warmed = await once();
+      if (warmed.ok && warmed.ms != null) {
+        return warmed.ms <= first.ms ? warmed : first;
+      }
+    }
+    return first;
+  }
 
   await new Promise((r) => setTimeout(r, 400));
   return once();

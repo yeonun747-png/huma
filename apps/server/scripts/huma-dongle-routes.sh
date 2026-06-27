@@ -88,6 +88,13 @@ warm_tether_arp() {
   fi
 }
 
+# ZTE RNDIS 허브 동글(eth*) — 재부팅 직후 ARP·게이트웨이 cold start (실폰 enx와 별도)
+warm_dongle_gateway() {
+  local iface="$1" ip="$2" gw
+  gw=$(guess_gateway "$iface" "$ip")
+  ping -c 2 -W 2 -I "$iface" "$gw" >/dev/null 2>&1 || true
+}
+
 add_default_route() {
   local iface="$1" table="$2" gw="$3"
   # ZTE RNDIS: 테이블에 link route 없이 via를 넣으면 "Nexthop has invalid gateway"
@@ -118,6 +125,7 @@ setup_slot_route() {
 
   ip_only="${ip_cidr%%/*}"
   warm_tether_arp "$iface" "$ip_only"
+  warm_dongle_gateway "$iface" "$ip_only"
   gw=$(guess_gateway "$iface" "$ip_only")
 
   while ip rule del from "${ip_only}/32" table "$table" 2>/dev/null; do :; done

@@ -133,6 +133,7 @@ import {
   captureAllCaptchaReceiptImagesPng,
   captureCaptchaRegionPng,
   captureFullCaptchaImagePng,
+  waitForCaptchaUiStable,
 } from './naver-captcha-capture.js';
 import {
   buildReceiptCaptchaVisionSystemPrompt,
@@ -302,6 +303,8 @@ async function captureCaptchaScreenshot(
   question = '',
 ): Promise<CaptchaVisionImages | null> {
   await page.bringToFront().catch(() => {});
+  await waitForCaptchaUiStable(page);
+
   const root = await locateActiveCaptchaRoot(page);
   const captureRoot = root ?? (await locateCaptchaRoot(page));
 
@@ -829,6 +832,8 @@ export async function tryAutoSolveNaverCaptcha(
 
       const captchaType = await detectCaptchaType(page);
       const question = await readCaptchaQuestion(page);
+
+      await waitForCaptchaUiStable(page);
 
       await logOperation({
         level: 'info',
