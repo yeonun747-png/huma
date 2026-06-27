@@ -391,7 +391,7 @@ export function ModemsView() {
     <div className="animate-fadeIn">
       <MPanel title="RESIDENTIAL PROXY · 계정별 고정 IP">
         <p className="mb-2 font-mono text-[10.5px] text-huma-t3">
-          허브 동글 1~5 · 직결 실폰 6~7 · 슬롯별 SOCKS+공인IP+지역 순차 probe (슬롯당 최대 ~90초) ·
+          허브 동글 1~5 · 직결 실폰 6~7 · 슬롯별 SOCKS+공인IP+지역 순차 probe (슬롯당 ~15~40초) ·
           재부팅 직후 동글 1~5는 policy route 미적용 시 SOCKS 지연 — 서버 기동·「다시 검사」 시 conf 기준 route 재적용 ·
           연운(:10001~10003) · 파나나(:10004) · 퀴즈(:10005) · C-Rank 실폰(:10006~10007)
           {probingSlot != null ? (
@@ -455,7 +455,8 @@ export function ModemsView() {
           </div>
         )}
         <p className="mt-2 font-mono text-[10px] text-huma-t3">
-          응답 ms = SOCKS naver probe 소요(보통 30~45초·LTE) · <strong>오류</strong> = SOCKS 연결 실패(느려서
+          응답 ms = SOCKS naver favicon probe 소요(보통 0.5~2초·LTE) · 화면 갱신까지는 슬롯당 공인IP·지역
+          조회가 추가되어 시계로 재면 더 길 수 있음 · <strong>오류</strong> = SOCKS 연결 실패(느려서
           아님, 타임아웃 45초) · IP — = probe 실패 · 지역 = 표시된 공인 IP 기준(ip-api·ipwho.is, LTE Geo는
           참고용) · UI 오류만으로 포스팅 큐가 막히지는 않으나 SOCKS 불가 시 작업 실행 중 실패할 수 있음
         </p>

@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { authMiddleware, requireSuper, supabase } from '../middleware/auth.js';
 import { reconnectModem } from '../modules/modem/reconnect.js';
 import { applyModemProxyProbe, shouldRunModemProxyProbe } from '../lib/modem-proxy-probe.js';
-import { reapplyPostingDonglePolicyRoutes } from '../lib/dongle-route-warm.js';
+import { reapplyPostingDonglePolicyRoutes, shouldSkipPostingDonglePathWarm } from '../lib/dongle-route-warm.js';
 import { probeModemsWithConcurrency } from '../lib/modem-socks-probe.js';
 import { runRestoreDongleNetwork } from '../lib/restore-dongle-network.js';
 import { logOperation } from '../lib/log-emitter.js';
@@ -34,7 +34,8 @@ async function probeModemsInRoute(
 
   if (
     process.platform !== 'win32' &&
-    probeTargets.some((m) => m.slot_number >= 1 && m.slot_number <= 5)
+    probeTargets.some((m) => m.slot_number >= 1 && m.slot_number <= 5) &&
+    !shouldSkipPostingDonglePathWarm()
   ) {
     reapplyPostingDonglePolicyRoutes();
   }

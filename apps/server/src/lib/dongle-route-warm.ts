@@ -14,6 +14,18 @@ export function guessDongleGateway(ip: string): string | null {
   return `${parts[0]}.${parts[1]}.${parts[2]}.1`;
 }
 
+/** UI 슬롯별 probe 시 route reapply·ping 중복 방지 (최근 warm이면 스킵) */
+let lastPostingDongleRouteWarmMs = 0;
+const POSTING_DONGLE_ROUTE_WARM_COOLDOWN_MS = 45_000;
+
+export function markPostingDongleRoutesWarmed(): void {
+  lastPostingDongleRouteWarmMs = Date.now();
+}
+
+export function shouldSkipPostingDonglePathWarm(): boolean {
+  return Date.now() - lastPostingDongleRouteWarmMs < POSTING_DONGLE_ROUTE_WARM_COOLDOWN_MS;
+}
+
 export function resolvePostingDongleInterface(
   slotNumber: number,
   interfaceName?: string | null,
@@ -91,6 +103,7 @@ export function reapplyPostingDonglePolicyRoutes(
     }
   }
 
+  markPostingDongleRoutesWarmed();
   return { applied, failed };
 }
 
@@ -99,6 +112,7 @@ export function preparePostingDongleForProbe(
   slotNumber: number,
   interfaceName?: string | null,
 ): void {
+  if (shouldSkipPostingDonglePathWarm()) return;
   warmPostingDonglePath(slotNumber, interfaceName);
 }
 

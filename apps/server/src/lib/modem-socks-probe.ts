@@ -2,8 +2,6 @@ import { execFile } from 'node:child_process';
 import { accessSync, constants } from 'node:fs';
 import { promisify } from 'node:util';
 
-import { isPostingDongleProxyPort } from './dongle-route-warm.js';
-
 const execFileAsync = promisify(execFile);
 
 function resolveCurlBin(): string {
@@ -48,11 +46,12 @@ export function curlSubprocessEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-/** check-socks-proxy.sh 와 동일 — curl --socks5-hostname (axios는 SOCKS5 미지원) */
+/**
+ * 가벼운 naver favicon — SOCKS 연결·LTE 지연 측정용 (전체 naver.com HTML은 6~10초+).
+ * 수동 전체 검증은 check-socks-proxy.sh (naver.com) 사용.
+ */
 export const MODEM_SOCKS_PROBE_URL =
-  process.env.HUMA_MODEM_SOCKS_PROBE_URL?.trim() || 'https://www.naver.com';
-
-const SOCKS_IPIFY_WARM_URL = 'https://api.ipify.org';
+  process.env.HUMA_MODEM_SOCKS_PROBE_URL?.trim() || 'https://www.naver.com/favicon.ico';
 
 async function probeModemSocksOnce(
   proxyPort: number,
@@ -95,20 +94,13 @@ async function probeModemSocksOnce(
   }
 }
 
-/** 재부팅·cold SOCKS 직후 첫 naver 요청은 수 초~10초+ — 워밍 후 재측정 */
+/** cold SOCKS 직후 첫 favicon도 간헐 2.5초+ — 재측정해 더 낮은 ms 선택 */
 const PROBE_WARM_RETRY_MS = 2_500;
-
-async function warmPostingDongleSocks(proxyPort: number, timeoutMs: number): Promise<void> {
-  if (!isPostingDongleProxyPort(proxyPort)) return;
-  await probeModemSocksOnce(proxyPort, Math.min(timeoutMs, 20_000), SOCKS_IPIFY_WARM_URL);
-}
 
 export async function probeModemSocks(
   proxyPort: number,
   timeoutMs = MODEM_SOCKS_PROBE_TIMEOUT_MS,
 ): Promise<{ ok: boolean; ms: number | null }> {
-  await warmPostingDongleSocks(proxyPort, timeoutMs);
-
   const hardMs = timeoutMs + 3000;
   const once = () =>
     Promise.race([
