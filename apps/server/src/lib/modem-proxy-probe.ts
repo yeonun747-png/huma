@@ -55,7 +55,6 @@ export async function applyModemProxyProbe(
   let geoRegion: string | null = null;
 
   if (health.ok) {
-    // busy 제외 — reconnecting 포함, SOCKS OK면 DB 복구 (네트워크는 정상인데 UI만 재연결 고착 방지)
     if (modem.status !== 'busy') {
       patch.status = 'idle';
       nextStatus = 'idle';
@@ -65,7 +64,7 @@ export async function applyModemProxyProbe(
     geoRegion = geo.geo_region;
     if (publicIp) patch.public_ip = publicIp;
     if (geoRegion) patch.geo_region = geoRegion;
-  } else if (modem.status !== 'reconnecting' && modem.status !== 'busy') {
+  } else if (modem.status !== 'busy') {
     patch.status = 'error';
     patch.public_ip = null;
     patch.geo_region = null;

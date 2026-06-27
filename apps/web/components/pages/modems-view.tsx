@@ -52,6 +52,10 @@ function ModemProbingLabel() {
   );
 }
 
+function isPhoneModem(m: HumaModem): boolean {
+  return m.carrier === 'phone' || m.proxy_port >= 10006;
+}
+
 function modemStatusTag(
   m: HumaModem,
   opts?: { probing?: boolean; reconnecting?: boolean },
@@ -60,9 +64,16 @@ function modemStatusTag(
   if (opts?.reconnecting) return { label: '재발급중', tone: 'warn' };
   if (m.status === 'error') return { label: '오류', tone: 'err' };
   if (m.status === 'reconnecting') return { label: '재연결', tone: 'warn' };
-  if (m.status === 'offline') return { label: '오프라인', tone: 'idle' };
+  if (m.status === 'offline') {
+    return isPhoneModem(m)
+      ? { label: '오류', tone: 'err' }
+      : { label: '오프라인', tone: 'idle' };
+  }
   if (m.status === 'busy') return { label: '사용중', tone: 'warn' };
   if (m.status === 'idle' && !m.public_ip && m.response_ms == null) return { label: '대기', tone: 'idle' };
+  if (m.status === 'idle' && !m.public_ip && m.response_ms != null) {
+    return { label: '오류', tone: 'err' };
+  }
   if (m.status === 'idle' && m.public_ip) return { label: '정상', tone: 'ok' };
   if (m.status === 'idle') return { label: '정상', tone: 'ok' };
   return { label: m.status, tone: 'idle' };
@@ -164,16 +175,17 @@ export function ModemsView() {
     setProbing(false);
     setProbingSlot(null);
     try {
-      const [base, acc] = await Promise.all([api.modems(), api.accounts()]);
+      const [base, acc] = await Promise.all([api.modems({ force: true }), api.accounts()]);
       if (probeGenRef.current !== gen) return;
       setModems(base);
       setAccounts(acc);
+      await runSlotProbes(base, gen, { silent: true });
     } catch (err: unknown) {
       if (probeGenRef.current !== gen) return;
       const msg = err instanceof Error ? err.message : '프록시 목록 로드 실패';
       setLoadError(msg);
     }
-  }, []);
+  }, [runSlotProbes]);
 
   /** DB 목록 갱신 후 7슬롯 순차 SOCKS probe — 「다시 검사」·복구 후 */
   const recheckAll = useCallback(async () => {

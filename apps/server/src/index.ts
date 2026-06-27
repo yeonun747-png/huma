@@ -57,6 +57,7 @@ import { startPananaCharacterSyncScheduler } from './lib/panana-character-schedu
 import { startQuizContentSyncScheduler } from './lib/quiz-content-scheduler.js';
 import { startVideoContentStorageScheduler } from './lib/video-content-storage-scheduler.js';
 import { assertSecretsConfigured } from './lib/secrets.js';
+import { probePhysicalModemsOnStartup } from './lib/modem-startup-probe.js';
 
 
 
@@ -231,6 +232,10 @@ async function main() {
     startQuizContentSyncScheduler();
     startVideoContentStorageScheduler();
     app.log.info('BullMQ worker + crank scheduler + cafe activity + panana-sync + quiz-sync + video-storage scheduler started');
+
+    void probePhysicalModemsOnStartup((msg) => app.log.info(msg)).catch((err) => {
+      app.log.warn('[modem-startup-probe] %s', (err as Error).message);
+    });
 
     registerGracefulShutdown(app, worker);
 
