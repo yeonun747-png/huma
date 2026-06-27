@@ -46,17 +46,69 @@ export function curlSubprocessEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-/**
- * 가벼운 naver favicon — SOCKS 연결·LTE 지연 측정용 (전체 naver.com HTML은 6~10초+).
- * 수동 전체 검증은 check-socks-proxy.sh (naver.com) 사용.
- */
-export const MODEM_SOCKS_PROBE_URL =
-  process.env.HUMA_MODEM_SOCKS_PROBE_URL?.trim() || 'https://www.naver.com/favicon.ico';
+const NAVER_HOME_PROBE = 'https://www.naver.com';
+const NAVER_FAVICON_PROBE = 'https://www.naver.com/favicon.ico';
+
+/** env 지정 시 그 URL로 GET probe (check-socks-proxy.sh 수동 검증용) */
+export const MODEM_SOCKS_PROBE_URL = process.env.HUMA_MODEM_SOCKS_PROBE_URL?.trim() || NAVER_HOME_PROBE;
+
+function parseCurlProbeResult(stdout: string): { ok: boolean; ms: number | null } {
+  const raw = String(stdout).trim();
+  if (raw.includes(':')) {
+    const [codePart, ttfbPart] = raw.split(':');
+    const code = parseInt(codePart ?? '', 10);
+    const ttfbSec = parseFloat(ttfbPart ?? '');
+    if (code >= 200 && code < 400 && Number.isFinite(ttfbSec) && ttfbSec > 0) {
+      return { ok: true, ms: Math.round(ttfbSec * 1000) };
+    }
+    return PROBE_FAIL;
+  }
+  const code = parseInt(raw, 10);
+  return code >= 200 && code < 400 ? { ok: true, ms: null } : PROBE_FAIL;
+}
+
+/** naver.com HEAD TTFB — VNC 첫 바이트에 가깝고 favicon보다 대표적 (본문·JS·이미지는 제외) */
+async function probeModemSocksHeadTtfb(
+  proxyPort: number,
+  timeoutMs: number,
+  targetUrl: string,
+): Promise<{ ok: boolean; ms: number | null }> {
+  const maxSec = Math.max(8, Math.ceil(timeoutMs / 1000));
+  const connectSec = Math.min(12, Math.max(5, Math.floor(timeoutMs / 4000)));
+  try {
+    const { stdout } = await execFileAsync(
+      CURL_BIN,
+      [
+        '-4',
+        '-s',
+        '-o',
+        process.platform === 'win32' ? 'NUL' : '/dev/null',
+        '-I',
+        '-w',
+        '%{http_code}:%{time_starttransfer}',
+        '--connect-timeout',
+        String(connectSec),
+        '--max-time',
+        String(maxSec),
+        '--socks5-hostname',
+        `127.0.0.1:${proxyPort}`,
+        targetUrl,
+      ],
+      {
+        timeout: timeoutMs + 8000,
+        env: curlSubprocessEnv(),
+      },
+    );
+    return parseCurlProbeResult(stdout);
+  } catch {
+    return PROBE_FAIL;
+  }
+}
 
 async function probeModemSocksOnce(
   proxyPort: number,
   timeoutMs: number,
-  targetUrl = MODEM_SOCKS_PROBE_URL,
+  targetUrl = NAVER_FAVICON_PROBE,
 ): Promise<{ ok: boolean; ms: number | null }> {
   const start = Date.now();
   const maxSec = Math.max(8, Math.ceil(timeoutMs / 1000));
@@ -84,9 +136,9 @@ async function probeModemSocksOnce(
         env: curlSubprocessEnv(),
       },
     );
-    const code = parseInt(String(stdout).trim(), 10);
-    if (code >= 200 && code < 400) {
-      return { ok: true, ms: Date.now() - start };
+    const parsed = parseCurlProbeResult(stdout);
+    if (parsed.ok) {
+      return { ok: true, ms: parsed.ms ?? Date.now() - start };
     }
     return PROBE_FAIL;
   } catch {
@@ -94,8 +146,23 @@ async function probeModemSocksOnce(
   }
 }
 
-/** cold SOCKS 직후 첫 favicon도 간헐 2.5초+ — 재측정해 더 낮은 ms 선택 */
+/** cold SOCKS 직후 첫 naver HEAD도 간헐 2.5초+ — 재측정해 더 낮은 ms 선택 */
 const PROBE_WARM_RETRY_MS = 2_500;
+
+async function probeModemSocksMeasured(
+  proxyPort: number,
+  timeoutMs: number,
+): Promise<{ ok: boolean; ms: number | null }> {
+  const customUrl = process.env.HUMA_MODEM_SOCKS_PROBE_URL?.trim();
+  if (customUrl) {
+    return probeModemSocksOnce(proxyPort, timeoutMs, customUrl);
+  }
+
+  const head = await probeModemSocksHeadTtfb(proxyPort, timeoutMs, NAVER_HOME_PROBE);
+  if (head.ok) return head;
+
+  return probeModemSocksOnce(proxyPort, timeoutMs, NAVER_FAVICON_PROBE);
+}
 
 export async function probeModemSocks(
   proxyPort: number,
@@ -104,7 +171,7 @@ export async function probeModemSocks(
   const hardMs = timeoutMs + 3000;
   const once = () =>
     Promise.race([
-      probeModemSocksOnce(proxyPort, timeoutMs),
+      probeModemSocksMeasured(proxyPort, timeoutMs),
       new Promise<{ ok: boolean; ms: number | null }>((resolve) =>
         setTimeout(() => resolve(PROBE_FAIL), hardMs),
       ),

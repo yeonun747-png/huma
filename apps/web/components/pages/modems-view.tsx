@@ -455,8 +455,10 @@ export function ModemsView() {
           </div>
         )}
         <p className="mt-2 font-mono text-[10px] text-huma-t3">
-          응답 ms = SOCKS naver favicon probe 소요(보통 0.5~2초·LTE) · 화면 갱신까지는 슬롯당 공인IP·지역
-          조회가 추가되어 시계로 재면 더 길 수 있음 · <strong>오류</strong> = SOCKS 연결 실패(느려서
+          응답 ms = SOCKS naver.com HEAD TTFB(첫 바이트, 보통 1~3초·LTE) · VNC에서 홈이
+          느리면 JS·이미지·CPU 렌더(Xvfb) 추가 로딩 — favicon·TTFB와 체감은 다를 수 있음 ·
+          화면 갱신까지는 슬롯당 공인IP·지역 조회가 추가되어 시계로 재면 더 길 수 있음 ·{' '}
+          <strong>오류</strong> = SOCKS 연결 실패(느려서
           아님, 타임아웃 45초) · IP — = probe 실패 · 지역 = 표시된 공인 IP 기준(ip-api·ipwho.is, LTE Geo는
           참고용) · UI 오류만으로 포스팅 큐가 막히지는 않으나 SOCKS 불가 시 작업 실행 중 실패할 수 있음
         </p>
