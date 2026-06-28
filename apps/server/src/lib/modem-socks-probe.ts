@@ -20,10 +20,14 @@ function resolveCurlBin(): string {
 
 export const CURL_BIN = resolveCurlBin();
 
-/** LTE 동글 SOCKS naver probe — i7 SSH 기준 30초+ 성공도 흔함 */
+/** check-socks-proxy.sh · restore 5단계 와 동일 */
+export const MODEM_SOCKS_PROBE_CONNECT_TIMEOUT_SEC = 15;
+export const MODEM_SOCKS_PROBE_MAX_TIME_SEC = 45;
+
+/** LTE 동글 SOCKS naver GET — i7 SSH 기준 30초+ 성공도 흔함 */
 export const MODEM_SOCKS_PROBE_TIMEOUT_MS = (() => {
   const raw = Number(process.env.HUMA_MODEM_SOCKS_PROBE_TIMEOUT_MS);
-  return Number.isFinite(raw) && raw >= 10_000 ? raw : 45_000;
+  return Number.isFinite(raw) && raw >= 10_000 ? raw : MODEM_SOCKS_PROBE_MAX_TIME_SEC * 1000;
 })();
 
 const PROBE_FAIL = { ok: false, ms: null } as const;
@@ -47,72 +51,42 @@ export function curlSubprocessEnv(): NodeJS.ProcessEnv {
 }
 
 const NAVER_HOME_PROBE = 'https://www.naver.com';
-const NAVER_FAVICON_PROBE = 'https://www.naver.com/favicon.ico';
 
-/** env 지정 시 그 URL로 GET probe (check-socks-proxy.sh 수동 검증용) */
+/** env 지정 시 그 URL로 GET probe */
 export const MODEM_SOCKS_PROBE_URL = process.env.HUMA_MODEM_SOCKS_PROBE_URL?.trim() || NAVER_HOME_PROBE;
 
-function parseCurlProbeResult(stdout: string): { ok: boolean; ms: number | null } {
+/** check-socks-proxy.sh 성공 HTTP 코드 */
+export function isModemSocksNaverSuccessCode(code: number): boolean {
+  return code === 200 || code === 301 || code === 302;
+}
+
+/** curl -w '%{http_code}:%{time_total}' 파싱 */
+export function parseModemSocksCurlResult(stdout: string): { ok: boolean; ms: number | null } {
   const raw = String(stdout).trim();
   if (raw.includes(':')) {
-    const [codePart, ttfbPart] = raw.split(':');
+    const [codePart, totalPart] = raw.split(':');
     const code = parseInt(codePart ?? '', 10);
-    const ttfbSec = parseFloat(ttfbPart ?? '');
-    if (code >= 200 && code < 400 && Number.isFinite(ttfbSec) && ttfbSec > 0) {
-      return { ok: true, ms: Math.round(ttfbSec * 1000) };
+    const totalSec = parseFloat(totalPart ?? '');
+    if (
+      isModemSocksNaverSuccessCode(code) &&
+      Number.isFinite(totalSec) &&
+      totalSec > 0
+    ) {
+      return { ok: true, ms: Math.round(totalSec * 1000) };
     }
     return PROBE_FAIL;
   }
   const code = parseInt(raw, 10);
-  return code >= 200 && code < 400 ? { ok: true, ms: null } : PROBE_FAIL;
+  return isModemSocksNaverSuccessCode(code) ? { ok: true, ms: null } : PROBE_FAIL;
 }
 
-/** naver.com HEAD TTFB — VNC 첫 바이트에 가깝고 favicon보다 대표적 (본문·JS·이미지는 제외) */
-async function probeModemSocksHeadTtfb(
+/** naver.com GET — restore check-socks-proxy.sh 와 동일 (본문 수신·time_total) */
+async function probeModemSocksNaverGet(
   proxyPort: number,
-  timeoutMs: number,
   targetUrl: string,
 ): Promise<{ ok: boolean; ms: number | null }> {
-  const maxSec = Math.max(8, Math.ceil(timeoutMs / 1000));
-  const connectSec = Math.min(12, Math.max(5, Math.floor(timeoutMs / 4000)));
-  try {
-    const { stdout } = await execFileAsync(
-      CURL_BIN,
-      [
-        '-4',
-        '-s',
-        '-o',
-        process.platform === 'win32' ? 'NUL' : '/dev/null',
-        '-I',
-        '-w',
-        '%{http_code}:%{time_starttransfer}',
-        '--connect-timeout',
-        String(connectSec),
-        '--max-time',
-        String(maxSec),
-        '--socks5-hostname',
-        `127.0.0.1:${proxyPort}`,
-        targetUrl,
-      ],
-      {
-        timeout: timeoutMs + 8000,
-        env: curlSubprocessEnv(),
-      },
-    );
-    return parseCurlProbeResult(stdout);
-  } catch {
-    return PROBE_FAIL;
-  }
-}
-
-async function probeModemSocksOnce(
-  proxyPort: number,
-  timeoutMs: number,
-  targetUrl = NAVER_FAVICON_PROBE,
-): Promise<{ ok: boolean; ms: number | null }> {
   const start = Date.now();
-  const maxSec = Math.max(8, Math.ceil(timeoutMs / 1000));
-  const connectSec = Math.min(12, Math.max(5, Math.floor(timeoutMs / 4000)));
+  const subprocessTimeoutMs = MODEM_SOCKS_PROBE_TIMEOUT_MS + 8000;
   try {
     const { stdout } = await execFileAsync(
       CURL_BIN,
@@ -122,21 +96,21 @@ async function probeModemSocksOnce(
         '-o',
         process.platform === 'win32' ? 'NUL' : '/dev/null',
         '-w',
-        '%{http_code}',
+        '%{http_code}:%{time_total}',
         '--connect-timeout',
-        String(connectSec),
+        String(MODEM_SOCKS_PROBE_CONNECT_TIMEOUT_SEC),
         '--max-time',
-        String(maxSec),
+        String(MODEM_SOCKS_PROBE_MAX_TIME_SEC),
         '--socks5-hostname',
         `127.0.0.1:${proxyPort}`,
         targetUrl,
       ],
       {
-        timeout: timeoutMs + 8000,
+        timeout: subprocessTimeoutMs,
         env: curlSubprocessEnv(),
       },
     );
-    const parsed = parseCurlProbeResult(stdout);
+    const parsed = parseModemSocksCurlResult(stdout);
     if (parsed.ok) {
       return { ok: true, ms: parsed.ms ?? Date.now() - start };
     }
@@ -146,22 +120,11 @@ async function probeModemSocksOnce(
   }
 }
 
-/** cold SOCKS 직후 첫 naver HEAD도 간헐 2.5초+ — 재측정해 더 낮은 ms 선택 */
-const PROBE_WARM_RETRY_MS = 2_500;
-
 async function probeModemSocksMeasured(
   proxyPort: number,
-  timeoutMs: number,
 ): Promise<{ ok: boolean; ms: number | null }> {
   const customUrl = process.env.HUMA_MODEM_SOCKS_PROBE_URL?.trim();
-  if (customUrl) {
-    return probeModemSocksOnce(proxyPort, timeoutMs, customUrl);
-  }
-
-  const head = await probeModemSocksHeadTtfb(proxyPort, timeoutMs, NAVER_HOME_PROBE);
-  if (head.ok) return head;
-
-  return probeModemSocksOnce(proxyPort, timeoutMs, NAVER_FAVICON_PROBE);
+  return probeModemSocksNaverGet(proxyPort, customUrl || NAVER_HOME_PROBE);
 }
 
 export async function probeModemSocks(
@@ -171,23 +134,14 @@ export async function probeModemSocks(
   const hardMs = timeoutMs + 3000;
   const once = () =>
     Promise.race([
-      probeModemSocksMeasured(proxyPort, timeoutMs),
+      probeModemSocksMeasured(proxyPort),
       new Promise<{ ok: boolean; ms: number | null }>((resolve) =>
         setTimeout(() => resolve(PROBE_FAIL), hardMs),
       ),
     ]);
 
   const first = await once();
-  if (first.ok) {
-    if (first.ms != null && first.ms >= PROBE_WARM_RETRY_MS) {
-      await new Promise((r) => setTimeout(r, 350));
-      const warmed = await once();
-      if (warmed.ok && warmed.ms != null) {
-        return warmed.ms <= first.ms ? warmed : first;
-      }
-    }
-    return first;
-  }
+  if (first.ok) return first;
 
   await new Promise((r) => setTimeout(r, 400));
   return once();
