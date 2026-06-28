@@ -1,6 +1,7 @@
 import type { Page } from 'playwright';
 import { createBrowser } from '../playwright/browser.js';
-import { isNaverCaptchaVisible } from '../../lib/naver-captcha-vision.js';
+import { isNaverCaptchaVisible, tryAutoSolveNaverCaptcha } from '../../lib/naver-captcha-vision.js';
+import { logOperation } from '../../lib/log-emitter.js';
 import { PLAYWRIGHT_NAV_TIMEOUT_MS } from '../../lib/playwright-nav-timeout.js';
 import { integratedSearchUrl } from '../../lib/naver-search-links.js';
 import { randomBetween, sleep } from '../../lib/utils.js';
@@ -99,6 +100,55 @@ export async function detectBlogCheckCaptcha(page: Page): Promise<boolean> {
   );
 }
 
+export type BlogCheckCaptchaContext = {
+  accountId?: string;
+  workspace?: string | null;
+  label?: string;
+  blogId?: string;
+};
+
+/** 포스팅 발행과 동일 Vision 캡차 모듈 — 성공 시 true, 여전히 차단이면 false */
+export async function resolveBlogCheckCaptcha(
+  page: Page,
+  ctx: BlogCheckCaptchaContext = {},
+): Promise<boolean> {
+  if (!(await detectBlogCheckCaptcha(page))) return true;
+
+  const vision = await tryAutoSolveNaverCaptcha(page, {
+    accountId: ctx.accountId,
+    workspace: ctx.workspace,
+    jobType: 'blog_check',
+    accountLabel: ctx.label,
+    autoLoginSubmit: page.url().includes('nidlogin'),
+  });
+
+  if (vision === 'solved') {
+    await logOperation({
+      level: 'info',
+      message: `[blog-check] CAPTCHA Vision 자동 해결${ctx.blogId ? ` (${ctx.blogId})` : ''}`,
+      account_id: ctx.accountId,
+      workspace: ctx.workspace ?? undefined,
+    });
+    return !(await detectBlogCheckCaptcha(page));
+  }
+
+  if (vision === 'failed') {
+    await logOperation({
+      level: 'warn',
+      message: `[blog-check] CAPTCHA Vision 3회 실패 — 스캔 중단${ctx.blogId ? ` (${ctx.blogId})` : ''}`,
+      account_id: ctx.accountId,
+      workspace: ctx.workspace ?? undefined,
+    });
+  }
+
+  return !(await detectBlogCheckCaptcha(page));
+}
+
+async function assertBlogCheckCaptchaClear(page: Page, ctx: BlogCheckCaptchaContext): Promise<void> {
+  if (await resolveBlogCheckCaptcha(page, ctx)) return;
+  throw new BlogCheckCaptchaError(ctx.blogId ?? '');
+}
+
 /**
  * site:blog.naver.com/계정ID/포스트번호 — 검색 결과에 URL 있으면 수집됨
  * method: 'site-url-fallback'
@@ -107,14 +157,13 @@ export async function checkPostIndexedBySite(
   page: Page,
   blogId: string,
   postNo: string,
+  captchaCtx: BlogCheckCaptchaContext = {},
 ): Promise<boolean> {
   const query = `site:blog.naver.com/${blogId}/${postNo}`;
   const url = integratedSearchUrl(query);
   await navigateBlogCheck(page, url);
 
-  if (await detectBlogCheckCaptcha(page)) {
-    throw new BlogCheckCaptchaError(blogId);
-  }
+  await assertBlogCheckCaptchaClear(page, { ...captchaCtx, blogId });
 
   const bodyText = await page.locator('body').innerText().catch(() => '');
   if (/검색결과가 없습니다|에 대한 검색 결과가 없습니다|결과를 찾을 수 없/i.test(bodyText)) {
@@ -312,6 +361,7 @@ async function collectTitleSearchHrefs(
   query: string,
   blogId: string,
   postNo: string,
+  captchaCtx: BlogCheckCaptchaContext = {},
 ): Promise<string[]> {
   const merged: string[] = [];
   const seenPost = new Set<string>();
@@ -320,9 +370,7 @@ async function collectTitleSearchHrefs(
     const start = pageIdx * BLOG_SEARCH_PAGE_SIZE + 1;
     await navigateBlogCheck(page, integratedSearchUrl(query, start));
 
-    if (await detectBlogCheckCaptcha(page)) {
-      throw new BlogCheckCaptchaError('');
-    }
+    await assertBlogCheckCaptchaClear(page, { ...captchaCtx, blogId });
 
     let pageHrefs = await collectIntegratedSearchResultHrefs(page);
     if (pageHrefs.length === 0) {
@@ -362,16 +410,17 @@ export async function checkPostExposure(
   blogId: string,
   postNo: string,
   title: string,
+  captchaCtx: BlogCheckCaptchaContext = {},
 ): Promise<PostRankResult> {
   const query = title.trim();
   if (!query) {
-    const indexed = await checkPostIndexedBySite(page, blogId, postNo);
+    const indexed = await checkPostIndexedBySite(page, blogId, postNo, captchaCtx);
     return { status: indexed ? 'weak' : 'miss', rank: null };
   }
 
   let hrefs: string[];
   try {
-    hrefs = await collectTitleSearchHrefs(page, query, blogId, postNo);
+    hrefs = await collectTitleSearchHrefs(page, query, blogId, postNo, captchaCtx);
   } catch (err) {
     if (err instanceof BlogCheckCaptchaError) {
       throw new BlogCheckCaptchaError(blogId);
@@ -385,7 +434,7 @@ export async function checkPostExposure(
     return { status: rankToExposureStatus(rank), rank };
   }
 
-  const indexed = await checkPostIndexedBySite(page, blogId, postNo);
+  const indexed = await checkPostIndexedBySite(page, blogId, postNo, captchaCtx);
   return { status: indexed ? 'weak' : 'miss', rank: null };
 }
 

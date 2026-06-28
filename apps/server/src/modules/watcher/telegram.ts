@@ -294,6 +294,14 @@ export function getTelegramEnvStatus(workspace?: string | null): {
 }
 
 export async function notifyTelegram(
+  _message: string,
+  _workspace?: string | null,
+): Promise<void> {
+  /* Layer4는 notifyLayer4Telegram · CAPTCHA Vision 3회 실패는 notifyCaptchaTelegram */
+}
+
+/** Layer4 Watcher — CAPTCHA/429/휴식 등 계정 자동 중지 알림 */
+export async function notifyLayer4Telegram(
   message: string,
   workspace?: string | null,
 ): Promise<void> {
@@ -330,6 +338,9 @@ export interface CaptchaTelegramParams {
 export async function notifyCaptchaTelegram(
   params: CaptchaTelegramParams,
 ): Promise<{ ok: boolean; error?: string; skipped?: string }> {
+  if (!params.visionAutoFailed) {
+    return { ok: false, skipped: 'CAPTCHA Vision 3회 실패 외 텔레그램 알림 비활성' };
+  }
   if (!params.force && !(await shouldNotifyTelegram())) {
     return { ok: false, skipped: 'Telegram 알림 꺼짐 또는 env 미설정' };
   }

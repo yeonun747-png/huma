@@ -8,7 +8,7 @@ import {
   BLOG_CHECK_PAGE_SETTLE_MS,
 } from './constants.js';
 import { type PostContentStats, mergePostContentStats } from './content-stats.js';
-import { BlogCheckCaptchaError, detectBlogCheckCaptcha, navigateBlogCheck } from './scanner.js';
+import { BlogCheckCaptchaError, navigateBlogCheck, resolveBlogCheckCaptcha, type BlogCheckCaptchaContext } from './scanner.js';
 
 /** SmartEditor 본문 후보 — post-view 내부만 사용 (페이지 chrome 제외) */
 const CONTENT_ROOT_SELECTORS = [
@@ -571,6 +571,7 @@ async function navigateAndScrape(
   url: string,
   blogId: string,
   postNo: string,
+  captchaCtx: BlogCheckCaptchaContext = {},
 ): Promise<PostContentStats> {
   const likeNetwork = page
     .waitForResponse(
@@ -584,7 +585,7 @@ async function navigateAndScrape(
 
   await navigateBlogCheck(page, url);
 
-  if (await detectBlogCheckCaptcha(page)) {
+  if (!(await resolveBlogCheckCaptcha(page, { ...captchaCtx, blogId }))) {
     throw new BlogCheckCaptchaError(blogId);
   }
 
@@ -622,16 +623,17 @@ export async function scrapePostContentStats(
   page: Page,
   blogId: string,
   postNo: string,
+  captchaCtx: BlogCheckCaptchaContext = {},
 ): Promise<PostContentStats> {
   const mobileUrl = mobilePostViewUrl(blogId, postNo);
   const desktopUrl = `https://blog.naver.com/PostView.naver?blogId=${encodeURIComponent(blogId)}&logNo=${encodeURIComponent(postNo)}`;
   // blog-check 브라우저는 모바일 UA — m.blog 우선(데스크톱 PostView+iframe은 Xvfb에서 hang·타임아웃 빈발)
-  let stats = await navigateAndScrape(page, mobileUrl, blogId, postNo);
+  let stats = await navigateAndScrape(page, mobileUrl, blogId, postNo, captchaCtx);
 
   if (stats.char_count < CONTENT_MIN_CHARS) {
     stats = mergePostContentStats(
       stats,
-      await navigateAndScrape(page, desktopUrl, blogId, postNo),
+      await navigateAndScrape(page, desktopUrl, blogId, postNo, captchaCtx),
     );
   }
 

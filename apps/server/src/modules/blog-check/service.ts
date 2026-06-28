@@ -39,7 +39,7 @@ import { scrapePostContentStats } from './post-content-scraper.js';
 import { preferBlogListTitleForSearch } from './post-title.js';
 import type { PostExposureStatus } from './exposure-status.js';
 import { rankToExposureStatus } from './exposure-status.js';
-import { notifyBlogCheckCaptcha, notifyBlogCheckIndexParseFailed } from './notify.js';
+import { notifyBlogCheckIndexParseFailed } from './notify.js';
 import {
   acquireBlogCheckScanLock,
   BLOG_CHECK_QUEUE_JOB_ID,
@@ -53,8 +53,8 @@ import { clearScanProgress, getScanProgress, setScanProgress, type BlogCheckScan
 import {
   BlogCheckCaptchaError,
   checkPostExposure,
-  detectBlogCheckCaptcha,
   randomScanDelayMs,
+  resolveBlogCheckCaptcha,
   resolveBlogId,
   setupBlogCheckPage,
   withBlogCheckBrowser,
@@ -947,6 +947,7 @@ async function computePostScanResult(
   page: Page,
   blogId: string,
   post: PostRow,
+  acc?: Pick<AccountRow, 'id' | 'workspace' | 'name' | 'slot_label' | 'naver_id'>,
 ): Promise<{
   contentStats: PostContentStats;
   exposure: { status: PostExposureStatus; rank: number | null };
@@ -971,12 +972,18 @@ async function computePostScanResult(
   };
 
   // 노출 순위는 search.naver.com(nexearch) — 본문 크롤보다 먼저 (본문 hang 시에도 강함/약함 반영)
-  const rankResult = await checkPostExposure(page, blogId, postNo, title);
+  const captchaCtx = {
+    accountId: acc?.id ?? post.account_id || undefined,
+    workspace: acc?.workspace ?? undefined,
+    label: acc ? acc.name || acc.slot_label || acc.naver_id : undefined,
+    blogId,
+  };
+  const rankResult = await checkPostExposure(page, blogId, postNo, title, captchaCtx);
 
   let crawled = emptyPostContentStats();
   if (!hasStoredContent) {
     try {
-      crawled = await scrapePostContentStats(page, blogId, postNo);
+      crawled = await scrapePostContentStats(page, blogId, postNo, captchaCtx);
     } catch (err) {
       if (err instanceof BlogCheckCaptchaError) throw err;
       await logOperation({
@@ -1012,7 +1019,7 @@ async function scanSinglePost(
   const postNo = post.post_no ?? extractPostNoFromUrl(post.post_url);
   if (!postNo) return false;
 
-  const { contentStats, exposure } = await computePostScanResult(page, blogId, post);
+  const { contentStats, exposure } = await computePostScanResult(page, blogId, post, acc);
 
   const { error: clearErr } = await supabase
     .from('blog_post_status')
@@ -1126,8 +1133,7 @@ async function scanAccountWorkItem(
       });
     }
 
-    if (await detectBlogCheckCaptcha(page)) {
-      await notifyBlogCheckCaptcha(blogId, label, acc.workspace);
+    if (!(await resolveBlogCheckCaptcha(page, { accountId: acc.id, workspace: acc.workspace, label, blogId }))) {
       accountAborted = true;
     }
 
@@ -1184,7 +1190,6 @@ async function scanAccountWorkItem(
 
       if (outcomes.some((o) => o.captcha)) {
         if (!accountAborted) {
-          await notifyBlogCheckCaptcha(blogId, label, acc.workspace);
           await logOperation({
             level: 'warn',
             message: `[blog-check] 캡차 감지 — ${label} 스캔 중단`,
@@ -1339,8 +1344,7 @@ async function runBlogCheckAdHocScan(
       posts: skeletonAdHocPosts(listPosts),
     });
 
-    if (await detectBlogCheckCaptcha(page)) {
-      await notifyBlogCheckCaptcha(blogId, label, null);
+    if (!(await resolveBlogCheckCaptcha(page, { blogId }))) {
       accountAborted = true;
     }
 
@@ -1393,7 +1397,6 @@ async function runBlogCheckAdHocScan(
 
           if (outcomes.some((o) => o.captcha)) {
             if (!accountAborted) {
-              await notifyBlogCheckCaptcha(blogId, label, null);
               await logOperation({
                 level: 'warn',
                 message: `[blog-check] 캡차 감지 — ${label} ad-hoc 스캔 중단`,

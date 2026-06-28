@@ -6,7 +6,7 @@ import {
   resolveRecoveryDelayMs,
   shouldNotifySlack,
 } from '../../lib/human-engine-policy.js';
-import { notifyTelegram } from './telegram.js';
+import { notifyLayer4Telegram } from './telegram.js';
 import { reconnectModem } from '../modem/reconnect.js';
 import type { ModemSession } from '../proxy/manager.js';
 import { getModemIdByProxyPort } from '../proxy/manager.js';
@@ -49,7 +49,7 @@ async function postWatcherAlert(text: string, workspace?: string | null) {
     const webhook = process.env.SLACK_WEBHOOK_URL?.trim();
     if (webhook) await axios.post(webhook, { text }).catch(() => {});
   }
-  await notifyTelegram(text, workspace);
+  await notifyLayer4Telegram(text, workspace);
 }
 
 export async function pauseAccount(accountId: string) {
