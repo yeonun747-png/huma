@@ -27,7 +27,46 @@ is_rndis_dongle_ip() {
   [[ "$ip" =~ ^192\.168\.[0-9]+\.100$ ]]
 }
 
-echo "=== 1) DHCP (eth/enx) ==="
+is_iface_usb_present() {
+  local iface="$1" dev
+  dev=$(readlink -f "/sys/class/net/${iface}/device" 2>/dev/null || true)
+  [ -n "$dev" ] && [ -e "$dev" ]
+}
+
+is_iface_carrier_up() {
+  local iface="$1" carrier
+  carrier=$(cat "/sys/class/net/${iface}/carrier" 2>/dev/null || echo 0)
+  [ "$carrier" = "1" ]
+}
+
+dongle_guess_gateway() {
+  local ip="$1"
+  echo "${ip%.*}.1"
+}
+
+# USB 분리 후에도 eth 이름·192.168.*.100 IP가 남는 고스트 iface 제외
+is_live_zte_dongle_iface() {
+  local iface="$1" ip="$2" gw
+  if ! is_iface_usb_present "$iface"; then
+    echo "  ⊘ ${iface} ${ip} — 고스트 (USB device 없음), 스킵"
+    return 1
+  fi
+  if ! is_iface_carrier_up "$iface"; then
+    echo "  ⊘ ${iface} ${ip} — 고스트 (carrier down), 스킵"
+    return 1
+  fi
+  gw=$(dongle_guess_gateway "$ip")
+  if ! ping -c 1 -W 2 -I "$iface" "$gw" >/dev/null 2>&1; then
+    echo "  ⊘ ${iface} ${ip} — 고스트 (gw ${gw} unreachable), 스킵"
+    return 1
+  fi
+  return 0
+}
+
+# 동시 dhclient 시 LTE bearer 동시 attach → 처리량 급락 방지 (동글 1대씩)
+DONGLE_DHCP_STAGGER_SEC="${HUMA_DONGLE_DHCP_STAGGER_SEC:-2}"
+
+echo "=== 1) DHCP (eth/enx) — 순차 dhclient (${DONGLE_DHCP_STAGGER_SEC}s 간격) ==="
 IFACES=()
 while read -r iface _; do
   IFACES+=("$iface")
@@ -43,6 +82,7 @@ for iface in "${IFACES[@]}"; do
   ip link set "$iface" up 2>/dev/null || true
   if ! ip -4 addr show dev "$iface" 2>/dev/null | grep -q 'inet '; then
     dhclient -1 "$iface" 2>/dev/null || echo "  ⚠ ${iface} DHCP 실패"
+    sleep "$DONGLE_DHCP_STAGGER_SEC"
   fi
   while ip route del default dev "$iface" 2>/dev/null; do :; done
 done
@@ -58,6 +98,9 @@ for iface in "${IFACES[@]}"; do
   [ -z "$ip_full" ] && continue
   if ! is_rndis_dongle_ip "$ip_full"; then
     echo "  ⊘ ${iface} ${ip_full} — 실폰 테더(ZTE 동글 192.168.*.100 아님), 스킵"
+    continue
+  fi
+  if ! is_live_zte_dongle_iface "$iface" "$ip_full"; then
     continue
   fi
   usb=$(dongle_usb_path "$iface")
@@ -132,6 +175,22 @@ ALL_ROUTE_ARGS=("${ROUTE_ARGS[@]}" "${PHONE_ROUTE_ARGS[@]}")
 
 echo ""
 echo "=== 3) policy routing 정리 + 적용 ==="
+# conf에 없는 stale 192.168.*.100 source rule 제거 (동글 분리 후 고스트 route)
+while read -r line; do
+  from_ip=$(echo "$line" | grep -oP '(?<=from )192\.168\.[0-9]+\.[0-9]+' || true)
+  [ -n "$from_ip" ] || continue
+  is_rndis_dongle_ip "$from_ip" || continue
+  keep=0
+  for entry in "${SORTED_LINES[@]}"; do
+    [ "${entry##*|}" = "$from_ip" ] && keep=1 && break
+  done
+  if [ "$keep" -eq 0 ]; then
+    while ip rule del from "${from_ip}/32" 2>/dev/null; do
+      echo "  ⊘ stale ip rule from ${from_ip}/32 제거"
+    done
+  fi
+done < <(ip rule show 2>/dev/null | grep 'from 192\.168\.')
+
 for tbl in 10001 10002 10003 10004 10005 10006 10007; do
   while ip rule del table "$tbl" 2>/dev/null; do :; done
 done
