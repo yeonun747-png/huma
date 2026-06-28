@@ -14,6 +14,7 @@ import {
 } from '../video-content/panana-characters.js';
 import { listYeonunProducts } from '../video-content/yeonun-product-picker.js';
 import { logOperation } from '../../lib/log-emitter.js';
+import { loadRecentPostingSubjectKeys } from '../../lib/posting-recent-subjects.js';
 
 export const YEONUN_POSTING_URL_BASE = 'https://yeonun.com/fortune';
 export const QUIZOASIS_POSTING_URL_BASE = 'https://www.myquizoasis.com/ko/test';
@@ -78,8 +79,11 @@ async function pickPostingSubject(
   workspace: string,
   accountId?: string | null,
 ): Promise<{ title: string; source_url: string; label: string }> {
+  const excludeRecentPostingKeys = await loadRecentPostingSubjectKeys(workspace);
+  const pickOpts = { excludeRecentPostingKeys };
+
   if (workspace === 'yeonun') {
-    const picked = await pickYeonunProduct();
+    const picked = await pickYeonunProduct(pickOpts);
     if (!picked) throw new Error('연운 상품 데이터 없음 — Supabase products 확인');
     return {
       title: picked.title?.trim() || picked.slug,
@@ -89,7 +93,7 @@ async function pickPostingSubject(
   }
 
   if (workspace === 'quizoasis') {
-    const picked = await pickQuizContent();
+    const picked = await pickQuizContent(pickOpts);
     if (!picked) {
       throw new Error('퀴즈 캐시 없음 — 계정관리에서 퀴즈 동기화 후 재시도');
     }
@@ -104,7 +108,7 @@ async function pickPostingSubject(
   }
 
   if (workspace === 'panana') {
-    const picked = await pickPananaCharacter(accountId ?? '');
+    const picked = await pickPananaCharacter(accountId ?? '', pickOpts);
     if (!picked) {
       throw new Error('파나나 캐릭터 캐시 없음 — 계정관리에서 동기화 후 재시도');
     }

@@ -36,6 +36,7 @@ import {
 } from './constants.js';
 import { computeBlogIndexScore, scrapeBlogStats } from './index-score.js';
 import { scrapePostContentStats } from './post-content-scraper.js';
+import { preferBlogListTitleForSearch } from './post-title.js';
 import type { PostExposureStatus } from './exposure-status.js';
 import { rankToExposureStatus } from './exposure-status.js';
 import { notifyBlogCheckCaptcha, notifyBlogCheckIndexParseFailed } from './notify.js';
@@ -479,7 +480,19 @@ async function fetchRecentPosts(
     const postUrl = canonicalBlogPostUrl(String(job.result_url ?? '').trim());
     if (!postUrl) continue;
     const key = postRowMergeKey(postUrl, extractPostNoFromUrl(postUrl));
-    merged.set(key, jobToPostRow(accountId, job as JobPostSource, workspace, postUrl));
+    const fromJob = jobToPostRow(accountId, job as JobPostSource, workspace, postUrl);
+    const existing = merged.get(key);
+    if (existing) {
+      merged.set(key, {
+        ...fromJob,
+        title: preferBlogListTitleForSearch(existing.title, fromJob.title),
+        published_at: mergePublishedAt(existing.published_at, fromJob.published_at),
+        ...mergePostContentStats(fromJob, existing),
+        ext_link_cleared: existing.ext_link_cleared,
+      });
+    } else {
+      merged.set(key, fromJob);
+    }
   }
 
   for (const row of (fromPosts ?? []) as PostRow[]) {
@@ -492,6 +505,7 @@ async function fetchRecentPosts(
         ...row,
         post_url: normalizedUrl,
         post_no: row.post_no ?? extractPostNoFromUrl(normalizedUrl),
+        title: preferBlogListTitleForSearch(existing.title, row.title),
         published_at: mergePublishedAt(existing.published_at, row.published_at),
         ...mergePostContentStats(existing, statsFromDbRow(row as unknown as Record<string, unknown>, workspace)),
         ext_link_cleared: row.ext_link_cleared,

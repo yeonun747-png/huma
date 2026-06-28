@@ -3,6 +3,7 @@ import { supabase } from '../../middleware/auth.js';
 import { notifyTelegram } from '../watcher/telegram.js';
 import { logOperation } from '../../lib/log-emitter.js';
 import { pickWeightedByCounts } from './panana-characters.js';
+import { filterPostingSubjectCandidates } from '../../lib/posting-recent-subjects.js';
 
 export interface QuizContentRow {
   id: string;
@@ -298,7 +299,9 @@ async function loadRecentUsedQuizIds(limit = 20): Promise<string[]> {
 }
 
 /** workspace 최근 used_quiz_id 빈도 — 적게 쓴 퀴즈 가중치 ↑ */
-export async function pickQuizContent(): Promise<QuizContentPick | null> {
+export async function pickQuizContent(opts?: {
+  excludeRecentPostingKeys?: Set<string>;
+}): Promise<QuizContentPick | null> {
   const active = await listActiveQuizContent();
   if (!active.length) {
     await logOperation({
@@ -309,15 +312,28 @@ export async function pickQuizContent(): Promise<QuizContentPick | null> {
     return null;
   }
 
+  const pool = filterPostingSubjectCandidates(
+    active,
+    (q) => q.slug?.trim() || q.quiz_external_id,
+    opts?.excludeRecentPostingKeys ?? new Set(),
+  );
+  if (pool.length < active.length && opts?.excludeRecentPostingKeys?.size) {
+    await logOperation({
+      level: 'info',
+      message: `[quiz-pick] 직전 포스팅 제외 후 후보 ${pool.length}/${active.length}건`,
+      workspace: 'quizoasis',
+    });
+  }
+
   const recent = await loadRecentUsedQuizIds();
   const counts = new Map<string, number>();
-  for (const row of active) counts.set(row.quiz_external_id, 0);
+  for (const row of pool) counts.set(row.quiz_external_id, 0);
   for (const id of recent) {
     if (counts.has(id)) counts.set(id, (counts.get(id) ?? 0) + 1);
   }
 
   const picked = pickWeightedByCounts(
-    active.map((q) => ({ id: q.quiz_external_id, row: q })),
+    pool.map((q) => ({ id: q.quiz_external_id, row: q })),
     counts,
   );
   if (!picked) return null;

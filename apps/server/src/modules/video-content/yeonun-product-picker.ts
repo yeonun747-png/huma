@@ -3,6 +3,8 @@ import {
   buildYeonunProductContextForVideo,
   type YeonunProductRow,
 } from '../content/yeonun-context.js';
+import { filterPostingSubjectCandidates } from '../../lib/posting-recent-subjects.js';
+import { logOperation } from '../../lib/log-emitter.js';
 
 export type YeonunProductPick = {
   slug: string;
@@ -43,9 +45,24 @@ async function loadRecentUsedProducts(workspace: string, limit = 20): Promise<st
 }
 
 /** 등장 횟수가 적을수록 선택 확률 ↑ */
-export async function pickYeonunProduct(): Promise<YeonunProductPick | null> {
+export async function pickYeonunProduct(opts?: {
+  excludeRecentPostingKeys?: Set<string>;
+}): Promise<YeonunProductPick | null> {
   const products = await listYeonunProducts();
   if (!products.length) return null;
+
+  const pool = filterPostingSubjectCandidates(
+    products,
+    (p) => p.slug,
+    opts?.excludeRecentPostingKeys ?? new Set(),
+  );
+  if (pool.length < products.length && opts?.excludeRecentPostingKeys?.size) {
+    await logOperation({
+      level: 'info',
+      message: `[yeonun-pick] 직전 포스팅 제외 후 후보 ${pool.length}/${products.length}건`,
+      workspace: 'yeonun',
+    });
+  }
 
   const recent = await loadRecentUsedProducts('yeonun');
   const counts = new Map<string, number>();
@@ -53,7 +70,7 @@ export async function pickYeonunProduct(): Promise<YeonunProductPick | null> {
     counts.set(slug, (counts.get(slug) ?? 0) + 1);
   }
 
-  const weights = products.map((p) => {
+  const weights = pool.map((p) => {
     const count = counts.get(p.slug) ?? 0;
     return { product: p, weight: 1 / (1 + count) };
   });
@@ -74,7 +91,7 @@ export async function pickYeonunProduct(): Promise<YeonunProductPick | null> {
     }
   }
 
-  const fallback = products[0]!;
+  const fallback = pool[0]!;
   const contextText =
     (await buildYeonunProductContextForVideo(fallback.slug)) ??
     formatProductContextFallback(fallback);

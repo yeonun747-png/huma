@@ -2,6 +2,7 @@ import axios, { type AxiosRequestConfig } from 'axios';
 import { supabase } from '../../middleware/auth.js';
 import { notifyTelegram } from '../watcher/telegram.js';
 import { logOperation } from '../../lib/log-emitter.js';
+import { filterPostingSubjectCandidates } from '../../lib/posting-recent-subjects.js';
 
 export interface PananaCharacterRow {
   id: string;
@@ -281,7 +282,10 @@ export async function listActivePananaCharacters(): Promise<PananaCharacterRow[]
   return (data ?? []) as PananaCharacterRow[];
 }
 
-export async function pickPananaCharacter(accountId: string): Promise<PananaCharacterRow | null> {
+export async function pickPananaCharacter(
+  accountId: string,
+  opts?: { excludeRecentPostingKeys?: Set<string> },
+): Promise<PananaCharacterRow | null> {
   const active = await listActivePananaCharacters();
   if (!active.length) {
     await logOperation({
@@ -290,6 +294,19 @@ export async function pickPananaCharacter(accountId: string): Promise<PananaChar
       workspace: 'panana',
     });
     return null;
+  }
+
+  const pool = filterPostingSubjectCandidates(
+    active,
+    (ch) => ch.panana_character_id,
+    opts?.excludeRecentPostingKeys ?? new Set(),
+  );
+  if (pool.length < active.length && opts?.excludeRecentPostingKeys?.size) {
+    await logOperation({
+      level: 'info',
+      message: `[panana-pick] 직전 포스팅 제외 후 후보 ${pool.length}/${active.length}건`,
+      workspace: 'panana',
+    });
   }
 
   const { data: recent } = await supabase
@@ -301,13 +318,13 @@ export async function pickPananaCharacter(accountId: string): Promise<PananaChar
     .limit(20);
 
   const counts = new Map<string, number>();
-  for (const ch of active) counts.set(ch.id, 0);
+  for (const ch of pool) counts.set(ch.id, 0);
   for (const row of recent ?? []) {
     const id = row.character_used as string;
     if (id && counts.has(id)) counts.set(id, (counts.get(id) ?? 0) + 1);
   }
 
-  return pickWeightedByCounts(active, counts);
+  return pickWeightedByCounts(pool, counts);
 }
 
 export async function getCharacterAppearanceCounts(

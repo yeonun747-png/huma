@@ -42,6 +42,11 @@ import {
 import { postingSlotByWorkspace } from '../../lib/dongle-slots.js';
 import { withPostingSimilarityLock } from '../../lib/posting-similarity-lock.js';
 import { logOperation } from '../../lib/log-emitter.js';
+import {
+  isPureKoreanSeoTitle,
+  sanitizeKoreanSeoTitle,
+  truncateKoreanSeoTitle,
+} from '../../lib/seo-title-korean.js';
 
 export interface ContentGenerationInput {
   title: string;
@@ -113,20 +118,20 @@ function normalizeTitleCompare(s: string): string {
 }
 
 function truncateSeoTitle(s: string): string {
-  const t = s.trim().replace(/\s+/g, ' ');
-  if (t.length <= SEO_TITLE_MAX) return t;
-  const cut = t.slice(0, SEO_TITLE_MAX);
-  const lastSpace = cut.lastIndexOf(' ');
-  if (lastSpace > SEO_TITLE_MAX * 0.6) return cut.slice(0, lastSpace);
-  return cut;
+  return truncateKoreanSeoTitle(s);
 }
 
 function isAcceptableSeoTitle(seo: string | undefined, operatorTitle: string): boolean {
   const t = seo?.trim();
   if (!t) return false;
   if (t.length > SEO_TITLE_MAX) return false;
+  if (!isPureKoreanSeoTitle(t)) return false;
   if (normalizeTitleCompare(t) === normalizeTitleCompare(operatorTitle)) return false;
   return true;
+}
+
+function finalizeSeoTitleCandidate(raw: string): string {
+  return sanitizeKoreanSeoTitle(raw);
 }
 
 function heuristicSeoTitle(operatorTitle: string, synopsis?: string, blogExcerpt?: string): string {
@@ -171,7 +176,7 @@ function forceDistinctSeoTitle(operatorTitle: string, synopsis?: string, blogExc
     const t = truncateSeoTitle(v);
     if (normalizeTitleCompare(t) !== normalizeTitleCompare(operatorTitle)) return t;
   }
-  return truncateSeoTitle(`${operatorTitle.slice(0, 28)}·정리`);
+  return truncateSeoTitle(`${operatorTitle.slice(0, 28)} 정리`);
 }
 
 async function generateSeoTitleOnly(params: {
@@ -203,9 +208,10 @@ ${similarityBlock}
 
 규칙:
 - 32자 이내 (공백 포함, 초과 금지)
+- 한글·숫자·공백만 (|, ·, -, 영문, 특수문자 금지)
 - 핵심 검색 키워드를 앞쪽 배치
 - 운영자 제목과 동일·거의 동일하게 쓰지 말 것
-- 과장·특수문자 남발 금지
+- 과장·특수문자·영문 금지
 - 클릭 유도 자연스러운 한국어
 
 {"seo_title":"..."}`,
@@ -232,21 +238,21 @@ export async function ensureSeoTitle(params: {
 }): Promise<string> {
   const operatorTitle = params.operatorTitle.trim();
   if (isAcceptableSeoTitle(params.candidate, operatorTitle)) {
-    return truncateSeoTitle(params.candidate!.trim());
+    return finalizeSeoTitleCandidate(params.candidate!.trim());
   }
 
   if (process.env.ANTHROPIC_API_KEY) {
     try {
       const generated = await generateSeoTitleOnly(params);
       if (isAcceptableSeoTitle(generated, operatorTitle)) {
-        return truncateSeoTitle(generated!.trim());
+        return finalizeSeoTitleCandidate(generated!.trim());
       }
     } catch (err) {
       console.warn('[content-generator] seo_title 전용 생성 실패:', (err as Error).message);
     }
   }
 
-  return forceDistinctSeoTitle(operatorTitle, params.synopsis, params.blogExcerpt);
+  return finalizeSeoTitleCandidate(forceDistinctSeoTitle(operatorTitle, params.synopsis, params.blogExcerpt));
 }
 
 /** 유사도 루프 전용 — forceDistinct 폴백 없이 LLM 재시도만 */
@@ -266,14 +272,14 @@ async function regenerateSeoTitleForSimilarity(params: {
       extraPrompt: params.extraPrompt,
     });
     if (candidate?.trim() && isAcceptableSeoTitle(candidate, params.operatorTitle)) {
-      return truncateSeoTitle(candidate.trim());
+      return finalizeSeoTitleCandidate(candidate.trim());
     }
   }
   throw new Error('SEO 제목 유사도 재생성 실패');
 }
 
 export function resolvePostingTitle(generated: Pick<ContentGenerationOutput, 'seo_title'>): string {
-  return generated.seo_title.trim();
+  return finalizeSeoTitleCandidate(generated.seo_title.trim());
 }
 
 async function fetchUrlText(url: string): Promise<string> {
@@ -330,7 +336,7 @@ function fallbackContent(
   const wsTag = input.workspace === 'quizoasis' ? '#심리테스트' : input.workspace === 'panana' ? '#AI캐릭터' : '#사주';
   return {
     blog_post: body,
-    seo_title: forceDistinctSeoTitle(input.title, input.synopsis, body),
+    seo_title: finalizeSeoTitleCandidate(forceDistinctSeoTitle(input.title, input.synopsis, body)),
     blog_post_target_chars: lengthRange.tier,
     blog_post_target_min_chars: lengthRange.min,
     blog_post_target_max_chars: lengthRange.max,
@@ -391,7 +397,7 @@ ${serviceMentionGuide}
 
 순수 JSON만 (코드블록 없이):
 {
-  "seo_title": "네이버 검색 최적화 제목 32자 이내. 핵심 키워드를 앞쪽에 배치, 클릭 유도. 과장·특수문자 남발 금지",
+  "seo_title": "네이버 검색 최적화 제목 32자 이내. 한글·숫자·공백만. 핵심 키워드 앞배치",
   "blog_post": "네이버 블로그 글 ${min}~${max}자 (필수·중간 끊김 금지·완결된 글). ${serviceMentionGuide.replace(/\n/g, ' ')}",
   "tiktok_caption": "TikTok 캡션 150자 이내",
   "instagram_caption": "Instagram 캡션 300자 이내",
@@ -601,7 +607,7 @@ ${blogPostLengthPromptGuide(lengthRange)}
 ${workspaceServiceMentionPromptGuide(input.workspace)}
 
 네이버 블로그용 ${lengthRange.min}~${lengthRange.max}자 완결 본문과 SEO 제목·SNS 캡션을 JSON으로 (tts_script 생략, Kling 내장 오디오):
-{"seo_title":"네이버 검색 최적화 제목 32자 이내. 핵심 키워드 앞배치, 운영자 제목과 다르게","blog_post":"...","tiktok_caption":"...","instagram_caption":"...","threads_text":"...","x_text":"...","image_prompt":"...","video_prompt":"..."}`,
+{"seo_title":"한글·숫자·공백만 32자 이내. 핵심 키워드 앞배치, 운영자 제목과 다르게","blog_post":"...","tiktok_caption":"...","instagram_caption":"...","threads_text":"...","x_text":"...","image_prompt":"...","video_prompt":"..."}`,
         ),
       });
       const jsonMatch = retryRaw?.match(/\{[\s\S]*\}/);
