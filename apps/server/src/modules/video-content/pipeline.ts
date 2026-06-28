@@ -704,13 +704,6 @@ export async function runContiGeneration(accountId: string): Promise<string> {
       mustIncludeProps = generated.mustIncludeProps;
       conti = generated.conti;
 
-      if (generated.conti.contentWarnings?.length) {
-        await notifyTelegram(
-          `⚠️ 콘티 샷 자동 보완\n계정: ${accountName} (${accountId})\n${generated.conti.contentWarnings.join('\n')}`,
-          workspace,
-        );
-      }
-
       if (generated.conti.lastShotIncompleteDetected) {
         await logOperation({
           level: 'warn',
