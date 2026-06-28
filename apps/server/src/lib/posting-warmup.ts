@@ -1,6 +1,6 @@
 /**
  * 포스팅 계정 워밍업 — huma_accounts.warmup_day(일일 활동 일수) 기준 점진적 일일 상한.
- * C-Rank와 동일 필드를 공유하므로, 이미 오래 쓰인 계정은 상한이 빨리 풀림.
+ * C-Rank·post_blog 완료 시 하루 1회 증가. post_blog 이력으로 DB 0일 때 보정.
  */
 
 /** 절대 최소 발행 간격(시간) — human_engine 설정 하한 */

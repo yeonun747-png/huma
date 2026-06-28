@@ -19,6 +19,7 @@ import { listYeonunProducts } from '../modules/video-content/yeonun-product-pick
 import { getPostingReservedToday } from './posting-quota-reserve.js';
 import { countTodaySimilaritySkipped } from './posting-content-similarity.js';
 import { countTodayPostBlogPublished } from './post-blog-publish-day.js';
+import { getPostingWarmupDay } from './posting-warmup-day.js';
 
 
 
@@ -247,7 +248,7 @@ async function buildAccountPublishStatus(
 
     .maybeSingle();
 
-  const warmupDay = (accRow?.warmup_day as number | undefined) ?? 0;
+  const warmupDay = await getPostingWarmupDay(account.id);
 
   const targetInfo = getDailyPostingTarget(account.id, new Date(), { warmupDay });
 

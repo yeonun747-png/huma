@@ -2,6 +2,7 @@ import { POSTING_DONGLE_SLOTS } from '@huma/shared';
 import { supabase } from '../middleware/auth.js';
 import { formatPostingAccountLabel } from './posting-accounts.js';
 import { getDailyPostingTarget } from './posting-daily-target.js';
+import { reconcilePostingWarmupDay } from './posting-warmup-day.js';
 import { describePostingWarmupPhase, getPostingWarmupWeekdayCap } from './posting-warmup.js';
 
 export interface PostingWarmupStatusRow {
@@ -56,7 +57,7 @@ export async function fetchPostingWarmupStatus(
     }
 
     const accountId = acc.id as string;
-    const warmupDay = (acc.warmup_day as number | undefined) ?? 0;
+    const warmupDay = await reconcilePostingWarmupDay(accountId);
     const phase = describePostingWarmupPhase(warmupDay);
     const cap = getPostingWarmupWeekdayCap(warmupDay);
     const targetInfo = getDailyPostingTarget(accountId, new Date(), { warmupDay });

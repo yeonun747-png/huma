@@ -9,6 +9,7 @@ import {
   RECONCILED_FROM_FAILED_KEY,
   resolveFinalizePublishAtIso,
 } from './post-blog-publish-day.js';
+import { maybeIncrementWarmupDay } from './posting-warmup-day.js';
 
 export type FinalizePostBlogOpts = {
   /** 네이버 실제 발행 시각 — reconcile 시 필수 */
@@ -71,8 +72,9 @@ export async function finalizePostBlogJob(
     .eq('id', jobId);
 
   if (job.account_id) {
+    const accountId = job.account_id as string;
     await recordPublishedPost({
-      accountId: job.account_id as string,
+      accountId,
       resultUrl: url,
       title: job.title as string | null,
       content: job.content as string | null,
@@ -82,6 +84,7 @@ export async function finalizePostBlogJob(
       workspace: job.workspace as string | null,
       hasVideo: job.content_type === 'B',
     });
+    await maybeIncrementWarmupDay(accountId);
   }
 
   await scheduleRepeatIfNeeded(job as JobRecord);

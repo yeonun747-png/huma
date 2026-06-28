@@ -1,14 +1,10 @@
 import { supabase } from '../middleware/auth.js';
 import { formatKstDateKey, getDailyPostingTarget } from './posting-daily-target.js';
+import { getPostingWarmupDay } from './posting-warmup-day.js';
 import { getEffectiveDailyLimit } from './human-engine-policy.js';
 
 async function loadAccountWarmupDay(accountId: string): Promise<number> {
-  const { data } = await supabase
-    .from('huma_accounts')
-    .select('warmup_day')
-    .eq('id', accountId.trim())
-    .maybeSingle();
-  return (data?.warmup_day as number | undefined) ?? 0;
+  return getPostingWarmupDay(accountId);
 }
 
 /** content_full insert 직전 원자적 슬롯 예약 — 실패 시 false */

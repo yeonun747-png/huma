@@ -112,23 +112,4 @@ export async function loadAccountForBrowser(
   };
 }
 
-export async function maybeIncrementWarmupDay(accountId: string): Promise<void> {
-  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
-  const { data: account } = await supabase
-    .from('huma_accounts')
-    .select('warmup_day, warmup_last_increment_date')
-    .eq('id', accountId)
-    .single();
-
-  if (!account) return;
-  if (account.warmup_last_increment_date === today) return;
-  if ((account.warmup_day ?? 0) >= 30) return;
-
-  await supabase
-    .from('huma_accounts')
-    .update({
-      warmup_day: (account.warmup_day ?? 0) + 1,
-      warmup_last_increment_date: today,
-    })
-    .eq('id', accountId);
-}
+export { maybeIncrementWarmupDay } from '../../lib/posting-warmup-day.js';

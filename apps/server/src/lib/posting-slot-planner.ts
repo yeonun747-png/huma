@@ -13,6 +13,7 @@ import { randomBetween } from './utils.js';
 import { getDailyPostingTarget } from './posting-daily-target.js';
 import { countInFlightPostingPipeline, kstTodayStartIso } from './posting-daily-status.js';
 import { ABSOLUTE_MIN_PUBLISH_INTERVAL_HOURS } from './posting-warmup.js';
+import { getPostingWarmupDay } from './posting-warmup-day.js';
 import {
   computeDynamicPublishIntervalHours,
   getActivePostingWindowHours,
@@ -52,12 +53,7 @@ function kstDateTimeToUtc(y: number, m: number, d: number, hour: number, minute:
 }
 
 async function loadAccountWarmupDay(accountId: string): Promise<number> {
-  const { data } = await supabase
-    .from('huma_accounts')
-    .select('warmup_day')
-    .eq('id', accountId)
-    .maybeSingle();
-  return (data?.warmup_day as number | undefined) ?? 0;
+  return getPostingWarmupDay(accountId);
 }
 
 async function listTodayPostBlogTimes(accountId: string): Promise<{

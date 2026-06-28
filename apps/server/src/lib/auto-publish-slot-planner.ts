@@ -17,6 +17,7 @@ import {
   msUntilNextActiveHour,
 } from './human-engine-policy.js';
 import { ABSOLUTE_MIN_PUBLISH_INTERVAL_HOURS } from './posting-warmup.js';
+import { getPostingWarmupDay } from './posting-warmup-day.js';
 import { randomBetween } from './utils.js';
 import { supabase } from '../middleware/auth.js';
 
@@ -57,12 +58,7 @@ function isHourInActiveWindow(hour: number, activeHours: number[], minIntensity 
 }
 
 async function loadAccountWarmupDay(accountId: string): Promise<number> {
-  const { data } = await supabase
-    .from('huma_accounts')
-    .select('warmup_day')
-    .eq('id', accountId)
-    .maybeSingle();
-  return (data?.warmup_day as number | undefined) ?? 0;
+  return getPostingWarmupDay(accountId);
 }
 
 async function ensureActivePostingWindow(candidate: Date, activeHours: number[]): Promise<Date> {
