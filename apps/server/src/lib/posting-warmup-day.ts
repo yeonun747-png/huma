@@ -64,13 +64,32 @@ export function resolveWarmupPublishKstDateKey(
   return null;
 }
 
-/** 완료된 post_blog의 KST 발행일(중복 제거) — 워밍업 일차 산출 */
+/** posts.published_at KST 일자 — job account_id 누락·집계 실패 대비 */
+async function collectWarmupKstDatesFromPosts(accountId: string, kstDates: Set<string>): Promise<void> {
+  const { data: postRows, error } = await supabase
+    .from('posts')
+    .select('published_at')
+    .eq('account_id', accountId);
+
+  if (error) throw new Error(`posts 워밍업 일차 집계 실패: ${error.message}`);
+
+  for (const row of postRows ?? []) {
+    const at = (row.published_at as string | null)?.trim();
+    if (!at) continue;
+    const d = new Date(at);
+    if (!Number.isNaN(d.getTime())) kstDates.add(formatKstDateKey(d));
+  }
+}
+
+/** 완료된 post_blog·posts 발행일(KST) 중복 제거 — 워밍업 일차 산출 */
 export async function countDistinctPostingWarmupDays(
   accountId: string,
   now = new Date(),
 ): Promise<{ distinctDays: number; includesToday: boolean }> {
   const key = accountId.trim();
   if (!key) return { distinctDays: 0, includesToday: false };
+
+  const kstDates = new Set<string>();
 
   const { data: jobs, error } = await supabase
     .from('huma_jobs')
@@ -81,18 +100,16 @@ export async function countDistinctPostingWarmupDays(
     .not('result_url', 'is', null);
 
   if (error) throw new Error(`포스팅 워밍업 일차 집계 실패: ${error.message}`);
-  if (!jobs?.length) return { distinctDays: 0, includesToday: false };
 
-  const postPublishedByUrl = await loadPostPublishedByUrl(
-    key,
-    jobs as PostBlogWarmupJob[],
-  );
-
-  const kstDates = new Set<string>();
-  for (const job of jobs as PostBlogWarmupJob[]) {
-    const kstDate = resolveWarmupPublishKstDateKey(job, postPublishedByUrl);
-    if (kstDate) kstDates.add(kstDate);
+  if (jobs?.length) {
+    const postPublishedByUrl = await loadPostPublishedByUrl(key, jobs as PostBlogWarmupJob[]);
+    for (const job of jobs as PostBlogWarmupJob[]) {
+      const kstDate = resolveWarmupPublishKstDateKey(job, postPublishedByUrl);
+      if (kstDate) kstDates.add(kstDate);
+    }
   }
+
+  await collectWarmupKstDatesFromPosts(key, kstDates);
 
   const today = kstTodayKey(now);
   return {
