@@ -973,7 +973,7 @@ async function computePostScanResult(
 
   // 노출 순위는 search.naver.com(nexearch) — 본문 크롤보다 먼저 (본문 hang 시에도 강함/약함 반영)
   const captchaCtx = {
-    accountId: acc?.id ?? post.account_id || undefined,
+    accountId: acc?.id ?? (post.account_id || undefined),
     workspace: acc?.workspace ?? undefined,
     label: acc ? acc.name || acc.slot_label || acc.naver_id : undefined,
     blogId,
