@@ -5,9 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { HumaAccount, HumaVideoContentHistory } from '@huma/shared';
 import { api } from '@/lib/api';
 import { appAlert, appConfirm, appToast } from '@/lib/app-dialog';
-import { useAuth } from '@/lib/auth-context';
-import { getAccessibleBusinessUnits } from '@/lib/admin-scope';
-import { WORKSPACES } from '@/lib/constants';
+import { useWorkspace } from '@/components/dashboard/workspace-context';
 import { getLogSocket } from '@/lib/socket';
 import {
   VIDEO_CONTENT_STATUS_LABEL,
@@ -513,11 +511,9 @@ function DetailPanel({
 
 export function VideoContentView() {
   const shellActive = useShellViewActive();
-  const { admin } = useAuth();
-  const units = useMemo(() => getAccessibleBusinessUnits(admin), [admin]);
+  const { workspace: filterWorkspace } = useWorkspace();
   const [accounts, setAccounts] = useState<HumaAccount[]>([]);
   const [items, setItems] = useState<HumaVideoContentHistory[]>([]);
-  const [filterWorkspace, setFilterWorkspace] = useState('');
   const [contiTarget, setContiTarget] = useState('');
   const [activeTab, setActiveTab] = useState<VideoContentTab>('review');
   const [listPage, setListPage] = useState(1);
@@ -542,12 +538,7 @@ export function VideoContentView() {
   const load = useCallback(async (opts?: { force?: boolean }) => {
     const [accs, list] = await Promise.all([
       api.accounts(),
-      api.videoContentList(
-        {
-          workspace: filterWorkspace || undefined,
-        },
-        { force: opts?.force },
-      ),
+      api.videoContentList({ workspace: filterWorkspace }, { force: opts?.force }),
     ]);
     setAccounts(accs.filter((a) => a.account_type === 'posting'));
     setItems(list);
@@ -901,18 +892,6 @@ export function VideoContentView() {
         {/* 좌: 작업 목록 */}
         <div className="flex min-h-0 w-[280px] shrink-0 flex-col rounded-lg border border-huma-bdr bg-huma-bg2">
           <div className="space-y-2 border-b border-huma-bdr p-3">
-            <select
-              className="m-model-select w-full"
-              value={filterWorkspace}
-              onChange={(e) => setFilterWorkspace(e.target.value)}
-            >
-              <option value="">전체 워크스페이스</option>
-              {WORKSPACES.filter((w) => units.includes(w.id)).map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.label}
-                </option>
-              ))}
-            </select>
             <select
               className="m-model-select w-full"
               value={contiTarget}

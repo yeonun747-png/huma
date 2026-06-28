@@ -882,11 +882,6 @@ export async function runContiGeneration(accountId: string): Promise<string> {
       }
     }
 
-    await notifyTelegram(
-      `📝 콘티 검토 대기\n계정: ${accountName}${selfAssessedHumor === 'dull' ? ' · ⚠ 유머 dull' : ''}\n${WEB_BASE}/video-content?id=${historyId}`,
-      workspace,
-    );
-
     await logOperation({
       level: 'info',
       message: `[video-content] 콘티 검토 대기 — history=${historyId}`,
