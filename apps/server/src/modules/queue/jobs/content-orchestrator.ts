@@ -129,9 +129,25 @@ async function insertJob(row: Record<string, unknown>): Promise<JobRecord> {
 function mergeBlogPlatformSchedule(
   schedule: PlatformSchedule | undefined,
   blogAt: string,
+  parentFlags?: Record<string, unknown> | null,
 ): Record<string, unknown> {
   const prev = (schedule as Record<string, unknown> | undefined) ?? {};
-  return { ...prev, [PUBLISH_SCHEDULED_AT_KEY]: blogAt };
+  const merged: Record<string, unknown> = { ...prev, [PUBLISH_SCHEDULED_AT_KEY]: blogAt };
+  const flags = parentFlags ?? {};
+  if (flags._auto_publish === true) merged._auto_publish = true;
+  if (flags._auto_pick != null) merged._auto_pick = flags._auto_pick;
+  if (flags._dry_run === true) merged._dry_run = true;
+  return merged;
+}
+
+async function loadParentPlatformFlags(parentJobId?: string): Promise<Record<string, unknown>> {
+  if (!parentJobId) return {};
+  const { data: job } = await supabase
+    .from('huma_jobs')
+    .select('platform_schedule')
+    .eq('id', parentJobId)
+    .maybeSingle();
+  return (job?.platform_schedule as Record<string, unknown> | null) ?? {};
 }
 
 function resolveStatus(scheduledAt: string) {
@@ -266,6 +282,7 @@ async function runTypeA(
     await assertAccountPostingQuota(workspace, accountId, { excludeJobId: params.parentJobId });
   }
   const blogAt = resolveBlogScheduledAt(auto_scheduled, accountId, schedule, scheduled_at);
+  const parentFlags = await loadParentPlatformFlags(params.parentJobId);
   const blogJob = await insertJob({
     workspace,
     account_id: accountId,
@@ -280,7 +297,7 @@ async function runTypeA(
     platform: 'naver',
     content_type: 'A',
     scheduled_at: blogAt,
-    platform_schedule: mergeBlogPlatformSchedule(schedule, blogAt),
+    platform_schedule: mergeBlogPlatformSchedule(schedule, blogAt, parentFlags),
     repeat_rule: repeat_rule ?? null,
     status: resolveStatus(blogAt),
     retry_count: 0,
@@ -341,6 +358,7 @@ async function runTypeB(
   const threadsAt = platformTime(auto_scheduled, schedule, 'threads', scheduled_at);
   const twitterAt = platformTime(auto_scheduled, schedule, 'x', scheduled_at);
   const videoAt = platformTime(auto_scheduled, schedule, 'tiktok', scheduled_at);
+  const parentFlags = await loadParentPlatformFlags(params.parentJobId);
 
   const blogJob = await insertJob({
     workspace,
@@ -357,7 +375,7 @@ async function runTypeB(
     content_type: 'B',
     video_model: videoModel,
     scheduled_at: blogAt,
-    platform_schedule: mergeBlogPlatformSchedule(schedule, blogAt),
+    platform_schedule: mergeBlogPlatformSchedule(schedule, blogAt, parentFlags),
     repeat_rule: repeat_rule ?? null,
     status: isNaverBlogOnlyMode() ? resolveStatus(blogAt) : 'paused',
     retry_count: 0,

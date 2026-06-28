@@ -1,4 +1,5 @@
 import { formatKstDateKey } from './posting-daily-target.js';
+import { reconcileAllPostingWarmupDays } from './posting-warmup-day.js';
 import { getKstClock } from './crank-schedule-config.js';
 import { getSystemPaused } from './system-pause.js';
 import { rolloverAutoPublishDay, triggerDueAutoPublishJobs } from './auto-publish-state.js';
@@ -18,6 +19,9 @@ async function tickAutoPublishScheduler(): Promise<void> {
     lastAutoPublishDayKey = dayKey;
     await rolloverAutoPublishDay(dayKey).catch((err) =>
       console.error('[auto-publish-scheduler] day rollover:', err),
+    );
+    await reconcileAllPostingWarmupDays().catch((err) =>
+      console.error('[auto-publish-scheduler] warmup reconcile after rollover:', err),
     );
   }
 
@@ -43,6 +47,9 @@ async function tickAutoPublishScheduler(): Promise<void> {
 }
 
 export function startAutoPublishScheduler(): void {
+  reconcileAllPostingWarmupDays().catch((err) =>
+    console.error('[auto-publish-scheduler] warmup reconcile on start:', err),
+  );
   setInterval(() => {
     tickAutoPublishScheduler().catch((err) =>
       console.error('[auto-publish-scheduler] tick:', err),

@@ -1,5 +1,6 @@
 import { supabase } from '../middleware/auth.js';
 import { normalizePostUrlKey } from '../modules/blog-check/blog-url.js';
+import { isAutoPublishJob } from './auto-publish-state.js';
 import { resolveJobPublishedAtIso } from './post-blog-publish-day.js';
 import { formatKstDateKey } from './posting-daily-target.js';
 
@@ -7,6 +8,10 @@ const MAX_WARMUP_DAY = 30;
 
 function kstTodayKey(now = new Date()): string {
   return formatKstDateKey(now);
+}
+
+function isAutoPublishWarmupJob(platformSchedule: unknown): boolean {
+  return isAutoPublishJob(platformSchedule);
 }
 
 /** 하루 1회 warmup_day +1 — C-Rank·post_blog 공용 */
@@ -22,13 +27,15 @@ export async function maybeIncrementWarmupDay(accountId: string): Promise<void> 
   if (account.warmup_last_increment_date === today) return;
   if ((account.warmup_day ?? 0) >= MAX_WARMUP_DAY) return;
 
-  await supabase
+  const { error } = await supabase
     .from('huma_accounts')
     .update({
       warmup_day: (account.warmup_day ?? 0) + 1,
       warmup_last_increment_date: today,
     })
     .eq('id', accountId);
+
+  if (error) console.error('[warmup] maybeIncrementWarmupDay failed:', error.message);
 }
 
 type PostBlogWarmupJob = {
@@ -64,30 +71,83 @@ export function resolveWarmupPublishKstDateKey(
   return null;
 }
 
-/** posts.published_at KST 일자 — job account_id 누락·집계 실패 대비 */
-async function collectWarmupKstDatesFromPosts(accountId: string, kstDates: Set<string>): Promise<void> {
-  const { data: postRows, error } = await supabase
-    .from('posts')
-    .select('published_at')
-    .eq('account_id', accountId);
+/** 자동발행 워밍업 기준일 — 없으면 첫 content_full(_auto_publish) 또는 post_blog 최초일 */
+export async function ensurePostingWarmupStartedKst(accountId: string): Promise<string | null> {
+  const key = accountId.trim();
+  if (!key) return null;
 
-  if (error) throw new Error(`posts 워밍업 일차 집계 실패: ${error.message}`);
+  const { data: acc, error: accErr } = await supabase
+    .from('huma_accounts')
+    .select('posting_warmup_started_kst, auto_publish_enabled')
+    .eq('id', key)
+    .maybeSingle();
 
-  for (const row of postRows ?? []) {
-    const at = (row.published_at as string | null)?.trim();
-    if (!at) continue;
-    const d = new Date(at);
-    if (!Number.isNaN(d.getTime())) kstDates.add(formatKstDateKey(d));
+  if (accErr) throw new Error(`워밍업 기준일 조회 실패: ${accErr.message}`);
+  const stored = (acc?.posting_warmup_started_kst as string | null)?.trim();
+  if (stored) return stored;
+
+  const { data: firstAutoContent } = await supabase
+    .from('huma_jobs')
+    .select('created_at')
+    .eq('account_id', key)
+    .eq('job_type', 'content_full')
+    .contains('platform_schedule', { _auto_publish: true })
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  let started: string | null = null;
+  if (firstAutoContent?.created_at) {
+    started = formatKstDateKey(new Date(firstAutoContent.created_at as string));
+  } else {
+    const { data: jobs } = await supabase
+      .from('huma_jobs')
+      .select('completed_at, scheduled_at, platform_schedule, result_url')
+      .eq('account_id', key)
+      .eq('job_type', 'post_blog')
+      .eq('status', 'completed')
+      .not('result_url', 'is', null)
+      .order('completed_at', { ascending: true })
+      .limit(50);
+
+    for (const job of jobs ?? []) {
+      if (acc?.auto_publish_enabled && !isAutoPublishWarmupJob(job.platform_schedule)) continue;
+      const kst = resolveWarmupPublishKstDateKey(job as PostBlogWarmupJob);
+      if (kst) {
+        started = kst;
+        break;
+      }
+    }
   }
+
+  if (!started) return null;
+
+  const { error: updErr } = await supabase
+    .from('huma_accounts')
+    .update({ posting_warmup_started_kst: started })
+    .eq('id', key);
+
+  if (updErr) throw new Error(`워밍업 기준일 저장 실패: ${updErr.message}`);
+  return started;
 }
 
-/** 완료된 post_blog·posts 발행일(KST) 중복 제거 — 워밍업 일차 산출 */
+/** 완료 post_blog 발행일(KST) 중복 제거 — 기준일 이후·자동발행 job만(가능 시) */
 export async function countDistinctPostingWarmupDays(
   accountId: string,
   now = new Date(),
-): Promise<{ distinctDays: number; includesToday: boolean }> {
+): Promise<{ distinctDays: number; includesToday: boolean; startedKst: string | null }> {
   const key = accountId.trim();
-  if (!key) return { distinctDays: 0, includesToday: false };
+  if (!key) return { distinctDays: 0, includesToday: false, startedKst: null };
+
+  const { data: accMeta } = await supabase
+    .from('huma_accounts')
+    .select('auto_publish_enabled, posting_warmup_started_kst')
+    .eq('id', key)
+    .maybeSingle();
+
+  const startedKst =
+    (accMeta?.posting_warmup_started_kst as string | null)?.trim() ??
+    (await ensurePostingWarmupStartedKst(key));
 
   const kstDates = new Set<string>();
 
@@ -102,19 +162,27 @@ export async function countDistinctPostingWarmupDays(
   if (error) throw new Error(`포스팅 워밍업 일차 집계 실패: ${error.message}`);
 
   if (jobs?.length) {
-    const postPublishedByUrl = await loadPostPublishedByUrl(key, jobs as PostBlogWarmupJob[]);
-    for (const job of jobs as PostBlogWarmupJob[]) {
+    const autoOnly = Boolean(accMeta?.auto_publish_enabled);
+    const flagged = (jobs as PostBlogWarmupJob[]).filter((job) =>
+      isAutoPublishWarmupJob(job.platform_schedule),
+    );
+    const jobsToCount =
+      autoOnly && flagged.length ? flagged : (jobs as PostBlogWarmupJob[]);
+
+    const postPublishedByUrl = await loadPostPublishedByUrl(key, jobsToCount);
+    for (const job of jobsToCount) {
       const kstDate = resolveWarmupPublishKstDateKey(job, postPublishedByUrl);
-      if (kstDate) kstDates.add(kstDate);
+      if (!kstDate) continue;
+      if (startedKst && kstDate < startedKst) continue;
+      kstDates.add(kstDate);
     }
   }
-
-  await collectWarmupKstDatesFromPosts(key, kstDates);
 
   const today = kstTodayKey(now);
   return {
     distinctDays: Math.min(MAX_WARMUP_DAY, kstDates.size),
     includesToday: kstDates.has(today),
+    startedKst: startedKst ?? null,
   };
 }
 
@@ -125,6 +193,10 @@ export async function reconcilePostingWarmupDay(
 ): Promise<number> {
   const key = accountId.trim();
   if (!key) return 0;
+
+  await ensurePostingWarmupStartedKst(key).catch((err) => {
+    console.error('[warmup] ensurePostingWarmupStartedKst:', (err as Error).message);
+  });
 
   const { distinctDays, includesToday } = await countDistinctPostingWarmupDays(key, now);
   if (distinctDays <= 0) {
@@ -156,8 +228,31 @@ export async function reconcilePostingWarmupDay(
     patch.warmup_last_increment_date = today;
   }
 
-  await supabase.from('huma_accounts').update(patch).eq('id', key);
+  const { error: updErr } = await supabase.from('huma_accounts').update(patch).eq('id', key);
+  if (updErr) throw new Error(`warmup_day 보정 저장 실패: ${updErr.message}`);
   return next;
+}
+
+/** 활성 포스팅 계정 전체 warmup_day 보정 — 서버 기동·자정 롤오버 후 */
+export async function reconcileAllPostingWarmupDays(): Promise<void> {
+  const { data: rows, error } = await supabase
+    .from('huma_accounts')
+    .select('id')
+    .eq('account_type', 'posting')
+    .eq('is_active', true);
+
+  if (error) {
+    console.error('[warmup] reconcileAll list failed:', error.message);
+    return;
+  }
+
+  for (const row of rows ?? []) {
+    try {
+      await reconcilePostingWarmupDay(row.id as string);
+    } catch (err) {
+      console.error('[warmup] reconcile failed', row.id, (err as Error).message);
+    }
+  }
 }
 
 /** 쿼터·스케줄용 — DB 0이면 post_blog 이력으로 1회 보정 */

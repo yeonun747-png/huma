@@ -238,7 +238,7 @@ export async function enableAutoPublish(workspace: string, accountId: string): P
   const { data: account } = await supabase
     .from('huma_accounts')
     .select(
-      'id, workspace, name, slot_label, auto_publish_kst_date, auto_publish_planned_count, warmup_day',
+      'id, workspace, name, slot_label, auto_publish_kst_date, auto_publish_planned_count, warmup_day, posting_warmup_started_kst',
     )
     .eq('id', accountId)
     .eq('workspace', workspace)
@@ -251,6 +251,13 @@ export async function enableAutoPublish(workspace: string, accountId: string): P
   await resetPostingQuotaReservation(accountId);
 
   const kstDate = formatKstDateKey();
+  if (!(account.posting_warmup_started_kst as string | null)?.trim()) {
+    await supabase
+      .from('huma_accounts')
+      .update({ posting_warmup_started_kst: kstDate })
+      .eq('id', accountId);
+  }
+
   const planned = await resolveAutoPublishPlannedCountForDay(
     accountId,
     account.auto_publish_kst_date as string | null,

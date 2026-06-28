@@ -1,6 +1,6 @@
 /**
  * 포스팅 계정 워밍업 — huma_accounts.warmup_day(일일 활동 일수) 기준 점진적 일일 상한.
- * C-Rank·post_blog 완료 시 하루 1회 증가. post_blog 이력으로 DB 0일 때 보정.
+ * 자동발행 기준일(posting_warmup_started_kst) 이후 post_blog 발행일만 집계·보정.
  */
 
 /** 절대 최소 발행 간격(시간) — human_engine 설정 하한 */
