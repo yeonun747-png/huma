@@ -38,6 +38,32 @@ type PostBlogWarmupJob = {
   platform_schedule: unknown;
 };
 
+/** 워밍업 일차 집계 — 발행 시각 우선, 없으면 scheduled_at·completed_at(KST) fallback */
+export function resolveWarmupPublishKstDateKey(
+  job: PostBlogWarmupJob,
+  postPublishedByUrl?: Map<string, string | null>,
+): string | null {
+  const publishedAt = resolveJobPublishedAtIso(job, postPublishedByUrl);
+  if (publishedAt?.trim()) {
+    const d = new Date(publishedAt);
+    if (!Number.isNaN(d.getTime())) return formatKstDateKey(d);
+  }
+
+  const scheduled = job.scheduled_at?.trim();
+  if (scheduled) {
+    const d = new Date(scheduled);
+    if (!Number.isNaN(d.getTime())) return formatKstDateKey(d);
+  }
+
+  const completed = job.completed_at?.trim();
+  if (completed) {
+    const d = new Date(completed);
+    if (!Number.isNaN(d.getTime())) return formatKstDateKey(d);
+  }
+
+  return null;
+}
+
 /** 완료된 post_blog의 KST 발행일(중복 제거) — 워밍업 일차 산출 */
 export async function countDistinctPostingWarmupDays(
   accountId: string,
@@ -64,11 +90,8 @@ export async function countDistinctPostingWarmupDays(
 
   const kstDates = new Set<string>();
   for (const job of jobs as PostBlogWarmupJob[]) {
-    const publishedAt = resolveJobPublishedAtIso(job, postPublishedByUrl);
-    if (!publishedAt?.trim()) continue;
-    const d = new Date(publishedAt);
-    if (Number.isNaN(d.getTime())) continue;
-    kstDates.add(formatKstDateKey(d));
+    const kstDate = resolveWarmupPublishKstDateKey(job, postPublishedByUrl);
+    if (kstDate) kstDates.add(kstDate);
   }
 
   const today = kstTodayKey(now);
