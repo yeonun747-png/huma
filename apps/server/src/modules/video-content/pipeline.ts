@@ -406,6 +406,13 @@ async function finalizeVideoContent(params: {
         workspace,
         account_id: accountId,
       });
+    } else {
+      await logOperation({
+        level: 'warn',
+        message: `[video-content] 이전 영상 보관 스킵(파일 없음) — history=${historyId}`,
+        workspace,
+        account_id: accountId,
+      });
     }
   }
 
@@ -462,11 +469,13 @@ async function finalizeVideoContent(params: {
   }).catch(() => {});
 
   const nextContiJson: Record<string, unknown> = { ...(contiJson ?? {}) };
-  if (archived) {
-    const prev = Array.isArray(nextContiJson.supersededVideos)
-      ? (nextContiJson.supersededVideos as SupersededVideoArchive[])
-      : [];
-    nextContiJson.supersededVideos = [...prev, archived];
+  if (replacingExisting) {
+    if (archived) {
+      const prev = Array.isArray(nextContiJson.supersededVideos)
+        ? (nextContiJson.supersededVideos as SupersededVideoArchive[])
+        : [];
+      nextContiJson.supersededVideos = [...prev, archived];
+    }
     nextContiJson.videoRenderCount = Number(nextContiJson.videoRenderCount ?? 1) + 1;
   } else if (nextContiJson.videoRenderCount == null) {
     nextContiJson.videoRenderCount = 1;

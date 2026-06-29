@@ -560,6 +560,7 @@ export function VideoContentView() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [creatingConti, setCreatingConti] = useState(false);
   const [renderingIds, setRenderingIds] = useState<Set<string>>(() => new Set());
+  const [rerenderingIds, setRerenderingIds] = useState<Set<string>>(() => new Set());
   const [reburning, setReburning] = useState(false);
   const [videoRefreshKey, setVideoRefreshKey] = useState(0);
   const [storageRefreshToken, setStorageRefreshToken] = useState(0);
@@ -839,7 +840,8 @@ export function VideoContentView() {
       ? '같은 콘티로 Kling 3 영상을 다시 만듭니다.\n\n· 성공: 기존 영상은 서버 보관 폴더로 옮기고, 새 영상으로 교체 (업로드 체크 초기화)\n· 실패: 기존 완료 영상은 그대로 유지\n\n수 분 소요될 수 있습니다.'
       : '검토한 콘티로 숏폼 영상을 제작합니다. 수 분 소요될 수 있습니다.';
     if (!(await appConfirm(confirmMsg))) return;
-    setRenderingIds((prev) => new Set(prev).add(selectedId));
+    const markRendering = isRerender ? setRerenderingIds : setRenderingIds;
+    markRendering((prev) => new Set(prev).add(selectedId));
     try {
       await api.renderVideoContent(selectedId);
       setActiveTab('progress');
@@ -864,7 +866,8 @@ export function VideoContentView() {
     } catch (e) {
       await appAlert(e instanceof Error ? e.message : '영상 제작 실패');
     } finally {
-      setRenderingIds((prev) => {
+      const clearRendering = isRerender ? setRerenderingIds : setRenderingIds;
+      clearRendering((prev) => {
         const next = new Set(prev);
         next.delete(selectedId);
         return next;
@@ -1068,7 +1071,7 @@ export function VideoContentView() {
                 accountName={videoContentDisplayName(selectedItem.account_id, accounts)}
                 loadingDetail={loadingDetail}
                 renderingStarting={selectedId ? renderingIds.has(selectedId) : false}
-                rerendering={selectedId ? renderingIds.has(selectedId) : false}
+                rerendering={selectedId ? rerenderingIds.has(selectedId) : false}
                 deleting={deleting}
                 reburning={reburning}
                 stopping={stopping}
