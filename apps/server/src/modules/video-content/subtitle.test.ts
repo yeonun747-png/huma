@@ -88,7 +88,7 @@ describe('buildAssContent', () => {
     expect(ass).toContain('Dialogue:');
     expect(ass).toContain('SpeakerA');
     expect(ass).toContain('SpeakerB');
-    // bottom_center base 50 + 3 lines × ~50px
-    expect(ass).toContain(',20,20,200,1');
+    // bottom_center base 50 + 1 line × ~50px
+    expect(ass).toContain(',20,20,100,1');
   });
 });

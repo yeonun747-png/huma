@@ -8,7 +8,7 @@ const ASS_COLOR_A = '&H00FFFFFF';
 const ASS_COLOR_B = '&H0000FFFF';
 const ASS_FONT_SIZE = 42;
 /** 하단 정렬(alignment 2) — MarginV가 클수록 화면에서 위 */
-const SUBTITLE_LINES_OFFSET_UP = 3;
+const SUBTITLE_LINES_OFFSET_UP = 1;
 const SUBTITLE_LINE_HEIGHT_PX = Math.round(ASS_FONT_SIZE * 1.2);
 
 function subtitleMarginV(baseFromBottom: number): number {
