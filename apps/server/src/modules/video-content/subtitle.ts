@@ -6,6 +6,14 @@ import type { SubtitleStyle, VideoConti, VideoContiShot } from './types.js';
 /** ASS PrimaryColour — &H00BBGGRR */
 const ASS_COLOR_A = '&H00FFFFFF';
 const ASS_COLOR_B = '&H0000FFFF';
+const ASS_FONT_SIZE = 42;
+/** 하단 정렬(alignment 2) — MarginV가 클수록 화면에서 위 */
+const SUBTITLE_LINES_OFFSET_UP = 3;
+const SUBTITLE_LINE_HEIGHT_PX = Math.round(ASS_FONT_SIZE * 1.2);
+
+function subtitleMarginV(baseFromBottom: number): number {
+  return baseFromBottom + SUBTITLE_LINES_OFFSET_UP * SUBTITLE_LINE_HEIGHT_PX;
+}
 
 export type DialogueSegment = { speaker: 'A' | 'B' | null; text: string };
 
@@ -76,13 +84,13 @@ function positionToAss(style: SubtitleStyle): { alignment: number; marginV: numb
   // ASS alignment 2 = 하단 가운데 (가로는 항상 중앙)
   switch (style.position) {
     case 'lower_third':
-      return { alignment: 2, marginV: 80 };
+      return { alignment: 2, marginV: subtitleMarginV(80) };
     case 'center_lower':
-      return { alignment: 2, marginV: 200 };
+      return { alignment: 2, marginV: subtitleMarginV(200) };
     case 'bottom_left':
     case 'bottom_center':
     default:
-      return { alignment: 2, marginV: 50 };
+      return { alignment: 2, marginV: subtitleMarginV(50) };
   }
 }
 
@@ -163,9 +171,9 @@ PlayResY: 1280
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${fontName},42,${ASS_COLOR_A},&H000000FF,&H00000000,${box.backColour},-1,0,0,0,100,100,0,0,${box.borderStyle},${box.outline},${box.shadow},${pos.alignment},20,20,${pos.marginV},1
-Style: SpeakerA,${fontName},42,${ASS_COLOR_A},&H000000FF,&H00000000,${box.backColour},-1,0,0,0,100,100,0,0,${box.borderStyle},${box.outline},${box.shadow},${pos.alignment},20,20,${pos.marginV},1
-Style: SpeakerB,${fontName},42,${ASS_COLOR_B},&H000000FF,&H00000000,${box.backColour},-1,0,0,0,100,100,0,0,${box.borderStyle},${box.outline},${box.shadow},${pos.alignment},20,20,${pos.marginV},1
+Style: Default,${fontName},${ASS_FONT_SIZE},${ASS_COLOR_A},&H000000FF,&H00000000,${box.backColour},-1,0,0,0,100,100,0,0,${box.borderStyle},${box.outline},${box.shadow},${pos.alignment},20,20,${pos.marginV},1
+Style: SpeakerA,${fontName},${ASS_FONT_SIZE},${ASS_COLOR_A},&H000000FF,&H00000000,${box.backColour},-1,0,0,0,100,100,0,0,${box.borderStyle},${box.outline},${box.shadow},${pos.alignment},20,20,${pos.marginV},1
+Style: SpeakerB,${fontName},${ASS_FONT_SIZE},${ASS_COLOR_B},&H000000FF,&H00000000,${box.backColour},-1,0,0,0,100,100,0,0,${box.borderStyle},${box.outline},${box.shadow},${pos.alignment},20,20,${pos.marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
