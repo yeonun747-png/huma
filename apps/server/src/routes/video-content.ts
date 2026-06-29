@@ -415,7 +415,7 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
     if (row.status === 'rendering' && evolinkTaskId) {
       return reply.code(409).send({ error: 'EvoLink 영상 제작이 이미 진행 중입니다' });
     }
-    if (row.status !== 'conti_ready') {
+    if (row.status !== 'conti_ready' && row.status !== 'completed') {
       return reply.code(409).send({ error: `영상 제작 불가 상태: ${row.status}` });
     }
 

@@ -173,16 +173,20 @@ function CompletedDetail({
   conti,
   accountName,
   reburning,
+  rerendering,
   videoRefreshKey,
   onReburn,
+  onRerender,
   onRefresh,
 }: {
   item: HumaVideoContentHistory;
   conti: ReturnType<typeof parseContiPreview>;
   accountName?: string;
   reburning: boolean;
+  rerendering: boolean;
   videoRefreshKey: number;
   onReburn: () => void;
+  onRerender: () => void;
   onRefresh: () => void;
 }) {
   const [tab, setTab] = useState<SocialPlatformKey>('youtube');
@@ -201,6 +205,7 @@ function CompletedDetail({
   const captionText = String(item[platform.captionKey] ?? '');
   const firstComment =
     tab === 'threads' ? item.first_comment_threads : tab === 'x' ? item.first_comment_x : null;
+  const renderCount = Number(item.conti_json?.videoRenderCount ?? 1);
 
   const saveShotDialogues = useCallback(
     async (dialogues: ShotDialogueDraft[]) => {
@@ -222,38 +227,69 @@ function CompletedDetail({
   };
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="text-[13px] font-semibold text-huma-t">{accountName ?? item.account_id.slice(0, 8)}</div>
+    <div className="flex flex-col gap-3">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="text-[13px] font-semibold text-huma-t">
+          {accountName ?? item.account_id.slice(0, 8)}
+        </span>
         <VideoContentHumorBadge humor={item.self_assessed_humor} />
+        {renderCount > 1 ? (
+          <span className="font-mono text-[10px] text-huma-t3">영상 {renderCount}회차</span>
+        ) : null}
       </div>
 
-      <div className="flex flex-wrap gap-1">
-        <button
-          type="button"
-          className={`m-af ${videoVariant === 'subtitled' ? 'e' : ''}`}
-          disabled={!hasSubtitled}
-          onClick={() => setVideoVariant('subtitled')}
-        >
-          자막본
-        </button>
-        <button
-          type="button"
-          className={`m-af ${videoVariant === 'source' ? 'e' : ''}`}
-          disabled={!hasSource}
-          onClick={() => setVideoVariant('source')}
-        >
-          원본
-        </button>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex gap-1">
+          <button
+            type="button"
+            className={`m-af ${videoVariant === 'subtitled' ? 'e' : ''}`}
+            disabled={!hasSubtitled}
+            onClick={() => setVideoVariant('subtitled')}
+          >
+            자막본
+          </button>
+          <button
+            type="button"
+            className={`m-af ${videoVariant === 'source' ? 'e' : ''}`}
+            disabled={!hasSource}
+            onClick={() => setVideoVariant('source')}
+          >
+            원본
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            className={`${VIDEO_DETAIL_ACTION_BTN} ${rerendering ? 'animate-pulse' : ''}`}
+            disabled={rerendering || reburning}
+            onClick={onRerender}
+          >
+            {rerendering ? '🔄 재생성 중…' : '🔄 영상 재생성'}
+          </button>
+          <button
+            type="button"
+            className={`${VIDEO_DETAIL_ACTION_BTN} ${reburning ? 'animate-pulse' : ''}`}
+            disabled={!hasSource || reburning || rerendering}
+            title={hasSource ? undefined : '원본이 보관된 작업만 가능 (신규 생성분부터)'}
+            onClick={onReburn}
+          >
+            {reburning ? '💬 자막 입히는 중…' : '💬 자막 다시 입히기'}
+          </button>
+        </div>
       </div>
 
       {videoUrl ? (
-        <video src={videoUrl} controls className="max-h-[360px] w-full rounded bg-black" playsInline />
+        <video
+          src={videoUrl}
+          controls
+          className="mx-auto max-h-[380px] w-full max-w-[240px] rounded bg-black sm:mx-0"
+          playsInline
+        />
       ) : videoLoadError ? (
-        <p className="rounded border border-huma-bdr bg-huma-bg2 px-3 py-6 text-center text-[11px] text-huma-t3">
+        <p className="mx-auto max-w-[240px] rounded border border-huma-bdr bg-huma-bg2 px-3 py-8 text-center text-[11px] text-huma-t3 sm:mx-0">
           {videoVariant === 'source'
             ? '원본 파일 없음 (이전 작업이거나 삭제됨)'
-            : '자막본 없음 — 원본에서 「자막 다시 입히기」 가능'}
+            : '자막본 없음 — 「자막 다시 입히기」 사용'}
         </p>
       ) : (
         <p className="text-[11px] text-huma-t3">영상 로드 중…</p>
@@ -275,29 +311,24 @@ function CompletedDetail({
           </button>
         ))}
       </div>
-      <div className="rounded border border-huma-bdr bg-huma-bg2 p-2 text-[11px] whitespace-pre-wrap">
+
+      <div className="rounded border border-huma-bdr bg-huma-bg2 p-2.5 text-[11px] leading-relaxed whitespace-pre-wrap">
         {captionText || '(캡션 없음)'}
+        {firstComment ? (
+          <p className="mt-2 border-t border-huma-bdr pt-2 text-[10px] text-huma-t3">
+            <span className="font-semibold text-huma-t2">첫 댓글</span>
+            <br />
+            {firstComment}
+          </p>
+        ) : null}
       </div>
-      {firstComment ? (
-        <div className="text-[10px] text-huma-t3">
-          <span className="font-semibold">첫 댓글:</span> {firstComment}
-        </div>
-      ) : null}
+
       <div className="flex flex-wrap gap-2">
         {conti ? (
           <button type="button" className={VIDEO_DETAIL_ACTION_BTN} onClick={() => setShowConti((v) => !v)}>
             {showConti ? '📝 콘티 닫기' : '📝 콘티 보기'}
           </button>
         ) : null}
-        <button
-          type="button"
-          className={`${VIDEO_DETAIL_ACTION_BTN} ${reburning ? 'animate-pulse' : ''}`}
-          disabled={!hasSource || reburning}
-          title={hasSource ? undefined : '원본이 보관된 작업만 가능 (신규 생성분부터)'}
-          onClick={onReburn}
-        >
-          {reburning ? '💬 자막 입히는 중…' : '💬 자막 다시 입히기'}
-        </button>
         <button
           type="button"
           className={VIDEO_DETAIL_ACTION_BTN}
@@ -315,6 +346,7 @@ function CompletedDetail({
           </button>
         ) : null}
       </div>
+
       {showConti && conti ? (
         <div className="rounded border border-huma-bdr bg-huma-bg2 p-3">
           <ContiPreview
@@ -343,10 +375,12 @@ function DetailPanel({
   renderingStarting,
   deleting,
   reburning,
+  rerendering,
   videoRefreshKey,
   onRender,
   onDelete,
   onReburn,
+  onRerender,
   onRefresh,
   progressStage,
   stopping,
@@ -359,11 +393,13 @@ function DetailPanel({
   renderingStarting: boolean;
   deleting: boolean;
   reburning: boolean;
+  rerendering: boolean;
   stopping: boolean;
   videoRefreshKey: number;
   onRender: () => void;
   onDelete: () => void;
   onReburn: () => void;
+  onRerender: () => void;
   onRefresh: () => void;
   progressStage?: string | null;
   onCancel?: () => void;
@@ -397,8 +433,10 @@ function DetailPanel({
         conti={conti}
         accountName={accountName}
         reburning={reburning}
+        rerendering={rerendering}
         videoRefreshKey={videoRefreshKey}
         onReburn={onReburn}
+        onRerender={onRerender}
         onRefresh={onRefresh}
       />
     );
@@ -794,9 +832,13 @@ export function VideoContentView() {
     }
   };
 
-  const handleRender = async () => {
+  const handleRender = async (opts?: { rerender?: boolean }) => {
     if (!selectedId) return;
-    if (!(await appConfirm('검토한 콘티로 숏폼 영상을 제작합니다. 수 분 소요될 수 있습니다.'))) return;
+    const isRerender = opts?.rerender ?? selectedItem?.status === 'completed';
+    const confirmMsg = isRerender
+      ? '같은 콘티로 Kling 3 영상을 다시 만듭니다.\n\n· 성공: 기존 영상은 서버 보관 폴더로 옮기고, 새 영상으로 교체 (업로드 체크 초기화)\n· 실패: 기존 완료 영상은 그대로 유지\n\n수 분 소요될 수 있습니다.'
+      : '검토한 콘티로 숏폼 영상을 제작합니다. 수 분 소요될 수 있습니다.';
+    if (!(await appConfirm(confirmMsg))) return;
     setRenderingIds((prev) => new Set(prev).add(selectedId));
     try {
       await api.renderVideoContent(selectedId);
@@ -1026,6 +1068,7 @@ export function VideoContentView() {
                 accountName={videoContentDisplayName(selectedItem.account_id, accounts)}
                 loadingDetail={loadingDetail}
                 renderingStarting={selectedId ? renderingIds.has(selectedId) : false}
+                rerendering={selectedId ? renderingIds.has(selectedId) : false}
                 deleting={deleting}
                 reburning={reburning}
                 stopping={stopping}
@@ -1033,6 +1076,7 @@ export function VideoContentView() {
                 onRender={() => void handleRender()}
                 onDelete={() => void handleDelete()}
                 onReburn={() => void handleReburn()}
+                onRerender={() => void handleRender({ rerender: true })}
                 onRefresh={() => void refreshSelectedDetail()}
                 onCancel={() => void handleCancel()}
                 progressStage={selectedId ? progressStageById[selectedId] : null}

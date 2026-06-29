@@ -40,6 +40,8 @@ import {
 } from './selection.js';
 import { burnSubtitles } from './subtitle.js';
 import { videoContentFinalPath, videoContentSourcePath } from './paths.js';
+import { archiveCurrentVideoFiles, type SupersededVideoArchive } from './video-archive.js';
+import { UPLOAD_PLATFORMS } from './storage.js';
 import { generateVideoContentThumbnails } from './thumbnail.js';
 import {
   assessContiHumor,
@@ -75,10 +77,11 @@ function stripEvoLinkRenderMeta(contiJson: Record<string, unknown>): Record<stri
   return next;
 }
 
-/** 영상 제작 실패·타임아웃 — 콘티는 유지하고 검토 대기로 복귀 */
+/** 영상 제작 실패·타임아웃 — 콘티는 유지하고 검토 대기(또는 완료 복구)로 복귀 */
 export async function revertVideoRenderToContiReady(
   historyId: string,
   reason: string,
+  opts?: { restoreCompleted?: boolean },
 ): Promise<void> {
   const { data: row } = await supabase
     .from('huma_video_content_history')
@@ -91,7 +94,7 @@ export async function revertVideoRenderToContiReady(
   await supabase
     .from('huma_video_content_history')
     .update({
-      status: 'conti_ready',
+      status: opts?.restoreCompleted ? 'completed' : 'conti_ready',
       error_message: reason.slice(0, 500),
       conti_json: contiJson,
     })
@@ -379,8 +382,10 @@ async function finalizeVideoContent(params: {
   conti: VideoConti;
   baseConditions: GenerationConditions;
   sourcePath: string;
+  contiJson?: Record<string, unknown>;
 }): Promise<void> {
-  const { historyId, accountId, workspace, accountName, conti, baseConditions, sourcePath } = params;
+  const { historyId, accountId, workspace, accountName, conti, baseConditions, sourcePath, contiJson } =
+    params;
 
   const tmpDir = join(process.cwd(), 'tmp', 'video-content', historyId);
   await mkdir(tmpDir, { recursive: true });
@@ -388,6 +393,22 @@ async function finalizeVideoContent(params: {
   const sourcePersistPath = videoContentSourcePath(historyId);
   const finalPath = videoContentFinalPath(historyId);
   await mkdir(join(process.cwd(), 'data', 'video-content'), { recursive: true });
+
+  const replacingExisting =
+    existsSync(sourcePersistPath) || existsSync(finalPath);
+  let archived: SupersededVideoArchive | null = null;
+  if (replacingExisting) {
+    archived = await archiveCurrentVideoFiles(historyId);
+    if (archived) {
+      await logOperation({
+        level: 'info',
+        message: `[video-content] 이전 영상 보관 — history=${historyId}`,
+        workspace,
+        account_id: accountId,
+      });
+    }
+  }
+
   if (sourcePath !== sourcePersistPath) {
     await copyFile(sourcePath, sourcePersistPath);
   }
@@ -440,6 +461,25 @@ async function finalizeVideoContent(params: {
     subtitledPath: finalPath,
   }).catch(() => {});
 
+  const nextContiJson: Record<string, unknown> = { ...(contiJson ?? {}) };
+  if (archived) {
+    const prev = Array.isArray(nextContiJson.supersededVideos)
+      ? (nextContiJson.supersededVideos as SupersededVideoArchive[])
+      : [];
+    nextContiJson.supersededVideos = [...prev, archived];
+    nextContiJson.videoRenderCount = Number(nextContiJson.videoRenderCount ?? 1) + 1;
+  } else if (nextContiJson.videoRenderCount == null) {
+    nextContiJson.videoRenderCount = 1;
+  }
+
+  const uploadReset: Record<string, boolean | null> = {};
+  if (replacingExisting) {
+    for (const platform of UPLOAD_PLATFORMS) {
+      uploadReset[`uploaded_${platform}`] = false;
+      uploadReset[`uploaded_${platform}_at`] = null;
+    }
+  }
+
   await supabase
     .from('huma_video_content_history')
     .update({
@@ -453,6 +493,9 @@ async function finalizeVideoContent(params: {
       caption_x: captions.captionX,
       first_comment_threads: captions.firstCommentThreads,
       first_comment_x: captions.firstCommentX,
+      error_message: null,
+      conti_json: nextContiJson,
+      ...uploadReset,
     })
     .eq('id', historyId);
 
@@ -944,12 +987,15 @@ export async function runVideoProduction(historyId: string): Promise<string> {
   const accountId = history.account_id as string;
   let accountName = accountId.slice(0, 8);
   let workspace: Workspace = history.workspace as Workspace;
+  let wasCompletedRerender = false;
 
   try {
-    if (!['conti_ready', 'rendering'].includes(String(history.status))) {
+    if (!['conti_ready', 'rendering', 'completed'].includes(String(history.status))) {
       throw new Error(`영상 제작 불가 상태: ${history.status}`);
     }
     if (!history.conti_json) throw new Error('콘티 데이터 없음');
+
+    wasCompletedRerender = history.status === 'completed';
 
     const { data: account } = await supabase
       .from('huma_accounts')
@@ -978,7 +1024,7 @@ export async function runVideoProduction(historyId: string): Promise<string> {
       throw new Error(`EvoLink 프롬프트 길이 초과 (${evoPrompt.length}자)`);
     }
 
-    if (history.status === 'conti_ready') {
+    if (history.status === 'conti_ready' || history.status === 'completed') {
       await supabase
         .from('huma_video_content_history')
         .update({ status: 'rendering', error_message: null })
@@ -1050,8 +1096,12 @@ export async function runVideoProduction(historyId: string): Promise<string> {
       if (!pollCompleted) {
         const reason = isEvoLinkPollTimeoutError(msg)
           ? msg
-          : `EvoLink 영상 생성 실패 — 검토 대기로 복구: ${msg.slice(0, 200)}`;
-        await revertVideoRenderToContiReady(historyId, reason);
+          : wasCompletedRerender
+            ? `EvoLink 영상 생성 실패 — 기존 완료 영상 유지: ${msg.slice(0, 200)}`
+            : `EvoLink 영상 생성 실패 — 검토 대기로 복구: ${msg.slice(0, 200)}`;
+        await revertVideoRenderToContiReady(historyId, reason, {
+          restoreCompleted: wasCompletedRerender,
+        });
         await logOperation({
           level: 'warn',
           message: `[video-content] ${reason} — history=${historyId}`,
@@ -1060,17 +1110,18 @@ export async function runVideoProduction(historyId: string): Promise<string> {
         });
         throw dlErr;
       }
-      await supabase
-        .from('huma_video_content_history')
-        .update({ status: 'failed', error_message: `EvoLink 다운로드 실패: ${msg}` })
-        .eq('id', historyId);
-      await handleEvoLinkDownloadFailure({
-        accountId,
-        workspace,
-        accountName,
-        historyId,
-        error: msg,
+      await revertVideoRenderToContiReady(historyId, `EvoLink 다운로드 실패: ${msg.slice(0, 200)}`, {
+        restoreCompleted: wasCompletedRerender,
       });
+      if (!wasCompletedRerender) {
+        await handleEvoLinkDownloadFailure({
+          accountId,
+          workspace,
+          accountName,
+          historyId,
+          error: msg,
+        });
+      }
       throw dlErr;
     }
 
@@ -1082,6 +1133,7 @@ export async function runVideoProduction(historyId: string): Promise<string> {
       conti,
       baseConditions,
       sourcePath,
+      contiJson,
     });
 
     return historyId;
@@ -1091,10 +1143,14 @@ export async function runVideoProduction(historyId: string): Promise<string> {
       throw err;
     }
     if (!msg.includes('EvoLink')) {
-      await supabase
-        .from('huma_video_content_history')
-        .update({ status: 'failed', error_message: msg })
-        .eq('id', historyId);
+      if (wasCompletedRerender) {
+        await revertVideoRenderToContiReady(historyId, msg.slice(0, 500), { restoreCompleted: true });
+      } else {
+        await supabase
+          .from('huma_video_content_history')
+          .update({ status: 'failed', error_message: msg })
+          .eq('id', historyId);
+      }
     }
     throw err;
   }
