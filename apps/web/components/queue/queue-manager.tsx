@@ -559,17 +559,17 @@ export function QueueManager() {
         onPreview={handlePreviewSubmit}
       />
 
-      <MPanel
-        title="포스팅 큐"
-        action={
-          <div className="flex flex-wrap items-center justify-end gap-3">
-            <AutoPublishPanel workspace={workspace} onDone={load} accountsRefresh={accountsTick} />
-            <button type="button" className="btn-ghost btn-sm shrink-0 px-2 py-1" onClick={() => setShowModal(true)}>
-              + 포스팅 수동 추가
-            </button>
-          </div>
-        }
-      >
+      <div className="mb-3 mt-3 flex flex-wrap items-center justify-between gap-3 pt-3">
+        <div className="panel-title mb-0">포스팅 큐</div>
+        <button type="button" className="btn-ghost btn-sm shrink-0 px-2 py-1" onClick={() => setShowModal(true)}>
+          + 포스팅 수동 추가
+        </button>
+      </div>
+
+      <MPanel>
+        <div className="mb-3 flex flex-wrap items-center justify-end gap-3">
+          <AutoPublishPanel workspace={workspace} onDone={load} accountsRefresh={accountsTick} />
+        </div>
         {loadError ? (
           <div className="py-8 text-center text-sm text-huma-t3">{loadError}</div>
         ) : total === 0 && jobs.length === 0 ? (
