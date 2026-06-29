@@ -31,6 +31,22 @@ export function getScheduleDelay(scheduledAt?: string | null): number | undefine
   return delay > 0 ? delay : undefined;
 }
 
+/** 발행 예약 시각이 도래했으면 true — 워커가 휴먼 엔진 재예약으로 밀지 않도록 */
+export function isScheduledPublishDue(scheduledAt?: string | null): boolean {
+  if (!scheduledAt) return false;
+  return getScheduleDelay(scheduledAt) === undefined;
+}
+
+export async function resolveHumaJobScheduledAt(humaJobId?: string): Promise<string | null> {
+  if (!humaJobId) return null;
+  const { data } = await supabase
+    .from('huma_jobs')
+    .select('scheduled_at')
+    .eq('id', humaJobId)
+    .maybeSingle();
+  return data?.scheduled_at ?? null;
+}
+
 export function resolveJobStatus(scheduledAt?: string | null): 'scheduled' | 'pending' {
   return getScheduleDelay(scheduledAt) ? 'scheduled' : 'pending';
 }

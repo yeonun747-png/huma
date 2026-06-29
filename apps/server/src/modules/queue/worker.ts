@@ -28,6 +28,7 @@ import {
   passesActiveHoursGate,
   passesWeekendVolumeGate,
 } from '../../lib/human-engine-policy.js';
+import { isScheduledPublishDue, resolveHumaJobScheduledAt } from '../../lib/job-scheduler.js';
 import { pickNaverCaptchaPage, tryAutoSolveNaverCaptcha } from '../../lib/naver-captcha-vision.js';
 import { isNaverLoginPagePendingSubmit } from '../../lib/posting-captcha-session.js';
 import {
@@ -186,6 +187,10 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
       const advanceRequested = await resolveHumaJobAdvanceRequested(humaJobId, {
         advanceRequested: advanceFlag,
       });
+      const humaScheduledAt =
+        type === 'post_blog' && humaJobId ? await resolveHumaJobScheduledAt(humaJobId) : null;
+      const honorDueScheduledPublish =
+        type === 'post_blog' && !advanceRequested && isScheduledPublishDue(humaScheduledAt);
 
       if (
         getSystemPaused() &&
@@ -226,7 +231,12 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         throw new DelayedError();
       }
 
-      if (PLAYWRIGHT_AND_CRANK.includes(type) && !scheduledCrank && !advanceRequested) {
+      if (
+        PLAYWRIGHT_AND_CRANK.includes(type) &&
+        !scheduledCrank &&
+        !advanceRequested &&
+        !honorDueScheduledPublish
+      ) {
         if (await isNightBanActive()) {
           await deferHumaJob(job, humaJobId, CRANK_NIGHT_DEFER_MS, {
             reason: 'NIGHT_BAN',
@@ -272,10 +282,16 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         throw new DelayedError();
       }
 
-      if (accountId && POSTING_JOBS.includes(type) && !advanceRequested) {
+      if (accountId && POSTING_JOBS.includes(type) && !advanceRequested && !honorDueScheduledPublish) {
         const waitMs = await checkMinPublishInterval(accountId, type);
         if (waitMs) {
-          await deferHumaJob(job, humaJobId, waitMs, { accountId, token });
+          await deferHumaJob(job, humaJobId, waitMs, {
+            accountId,
+            token,
+            reason: 'MIN_PUBLISH_INTERVAL',
+            logMessage: `[${type}] 최소 발행 간격 — ${Math.ceil(waitMs / 60_000)}분 후 재예약`,
+            level: 'info',
+          });
           throw new DelayedError();
         }
       }
