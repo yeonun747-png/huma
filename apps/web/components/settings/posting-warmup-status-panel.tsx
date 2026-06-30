@@ -142,7 +142,9 @@ function accountDisplayLabel(row: EnrichedWarmupRow, indexInGroup: number): stri
 }
 
 function sortWarmupRows(rows: PostingWarmupStatusRow[]): EnrichedWarmupRow[] {
-  const portOrder = new Map(POSTING_DONGLE_SLOTS.map((s, i) => [s.proxyPort, i]));
+  const portOrder = new Map<number, number>(
+    POSTING_DONGLE_SLOTS.map((s, i) => [s.proxyPort, i]),
+  );
   return rows.map(enrichWarmupRow).sort((a, b) => {
     const pa = a.dongleKey >= 0 ? (portOrder.get(a.dongleKey) ?? 99) : 99;
     const pb = b.dongleKey >= 0 ? (portOrder.get(b.dongleKey) ?? 99) : 99;
