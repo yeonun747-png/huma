@@ -290,7 +290,21 @@ export function AutoPublishButton({ workspace, onDone, refreshToken = 0 }: AutoP
 
     setToggling(true);
     try {
-      const res = await api.toggleAutoPublish(workspace, !enabled);
+      let accountId = status?.account_id;
+      if (!accountId) {
+        try {
+          const res = await api.getAutoPublishAccountsStatus(workspace);
+          accountId = res.accounts.find((a) => a.account_id)?.account_id;
+        } catch {
+          /* status 조회 실패 시 아래 공통 안내 */
+        }
+      }
+      if (!accountId) {
+        await appAlert('포스팅 계정을 찾을 수 없습니다. 계정 관리에서 포스팅 계정을 등록해 주세요.');
+        return;
+      }
+
+      const res = await api.toggleAutoPublish(workspace, !enabled, accountId);
       const daily = res._meta?.daily_status as AutoPublishStatus | undefined;
       if (daily) {
         publishStatusCache.set(workspace, daily);
