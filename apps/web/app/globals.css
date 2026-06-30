@@ -205,7 +205,7 @@
   }
 
   .auto-publish-chip {
-    @apply gap-1.5 rounded-lg border border-huma-bdr2 transition-colors duration-300;
+    @apply relative gap-1.5 rounded-lg border border-huma-bdr2 transition-colors duration-300;
     padding: 8px 10px;
     background: color-mix(in srgb, var(--bg2) 80%, transparent);
   }
@@ -238,21 +238,42 @@
 
   .auto-publish-next-badge {
     position: absolute;
-    top: -7px;
-    right: -6px;
+    top: 0;
+    left: 50%;
     z-index: 2;
     pointer-events: none;
+    transform: translate(-50%, -50%);
     border-radius: 4px;
-    padding: 1px 5px;
-    font-family: ui-monospace, monospace;
-    font-size: 8px;
-    font-weight: 700;
+    padding: 1px 7px;
+    font-family: var(--font-ui);
+    font-size: 9px;
+    font-weight: 400;
     line-height: 1.35;
-    letter-spacing: -0.02em;
+    letter-spacing: 0.01em;
     white-space: nowrap;
-    color: #fff;
-    background: var(--acc);
-    box-shadow: 0 1px 4px color-mix(in srgb, var(--acc) 45%, transparent);
+    background: #000;
+    border: 1px solid var(--bdr2);
+  }
+
+  .auto-publish-chip--on .auto-publish-next-badge {
+    background: #000;
+    border-color: color-mix(in srgb, var(--acc2) 40%, transparent);
+  }
+
+  .auto-publish-next-badge-text {
+    display: inline-block;
+    color: var(--t2);
+    animation: auto-publish-next-badge-text-pulse 2.2s ease-in-out infinite;
+  }
+
+  @keyframes auto-publish-next-badge-text-pulse {
+    0%,
+    100% {
+      opacity: 0.5;
+    }
+    50% {
+      opacity: 1;
+    }
   }
 
   .auto-publish-progress-track {

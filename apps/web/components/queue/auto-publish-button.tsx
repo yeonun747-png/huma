@@ -147,6 +147,11 @@ export function AutoPublishChip({
     <div
       className={`auto-publish-chip flex shrink-0 flex-col ${enabled ? 'auto-publish-chip--on' : ''}`}
     >
+      {showNextPublishBadge ? (
+        <span className="auto-publish-next-badge" aria-hidden>
+          <span className="auto-publish-next-badge-text">다음발행</span>
+        </span>
+      ) : null}
       <div className="auto-publish-chip-row flex items-center gap-2">
         {label ? (
           <span
@@ -158,22 +163,15 @@ export function AutoPublishChip({
             {label}
           </span>
         ) : null}
-        <div className="relative inline-flex shrink-0">
-          {showNextPublishBadge ? (
-            <span className="auto-publish-next-badge" aria-hidden>
-              다음발행
-            </span>
-          ) : null}
-          <button
-            type="button"
-            className={resolveAutoPublishButtonClass(enabled)}
-            disabled={isAutoPublishButtonDisabled({ busy })}
-            title={buildAutoPublishTitle(status, { syncing, enabled, label })}
-            onClick={onToggle}
-          >
-            {formatAutoPublishButtonLabel(done, quota, { publishing: busy, enabled })}
-          </button>
-        </div>
+        <button
+          type="button"
+          className={resolveAutoPublishButtonClass(enabled)}
+          disabled={isAutoPublishButtonDisabled({ busy })}
+          title={buildAutoPublishTitle(status, { syncing, enabled, label })}
+          onClick={onToggle}
+        >
+          {formatAutoPublishButtonLabel(done, quota, { publishing: busy, enabled })}
+        </button>
       </div>
       {enabled && scheduleLine ? (
         <div className="auto-publish-chip-meta flex min-w-0 items-center gap-1.5" aria-live="polite">
