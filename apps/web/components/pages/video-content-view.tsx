@@ -174,9 +174,11 @@ function CompletedDetail({
   accountName,
   reburning,
   rerendering,
+  deleting,
   videoRefreshKey,
   onReburn,
   onRerender,
+  onDelete,
   onRefresh,
 }: {
   item: HumaVideoContentHistory;
@@ -184,9 +186,11 @@ function CompletedDetail({
   accountName?: string;
   reburning: boolean;
   rerendering: boolean;
+  deleting: boolean;
   videoRefreshKey: number;
   onReburn: () => void;
   onRerender: () => void;
+  onDelete: () => void;
   onRefresh: () => void;
 }) {
   const [tab, setTab] = useState<SocialPlatformKey>('youtube');
@@ -228,14 +232,24 @@ function CompletedDetail({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="text-[13px] font-semibold text-huma-t">
-          {accountName ?? item.account_id.slice(0, 8)}
-        </span>
-        <VideoContentHumorBadge humor={item.self_assessed_humor} />
-        {renderCount > 1 ? (
-          <span className="font-mono text-[10px] text-huma-t3">영상 {renderCount}회차</span>
-        ) : null}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-[13px] font-semibold text-huma-t">
+            {accountName ?? item.account_id.slice(0, 8)}
+          </span>
+          <VideoContentHumorBadge humor={item.self_assessed_humor} />
+          {renderCount > 1 ? (
+            <span className="font-mono text-[10px] text-huma-t3">영상 {renderCount}회차</span>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          className="btn-ghost btn-sm shrink-0 text-huma-err"
+          disabled={deleting || rerendering || reburning}
+          onClick={onDelete}
+        >
+          {deleting ? '삭제 중…' : '삭제'}
+        </button>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -261,7 +275,7 @@ function CompletedDetail({
           <button
             type="button"
             className={`${VIDEO_DETAIL_ACTION_BTN} ${rerendering ? 'animate-pulse' : ''}`}
-            disabled={rerendering || reburning}
+            disabled={rerendering || reburning || deleting}
             onClick={onRerender}
           >
             {rerendering ? '🔄 재생성 중…' : '🔄 영상 재생성'}
@@ -269,7 +283,7 @@ function CompletedDetail({
           <button
             type="button"
             className={`${VIDEO_DETAIL_ACTION_BTN} ${reburning ? 'animate-pulse' : ''}`}
-            disabled={!hasSource || reburning || rerendering}
+            disabled={!hasSource || reburning || rerendering || deleting}
             title={hasSource ? undefined : '원본이 보관된 작업만 가능 (신규 생성분부터)'}
             onClick={onReburn}
           >
@@ -434,9 +448,11 @@ function DetailPanel({
         accountName={accountName}
         reburning={reburning}
         rerendering={rerendering}
+        deleting={deleting}
         videoRefreshKey={videoRefreshKey}
         onReburn={onReburn}
         onRerender={onRerender}
+        onDelete={onDelete}
         onRefresh={onRefresh}
       />
     );
