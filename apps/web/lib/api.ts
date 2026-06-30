@@ -662,6 +662,7 @@ export const api = {
   getPostingWarmupStatus: () =>
     request<{
       accounts: Array<{
+        dongle_label: string;
         slot_label: string;
         workspace: string;
         proxy_port: number;
@@ -676,6 +677,22 @@ export const api = {
       }>;
       is_super?: boolean;
     }>('/api/posting/warmup-status'),
+  getPostingAccounts: (workspace: string) =>
+    request<{
+      accounts: Array<{ id: string; label?: string; proxy_port?: number }>;
+    }>(`/api/posting/accounts?workspace=${encodeURIComponent(workspace)}`),
+  getPostingDongles: (workspace?: string) =>
+    request<{
+      dongles: Array<{
+        slot: number;
+        label: string;
+        proxy_port: number;
+        workspace: string;
+        account_count: number;
+        max_accounts: number;
+        accounts: Array<Record<string, unknown>>;
+      }>;
+    }>(`/api/posting/dongles${workspace ? `?workspace=${encodeURIComponent(workspace)}` : ''}`),
   platformAccounts: () => request<Array<Record<string, unknown>>>('/api/platform-accounts'),
   createPlatformAccount: (body: Record<string, unknown>) =>
     request('/api/platform-accounts', { method: 'POST', body: JSON.stringify(body) }),

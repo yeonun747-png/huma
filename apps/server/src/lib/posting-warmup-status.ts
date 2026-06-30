@@ -6,6 +6,7 @@ import { reconcilePostingWarmupDay } from './posting-warmup-day.js';
 import { describePostingWarmupPhase, getPostingWarmupWeekdayCap } from './posting-warmup.js';
 
 export interface PostingWarmupStatusRow {
+  dongle_label: string;
   slot_label: string;
   workspace: string;
   proxy_port: number;
@@ -19,7 +20,39 @@ export interface PostingWarmupStatusRow {
   missing: boolean;
 }
 
-/** 연운1~3 · 퀴즈 · 파나나 포스팅 계정 워밍업 현황 — allowedWorkspaces에 해당하는 슬롯만 */
+async function buildAccountWarmupRow(
+  dongleLabel: string,
+  account: {
+    id: string;
+    warmup_day?: number | null;
+    slot_label?: string | null;
+    name?: string | null;
+  },
+  slot: { workspace: string; proxyPort: number },
+): Promise<PostingWarmupStatusRow> {
+  const accountId = account.id as string;
+  const warmupDay = await reconcilePostingWarmupDay(accountId);
+  const phase = describePostingWarmupPhase(warmupDay);
+  const cap = getPostingWarmupWeekdayCap(warmupDay);
+  const targetInfo = getDailyPostingTarget(accountId, new Date(), { warmupDay });
+
+  return {
+    dongle_label: dongleLabel,
+    slot_label: formatPostingAccountLabel(account) ?? dongleLabel,
+    workspace: slot.workspace,
+    proxy_port: slot.proxyPort,
+    account_id: accountId,
+    warmup_day: warmupDay,
+    phase_label: phase.label,
+    stage: phase.stage,
+    weekday_cap: cap >= 999 ? null : cap,
+    today_target: targetInfo.target,
+    is_complete: cap >= 999,
+    missing: false,
+  };
+}
+
+/** 포스팅 동글·계정별 워밍업 현황 — allowedWorkspaces에 해당하는 슬롯만 */
 export async function fetchPostingWarmupStatus(
   allowedWorkspaces: string[],
 ): Promise<PostingWarmupStatusRow[]> {
@@ -28,20 +61,21 @@ export async function fetchPostingWarmupStatus(
   const rows: PostingWarmupStatusRow[] = [];
 
   for (const slot of slots) {
-    const { data: acc } = await supabase
+    const { data: accRows } = await supabase
       .from('huma_accounts')
       .select('id, warmup_day, slot_label, name')
       .eq('workspace', slot.workspace)
       .eq('account_type', 'posting')
       .eq('is_active', true)
       .eq('proxy_port', slot.proxyPort)
-      .maybeSingle();
+      .order('slot_label', { ascending: true });
 
-    const slotLabel = slot.label;
+    const accounts = accRows ?? [];
 
-    if (!acc?.id) {
+    if (!accounts.length) {
       rows.push({
-        slot_label: slotLabel,
+        dongle_label: slot.label,
+        slot_label: slot.label,
         workspace: slot.workspace,
         proxy_port: slot.proxyPort,
         account_id: null,
@@ -56,25 +90,9 @@ export async function fetchPostingWarmupStatus(
       continue;
     }
 
-    const accountId = acc.id as string;
-    const warmupDay = await reconcilePostingWarmupDay(accountId);
-    const phase = describePostingWarmupPhase(warmupDay);
-    const cap = getPostingWarmupWeekdayCap(warmupDay);
-    const targetInfo = getDailyPostingTarget(accountId, new Date(), { warmupDay });
-
-    rows.push({
-      slot_label: formatPostingAccountLabel(acc) ?? slotLabel,
-      workspace: slot.workspace,
-      proxy_port: slot.proxyPort,
-      account_id: accountId,
-      warmup_day: warmupDay,
-      phase_label: phase.label,
-      stage: phase.stage,
-      weekday_cap: cap >= 999 ? null : cap,
-      today_target: targetInfo.target,
-      is_complete: cap >= 999,
-      missing: false,
-    });
+    for (const acc of accounts) {
+      rows.push(await buildAccountWarmupRow(slot.label, acc, slot));
+    }
   }
 
   return rows;

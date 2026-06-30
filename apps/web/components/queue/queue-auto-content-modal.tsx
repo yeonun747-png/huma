@@ -11,13 +11,10 @@ import { formatScheduleLabel } from './job-schedule-form';
 import { api } from '@/lib/api';
 import { compressImageFileForUpload } from '@/lib/compress-image-for-upload';
 import {
-  getInitialYeonunAccounts,
-  resolveYeonunAccountId,
-  isYeonunPlaceholderAccountId,
-  setYeonunAccountsCache,
-  toYeonunAccountOptions,
-  type YeonunAccountOption,
-} from './auto-publish-button';
+  groupPostingAccountsByDongle,
+  type PostingAccountOption,
+  type PostingDongleAccountGroup,
+} from '@/lib/posting-dongle-groups';
 
 const IMAGE_SLOT_COUNT = 5;
 const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
@@ -31,7 +28,7 @@ export interface AutoContentFormValues {
   auto_schedule: boolean;
   uploaded_images: UploadedImageSlot[];
   schedule_time: string;
-  /** 연운 수동 등록 — 포스팅 계정 */
+  /** 수동 등록 — 포스팅 계정 (전 workspace 필수) */
   account_id: string;
 }
 
@@ -105,7 +102,8 @@ export function QueueAutoContentModal({
   const [loadingAction, setLoadingAction] = useState<'preview' | 'publish' | null>(null);
   const [uploadProgress, setUploadProgress] = useState({ done: 0, total: 0 });
   const [error, setError] = useState('');
-  const [yeonunAccounts, setYeonunAccounts] = useState<YeonunAccountOption[]>([]);
+  const [postingAccountGroups, setPostingAccountGroups] = useState<PostingDongleAccountGroup[]>([]);
+  const [postingAccountOptions, setPostingAccountOptions] = useState<PostingAccountOption[]>([]);
   const [accountsSyncing, setAccountsSyncing] = useState(false);
 
   const loading = loadingAction !== null;
@@ -119,30 +117,17 @@ export function QueueAutoContentModal({
       setSlotNames(
         slotsFromJob(editJob).map((url, i) => (url ? `슬롯 ${i + 1}` : '')),
       );
-      if (workspace === 'yeonun') {
-        setYeonunAccounts(toYeonunAccountOptions(getInitialYeonunAccounts()));
-      }
     } else if (prefill) {
-      const yeonunOpts =
-        workspace === 'yeonun' ? toYeonunAccountOptions(getInitialYeonunAccounts()) : [];
       setForm({
         ...EMPTY_FORM,
         title: prefill.title,
         source_url: prefill.source_url,
-        account_id: yeonunOpts[0]?.id ?? '',
+        account_id: '',
       });
       setSlotNames(Array(IMAGE_SLOT_COUNT).fill(''));
-      if (workspace === 'yeonun') setYeonunAccounts(yeonunOpts);
     } else {
-      const yeonunOpts =
-        workspace === 'yeonun' ? toYeonunAccountOptions(getInitialYeonunAccounts()) : [];
-      setForm({
-        ...EMPTY_FORM,
-        account_id: yeonunOpts[0]?.id ?? '',
-      });
+      setForm({ ...EMPTY_FORM });
       setSlotNames(Array(IMAGE_SLOT_COUNT).fill(''));
-      if (workspace === 'yeonun') setYeonunAccounts(yeonunOpts);
-      else setYeonunAccounts([]);
     }
     setPreviewSlot(null);
     setDragOverSlot(null);
@@ -152,47 +137,58 @@ export function QueueAutoContentModal({
   }, [open, editJob, prefill, workspace]);
 
   useEffect(() => {
-    if (!open || workspace !== 'yeonun') return;
+    if (!open) return;
     let cancelled = false;
-    const hadRealIds = getInitialYeonunAccounts().some((a) => Boolean(a.account_id));
-    if (!hadRealIds) setAccountsSyncing(true);
+    setAccountsSyncing(true);
 
-    void api.getAutoPublishAccountsStatus('yeonun').then((res) => {
-      if (cancelled) return;
-      const rows = res.accounts;
-      if (rows.length) setYeonunAccountsCache(rows);
-      const opts = toYeonunAccountOptions(rows.length ? rows : getInitialYeonunAccounts());
-      setYeonunAccounts(opts);
-      if (!editJob) {
-        setForm((f) => {
-          const resolved =
-            resolveYeonunAccountId(f.account_id, rows) ??
-            rows.find((a) => a.account_id)?.account_id ??
-            opts.find((o) => !isYeonunPlaceholderAccountId(o.id))?.id ??
-            f.account_id;
-          return resolved !== f.account_id ? { ...f, account_id: resolved } : f;
-        });
-      }
-      setAccountsSyncing(false);
-    }).catch(() => {
-      if (!cancelled) setAccountsSyncing(false);
-    });
+    void api
+      .getPostingAccounts(workspace)
+      .then((res) => {
+        if (cancelled) return;
+        const options: PostingAccountOption[] = (res.accounts ?? []).map((a) => ({
+          id: a.id,
+          label: a.label ?? a.id,
+          proxy_port: a.proxy_port,
+        }));
+        const groups = groupPostingAccountsByDongle(workspace, options);
+        setPostingAccountGroups(groups);
+        setPostingAccountOptions(options);
+        if (!editJob) {
+          setForm((f) => ({
+            ...f,
+            account_id: f.account_id || options[0]?.id || '',
+          }));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPostingAccountGroups([]);
+          setPostingAccountOptions([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setAccountsSyncing(false);
+      });
 
     return () => {
       cancelled = true;
     };
   }, [open, workspace, editJob]);
 
-  const requireYeonunAccount = workspace === 'yeonun' && !isEdit;
+  const requirePostingAccount = !isEdit;
 
   const validateForm = (): boolean => {
-    if (requireYeonunAccount) {
-      if (accountsSyncing || isYeonunPlaceholderAccountId(form.account_id)) {
-        setError('연운 포스팅 계정 정보를 불러오는 중입니다. 잠시 후 다시 시도하세요.');
+    if (requirePostingAccount) {
+      if (accountsSyncing) {
+        setError('포스팅 계정 정보를 불러오는 중입니다. 잠시 후 다시 시도하세요.');
         return false;
       }
       if (!form.account_id.trim()) {
-        setError('연운 포스팅 계정(연운1~3)을 선택하세요.');
+        setError('포스팅 계정을 선택하세요.');
+        return false;
+      }
+      if (!postingAccountOptions.some((a) => a.id === form.account_id)) {
+        setError('유효한 포스팅 계정을 선택하세요.');
         return false;
       }
     }
@@ -358,42 +354,53 @@ export function QueueAutoContentModal({
           </div>
         </div>
 
-        {workspace === 'yeonun' ? (
-          <div className="m-modal-field">
-            <div className="m-modal-label">
-              포스팅 계정 <span className="text-huma-err">필수</span>
-            </div>
-            {yeonunAccounts.length ? (
-              <div className="flex flex-wrap gap-2">
-                {yeonunAccounts.map((ac) => {
-                  const selected = form.account_id === ac.id;
-                  return (
-                    <label
-                      key={ac.id}
-                      className={`cursor-pointer rounded-md border px-3 py-2 font-mono text-[11px] ${
-                        selected
-                          ? 'border-huma-acc bg-huma-acc/10 text-huma-acc'
-                          : 'border-huma-bdr text-huma-t2 hover:border-huma-bdr2'
-                      } ${!editable ? 'pointer-events-none opacity-60' : accountsSyncing ? 'opacity-80' : ''}`}
-                    >
-                      <input
-                        type="radio"
-                        className="sr-only"
-                        name="yeonun-posting-account"
-                        checked={selected}
-                        disabled={!editable}
-                        onChange={() => setForm((f) => ({ ...f, account_id: ac.id }))}
-                      />
-                      {ac.label}
-                    </label>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="font-mono text-[10.5px] text-huma-t3">연운 포스팅 계정 없음</p>
-            )}
+        <div className="m-modal-field">
+          <div className="m-modal-label">
+            포스팅 계정 <span className="text-huma-err">필수</span>
           </div>
-        ) : null}
+          {accountsSyncing ? (
+            <p className="font-mono text-[10.5px] text-huma-t3">계정 목록 불러오는 중…</p>
+          ) : postingAccountOptions.length ? (
+            <div className="flex flex-col gap-2">
+              {postingAccountGroups.map((group) =>
+                group.accounts.length ? (
+                  <div key={group.proxy_port}>
+                    <div className="mb-1 font-mono text-[10px] text-huma-t3">
+                      {group.dongle_label} · :{group.proxy_port}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {group.accounts.map((ac) => {
+                        const selected = form.account_id === ac.id;
+                        return (
+                          <label
+                            key={ac.id}
+                            className={`cursor-pointer rounded-md border px-3 py-2 font-mono text-[11px] ${
+                              selected
+                                ? 'border-huma-acc bg-huma-acc/10 text-huma-acc'
+                                : 'border-huma-bdr text-huma-t2 hover:border-huma-bdr2'
+                            } ${!editable ? 'pointer-events-none opacity-60' : ''}`}
+                          >
+                            <input
+                              type="radio"
+                              className="sr-only"
+                              name="posting-account"
+                              checked={selected}
+                              disabled={!editable}
+                              onChange={() => setForm((f) => ({ ...f, account_id: ac.id }))}
+                            />
+                            {ac.label}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null,
+              )}
+            </div>
+          ) : (
+            <p className="font-mono text-[10.5px] text-huma-t3">포스팅 계정 없음 — 계정관리에서 등록하세요</p>
+          )}
+        </div>
 
         <div className="m-modal-field">
           <div className="m-modal-label">

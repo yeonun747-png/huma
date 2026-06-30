@@ -1,5 +1,8 @@
 import type { Workspace } from './account';
 
+/** 동글(proxy_port)당 최대 포스팅 계정 수 */
+export const MAX_ACCOUNTS_PER_DONGLE = 5;
+
 /** 물리 동글 번호 = slot_number = 192.168.3.{slot} (관리·3proxy bind) */
 export const POSTING_DONGLE_SLOTS = [
   { slot: 1, proxyPort: 10001, workspace: 'yeonun' as Workspace, label: '연운1' },

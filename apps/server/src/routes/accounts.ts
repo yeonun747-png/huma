@@ -16,6 +16,8 @@ import {
 import { ensureAccountAntiDetect } from '../modules/playwright/account-loader.js';
 import {
   assertPostingProxyPortMatchesWorkspace,
+  assertDongleCapacity,
+  generateAutoSlotLabel,
   resolvePostingProxyPortForCreate,
 } from '../lib/posting-proxy.js';
 import { mergeBlogWritingPersonaField } from '../lib/account-persona.js';
@@ -135,7 +137,19 @@ export async function registerAccountRoutes(app: FastifyInstance) {
 
     if (accountType === 'posting') {
       const ws = (body.workspace as string) ?? 'yeonun';
-      body.proxy_port = await resolvePostingProxyPortForCreate(ws);
+      const requestedPort =
+        typeof body.proxy_port === 'number' && !Number.isNaN(body.proxy_port)
+          ? (body.proxy_port as number)
+          : undefined;
+      body.proxy_port = await resolvePostingProxyPortForCreate(ws, requestedPort);
+      const slotLabel = typeof body.slot_label === 'string' ? body.slot_label.trim() : '';
+      if (!slotLabel) {
+        body.slot_label = await generateAutoSlotLabel(body.proxy_port as number);
+      }
+      const displayName = typeof body.name === 'string' ? body.name.trim() : '';
+      if (!displayName) {
+        body.name = body.slot_label;
+      }
     }
 
     const { data, error } = await supabase.from('huma_accounts').insert(body).select().single();
@@ -319,6 +333,7 @@ export async function registerAccountRoutes(app: FastifyInstance) {
     if (body.proxy_port !== undefined && accountType === 'posting' && !isPersonaOnlyPatch(body, patch)) {
       try {
         assertPostingProxyPortMatchesWorkspace(ws, body.proxy_port as number);
+        await assertDongleCapacity(body.proxy_port as number, accountId);
       } catch (err) {
         return reply.code(400).send({ error: (err as Error).message });
       }

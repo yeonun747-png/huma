@@ -21,7 +21,6 @@ import {
 } from '../modules/content/auto-publish.js';
 import { promoteDryRunToPublish } from '../modules/queue/jobs/content-orchestrator.js';
 import { kstTodayStartIso } from '../lib/posting-daily-status.js';
-import { resolvePostingAccount } from '../lib/posting-accounts.js';
 import { assertCafeNewPostAccount, assertCafeReplyAccount } from '../lib/cafe-accounts.js';
 import { assertHumaJobAdvanceAllowed, assertHumaJobRunnable } from '../lib/account-guards.js';
 import { assertManualSocialCrankAllowed } from '../lib/crank-guard.js';
@@ -232,9 +231,14 @@ export async function registerJobRoutes(app: FastifyInstance) {
         const scheduledAt =
           (body.scheduled_at as string) ||
           resolveAutoContentStartAt(autoScheduled, (body.schedule_time as string) ?? undefined);
+        const accountId = (body.account_id as string | undefined)?.trim();
+        const isSchedulerAutoPublish = body.auto_publish === true;
+        if (!accountId && !isSchedulerAutoPublish) {
+          return reply.code(400).send({ error: '포스팅 계정(account_id)을 선택하세요' });
+        }
         const result = await registerAutoContentJobs({
           workspace: body.workspace as string,
-          account_id: (body.account_id as string | undefined)?.trim() || undefined,
+          account_id: accountId || undefined,
           title: body.title ? String(body.title).trim() : undefined,
           source_url: sourceUrl?.toString().trim() || undefined,
           synopsis: (body.synopsis as string | undefined)?.trim(),
@@ -360,11 +364,9 @@ export async function registerJobRoutes(app: FastifyInstance) {
     }
 
     try {
-      const accountId =
-        body.account_id?.trim() ??
-        (body.workspace === 'yeonun' ? undefined : (await resolvePostingAccount(body.workspace))?.id);
+      const accountId = body.account_id?.trim();
       if (!accountId) {
-        return reply.code(400).send({ error: '연운 자동발행은 account_id가 필요합니다' });
+        return reply.code(400).send({ error: '자동발행은 account_id가 필요합니다' });
       }
 
       const { data: row } = await supabase

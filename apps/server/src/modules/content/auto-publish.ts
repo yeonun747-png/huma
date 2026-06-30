@@ -8,7 +8,6 @@ import {
   enableAutoPublish,
   setAutoPublishEnabled,
 } from '../../lib/auto-publish-state.js';
-import { resolvePostingAccount } from '../../lib/posting-accounts.js';
 
 export async function fetchAutoPublishStatus(workspace: string): Promise<AutoPublishStatus> {
   const { getAutoPublishButtonStatus } = await import('../../lib/posting-daily-status.js');
@@ -45,10 +44,8 @@ export async function toggleAutoPublish(
 
 export async function setAutoPublish(workspace: string, accountId: string | undefined, enabled: boolean) {
   const trimmed = accountId?.trim();
-  if (workspace === 'yeonun' && !trimmed) {
-    throw new Error('연운 자동발행은 계정을 선택하세요');
+  if (!trimmed) {
+    throw new Error('자동발행은 계정을 선택하세요');
   }
-  const targetId = trimmed ?? (await resolvePostingAccount(workspace))?.id;
-  if (!targetId) throw new Error('포스팅 계정 없음');
-  return setAutoPublishEnabled(workspace, targetId, enabled);
+  return setAutoPublishEnabled(workspace, trimmed, enabled);
 }

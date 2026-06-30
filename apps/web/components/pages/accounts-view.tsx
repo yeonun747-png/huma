@@ -5,6 +5,8 @@ import type { AccountType, HumaAccount, Workspace } from '@huma/shared';
 import {
   CRANK_POOL_WORKSPACE,
   CRANK_SERVICE_ORDER,
+  MAX_ACCOUNTS_PER_DONGLE,
+  POSTING_DONGLE_SLOTS,
   crankLabelOf,
   crankServiceLabelKo,
   crankWorkspaceFromLabel,
@@ -30,11 +32,11 @@ import {
   type BusinessUnit,
 } from '@/lib/admin-scope';
 
-const POSTING_COLUMNS: { ws: Workspace; title: string; sub: string }[] = [
-  { ws: 'yeonun', title: '연운', sub: '동글1~3 · :10001~03' },
-  { ws: 'quizoasis', title: '퀴즈오아시스', sub: '동글5 · :10005' },
-  { ws: 'panana', title: '파나나', sub: '동글4 · :10004' },
-];
+const WS_LABEL: Record<Workspace, string> = {
+  yeonun: '연운',
+  quizoasis: '퀴즈오아시스',
+  panana: '파나나',
+};
 
 type AccountCategory = 'posting' | 'crank' | 'social';
 
@@ -115,9 +117,28 @@ function isPostingAccount(ac: HumaAccount) {
   return ac.account_type === 'posting';
 }
 
-function visiblePostingColumns(admin: ReturnType<typeof useAuth>['admin']) {
-  const units = getAccessibleBusinessUnits(admin);
-  return POSTING_COLUMNS.filter((c) => units.includes(c.ws));
+function defaultProxyPortForUnit(unit: BusinessUnit): number {
+  const slot = POSTING_DONGLE_SLOTS.find((d) => d.workspace === unit);
+  return slot?.proxyPort ?? 10001;
+}
+
+function postingDongleOptionsForUnit(unit: BusinessUnit) {
+  return POSTING_DONGLE_SLOTS.filter((d) => d.workspace === unit);
+}
+
+function emptyForm(registerUnit: BusinessUnit) {
+  return {
+    registerUnit,
+    category: 'posting' as AccountCategory,
+    proxy_port: defaultProxyPortForUnit(registerUnit),
+    name: '',
+    naver_id: '',
+    naver_pw: '',
+    blog_url: '',
+    platform: 'tiktok',
+    username: '',
+    access_token: '',
+  };
 }
 
 function statusTone(ac: HumaAccount): 'ok' | 'warn' | 'err' | 'live' | 'idle' {
@@ -133,20 +154,6 @@ function statusLabel(ac: HumaAccount) {
 
 async function confirmDelete(label: string) {
   return appConfirm(`「${label}」 계정을 삭제할까요?\n삭제 후에는 복구할 수 없습니다.`, { destructive: true });
-}
-
-function emptyForm(registerUnit: BusinessUnit) {
-  return {
-    registerUnit,
-    category: 'posting' as AccountCategory,
-    name: '',
-    naver_id: '',
-    naver_pw: '',
-    blog_url: '',
-    platform: 'tiktok',
-    username: '',
-    access_token: '',
-  };
 }
 
 export function AccountsView() {
@@ -178,7 +185,11 @@ export function AccountsView() {
   const [personaError, setPersonaError] = useState('');
   const [remoteAccessId, setRemoteAccessId] = useState<string | null>(null);
 
-  const postingColumns = useMemo(() => visiblePostingColumns(admin), [admin]);
+  const accessibleUnits = useMemo(() => getAccessibleBusinessUnits(admin), [admin]);
+  const postingDongles = useMemo(
+    () => POSTING_DONGLE_SLOTS.filter((d) => accessibleUnits.includes(d.workspace)),
+    [accessibleUnits],
+  );
 
   const load = useCallback((opts?: { force?: boolean }) => {
     Promise.all([api.accounts(opts), api.platformAccounts()])
@@ -228,17 +239,17 @@ export function AccountsView() {
   const visiblePlatforms = useMemo(
     () =>
       platforms.filter((p) =>
-        postingColumns.some((c) => c.ws === String(p.workspace)),
+        accessibleUnits.includes(String(p.workspace) as BusinessUnit),
       ),
-    [platforms, postingColumns],
+    [platforms, accessibleUnits],
   );
 
   const posting = useMemo(
     () =>
       accounts.filter(
-        (a) => isPostingAccount(a) && postingColumns.some((c) => c.ws === a.workspace),
+        (a) => isPostingAccount(a) && accessibleUnits.includes(a.workspace as BusinessUnit),
       ).length,
-    [accounts, postingColumns],
+    [accounts, accessibleUnits],
   );
   const crankCafe = crankPoolAccounts.length;
   const isSocial = form.category === 'social';
@@ -251,6 +262,16 @@ export function AccountsView() {
 
   const registerUnitLabel =
     BUSINESS_UNITS.find((u) => u.id === form.registerUnit)?.label ?? form.registerUnit;
+
+  const openPostingFormForDongle = (proxyPort: number, unit: BusinessUnit) => {
+    setShowForm(true);
+    setError('');
+    setForm({
+      ...emptyForm(unit),
+      category: 'posting',
+      proxy_port: proxyPort,
+    });
+  };
 
   const handleCreate = async () => {
     setError('');
@@ -275,26 +296,46 @@ export function AccountsView() {
           is_active: true,
         });
       } else {
-        if (!form.name.trim() || !form.naver_id.trim()) {
-          setError('표시 이름과 네이버 ID는 필수입니다.');
-          return;
+        if (form.category === 'posting') {
+          if (!form.naver_id.trim()) {
+            setError('네이버 ID는 필수입니다.');
+            return;
+          }
+          if (!form.blog_url.trim()) {
+            setError('포스팅 계정은 블로그 URL이 필수입니다.');
+            return;
+          }
+          await api.createAccount({
+            workspace: form.registerUnit,
+            proxy_port: form.proxy_port,
+            name: form.name.trim() || undefined,
+            naver_id: form.naver_id.trim(),
+            naver_pw: form.naver_pw,
+            account_type: 'posting',
+            blog_url: form.blog_url.trim(),
+            is_active: true,
+            health_score: 100,
+            blog_index: 5,
+            wpm: 55,
+          });
+        } else {
+          if (!form.name.trim() || !form.naver_id.trim()) {
+            setError('표시 이름과 네이버 ID는 필수입니다.');
+            return;
+          }
+          await api.createAccount({
+            workspace: form.category === 'crank' ? CRANK_POOL_WORKSPACE : form.registerUnit,
+            name: form.name.trim(),
+            naver_id: form.naver_id.trim(),
+            naver_pw: form.naver_pw,
+            account_type: form.category,
+            blog_url: form.blog_url.trim() || undefined,
+            is_active: true,
+            health_score: 100,
+            blog_index: 0,
+            wpm: 55,
+          });
         }
-        if (form.category === 'posting' && !form.blog_url.trim()) {
-          setError('포스팅 계정은 블로그 URL이 필수입니다.');
-          return;
-        }
-        await api.createAccount({
-          workspace: form.category === 'crank' ? CRANK_POOL_WORKSPACE : form.registerUnit,
-          name: form.name.trim(),
-          naver_id: form.naver_id.trim(),
-          naver_pw: form.naver_pw,
-          account_type: form.category,
-          blog_url: form.blog_url.trim() || undefined,
-          is_active: true,
-          health_score: 100,
-          blog_index: form.category === 'posting' ? 5 : 0,
-          wpm: 55,
-        });
       }
       setShowForm(false);
       load({ force: true });
@@ -490,13 +531,42 @@ export function AccountsView() {
     return 'S';
   };
 
-  const accountsInWorkspace = (ws: Workspace) =>
-    accounts
-      .filter((a) => isPostingAccount(a) && a.workspace === ws)
-      .sort((a, b) => (a.proxy_port ?? 99) - (b.proxy_port ?? 99));
-
-  const platformsInWorkspace = (ws: Workspace) =>
-    platforms.filter((p) => String(p.workspace) === ws);
+  const renderPostingCard = (ac: HumaAccount) => (
+    <MAccountCard
+      key={ac.id}
+      icon="📝"
+      iconBg="var(--ok-bg)"
+      name={
+        <>
+          {ac.slot_label ?? ac.name}{' '}
+          <span className="m-type-badge m-type-posting">POSTING</span>
+        </>
+      }
+      url={
+        ac.blog_url ??
+        `${ac.naver_id} · :${ac.proxy_port ?? '?'} · 지수${ac.blog_index ?? 5}`
+      }
+      status={statusLabel(ac)}
+      statusTone={!ac.blog_url ? 'warn' : statusTone(ac)}
+      stats={[
+        { label: 'Health', value: ac.health_score ?? '—', tone: (ac.health_score ?? 100) >= 80 ? 'text-huma-ok' : 'text-huma-warn' },
+        { label: 'Index', value: ac.blog_index ?? '—' },
+        { label: 'WPM', value: ac.wpm ?? '—' },
+      ]}
+      actions={[
+        { label: '편집', primary: true, onClick: () => handleStartEditPosting(ac) },
+        {
+          label: remoteAccessId === ac.id ? '접속 중…' : '🖥 원격접속',
+          onClick: () => void handleRemoteAccess(ac),
+        },
+        { label: ac.is_active ? '정지' : '재개', onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(() => load({ force: true })) },
+      ]}
+      actionsSecondary={[
+        { label: '포스팅 페르소나', onClick: () => handleOpenPersona(ac) },
+        { label: '영상 페르소나', primary: true, onClick: () => setVideoPersonaAccount(ac) },
+      ]}
+    />
+  );
 
   if (authLoading) {
     return <div className="animate-fadeIn py-8 text-center text-[12px] text-huma-t3">계정 목록 불러오는 중…</div>;
@@ -536,7 +606,15 @@ export function AccountsView() {
               <select
                 value={form.registerUnit}
                 onChange={(e) =>
-                  setForm((f) => ({ ...f, registerUnit: e.target.value as BusinessUnit }))
+                  setForm((f) => {
+                    const unit = e.target.value as BusinessUnit;
+                    return {
+                      ...f,
+                      registerUnit: unit,
+                      proxy_port:
+                        f.category === 'posting' ? defaultProxyPortForUnit(unit) : f.proxy_port,
+                    };
+                  })
                 }
                 className="m-model-select w-full max-w-full"
               >
@@ -556,7 +634,11 @@ export function AccountsView() {
               <button
                 key={opt.value}
                 type="button"
-                onClick={() => setForm((f) => ({ ...f, category: opt.value }))}
+                onClick={() => setForm((f) => ({
+                  ...f,
+                  category: opt.value,
+                  proxy_port: opt.value === 'posting' ? defaultProxyPortForUnit(f.registerUnit) : f.proxy_port,
+                }))}
                 className={`rounded-md border px-3 py-2 text-left text-xs transition ${
                   form.category === opt.value
                     ? 'border-huma-acc bg-huma-glow text-huma-acc'
@@ -598,8 +680,23 @@ export function AccountsView() {
               </>
             ) : (
               <>
+                {form.category === 'posting' && (
+                  <select
+                    value={form.proxy_port}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, proxy_port: Number(e.target.value) }))
+                    }
+                    className="m-model-select w-full"
+                  >
+                    {postingDongleOptionsForUnit(form.registerUnit).map((d) => (
+                      <option key={d.proxyPort} value={d.proxyPort}>
+                        {d.label} · :{d.proxyPort}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <input
-                  placeholder="표시 이름"
+                  placeholder={form.category === 'posting' ? '표시 이름 (비우면 자동)' : '표시 이름'}
                   value={form.name}
                   onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                   className="m-model-select w-full"
@@ -643,7 +740,7 @@ export function AccountsView() {
 
           {form.category === 'posting' && (
             <p className="font-mono text-[10.5px] text-huma-t3">
-              포스팅 URL 필수 · 연운=동글1~3 · 파나나=동글4(192.168.3.4) · 퀴즈=동글5(192.168.3.5)
+              동글당 최대 {MAX_ACCOUNTS_PER_DONGLE}계정 · slot_label 자동(예: 연운1-2) · 같은 IP 순차 포스팅
             </p>
           )}
 
@@ -787,60 +884,56 @@ export function AccountsView() {
         </div>
       )}
 
-      <MGrid cols={3} className="accounts-posting-cols">
-        <div>
-          {postingColumns.map((col, idx) => {
-            const colAccounts = accountsInWorkspace(col.ws);
-            return (
-              <div key={col.ws}>
-                <div className="m-ws-col-title">
-                  {idx === 0 ? '포스팅 계정 — 연운' : `포스팅 계정 — ${col.title}`}
+      {postingDongles.length > 0 && (
+        <div className="mb-4">
+          <div className="m-ws-col-title mb-2">포스팅 계정 — 동글별 (최대 {MAX_ACCOUNTS_PER_DONGLE}계정/동글)</div>
+          <div className="flex flex-col gap-3">
+            {postingDongles.map((dongle) => {
+              const dongleAccounts = accounts
+                .filter((a) => isPostingAccount(a) && a.proxy_port === dongle.proxyPort)
+                .sort((a, b) =>
+                  (a.slot_label ?? a.name).localeCompare(b.slot_label ?? b.name, 'ko'),
+                );
+              return (
+                <div
+                  key={dongle.proxyPort}
+                  className="rounded-lg border border-huma-bdr bg-huma-bg2/40 p-2"
+                >
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="font-mono text-[11px] font-semibold text-huma-acc">
+                      {dongle.label} · :{dongle.proxyPort}
+                      <span className="ml-2 text-[10px] font-normal text-huma-t3">
+                        {dongleAccounts.length}/{MAX_ACCOUNTS_PER_DONGLE}
+                      </span>
+                    </div>
+                    {dongleAccounts.length < MAX_ACCOUNTS_PER_DONGLE && (
+                      <button
+                        type="button"
+                        className="btn-ghost btn-sm text-[10px]"
+                        onClick={() =>
+                          openPostingFormForDongle(
+                            dongle.proxyPort,
+                            dongle.workspace as BusinessUnit,
+                          )
+                        }
+                      >
+                        + 추가
+                      </button>
+                    )}
+                  </div>
+                  {dongleAccounts.length ? (
+                    dongleAccounts.map((ac) => renderPostingCard(ac))
+                  ) : (
+                    <div className="m-ac text-center text-[11px] text-huma-t3">계정 없음</div>
+                  )}
                 </div>
-                {colAccounts.length ? (
-                  colAccounts.map((ac) => (
-                    <MAccountCard
-                      key={ac.id}
-                      icon="📝"
-                      iconBg="var(--ok-bg)"
-                      name={
-                        <>
-                          {ac.name}{' '}
-                          <span className="m-type-badge m-type-posting">POSTING</span>
-                        </>
-                      }
-                      url={
-                        ac.blog_url ??
-                        `${ac.naver_id} · :${ac.proxy_port ?? '?'} · 지수${ac.blog_index ?? 5}`
-                      }
-                      status={statusLabel(ac)}
-                      statusTone={!ac.blog_url ? 'warn' : statusTone(ac)}
-                      stats={[
-                        { label: 'Health', value: ac.health_score ?? '—', tone: (ac.health_score ?? 100) >= 80 ? 'text-huma-ok' : 'text-huma-warn' },
-                        { label: 'Index', value: ac.blog_index ?? '—' },
-                        { label: 'WPM', value: ac.wpm ?? '—' },
-                      ]}
-                      actions={[
-                        { label: '편집', primary: true, onClick: () => handleStartEditPosting(ac) },
-                        {
-                          label: remoteAccessId === ac.id ? '접속 중…' : '🖥 원격접속',
-                          onClick: () => void handleRemoteAccess(ac),
-                        },
-                        { label: ac.is_active ? '정지' : '재개', onClick: () => api.updateAccount(ac.id, { is_active: !ac.is_active }).then(() => load({ force: true })) },
-                      ]}
-                      actionsSecondary={[
-                        { label: '포스팅 페르소나', onClick: () => handleOpenPersona(ac) },
-                        { label: '영상 페르소나', primary: true, onClick: () => setVideoPersonaAccount(ac) },
-                      ]}
-                    />
-                  ))
-                ) : (
-                  <div className="m-ac text-center text-[11px] text-huma-t3">포스팅 계정 없음</div>
-                )}
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
+      )}
 
+      <MGrid cols={2} className="accounts-posting-cols">
         <div>
           <div className="mb-2 flex items-center justify-between">
             <div className="m-ws-col-title mb-0">C-Rank 소통 계정 ({crankCafe}개)</div>
@@ -924,14 +1017,12 @@ export function AccountsView() {
         </div>
 
         <div>
-          {postingColumns.map((col, idx) => {
-            const colPlatforms = platformsInWorkspace(col.ws);
+          {accessibleUnits.map((ws) => {
+            const colPlatforms = platforms.filter((p) => String(p.workspace) === ws);
             if (!colPlatforms.length) return null;
             return (
-              <div key={`social-${col.ws}`}>
-                <div className="m-ws-col-title">
-                  소셜미디어 계정 — {col.title}
-                </div>
+              <div key={`social-${ws}`}>
+                <div className="m-ws-col-title">소셜미디어 계정 — {WS_LABEL[ws]}</div>
                 {colPlatforms.map((p) => {
                   const platform = String(p.platform ?? '');
                   const active = p.is_active !== false;
@@ -941,7 +1032,7 @@ export function AccountsView() {
                       icon={platformIcon(platform)}
                       iconBg={platform === 'tiktok' ? 'rgba(255,0,80,.1)' : 'var(--blue-bg)'}
                       name={String(p.username ?? platform)}
-                      url={`${socialPlatformLabel(platform)} · ${col.title}`}
+                      url={`${socialPlatformLabel(platform)} · ${WS_LABEL[ws]}`}
                       status={active ? '활성' : '세션오류'}
                       statusTone={active ? 'ok' : 'err'}
                       stats={[
