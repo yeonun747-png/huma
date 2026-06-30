@@ -22,6 +22,7 @@ interface YeonunPublishAccountsStripProps {
 
 export function YeonunPublishAccountsStrip({ refreshToken = 0, onDone }: YeonunPublishAccountsStripProps) {
   const [accounts, setAccounts] = useState<AutoPublishStatus[]>(getInitialYeonunAccounts);
+  const [nextPublishAccountId, setNextPublishAccountId] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(() =>
@@ -39,6 +40,7 @@ export function YeonunPublishAccountsStrip({ refreshToken = 0, onDone }: YeonunP
         setYeonunAccountsCache(rows);
         setAccounts(rows);
       }
+      setNextPublishAccountId(res.next_publish_account_id ?? null);
       setLoaded(true);
     } catch {
       if (!getInitialYeonunAccounts().some((a) => a.account_id)) {
@@ -67,9 +69,8 @@ export function YeonunPublishAccountsStrip({ refreshToken = 0, onDone }: YeonunP
       if (rows?.length) {
         setYeonunAccountsCache(rows);
         setAccounts(rows);
-      } else {
-        await load();
       }
+      await load({ silent: true });
       if (!res.enabled) {
         const who = formatYeonunAccountDisplayLabel(row.account_label, {
           proxyPort: row.proxy_port ?? undefined,
@@ -129,6 +130,13 @@ export function YeonunPublishAccountsStrip({ refreshToken = 0, onDone }: YeonunP
                     busy={busy}
                     label={label}
                     syncing={syncing}
+                    showNextPublishBadge={
+                      Boolean(
+                        row.account_id &&
+                          nextPublishAccountId &&
+                          row.account_id === nextPublishAccountId,
+                      )
+                    }
                     onToggle={() => void handleToggle(row)}
                   />
                 );

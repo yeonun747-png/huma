@@ -203,9 +203,10 @@ export const api = {
       auto_pick_ready: boolean;
       is_weekend: boolean;
       weekend_ratio?: number;
-    }>(`/api/jobs/auto-publish/status?workspace=${encodeURIComponent(workspace)}`),
+    } & { next_publish_account_id?: string | null }>(`/api/jobs/auto-publish/status?workspace=${encodeURIComponent(workspace)}`),
   getAutoPublishAccountsStatus: (workspace: string) =>
-    request<{ accounts: Array<{
+    request<{
+      accounts: Array<{
       workspace: string;
       account_id?: string;
       account_label?: string;
@@ -225,7 +226,9 @@ export const api = {
       auto_pick_ready: boolean;
       is_weekend: boolean;
       weekend_ratio?: number;
-    }> }>(`/api/jobs/auto-publish/accounts?workspace=${encodeURIComponent(workspace)}`),
+    }>;
+      next_publish_account_id?: string | null;
+    }>(`/api/jobs/auto-publish/accounts?workspace=${encodeURIComponent(workspace)}`),
   runAutoPublish: (workspace: string, accountId?: string) =>
     request<{
       ok: boolean;

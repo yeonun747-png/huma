@@ -27,6 +27,7 @@ export type AutoPublishStatus = {
   auto_publish_planned_count?: number | null;
   auto_publish_next_slot_at?: string | null;
   proxy_port?: number | null;
+  next_publish_account_id?: string | null;
 };
 
 export const AUTO_PUBLISH_BTN_CLASS =
@@ -121,6 +122,7 @@ type AutoPublishChipProps = {
   busy: boolean;
   label?: string;
   syncing?: boolean;
+  showNextPublishBadge?: boolean;
   onToggle: () => void;
 };
 
@@ -131,6 +133,7 @@ export function AutoPublishChip({
   busy,
   label,
   syncing,
+  showNextPublishBadge = false,
   onToggle,
 }: AutoPublishChipProps) {
   const done = status.today_completed ?? 0;
@@ -155,15 +158,22 @@ export function AutoPublishChip({
             {label}
           </span>
         ) : null}
-        <button
-          type="button"
-          className={resolveAutoPublishButtonClass(enabled)}
-          disabled={isAutoPublishButtonDisabled({ busy })}
-          title={buildAutoPublishTitle(status, { syncing, enabled, label })}
-          onClick={onToggle}
-        >
-          {formatAutoPublishButtonLabel(done, quota, { publishing: busy, enabled })}
-        </button>
+        <div className="relative inline-flex shrink-0">
+          {showNextPublishBadge ? (
+            <span className="auto-publish-next-badge" aria-hidden>
+              다음발행
+            </span>
+          ) : null}
+          <button
+            type="button"
+            className={resolveAutoPublishButtonClass(enabled)}
+            disabled={isAutoPublishButtonDisabled({ busy })}
+            title={buildAutoPublishTitle(status, { syncing, enabled, label })}
+            onClick={onToggle}
+          >
+            {formatAutoPublishButtonLabel(done, quota, { publishing: busy, enabled })}
+          </button>
+        </div>
       </div>
       {enabled && scheduleLine ? (
         <div className="auto-publish-chip-meta flex min-w-0 items-center gap-1.5" aria-live="polite">
@@ -264,6 +274,7 @@ export function AutoPublishButton({ workspace, onDone, refreshToken = 0 }: AutoP
   const [status, setStatus] = useState<AutoPublishStatus | null>(
     () => publishStatusCache.get(workspace) ?? null,
   );
+  const [nextPublishAccountId, setNextPublishAccountId] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(() => !publishStatusCache.has(workspace));
   const [toggling, setToggling] = useState(false);
 
@@ -273,6 +284,7 @@ export function AutoPublishButton({ workspace, onDone, refreshToken = 0 }: AutoP
       const s = await api.getAutoPublishStatus(workspace);
       publishStatusCache.set(workspace, s);
       setStatus(s);
+      setNextPublishAccountId(s.next_publish_account_id ?? null);
     } catch {
       setStatus(publishStatusCache.get(workspace) ?? null);
     } finally {
@@ -309,9 +321,8 @@ export function AutoPublishButton({ workspace, onDone, refreshToken = 0 }: AutoP
       if (daily) {
         publishStatusCache.set(workspace, daily);
         setStatus(daily);
-      } else {
-        await loadStatus();
       }
+      await loadStatus({ silent: true });
       if (res.enabled) {
         /* ON — 칩 UI에 계획·다음 슬롯 표시, 모달 생략 */
       } else {
@@ -330,15 +341,17 @@ export function AutoPublishButton({ workspace, onDone, refreshToken = 0 }: AutoP
 
   if (!status) {
     return (
-      <button
-        type="button"
-        className={AUTO_PUBLISH_BTN_CLASS}
-        disabled={syncing || toggling}
-        title={syncing ? '발행 현황 불러오는 중…' : '자동발행'}
-        onClick={() => void handleToggle()}
-      >
-        {formatAutoPublishButtonLabel(0, '—', { publishing: toggling || syncing })}
-      </button>
+      <div className="relative inline-flex shrink-0">
+        <button
+          type="button"
+          className={AUTO_PUBLISH_BTN_CLASS}
+          disabled={syncing || toggling}
+          title={syncing ? '발행 현황 불러오는 중…' : '자동발행'}
+          onClick={() => void handleToggle()}
+        >
+          {formatAutoPublishButtonLabel(0, '—', { publishing: toggling || syncing })}
+        </button>
+      </div>
     );
   }
 
@@ -348,6 +361,13 @@ export function AutoPublishButton({ workspace, onDone, refreshToken = 0 }: AutoP
       enabled={enabled}
       busy={toggling}
       syncing={syncing}
+      showNextPublishBadge={
+        Boolean(
+          status.account_id &&
+            nextPublishAccountId &&
+            status.account_id === nextPublishAccountId,
+        )
+      }
       onToggle={() => void handleToggle()}
     />
   );

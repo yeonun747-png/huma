@@ -333,7 +333,12 @@ export async function registerJobRoutes(app: FastifyInstance) {
     }
 
     try {
-      return await fetchAutoPublishStatus(workspace);
+      const { resolveEarliestNextPublish } = await import('../lib/next-publish-schedule.js');
+      const [status, next] = await Promise.all([
+        fetchAutoPublishStatus(workspace),
+        resolveEarliestNextPublish([workspace]),
+      ]);
+      return { ...status, next_publish_account_id: next.account_id };
     } catch (err) {
       return reply.code(500).send({ error: (err as Error).message ?? '상태 조회 실패' });
     }
@@ -348,8 +353,10 @@ export async function registerJobRoutes(app: FastifyInstance) {
     }
 
     try {
+      const { resolveEarliestNextPublish } = await import('../lib/next-publish-schedule.js');
       const accounts = await fetchAutoPublishAccountsStatus(workspace);
-      return { accounts };
+      const next = await resolveEarliestNextPublish([workspace]);
+      return { accounts, next_publish_account_id: next.account_id };
     } catch (err) {
       return reply.code(500).send({ error: (err as Error).message ?? '계정 현황 조회 실패' });
     }
