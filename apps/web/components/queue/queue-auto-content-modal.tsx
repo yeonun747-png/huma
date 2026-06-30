@@ -15,6 +15,7 @@ import {
   type PostingAccountOption,
   type PostingDongleAccountGroup,
 } from '@/lib/posting-dongle-groups';
+import { formatYeonunAccountDisplayLabel, formatYeonunDongleGroupLabel } from '@/lib/yeonun-dongle-groups';
 
 const IMAGE_SLOT_COUNT = 5;
 const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
@@ -366,11 +367,21 @@ export function QueueAutoContentModal({
                 group.accounts.length ? (
                   <div key={group.proxy_port}>
                     <div className="mb-1 font-mono text-[10px] text-huma-t3">
-                      {group.dongle_label} · :{group.proxy_port}
+                      {workspace === 'yeonun'
+                        ? formatYeonunDongleGroupLabel(group.dongle_label)
+                        : group.dongle_label}{' '}
+                      · :{group.proxy_port}
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {group.accounts.map((ac) => {
+                      {group.accounts.map((ac, acIndex) => {
                         const selected = form.account_id === ac.id;
+                        const accountLabel =
+                          workspace === 'yeonun'
+                            ? formatYeonunAccountDisplayLabel(ac.label, {
+                                proxyPort: group.proxy_port,
+                                indexInGroup: acIndex,
+                              })
+                            : ac.label;
                         return (
                           <label
                             key={ac.id}
@@ -388,7 +399,7 @@ export function QueueAutoContentModal({
                               disabled={!editable}
                               onChange={() => setForm((f) => ({ ...f, account_id: ac.id }))}
                             />
-                            {ac.label}
+                            {accountLabel}
                           </label>
                         );
                       })}

@@ -10,6 +10,10 @@ import {
   parseBlogCheckSearchQuery,
 } from '@/lib/blog-check-search';
 import { EmptyPanel } from '@/components/ui/empty-panel';
+import {
+  formatYeonunAccountDisplayLabel,
+  groupYeonunByDongle,
+} from '@/lib/yeonun-dongle-groups';
 
 type BcAccount = Awaited<ReturnType<typeof api.blogCheckAccounts>>['accounts'][number];
 type BcPost = Awaited<ReturnType<typeof api.blogCheckPosts>>['posts'][number];
@@ -23,10 +27,59 @@ const GLOBAL_FULL_SCAN_LABEL = '⟳ 전체 다시 스캔';
 const SEARCH_SCAN_LABEL = '🔍 검색 스캔';
 const SCAN_POLL_MS = 1500;
 
+function bcAccountDisplayLabel(a: Pick<BcAccount, 'label' | 'svc'>): string {
+  if (a.svc !== '연운') return a.label;
+  return formatYeonunAccountDisplayLabel(a.label);
+}
+
+const BCI_SVC_SECTION_ORDER = ['연운', '파나나', '퀴즈'] as const;
+
+type BciGridItem = { kind: 'gap' } | { kind: 'card'; account: BcAccount };
+
+function buildBciGridItems(accounts: BcAccount[]): BciGridItem[] {
+  const bySvc = new Map<string, BcAccount[]>();
+  for (const account of accounts) {
+    const list = bySvc.get(account.svc) ?? [];
+    list.push(account);
+    bySvc.set(account.svc, list);
+  }
+
+  const items: BciGridItem[] = [];
+  let hasSection = false;
+
+  for (const svc of BCI_SVC_SECTION_ORDER) {
+    const sectionAccounts =
+      svc === '연운'
+        ? groupYeonunByDongle(
+            (bySvc.get('연운') ?? []).map((a) => ({ ...a, account_label: a.label })),
+          ).flatMap((group) => group.items as BcAccount[])
+        : (bySvc.get(svc) ?? []);
+
+    if (!sectionAccounts.length) continue;
+    if (hasSection) items.push({ kind: 'gap' });
+    for (const account of sectionAccounts) {
+      items.push({ kind: 'card', account });
+    }
+    hasSection = true;
+  }
+
+  for (const [svc, sectionAccounts] of bySvc) {
+    if ((BCI_SVC_SECTION_ORDER as readonly string[]).includes(svc)) continue;
+    if (hasSection) items.push({ kind: 'gap' });
+    for (const account of sectionAccounts) {
+      items.push({ kind: 'card', account });
+    }
+    hasSection = true;
+  }
+
+  return items;
+}
+
 function matchesAccountSearch(a: BcAccount, query: string): boolean {
   const q = query.trim();
   if (!q) return true;
   if (a.label.toLowerCase().includes(q.toLowerCase())) return true;
+  if (a.svc === '연운' && bcAccountDisplayLabel(a).toLowerCase().includes(q.toLowerCase())) return true;
   if (blogCheckQueryMatchesBlogId(q, a.blog_url)) return true;
   const parsed = parseBlogCheckSearchQuery(q);
   if (parsed && parsed.toLowerCase() === a.blog_url.toLowerCase()) return true;
@@ -311,6 +364,8 @@ export function BlogCheckView() {
     return accounts.filter((a) => matchesAccountSearch(a, searchQuery));
   }, [accounts, searchQuery]);
 
+  const bciGridItems = useMemo(() => buildBciGridItems(visibleAccounts), [visibleAccounts]);
+
   const filteredPosts = useMemo(() => {
     if (filter === 'all') return posts;
     if (filter === 'weak') return posts.filter((p) => p.status === 'weak' || p.status === 'collect');
@@ -324,7 +379,8 @@ export function BlogCheckView() {
     if (!scanning) return null;
     if (scanProgress?.accountLabel?.trim()) return scanProgress.accountLabel.trim();
     if (scanProgress?.accountId) {
-      return accounts.find((a) => a.account_id === scanProgress.accountId)?.label ?? null;
+      const acc = accounts.find((a) => a.account_id === scanProgress.accountId);
+      return acc ? bcAccountDisplayLabel(acc) : null;
     }
     if (adhocBlogId) return adhocLabel ?? adhocBlogId;
     return '전체 스캔';
@@ -525,7 +581,13 @@ export function BlogCheckView() {
       </div>
 
       <div className="bci-grid">
-        {visibleAccounts.map((a) => {
+        {bciGridItems.map((item, itemIndex) => {
+          if (item.kind === 'gap') {
+            return <div key={`gap-${itemIndex}`} className="bci-section-gap" aria-hidden />;
+          }
+
+          const a = item.account;
+          const displayLabel = bcAccountDisplayLabel(a);
           const rate = a.miss_rate;
           const rateColor = rate >= 20 ? 'var(--err)' : rate >= 10 ? 'var(--warn)' : 'var(--ok)';
           const idx = a.idx_score;
@@ -559,7 +621,7 @@ export function BlogCheckView() {
                   <button
                     type="button"
                     className="bci-scan-btn"
-                    title={`${a.label} — 최근 10건 전체 스캔`}
+                    title={`${displayLabel} — 최근 10건 전체 스캔`}
                     disabled={scanning}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -572,7 +634,7 @@ export function BlogCheckView() {
                   <button
                     type="button"
                     className="bci-scan-btn bci-scan-btn-delta"
-                    title={`${a.label} · 24h 이내 미스캔 글만`}
+                    title={`${displayLabel} · 24h 이내 미스캔 글만`}
                     disabled={scanning}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -584,7 +646,7 @@ export function BlogCheckView() {
                   </button>
                 </div>
               </div>
-              <div className="bci-name">{a.label}</div>
+              <div className="bci-name">{displayLabel}</div>
               <div className="bci-url">blog.naver.com/{a.blog_url}</div>
               <div className="mb-0.5 font-mono text-[10px] text-huma-t3">HUMA 자체 지수</div>
               <div className="bci-idx-row">
@@ -686,7 +748,7 @@ export function BlogCheckView() {
             {adhocBlogId
               ? `${adhocLabel ?? adhocBlogId}  —  최근 ${posts.length}건 (외부 · 미등록) · 누락 ${posts.filter((p) => p.status === 'miss').length}건`
               : selectedAcc
-                ? `${selectedAcc.label}  —  최근 ${posts.length}건 (최대 10건) · 누락 ${posts.filter((p) => p.status === 'miss').length}건`
+                ? `${bcAccountDisplayLabel(selectedAcc)}  —  최근 ${posts.length}건 (최대 10건) · 누락 ${posts.filter((p) => p.status === 'miss').length}건`
                 : '← 계정 카드를 선택하거나 검색 스캔하세요'}
           </div>
           <div className="bcp-filter">

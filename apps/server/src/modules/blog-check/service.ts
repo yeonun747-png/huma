@@ -207,11 +207,22 @@ async function persistCrawledPostStats(
   }
 }
 
+function yeonunSlotSortKey(acc: AccountRow): string {
+  const label = (acc.slot_label || acc.name || '').trim();
+  const m = label.match(/^연운(\d+)(?:-(\d+))?$/);
+  if (m) {
+    return `${m[1].padStart(2, '0')}-${(m[2] ?? '1').padStart(2, '0')}`;
+  }
+  return `99-${label}`;
+}
+
 function sortAccounts(accounts: AccountRow[]): AccountRow[] {
   return [...accounts].sort((a, b) => {
     const ws = (WORKSPACE_SORT[a.workspace] ?? 9) - (WORKSPACE_SORT[b.workspace] ?? 9);
     if (ws !== 0) return ws;
-    return (a.proxy_port ?? 999) - (b.proxy_port ?? 999);
+    const port = (a.proxy_port ?? 999) - (b.proxy_port ?? 999);
+    if (port !== 0) return port;
+    return yeonunSlotSortKey(a).localeCompare(yeonunSlotSortKey(b));
   });
 }
 

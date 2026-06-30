@@ -3,7 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
 import { appAlert } from '@/lib/app-dialog';
-import { groupYeonunByDongle } from '@/lib/yeonun-dongle-groups';
+import {
+  formatYeonunAccountDisplayLabel,
+  formatYeonunDongleGroupLabel,
+  groupYeonunByDongle,
+} from '@/lib/yeonun-dongle-groups';
 import {
   AutoPublishChip,
   getInitialYeonunAccounts,
@@ -67,7 +71,9 @@ export function YeonunPublishAccountsStrip({ refreshToken = 0, onDone }: YeonunP
         await load();
       }
       if (!res.enabled) {
-        const who = row.account_label ?? '';
+        const who = formatYeonunAccountDisplayLabel(row.account_label, {
+          proxyPort: row.proxy_port ?? undefined,
+        });
         await appAlert(`${who} 자동발행 OFF`);
       }
       onDone?.();
@@ -104,12 +110,14 @@ export function YeonunPublishAccountsStrip({ refreshToken = 0, onDone }: YeonunP
             aria-label={`${group.dongleLabel} 동글`}
           >
             <div className="px-0.5 font-mono text-[9px] font-semibold uppercase tracking-wide text-huma-t3">
-              {group.dongleLabel}
+              {formatYeonunDongleGroupLabel(group.dongleLabel)}
             </div>
             <div className="flex flex-wrap items-start gap-2">
               {group.items.map((row, index) => {
-                const label =
-                  row.account_label ?? row.account_id?.slice(0, 8) ?? `${group.dongleLabel}-${index + 1}`;
+                const label = formatYeonunAccountDisplayLabel(row.account_label, {
+                  proxyPort: group.proxyPort,
+                  indexInGroup: index,
+                });
                 const enabled = row.auto_publish_enabled ?? false;
                 const busy = togglingId === row.account_id;
 

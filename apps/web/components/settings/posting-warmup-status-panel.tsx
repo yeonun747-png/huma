@@ -2,6 +2,7 @@
 
 import { POSTING_DONGLE_SLOTS } from '@huma/shared';
 import { cn } from '@/lib/constants';
+import { formatYeonunAccountDisplayLabel } from '@/lib/yeonun-dongle-groups';
 
 export type PostingWarmupStatusRow = {
   dongle_label?: string;
@@ -123,22 +124,17 @@ function enrichWarmupRow(row: PostingWarmupStatusRow): EnrichedWarmupRow {
   };
 }
 
-/** slot_label이 이미 `연운1-2` 형식인지 */
-function hasNumberedSlotLabel(slotLabel: string, dongleLabel: string): boolean {
-  const escaped = dongleLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`^${escaped}-\\d+$`).test(slotLabel);
-}
-
-/** 계정 열 — 레거시(연운1)는 연운1-1, 신규(연운1-2)는 그대로 */
+/** 계정 열 — 연운 1-1 · 연운 1-2 형식 */
 function accountDisplayLabel(row: EnrichedWarmupRow, indexInGroup: number): string {
   if (row.missing) return '—';
-  if (hasNumberedSlotLabel(row.slot_label, row.dongleLabel)) {
-    return row.slot_label;
-  }
-  if (row.slot_label === row.dongleLabel || row.slot_label === row.dongle_label) {
-    return `${row.dongleLabel}-${indexInGroup + 1}`;
-  }
-  return row.slot_label;
+  const raw =
+    row.slot_label === row.dongleLabel || row.slot_label === row.dongle_label
+      ? `${row.dongleLabel}-${indexInGroup + 1}`
+      : row.slot_label;
+  return formatYeonunAccountDisplayLabel(raw, {
+    proxyPort: row.port > 0 ? row.port : undefined,
+    indexInGroup,
+  });
 }
 
 function sortWarmupRows(rows: PostingWarmupStatusRow[]): EnrichedWarmupRow[] {

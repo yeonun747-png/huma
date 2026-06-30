@@ -1415,6 +1415,11 @@
 @media (max-width: 900px) {
   .blog-check-view .bci-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+.blog-check-view .bci-section-gap {
+  grid-column: 1 / -1;
+  height: 0;
+  margin: 14px 0 2px;
+}
 .blog-check-view .bci-card {
   background: var(--bg2);
   border: 1px solid var(--bdr);

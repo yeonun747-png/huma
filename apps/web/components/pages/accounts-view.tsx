@@ -23,6 +23,7 @@ import { useAuth } from '@/lib/auth-context';
 import { alertAccountError } from '@/lib/account-errors';
 import { copyVncEndpoint, parseVncEndpoint } from '@/lib/open-vnc';
 import { BlogPersonaModal } from '@/components/accounts/blog-persona-modal';
+import { formatYeonunAccountDisplayLabel } from '@/lib/yeonun-dongle-groups';
 import { VideoPersonaModal } from '@/components/accounts/video-persona-modal';
 import {
   BUSINESS_UNITS,
@@ -538,7 +539,11 @@ export function AccountsView() {
       iconBg="var(--ok-bg)"
       name={
         <>
-          {ac.slot_label ?? ac.name}{' '}
+          {ac.workspace === 'yeonun'
+            ? formatYeonunAccountDisplayLabel(ac.slot_label ?? ac.name, {
+                proxyPort: ac.proxy_port ?? undefined,
+              })
+            : (ac.slot_label ?? ac.name)}{' '}
           <span className="m-type-badge m-type-posting">POSTING</span>
         </>
       }
