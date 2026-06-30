@@ -26,6 +26,7 @@ export type AutoPublishStatus = {
   auto_publish_enabled?: boolean;
   auto_publish_planned_count?: number | null;
   auto_publish_next_slot_at?: string | null;
+  proxy_port?: number | null;
 };
 
 export const AUTO_PUBLISH_BTN_CLASS =

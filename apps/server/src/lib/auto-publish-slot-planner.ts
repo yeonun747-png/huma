@@ -1,4 +1,10 @@
-import { avoidCrossPostingCollision } from './posting-cross-stagger.js';
+import {
+  avoidDongleAwareScheduleCollision,
+  CROSS_DONGLE_AUTO_PUBLISH_STAGGER_MS,
+  loadPostingAccountProxyPort,
+  SAME_DONGLE_STAGGER_MS,
+  type PeerScheduleSlot,
+} from './posting-cross-stagger.js';
 import {
   countInFlightPostingPipeline,
   countTodayPostBlogCompleted,
@@ -21,7 +27,7 @@ import { getPostingWarmupDay } from './posting-warmup-day.js';
 import { randomBetween } from './utils.js';
 import { supabase } from '../middleware/auth.js';
 
-/** 자동발행 content_full 등록 — 다른 계정 트리거와만 2분 간격 (CAPTCHA 10분은 post_blog 실행 시 적용) */
+/** @deprecated 동글-aware stagger 사용 */
 export const AUTO_PUBLISH_PEER_STAGGER_MS = 2 * 60_000;
 
 function kstNowParts(date = new Date()): { y: number; m: number; d: number; hour: number; minute: number } {
@@ -158,36 +164,50 @@ export async function planNextAutoPublishTriggerAt(
 
   candidate = await ensureActivePostingWindow(candidate, activeHours);
 
+  const accountProxyPort = await loadPostingAccountProxyPort(accountId);
   const peerTriggers = await listPeerAutoPublishNextSlots(accountId);
-  candidate = avoidCrossPostingCollision(
-    candidate,
-    peerTriggers,
-    AUTO_PUBLISH_PEER_STAGGER_MS,
-  );
+  candidate = avoidDongleAwareScheduleCollision(candidate, peerTriggers, accountProxyPort, {
+    sameDongleMs: SAME_DONGLE_STAGGER_MS,
+    crossDongleMs: CROSS_DONGLE_AUTO_PUBLISH_STAGGER_MS,
+  });
 
   if (candidate.getTime() <= now + 60_000) {
-    candidate = avoidCrossPostingCollision(
+    candidate = avoidDongleAwareScheduleCollision(
       await ensureActivePostingWindow(new Date(now + randomBetween(2, 8) * 60_000), activeHours),
       peerTriggers,
-      AUTO_PUBLISH_PEER_STAGGER_MS,
+      accountProxyPort,
+      {
+        sameDongleMs: SAME_DONGLE_STAGGER_MS,
+        crossDongleMs: CROSS_DONGLE_AUTO_PUBLISH_STAGGER_MS,
+      },
     );
   }
 
   return candidate.toISOString();
 }
 
-/** 다른 계정의 예정 자동발행 시각 — 겹침 방지 */
-async function listPeerAutoPublishNextSlots(excludeAccountId: string): Promise<Date[]> {
+/** 다른 계정의 예정 자동발행 시각 — 동글별 겹침 방지 */
+async function listPeerAutoPublishNextSlots(excludeAccountId: string): Promise<PeerScheduleSlot[]> {
   const { data } = await supabase
     .from('huma_accounts')
-    .select('id, auto_publish_next_slot_at')
+    .select('id, proxy_port, auto_publish_next_slot_at')
     .eq('auto_publish_enabled', true)
     .neq('id', excludeAccountId)
     .not('auto_publish_next_slot_at', 'is', null);
 
   return (data ?? [])
-    .map((r) => (r.auto_publish_next_slot_at ? new Date(r.auto_publish_next_slot_at as string) : null))
-    .filter((d): d is Date => d != null);
+    .map((r) => {
+      const at = r.auto_publish_next_slot_at
+        ? new Date(r.auto_publish_next_slot_at as string)
+        : null;
+      if (!at) return null;
+      const port = r.proxy_port;
+      return {
+        at,
+        proxyPort: typeof port === 'number' ? port : null,
+      } satisfies PeerScheduleSlot;
+    })
+    .filter((d): d is PeerScheduleSlot => d != null);
 }
 
 /** 자정 롤오버 — enabled 계정의 planned_count 갱신 */

@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
 import { appAlert } from '@/lib/app-dialog';
+import { groupYeonunByDongle } from '@/lib/yeonun-dongle-groups';
 import {
   AutoPublishChip,
   getInitialYeonunAccounts,
@@ -22,6 +23,8 @@ export function YeonunPublishAccountsStrip({ refreshToken = 0, onDone }: YeonunP
   const [loaded, setLoaded] = useState(() =>
     getInitialYeonunAccounts().some((a) => Boolean(a.account_id)),
   );
+
+  const dongleGroups = useMemo(() => groupYeonunByDongle(accounts), [accounts]);
 
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setSyncing(true);
@@ -83,24 +86,49 @@ export function YeonunPublishAccountsStrip({ refreshToken = 0, onDone }: YeonunP
   }
 
   return (
-    <div className="flex flex-wrap items-start justify-end gap-2" aria-label="연운 계정별 자동 발행">
-      {accounts.map((row, index) => {
-        const label = row.account_label ?? row.account_id?.slice(0, 8) ?? `연운${index + 1}`;
-        const enabled = row.auto_publish_enabled ?? false;
-        const busy = togglingId === row.account_id;
+    <div
+      className="flex flex-wrap items-stretch justify-end gap-y-2"
+      aria-label="연운 계정별 자동 발행"
+    >
+      {dongleGroups.map((group, groupIndex) => (
+        <div key={group.proxyPort} className="flex items-stretch">
+          {groupIndex > 0 ? (
+            <div
+              className="mx-2 w-px shrink-0 self-stretch bg-huma-bdr/90"
+              aria-hidden
+              title={`${group.dongleLabel} 그룹`}
+            />
+          ) : null}
+          <div
+            className="flex flex-col gap-0.5"
+            aria-label={`${group.dongleLabel} 동글`}
+          >
+            <div className="px-0.5 font-mono text-[9px] font-semibold uppercase tracking-wide text-huma-t3">
+              {group.dongleLabel}
+            </div>
+            <div className="flex flex-wrap items-start gap-2">
+              {group.items.map((row, index) => {
+                const label =
+                  row.account_label ?? row.account_id?.slice(0, 8) ?? `${group.dongleLabel}-${index + 1}`;
+                const enabled = row.auto_publish_enabled ?? false;
+                const busy = togglingId === row.account_id;
 
-        return (
-          <AutoPublishChip
-            key={row.account_id ?? label}
-            status={row}
-            enabled={enabled}
-            busy={busy}
-            label={label}
-            syncing={syncing}
-            onToggle={() => void handleToggle(row)}
-          />
-        );
-      })}
+                return (
+                  <AutoPublishChip
+                    key={row.account_id ?? label}
+                    status={row}
+                    enabled={enabled}
+                    busy={busy}
+                    label={label}
+                    syncing={syncing}
+                    onToggle={() => void handleToggle(row)}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

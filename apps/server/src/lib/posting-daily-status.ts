@@ -87,6 +87,9 @@ export interface AutoPublishStatus {
   /** 다음 content_full 자동 등록 예정 */
   auto_publish_next_slot_at?: string | null;
 
+  /** 포스팅 동글 proxy_port (10001~10005) */
+  proxy_port?: number | null;
+
 }
 
 
@@ -226,7 +229,7 @@ async function buildAccountPublishStatus(
 
   workspace: string,
 
-  account: { id: string; label?: string },
+  account: { id: string; label?: string; proxy_port?: number | null },
 
 ): Promise<AutoPublishStatus> {
 
@@ -242,7 +245,7 @@ async function buildAccountPublishStatus(
 
     .from('huma_accounts')
 
-    .select('warmup_day, auto_publish_enabled, auto_publish_planned_count, auto_publish_next_slot_at')
+    .select('warmup_day, auto_publish_enabled, auto_publish_planned_count, auto_publish_next_slot_at, proxy_port')
 
     .eq('id', account.id)
 
@@ -305,6 +308,10 @@ async function buildAccountPublishStatus(
     auto_publish_planned_count: (accRow?.auto_publish_planned_count as number | null) ?? null,
 
     auto_publish_next_slot_at: (accRow?.auto_publish_next_slot_at as string | null) ?? null,
+
+    proxy_port:
+      account.proxy_port ??
+      (typeof accRow?.proxy_port === 'number' ? (accRow.proxy_port as number) : null),
 
   };
 
@@ -522,11 +529,20 @@ export async function getAutoPublishStatusForAllAccounts(
 
   if (!accounts.length) return [];
 
-  return Promise.all(
+  const rows = await Promise.all(
 
-    accounts.map((a) => buildAccountPublishStatus(workspace, { id: a.id, label: a.label })),
+    accounts.map((a) =>
+      buildAccountPublishStatus(workspace, { id: a.id, label: a.label, proxy_port: a.proxy_port }),
+    ),
 
   );
+
+  return rows.sort((a, b) => {
+    const pa = a.proxy_port ?? 99999;
+    const pb = b.proxy_port ?? 99999;
+    if (pa !== pb) return pa - pb;
+    return (a.account_label ?? '').localeCompare(b.account_label ?? '', 'ko');
+  });
 
 }
 
