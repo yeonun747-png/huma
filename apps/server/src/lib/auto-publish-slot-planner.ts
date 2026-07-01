@@ -13,15 +13,17 @@ import {
 import { countTodaySimilaritySkipped } from './posting-content-similarity.js';
 import { formatKstDateKey, getDailyPostingTarget } from './posting-daily-target.js';
 import {
+  computeDynamicPublishIntervalHours,
+  computeEarliestPostingCandidate,
   deriveActiveHourWindow,
   getActivePostingWindowHours,
-  computeDynamicPublishIntervalHours,
 } from './posting-interval.js';
 import {
   getHumanEngineScheduleConfig,
   isNightBanActive,
   msUntilNextActiveHour,
 } from './human-engine-policy.js';
+import { msUntilNightBanEnd } from './crank-schedule-config.js';
 import { ABSOLUTE_MIN_PUBLISH_INTERVAL_HOURS } from './posting-warmup.js';
 import { getPostingWarmupDay } from './posting-warmup-day.js';
 import { randomBetween } from './utils.js';
@@ -30,32 +32,12 @@ import { supabase } from '../middleware/auth.js';
 /** @deprecated 동글-aware stagger 사용 */
 export const AUTO_PUBLISH_PEER_STAGGER_MS = 2 * 60_000;
 
-function kstNowParts(date = new Date()): { y: number; m: number; d: number; hour: number; minute: number } {
-  const fmt = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Seoul',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
-  const parts = fmt.formatToParts(date);
-  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
-  return { y: get('year'), m: get('month'), d: get('day'), hour: get('hour'), minute: get('minute') };
-}
-
 function kstHourFromDate(date: Date): number {
   return Number(
     new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', hour: 'numeric', hour12: false }).format(
       date,
     ),
   );
-}
-
-function kstDateTimeToUtc(y: number, m: number, d: number, hour: number, minute: number): Date {
-  const iso = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00+09:00`;
-  return new Date(iso);
 }
 
 function isHourInActiveWindow(hour: number, activeHours: number[], minIntensity = 0.25): boolean {
@@ -68,16 +50,17 @@ async function loadAccountWarmupDay(accountId: string): Promise<number> {
 }
 
 async function ensureActivePostingWindow(candidate: Date, activeHours: number[]): Promise<Date> {
+  const human = await getHumanEngineScheduleConfig();
   if (await isNightBanActive()) {
-    const human = await getHumanEngineScheduleConfig();
-    const wait = msUntilNextActiveHour(human.active_hours ?? []);
-    return new Date(Date.now() + wait + randomBetween(1, 5) * 60_000);
+    const wait = msUntilNightBanEnd(human.night_ban_start ?? 0, human.night_ban_end ?? 7);
+    if (wait > 0) {
+      return new Date(Date.now() + wait + randomBetween(1, 5) * 60_000);
+    }
   }
   const hour = kstHourFromDate(candidate);
   if (isHourInActiveWindow(hour, activeHours) && candidate.getTime() > Date.now() + 60_000) {
     return candidate;
   }
-  const human = await getHumanEngineScheduleConfig();
   const wait = msUntilNextActiveHour(human.active_hours ?? []);
   return new Date(Date.now() + wait + randomBetween(1, 5) * 60_000);
 }
@@ -121,32 +104,10 @@ export async function planNextAutoPublishTriggerAt(
   );
   const minGapMs = minIntervalH * 3600_000;
 
-  const slotIndex = Math.min(consumedCount, dailyTarget - 1);
-  const { start: winStart, end: winEnd } = deriveActiveHourWindow(
+  const { start: winStart } = deriveActiveHourWindow(
     activeHours.length === 24 ? activeHours : [],
     0.25,
   );
-  const kst = kstNowParts(date);
-  const windowStartMin = winStart * 60;
-  const windowEndMin = winEnd * 60;
-  const windowSpanMin = Math.max(60, windowEndMin - windowStartMin);
-  const slotSizeMin = windowSpanMin / dailyTarget;
-  const slotStartMin = windowStartMin + slotIndex * slotSizeMin;
-  const slotEndMin = Math.min(windowEndMin, slotStartMin + slotSizeMin);
-  const buffer = Math.min(15, slotSizeMin * 0.12);
-  const pickStart = Math.floor(slotStartMin + buffer);
-  const pickEnd = Math.max(pickStart + 5, Math.floor(slotEndMin - buffer));
-  const pickMin =
-    pickStart + Math.floor(Math.random() * Math.max(1, pickEnd - pickStart + 1));
-  const pickHour = Math.floor(pickMin / 60);
-  const pickMinute = pickMin % 60;
-
-  let candidate = kstDateTimeToUtc(kst.y, kst.m, kst.d, pickHour, pickMinute);
-  const now = Date.now();
-
-  if (candidate.getTime() <= now + 60_000) {
-    candidate = new Date(now + randomBetween(2, 8) * 60_000);
-  }
 
   const { data: lastJobs } = await supabase
     .from('huma_jobs')
@@ -158,9 +119,14 @@ export async function planNextAutoPublishTriggerAt(
     .limit(1);
 
   const lastAt = lastJobs?.[0]?.created_at ? new Date(lastJobs[0].created_at as string) : null;
-  if (lastAt && candidate.getTime() - lastAt.getTime() < minGapMs) {
-    candidate = new Date(lastAt.getTime() + minGapMs + randomBetween(1, 8) * 60_000);
-  }
+
+  let candidate = computeEarliestPostingCandidate({
+    now: date,
+    winStartHour: winStart,
+    minGapMs,
+    lastAnchor: lastAt,
+  });
+  const now = Date.now();
 
   candidate = await ensureActivePostingWindow(candidate, activeHours);
 

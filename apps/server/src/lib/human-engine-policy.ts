@@ -155,7 +155,7 @@ export async function getHumanEngineScheduleConfig(): Promise<HumanEngineSchedul
 export function isKstNightBanFromConfig(
   human: Pick<HumanEngineConfig, 'night_ban_start' | 'night_ban_end'>,
 ): boolean {
-  return isKstNightBan(human.night_ban_start ?? 1, human.night_ban_end ?? 7);
+  return isKstNightBan(human.night_ban_start ?? 0, human.night_ban_end ?? 7);
 }
 
 /** app_settings.night_ban + human_engine 야간 구간 (KST) */

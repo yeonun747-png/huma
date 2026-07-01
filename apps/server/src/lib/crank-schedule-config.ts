@@ -214,13 +214,26 @@ export function getKstClock(from = new Date()): { hour: number; minute: number; 
 }
 
 export function isKstNightBan(
-  nightBanStart = 1,
+  nightBanStart = 0,
   nightBanEnd = 7,
   from = new Date(),
 ): boolean {
   const { hour } = getKstClock(from);
   if (nightBanStart < nightBanEnd) return hour >= nightBanStart && hour < nightBanEnd;
   return hour >= nightBanStart || hour < nightBanEnd;
+}
+
+/** KST 야간 금지 종료(예: 07:00)까지 대기 ms — 금지 구간 밖이면 0 */
+export function msUntilNightBanEnd(
+  nightBanStart = 0,
+  nightBanEnd = 7,
+  from = new Date(),
+): number {
+  if (!isKstNightBan(nightBanStart, nightBanEnd, from)) return 0;
+  const { hour, minute } = getKstClock(from);
+  let hoursToEnd = nightBanEnd - hour;
+  if (hoursToEnd <= 0) hoursToEnd += 24;
+  return Math.max(60_000, hoursToEnd * 3_600_000 - minute * 60_000);
 }
 
 export function addDaysToIso(iso: string | null | undefined, days: number): string | null {

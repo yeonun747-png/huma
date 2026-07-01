@@ -72,7 +72,7 @@ export async function getHumanEngineConfig(): Promise<HumanEngineConfig> {
     backspace_delay_ms: [200, 800],
     paragraph_pause_ms: [5000, 20000],
     review_duration_ms: [120000, 300000],
-    night_ban_start: 1,
+    night_ban_start: 0,
     night_ban_end: 7,
     paste_ratio: 0.55,
     // 합성 composition 입력이 기본(fcitx/CDP 비의존, 한글 정확). OS IME는 명시 활성 시에만.
@@ -82,6 +82,6 @@ export async function getHumanEngineConfig(): Promise<HumanEngineConfig> {
 
 /** @deprecated worker는 isNightBanActive() 사용 (KST + app_settings) */
 export function isNightBan(config?: HumanEngineConfig): boolean {
-  const c = config ?? { night_ban_start: 1, night_ban_end: 7 };
+  const c = config ?? { night_ban_start: 0, night_ban_end: 7 };
   return isKstNightBan(c.night_ban_start, c.night_ban_end);
 }

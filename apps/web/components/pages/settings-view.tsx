@@ -314,7 +314,7 @@ export function SettingsView() {
             onChange={(v) => patchApp('daily_limit', v)}
           />
           <SettingsToggle
-            label="야간 발행 금지 (01~07시)"
+            label="야간 발행 금지 (00~07시)"
             value={Boolean(app.night_ban ?? true)}
             onChange={(v) => patchApp('night_ban', v)}
           />
