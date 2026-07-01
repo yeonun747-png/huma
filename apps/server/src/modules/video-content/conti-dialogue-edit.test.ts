@@ -19,13 +19,13 @@ describe('applyShotDialoguePatches', () => {
     };
 
     const next = applyShotDialoguePatches(contiJson, [
-      { shotNumber: 1, dialogue: 'A: "수정본"' },
-      { shotNumber: 2, dialogue: 'B: "추가"' },
+      { shotNumber: 1, dialogue: 'A: "수정본"', action: 'A가 고개를 든다.' },
+      { shotNumber: 2, dialogue: 'B: "추가"', action: 'B가 웃는다.' },
     ]);
 
     expect(next.shots).toEqual([
-      { shotNumber: 1, startSec: 0, endSec: 3, camera: '미디엄', action: 'A가 본다.', dialogue: 'A: "수정본"' },
-      { shotNumber: 2, startSec: 3, endSec: 6, camera: '클로즈', action: 'B가 말한다.', dialogue: 'B: "추가"' },
+      { shotNumber: 1, startSec: 0, endSec: 3, camera: '미디엄', action: 'A가 고개를 든다.', dialogue: 'A: "수정본"' },
+      { shotNumber: 2, startSec: 3, endSec: 6, camera: '클로즈', action: 'B가 웃는다.', dialogue: 'B: "추가"' },
     ]);
   });
 });

@@ -328,7 +328,7 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
     if (!existing) return reply.code(404).send({ error: '없음' });
     if (!allowed.includes(existing.workspace)) return reply.code(403).send({ error: '권한 없음' });
     if (!canEditContiDialogues(existing.status)) {
-      return reply.code(409).send({ error: `멘트 수정 불가 상태: ${existing.status}` });
+      return reply.code(409).send({ error: `액션/멘트 수정 불가 상태: ${existing.status}` });
     }
 
     const body = request.body as { dialogues?: ShotDialoguePatch[] };
@@ -341,7 +341,7 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
     try {
       nextContiJson = applyShotDialoguePatches(contiJson, body.dialogues);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : '멘트 저장 실패';
+      const msg = err instanceof Error ? err.message : '액션/멘트 저장 실패';
       return reply.code(400).send({ error: msg });
     }
 

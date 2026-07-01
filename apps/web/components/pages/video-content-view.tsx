@@ -215,10 +215,10 @@ function CompletedDetail({
     async (dialogues: ShotDialogueDraft[]) => {
       try {
         await api.updateVideoContentShotDialogues(item.id, dialogues);
-        await appAlert('멘트를 저장했습니다');
+        await appAlert('액션/멘트를 저장했습니다');
         onRefresh();
       } catch (e) {
-        await appAlert(e instanceof Error ? e.message : '멘트 저장 실패');
+        await appAlert(e instanceof Error ? e.message : '액션/멘트 저장 실패');
         throw e;
       }
     },
@@ -426,10 +426,10 @@ function DetailPanel({
     async (dialogues: ShotDialogueDraft[]) => {
       try {
         await api.updateVideoContentShotDialogues(full.id, dialogues);
-        await appAlert('멘트를 저장했습니다');
+        await appAlert('액션/멘트를 저장했습니다');
         onRefresh();
       } catch (e) {
-        await appAlert(e instanceof Error ? e.message : '멘트 저장 실패');
+        await appAlert(e instanceof Error ? e.message : '액션/멘트 저장 실패');
         throw e;
       }
     },

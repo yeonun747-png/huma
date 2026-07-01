@@ -16,6 +16,7 @@ export function canEditContiDialogues(status: string): status is EditableContiDi
 export interface ShotDialoguePatch {
   shotNumber: number;
   dialogue: string;
+  action: string;
 }
 
 export function applyShotDialoguePatches(
@@ -30,14 +31,17 @@ export function applyShotDialoguePatches(
   const byNumber = new Map(
     patches
       .filter((p) => Number.isFinite(p.shotNumber) && p.shotNumber > 0)
-      .map((p) => [p.shotNumber, p.dialogue]),
+      .map((p) => [
+        p.shotNumber,
+        { dialogue: String(p.dialogue ?? '').trim(), action: String(p.action ?? '').trim() },
+      ]),
   );
 
   const nextShots = shots.map((shot, index) => {
     const shotNumber = shot.shotNumber > 0 ? shot.shotNumber : index + 1;
-    if (!byNumber.has(shotNumber)) return shot;
-    const dialogue = String(byNumber.get(shotNumber) ?? '').trim();
-    return { ...shot, dialogue };
+    const patch = byNumber.get(shotNumber);
+    if (!patch) return shot;
+    return { ...shot, dialogue: patch.dialogue, action: patch.action };
   });
 
   return { ...contiJson, shots: nextShots };

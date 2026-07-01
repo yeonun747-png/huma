@@ -594,7 +594,7 @@ export const api = {
     request(`/api/video-content/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   updateVideoContentShotDialogues: (
     id: string,
-    dialogues: Array<{ shotNumber: number; dialogue: string }>,
+    dialogues: Array<{ shotNumber: number; dialogue: string; action: string }>,
   ) =>
     request<HumaVideoContentHistory>(`/api/video-content/${id}/conti-dialogues`, {
       method: 'PATCH',

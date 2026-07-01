@@ -4,12 +4,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ContiPreviewData } from '@/lib/video-content-status';
 import { VIDEO_PRIMARY_BTN } from '@/components/video/video-content-ui';
 
-export type ShotDialogueDraft = { shotNumber: number; dialogue: string };
+export type ShotDialogueDraft = { shotNumber: number; dialogue: string; action: string };
 
 function syncTextareaHeight(el: HTMLTextAreaElement) {
   el.style.height = 'auto';
   el.style.height = `${el.scrollHeight}px`;
 }
+
+const CONTI_ACTION_TEXTAREA =
+  'w-full min-h-[2rem] rounded-md border border-huma-bdr bg-huma-bg3 px-2 py-1.5 font-[inherit] text-[11.5px] leading-relaxed text-huma-t outline-none focus:border-huma-acc';
 
 const CONTI_DIALOGUE_TEXTAREA =
   'w-full min-h-[2rem] rounded-md border border-huma-bdr bg-huma-bg3 px-2 py-1.5 font-[inherit] text-[11.5px] leading-relaxed text-huma-warn outline-none focus:border-huma-acc';
@@ -63,7 +66,12 @@ export function ContiPreview({
 }) {
   const shots = conti.shots ?? [];
   const initialDrafts = useMemo(
-    () => shots.map((s, i) => ({ shotNumber: s.shotNumber ?? i + 1, dialogue: s.dialogue ?? '' })),
+    () =>
+      shots.map((s, i) => ({
+        shotNumber: s.shotNumber ?? i + 1,
+        dialogue: s.dialogue ?? '',
+        action: s.action ?? '',
+      })),
     [shots],
   );
   const [drafts, setDrafts] = useState(initialDrafts);
@@ -73,7 +81,10 @@ export function ContiPreview({
     setDrafts(initialDrafts);
   }, [initialDrafts]);
 
-  const dirty = drafts.some((d, i) => d.dialogue !== (shots[i]?.dialogue ?? ''));
+  const dirty = drafts.some(
+    (d, i) =>
+      d.dialogue !== (shots[i]?.dialogue ?? '') || d.action !== (shots[i]?.action ?? ''),
+  );
 
   const handleSave = async () => {
     if (!onSaveDialogues || !dirty) return;
@@ -160,7 +171,7 @@ export function ContiPreview({
                 disabled={!dirty || saving || !onSaveDialogues}
                 onClick={() => void handleSave()}
               >
-                {saving ? '저장 중…' : '멘트 저장'}
+                {saving ? '저장 중…' : '액션/멘트 저장'}
               </button>
             ) : null}
           </div>
@@ -189,23 +200,41 @@ export function ContiPreview({
                     </td>
                     <td className="p-1">{s.camera ?? '—'}</td>
                     <td className="p-1">
-                      {s.action ? <div>{s.action}</div> : null}
                       {editable ? (
-                        <AutoHeightTextarea
-                          className={`${CONTI_DIALOGUE_TEXTAREA} ${s.action ? 'mt-1' : ''}`}
-                          value={drafts[i]?.dialogue ?? ''}
-                          placeholder="멘트 없음"
-                          onChange={(value) => {
-                            setDrafts((prev) =>
-                              prev.map((row, idx) => (idx === i ? { ...row, dialogue: value } : row)),
-                            );
-                          }}
-                        />
-                      ) : drafts[i]?.dialogue ? (
-                        <div className={`text-huma-warn ${s.action ? 'mt-1' : ''}`}>「{drafts[i]!.dialogue}」</div>
-                      ) : !s.action ? (
-                        <span className="text-huma-t4">—</span>
-                      ) : null}
+                        <>
+                          <AutoHeightTextarea
+                            className={CONTI_ACTION_TEXTAREA}
+                            value={drafts[i]?.action ?? ''}
+                            placeholder="액션 없음"
+                            onChange={(value) => {
+                              setDrafts((prev) =>
+                                prev.map((row, idx) => (idx === i ? { ...row, action: value } : row)),
+                              );
+                            }}
+                          />
+                          <AutoHeightTextarea
+                            className={`${CONTI_DIALOGUE_TEXTAREA} mt-1`}
+                            value={drafts[i]?.dialogue ?? ''}
+                            placeholder="멘트 없음"
+                            onChange={(value) => {
+                              setDrafts((prev) =>
+                                prev.map((row, idx) => (idx === i ? { ...row, dialogue: value } : row)),
+                              );
+                            }}
+                          />
+                        </>
+                      ) : (
+                        <>
+                          {drafts[i]?.action ? <div>{drafts[i]!.action}</div> : null}
+                          {drafts[i]?.dialogue ? (
+                            <div className={`text-huma-warn ${drafts[i]?.action ? 'mt-1' : ''}`}>
+                              「{drafts[i]!.dialogue}」
+                            </div>
+                          ) : !drafts[i]?.action ? (
+                            <span className="text-huma-t4">—</span>
+                          ) : null}
+                        </>
+                      )}
                     </td>
                   </tr>
                 ))}
