@@ -611,6 +611,7 @@ export const api = {
         endSec: number;
         text: string;
         speakerStyle: 'A' | 'B' | 'default';
+        lines: Array<{ text: string; speakerStyle: 'A' | 'B' | 'default' }>;
       }>;
     }>(`/api/video-content/${id}/subtitle-preview`, {
       method: 'POST',

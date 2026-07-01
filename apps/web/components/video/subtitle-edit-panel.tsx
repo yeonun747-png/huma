@@ -131,7 +131,7 @@ export function SubtitleEditPanel({
   onSaveOnly: (drafts: ShotSubtitleDraft[]) => Promise<void>;
   onSaveAndApply: (drafts: ShotSubtitleDraft[]) => Promise<void>;
   onRestore: () => Promise<void>;
-  onApplyWithoutSave: () => Promise<void>;
+  onApplyWithoutSave: (opts?: { skipConfirm?: boolean }) => Promise<void>;
 }) {
   const shotsFingerprint = contiShotsFingerprint(conti);
   const initialDrafts = useMemo(() => shotsToDrafts(conti), [shotsFingerprint]);
@@ -184,11 +184,15 @@ export function SubtitleEditPanel({
     }
   };
 
-  const handleSaveAndApply = async () => {
-    if (!hasSource) return;
+  const handlePrimaryApply = async () => {
+    if (!hasSource || busy) return;
     setSaving(true);
     try {
-      await onSaveAndApply(drafts);
+      if (dirty) {
+        await onSaveAndApply(drafts);
+      } else {
+        await onApplyWithoutSave({ skipConfirm: true });
+      }
     } finally {
       setSaving(false);
     }
@@ -223,11 +227,11 @@ export function SubtitleEditPanel({
   };
 
   return (
-    <div className="rounded-lg border border-huma-bdr bg-huma-bg2">
+    <div id="subtitle-edit-panel" className="rounded-lg border border-huma-bdr bg-huma-bg2 scroll-mt-3">
       <div className="border-b border-huma-bdr px-3 py-2.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <div className="text-[12px] font-semibold text-huma-t">💬 자막 수정</div>
+            <div className="text-[12px] font-semibold text-huma-t">💬 자막만 다시 입히기(무료)</div>
             <p className="mt-0.5 text-[10px] leading-relaxed text-huma-t3">
               원본 영상은 그대로, 아래 멘트·구간 기준으로 자막만 다시 입힙니다.
               {reburnCount > 0 ? (
@@ -365,10 +369,10 @@ export function SubtitleEditPanel({
           <button
             type="button"
             className={`${VIDEO_PRIMARY_BTN} ${reburning ? 'animate-pulse' : ''}`}
-            disabled={!dirty || busy || !hasSource}
-            onClick={() => void handleSaveAndApply()}
+            disabled={busy || !hasSource}
+            onClick={() => void handlePrimaryApply()}
           >
-            {reburning ? '자막 적용 중…' : '저장 후 자막 적용'}
+            {reburning ? '자막 적용 중…' : '자막만 다시 입히기(무료)'}
           </button>
         </div>
       </div>

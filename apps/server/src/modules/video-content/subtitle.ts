@@ -47,37 +47,73 @@ export function parseDialogueSegments(dialogue: string): DialogueSegment[] {
   return segments;
 }
 
-/** 화면 자막용 — 모든 A:/B: 라벨·따옴표 제거 */
-export function stripSpeakerLabel(dialogue: string): string {
-  const segments = parseDialogueSegments(dialogue);
+/** 화면 자막용 — 한 줄에서 A:/B: 라벨·따옴표 제거 */
+function stripSpeakerLabelLine(line: string): string {
+  const segments = parseDialogueSegments(line);
   if (segments.length) return segments.map((s) => s.text).join(' ').trim();
-  return cleanQuotedFragment(normalizeDialogueQuotes(dialogue).replace(/(?:^|\s)[AB]\s*:\s*/gi, ' '));
+  return cleanQuotedFragment(normalizeDialogueQuotes(line).replace(/(?:^|\s)[AB]\s*:\s*/gi, ' '));
+}
+
+/** 화면 자막용 — 모든 A:/B: 라벨·따옴표 제거 (줄바꿈 유지) */
+export function stripSpeakerLabel(dialogue: string): string {
+  const lines = dialogue.replace(/\r\n/g, '\n').split('\n');
+  if (lines.length > 1) {
+    return lines.map((line) => stripSpeakerLabelLine(line)).filter(Boolean).join('\n');
+  }
+  return stripSpeakerLabelLine(dialogue);
 }
 
 function escapeAssText(text: string): string {
   return text.replace(/\\/g, '\\\\').replace(/{/g, '\\{').replace(/}/g, '\\}');
 }
 
-export function formatAssDialogueText(dialogue: string): {
+function assNewlines(text: string): string {
+  return escapeAssText(text).replace(/\n/g, '\\N');
+}
+
+/** 한 물리 줄(엔터로 구분) ASS 텍스트 — 같은 줄에 A/B 복수 대사는 인라인 색상 */
+function formatAssDialogueLine(line: string): {
   text: string;
   style: 'Default' | 'SpeakerA' | 'SpeakerB';
 } {
-  const segments = parseDialogueSegments(dialogue);
+  const segments = parseDialogueSegments(line);
   if (!segments.length) return { text: '', style: 'Default' };
 
   if (segments.length === 1) {
     const seg = segments[0]!;
-    if (seg.speaker === 'B') return { text: escapeAssText(seg.text), style: 'SpeakerB' };
-    if (seg.speaker === 'A') return { text: escapeAssText(seg.text), style: 'SpeakerA' };
-    return { text: escapeAssText(seg.text), style: 'Default' };
+    if (seg.speaker === 'B') return { text: assNewlines(seg.text), style: 'SpeakerB' };
+    if (seg.speaker === 'A') return { text: assNewlines(seg.text), style: 'SpeakerA' };
+    return { text: assNewlines(seg.text), style: 'Default' };
   }
 
   const parts = segments.map((seg, i) => {
     const prefix = i > 0 ? ' ' : '';
     const color = seg.speaker === 'B' ? ASS_COLOR_B : ASS_COLOR_A;
-    return `${prefix}{\\c${color}&}${escapeAssText(seg.text)}`;
+    return `${prefix}{\\c${color}&}${assNewlines(seg.text)}`;
   });
   return { text: parts.join(''), style: 'Default' };
+}
+
+function assColoredLine(f: { text: string; style: 'Default' | 'SpeakerA' | 'SpeakerB' }): string {
+  if (f.style === 'SpeakerB') return `{\\c${ASS_COLOR_B}&}${f.text}`;
+  if (f.style === 'SpeakerA') return `{\\c${ASS_COLOR_A}&}${f.text}`;
+  return f.text;
+}
+
+export function formatAssDialogueText(dialogue: string): {
+  text: string;
+  style: 'Default' | 'SpeakerA' | 'SpeakerB';
+} {
+  const normalized = dialogue.replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n').map((l) => l.trim()).filter(Boolean);
+  const formatted = lines.map(formatAssDialogueLine);
+  if (!formatted.length) return { text: '', style: 'Default' };
+  if (formatted.length === 1) return formatted[0]!;
+
+  return {
+    text: formatted.map(assColoredLine).join('\\N'),
+    style: 'Default',
+  };
 }
 
 function positionToAss(style: SubtitleStyle): { alignment: number; marginV: number } {
@@ -159,12 +195,33 @@ function subtitleWindow(
   return { startSec, endSec };
 }
 
+export interface SubtitlePreviewLine {
+  text: string;
+  speakerStyle: 'A' | 'B' | 'default';
+}
+
 export interface SubtitlePreviewEvent {
   shotNumber: number;
   startSec: number;
   endSec: number;
   text: string;
   speakerStyle: 'A' | 'B' | 'default';
+  lines: SubtitlePreviewLine[];
+}
+
+function previewLinesForDialogue(dialogue: string): SubtitlePreviewLine[] {
+  return dialogue
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const { style } = formatAssDialogueLine(line);
+      const speakerStyle: SubtitlePreviewLine['speakerStyle'] =
+        style === 'SpeakerB' ? 'B' : style === 'SpeakerA' ? 'A' : 'default';
+      return { text: stripSpeakerLabelLine(line), speakerStyle };
+    })
+    .filter((l) => l.text.length > 0);
 }
 
 export function buildSubtitlePreviewEvents(conti: VideoConti, style: SubtitleStyle): SubtitlePreviewEvent[] {
@@ -181,6 +238,7 @@ export function buildSubtitlePreviewEvents(conti: VideoConti, style: SubtitleSty
     if (!window) continue;
 
     const { style: assStyle } = formatAssDialogueText(shot.dialogue!);
+    const lines = previewLinesForDialogue(shot.dialogue!);
     const displayText = stripSpeakerLabel(shot.dialogue!);
     if (!displayText) continue;
 
@@ -193,12 +251,41 @@ export function buildSubtitlePreviewEvents(conti: VideoConti, style: SubtitleSty
       endSec: window.endSec,
       text: displayText,
       speakerStyle,
+      lines,
     });
   }
 
   return events;
 }
 
+function splitPhysicalDialogueLines(dialogue: string): string[] {
+  return dialogue
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+
+export function buildAssDialogueRows(params: {
+  dialogue: string;
+  style: SubtitleStyle;
+}): Array<{ assStyle: 'Default' | 'SpeakerA' | 'SpeakerB'; marginV: number; text: string }> {
+  const pos = positionToAss(params.style);
+  const physicalLines = splitPhysicalDialogueLines(params.dialogue);
+
+  if (physicalLines.length <= 1) {
+    const { text, style: assStyle } = formatAssDialogueText(params.dialogue);
+    if (!text) return [];
+    return [{ assStyle, marginV: pos.marginV, text }];
+  }
+
+  const lineHeight = SUBTITLE_LINE_HEIGHT_PX;
+  return physicalLines.map((line, index) => {
+    const formatted = formatAssDialogueLine(line);
+    const marginV = pos.marginV + (physicalLines.length - 1 - index) * lineHeight;
+    return { assStyle: formatted.style, marginV, text: formatted.text };
+  });
+}
 export function buildAssContent(conti: VideoConti, style: SubtitleStyle): string {
   const pos = positionToAss(style);
   const box = boxStyleToAss(style);
@@ -223,15 +310,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   const lines: string[] = [header];
 
   for (const event of events) {
-    const assStyle =
-      event.speakerStyle === 'B' ? 'SpeakerB' : event.speakerStyle === 'A' ? 'SpeakerA' : 'Default';
-    const { text } = formatAssDialogueText(
-      conti.shots.find((s) => s.shotNumber === event.shotNumber)?.dialogue ?? event.text,
-    );
-    if (!text) continue;
-    lines.push(
-      `Dialogue: 0,${secToAssTime(event.startSec)},${secToAssTime(event.endSec)},${assStyle},,0,0,0,,${text.replace(/\n/g, '\\N')}`,
-    );
+    const dialogueRaw =
+      conti.shots.find((s) => s.shotNumber === event.shotNumber)?.dialogue ?? event.text;
+    const rows = buildAssDialogueRows({ dialogue: dialogueRaw, style });
+    for (const row of rows) {
+      if (!row.text) continue;
+      lines.push(
+        `Dialogue: 0,${secToAssTime(event.startSec)},${secToAssTime(event.endSec)},${row.assStyle},,0,0,${row.marginV},,${row.text}`,
+      );
+    }
   }
 
   return lines.join('\n');

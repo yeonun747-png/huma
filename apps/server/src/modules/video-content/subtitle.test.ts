@@ -45,6 +45,24 @@ describe('formatAssDialogueText', () => {
     expect(text).not.toMatch(/\b[AB]\s*:/i);
     expect(text).toMatch(/\\c&H/);
   });
+
+  it('preserves newline between speaker lines in ASS output', () => {
+    const dialogue = 'A: "손님이 워낙 많아서..."\nB: "최고 공감인데 단골은 안기억나요?"';
+    const { text, style } = formatAssDialogueText(dialogue);
+    expect(style).toBe('Default');
+    expect(text).toContain('\\N');
+    expect(text).toContain('손님이 워낙 많아서');
+    expect(text).toContain('최고 공감인데');
+  });
+});
+
+describe('stripSpeakerLabel newlines', () => {
+  it('preserves newline between speaker lines', () => {
+    const dialogue = 'A: "손님이 워낙 많아서..."\nB: "최고 공감인데 단골은 안기억나요?"';
+    expect(stripSpeakerLabel(dialogue)).toBe(
+      '손님이 워낙 많아서...\n최고 공감인데 단골은 안기억나요?',
+    );
+  });
 });
 
 describe('buildAssContent', () => {
@@ -118,5 +136,35 @@ describe('buildAssContent', () => {
     expect(events[0]!.text).toBe('안녕');
     expect(events[0]!.speakerStyle).toBe('A');
     expect(events[0]!.startSec).toBeLessThan(events[0]!.endSec);
+  });
+
+  it('writes ASS hard line break for multiline dialogue in one shot', () => {
+    const conti: VideoConti = {
+      characters: [],
+      location: '거실',
+      lighting: '밝음',
+      timeOfDay: '낮',
+      cutType: 'multi_shot',
+      duration: 6,
+      scenarioSummary: '테스트',
+      fullText: '테스트',
+      shots: [
+        {
+          shotNumber: 1,
+          startSec: 0,
+          endSec: 5,
+          camera: '와이드',
+          action: '대화',
+          dialogue: 'A: "손님이 워낙 많아서..."\nB: "최고 공감인데 단골은 안기억나요?"',
+        },
+      ],
+    };
+    const ass = buildAssContent(conti, subtitleStyle);
+    const dialogueLines = ass.split('\n').filter((line) => line.startsWith('Dialogue:'));
+    expect(dialogueLines).toHaveLength(2);
+    expect(dialogueLines[0]).toContain('SpeakerA');
+    expect(dialogueLines[0]).toContain('손님이 워낙 많아서');
+    expect(dialogueLines[1]).toContain('SpeakerB');
+    expect(dialogueLines[1]).toContain('최고 공감인데');
   });
 });

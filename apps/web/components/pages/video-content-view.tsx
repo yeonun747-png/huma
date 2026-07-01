@@ -256,20 +256,21 @@ function CompletedDetail({
           item.id,
           drafts.map((d) => ({
             shotNumber: d.shotNumber,
-            dialogue: d.dialogue,
+            dialogue: d.dialogue.replace(/\r\n/g, '\n'),
             action: d.action,
             startSec: d.startSec,
             endSec: d.endSec,
           })),
         );
         await onReburn({ skipConfirm: true });
-        await appToast('자막이 적용되었습니다');
+        appToast('자막이 적용되었습니다');
+        await onRefresh();
       } catch (e) {
         await appAlert(e instanceof Error ? e.message : '자막 적용 실패');
         throw e;
       }
     },
-    [item.id, onReburn],
+    [item.id, onReburn, onRefresh],
   );
 
   const seekVideo = useCallback((sec: number) => {
@@ -278,6 +279,8 @@ function CompletedDetail({
     el.currentTime = Math.max(0, sec);
     void el.play().catch(() => {});
   }, []);
+
+  const subtitlePanelRef = useRef<HTMLDivElement>(null);
 
   const handlePreviewEventsChange = useCallback((events: SubtitlePreviewEvent[]) => {
     setPreviewEvents(events);
@@ -339,7 +342,7 @@ function CompletedDetail({
           title="Kling 영상을 처음부터 다시 생성합니다"
           onClick={onRerender}
         >
-          {rerendering ? '🔄 재생성 중…' : '🔄 영상 재생성'}
+          {rerendering ? '🔄 재생성 중…' : '🔄 영상 재생성(비용발생)'}
         </button>
       </div>
 
@@ -375,7 +378,7 @@ function CompletedDetail({
           <p className="rounded border border-huma-bdr bg-huma-bg2 px-3 py-8 text-center text-[11px] text-huma-t3">
             {videoVariant === 'source'
               ? '원본 파일 없음 (이전 작업이거나 삭제됨)'
-              : '자막본 없음 — 아래 「저장 후 자막 적용」 사용'}
+              : '자막본 없음 — 아래 「자막만 다시 입히기(무료)」 사용'}
           </p>
         ) : (
           <p className="text-[11px] text-huma-t3">영상 로드 중…</p>
@@ -383,7 +386,8 @@ function CompletedDetail({
       </div>
 
       {conti ? (
-        <SubtitleEditPanel
+        <div ref={subtitlePanelRef}>
+          <SubtitleEditPanel
           historyId={item.id}
           conti={conti}
           hasSource={hasSource}
@@ -398,9 +402,14 @@ function CompletedDetail({
           onSaveOnly={persistDrafts}
           onSaveAndApply={saveAndApply}
           onRestore={onRestoreSubtitles}
-          onApplyWithoutSave={() => onReburn()}
+          onApplyWithoutSave={(opts) => onReburn({ skipConfirm: opts?.skipConfirm })}
         />
-      ) : null}
+        </div>
+      ) : (
+        <p className="rounded-lg border border-huma-bdr bg-huma-bg2 px-3 py-4 text-[11px] text-huma-t3">
+          콘티 데이터가 없어 자막 수정 패널을 표시할 수 없습니다.
+        </p>
+      )}
 
       <div className="flex flex-wrap gap-1">
         {PLATFORMS.map((p) => (

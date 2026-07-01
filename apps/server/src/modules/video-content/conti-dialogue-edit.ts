@@ -37,6 +37,12 @@ export interface ShotDialoguePatch {
   endSec?: number;
 }
 
+function normalizeDialogueField(value: unknown): string {
+  return String(value ?? '')
+    .replace(/\r\n/g, '\n')
+    .trim();
+}
+
 function patchShotTiming(
   shot: { shotNumber: number; startSec: number; endSec: number },
   patch: Pick<ShotDialoguePatch, 'startSec' | 'endSec'>,
@@ -70,7 +76,7 @@ export function applyShotDialoguePatches(
       .map((p) => [
         p.shotNumber,
         {
-          dialogue: String(p.dialogue ?? '').trim(),
+          dialogue: normalizeDialogueField(p.dialogue),
           action: String(p.action ?? '').trim(),
           startSec: p.startSec,
           endSec: p.endSec,
