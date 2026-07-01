@@ -358,7 +358,8 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
               error_message: null,
               advance_requested_at: null,
             })
-            .eq('id', humaJobId);
+            .eq('id', humaJobId)
+            .neq('status', 'completed');
         }
       };
 
@@ -840,7 +841,8 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
           await supabase
             .from('huma_jobs')
             .update({ status: 'failed', error_message: (err as Error).message, started_at: null })
-            .eq('id', humaJobId);
+            .eq('id', humaJobId)
+            .neq('status', 'completed');
         }
         if (!isVideoContentJob) {
           await logOperation({

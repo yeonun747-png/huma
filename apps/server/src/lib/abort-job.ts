@@ -38,6 +38,33 @@ async function forceReleaseModemForAccount(accountId: string): Promise<void> {
     .eq('status', 'busy');
 }
 
+type StuckJobRow = {
+  id: string;
+  status: string;
+  bull_job_id?: string | null;
+  account_id?: string | null;
+};
+
+/** Bull·CAPTCHA hold·계정·동글 락 해제 — DB status는 변경하지 않음 */
+export async function releaseStuckJobResources(job: StuckJobRow): Promise<void> {
+  if (getCaptchaHold(job.id) || job.status === 'awaiting_captcha') {
+    await cancelCaptchaHold(job.id).catch(() => {});
+  }
+
+  await removeBullJob(job.bull_job_id);
+  await removeBullJob(`huma-${job.id}`);
+
+  if (job.account_id) {
+    await forceReleaseAccount(job.account_id);
+    await forceReleaseModemForAccount(job.account_id);
+  }
+
+  await supabase
+    .from('huma_jobs')
+    .update({ bull_job_id: null, advance_requested_at: null })
+    .eq('id', job.id);
+}
+
 /**
  * 고착 LIVE/running — Bull·CAPTCHA hold·계정·동글 락 해제 후 failed 처리 (또는 삭제).
  */
@@ -60,17 +87,7 @@ export async function abortHumaJobById(
 
   const reason = opts?.reason?.trim() || 'JOB_ABORTED_BY_USER';
 
-  if (getCaptchaHold(id) || job.status === 'awaiting_captcha') {
-    await cancelCaptchaHold(id).catch(() => {});
-  }
-
-  await removeBullJob(job.bull_job_id);
-  await removeBullJob(`huma-${id}`);
-
-  if (job.account_id) {
-    await forceReleaseAccount(job.account_id);
-    await forceReleaseModemForAccount(job.account_id);
-  }
+  await releaseStuckJobResources(job);
 
   if (opts?.deleteAfter) {
     const del = await deleteJobById(id);
@@ -91,8 +108,6 @@ export async function abortHumaJobById(
       error_message: reason,
       started_at: null,
       completed_at: new Date().toISOString(),
-      bull_job_id: null,
-      advance_requested_at: null,
     })
     .eq('id', id);
 

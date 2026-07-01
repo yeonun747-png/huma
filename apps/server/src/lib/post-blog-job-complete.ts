@@ -68,6 +68,8 @@ export async function finalizePostBlogJob(
       started_at: job.started_at ?? completedAt,
       image_urls: null,
       platform_schedule,
+      bull_job_id: null,
+      advance_requested_at: null,
     })
     .eq('id', jobId);
 

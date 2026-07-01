@@ -1,7 +1,10 @@
 import { supabase } from '../middleware/auth.js';
 import { extractBlogIdFromUrl, normalizeBlogPostUrl } from '../modules/blog-check/blog-url.js';
+import { releaseStuckJobResources } from './abort-job.js';
 import { logOperation } from './log-emitter.js';
 import { finalizePostBlogJob } from './post-blog-job-complete.js';
+
+export const RECONCILABLE_POST_BLOG_STATUSES = ['failed', 'running', 'awaiting_captcha'] as const;
 
 export function normalizePostTitleForMatch(title: string): string {
   return title.replace(/\s+/g, ' ').trim().toLowerCase();
@@ -130,7 +133,7 @@ export async function tryReconcilePostBlogJobCompletion(jobId: string): Promise<
     if (ok) {
       await logOperation({
         level: 'info',
-        message: `[post_blog] 블로그 발행 확인(posts) — failed → completed`,
+        message: `[post_blog] 블로그 발행 확인(posts) — ${job.status} → completed`,
         job_id: jobId,
         account_id: job.account_id as string,
       });
@@ -149,7 +152,7 @@ export async function tryReconcilePostBlogJobCompletion(jobId: string): Promise<
     if (ok) {
       await logOperation({
         level: 'info',
-        message: `[post_blog] 블로그 발행 확인(네이버 API) — failed → completed`,
+        message: `[post_blog] 블로그 발행 확인(네이버 API) — ${job.status} → completed`,
         job_id: jobId,
         account_id: job.account_id as string,
       });
@@ -158,4 +161,46 @@ export async function tryReconcilePostBlogJobCompletion(jobId: string): Promise<
   }
 
   return null;
+}
+
+/** failed·LIVE·CAPTCHA — 네이버 발행 확인 후 completed (LIVE는 세션·락 해제) */
+export async function reconcilePostBlogJobById(
+  jobId: string,
+): Promise<{ ok: true; result_url: string } | { ok: false; error: string; status: number }> {
+  const { data: job, error } = await supabase
+    .from('huma_jobs')
+    .select('id, job_type, status, bull_job_id, account_id, title')
+    .eq('id', jobId)
+    .maybeSingle();
+
+  if (error) return { ok: false, error: error.message, status: 500 };
+  if (!job) return { ok: false, error: '작업 없음', status: 404 };
+  if (job.job_type !== 'post_blog') {
+    return { ok: false, error: 'post_blog 작업만 지원합니다', status: 400 };
+  }
+  if (!(RECONCILABLE_POST_BLOG_STATUSES as readonly string[]).includes(String(job.status))) {
+    return {
+      ok: false,
+      error: 'failed·LIVE·CAPTCHA 대기 상태만 발행 확인할 수 있습니다',
+      status: 400,
+    };
+  }
+
+  const wasActive = job.status === 'running' || job.status === 'awaiting_captcha';
+  const resultUrl = await tryReconcilePostBlogJobCompletion(jobId);
+  if (!resultUrl) {
+    return { ok: false, error: '블로그에서 일치하는 발행 글을 찾지 못했습니다', status: 404 };
+  }
+
+  if (wasActive) {
+    await releaseStuckJobResources(job);
+    await logOperation({
+      level: 'info',
+      message: `[post_blog] LIVE 발행 확인 — 세션·락 해제 후 completed (${resultUrl})`,
+      job_id: jobId,
+      account_id: job.account_id as string | undefined,
+    });
+  }
+
+  return { ok: true, result_url: resultUrl };
 }

@@ -32,7 +32,7 @@ import { resolveJobPreviewImageUrl } from '../lib/resolve-job-preview-image.js';
 import { normalizeUploadedImagesInput, persistSingleJobImageDataUrl } from '../lib/upload-job-images.js';
 import { readCaptchaHoldScreenshot } from '../lib/captcha-hold-screenshot.js';
 import { submitCaptchaAnswerForJob } from '../lib/captcha-answer-submit.js';
-import { tryReconcilePostBlogJobCompletion } from '../lib/post-blog-reconcile.js';
+import { reconcilePostBlogJobById } from '../lib/post-blog-reconcile.js';
 import { revertPostBlogCompletion } from '../lib/revert-post-blog-completion.js';
 import { explainPostBlogPublishDay } from '../lib/post-blog-publish-day.js';
 import { diagnoseAutoPublishWorkspace } from '../lib/auto-publish-diagnosis.js';
@@ -904,33 +904,18 @@ export async function registerJobRoutes(app: FastifyInstance) {
     return { workspace, accounts };
   });
 
-  /** post_blog — 네이버에 이미 발행됐으나 failed 로 남은 job 상태 정정 */
+  /** post_blog — 네이버에 이미 발행됐으나 failed·LIVE로 남은 job 상태 정정 */
   app.post('/api/jobs/:id/reconcile-publish', { preHandler: authMiddleware }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const allowedWorkspaces = getWorkspaceFilter(request);
     const access = await assertJobWorkspaceAccess(id, allowedWorkspaces);
     if (!access.ok) return reply.code(access.status).send({ error: access.error });
 
-    const { data: job } = await supabase
-      .from('huma_jobs')
-      .select('job_type, status')
-      .eq('id', id)
-      .maybeSingle();
-    if (!job) return reply.code(404).send({ error: '작업 없음' });
-    if (job.job_type !== 'post_blog') {
-      return reply.code(400).send({ error: 'post_blog 작업만 지원합니다' });
-    }
-    if (job.status !== 'failed') {
-      return reply.code(400).send({ error: 'failed 상태 job만 발행 확인할 수 있습니다' });
-    }
-
-    const resultUrl = await tryReconcilePostBlogJobCompletion(id);
-    if (!resultUrl) {
-      return reply.code(404).send({ error: '블로그에서 일치하는 발행 글을 찾지 못했습니다' });
-    }
+    const result = await reconcilePostBlogJobById(id);
+    if (!result.ok) return reply.code(result.status).send({ error: result.error });
 
     const { data: updated } = await supabase.from('huma_jobs').select('*').eq('id', id).single();
-    return { ok: true, result_url: resultUrl, job: updated };
+    return { ok: true, result_url: result.result_url, job: updated };
   });
 
   /** post_blog — ✓ 발행 확인을 잘못 눌렀을 때 completed 되돌리기 */

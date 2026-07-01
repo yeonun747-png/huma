@@ -24,6 +24,7 @@ import {
   isAbortableQueueJob,
   isDeletableQueueJob,
   isPausableQueueJob,
+  isReconcilablePublishJob,
   isStaleOrFailedQueueJob,
 } from '@/lib/queue-job-eligibility';
 import { CaptchaCompleteModal } from './captcha-complete-modal';
@@ -605,7 +606,7 @@ export function QueueManager() {
                   </button>
                 ) : (
                   <span className="text-[11px] text-huma-t3">
-                    LIVE는 ■ 강제 중단 · CAPTCHA·실패·지연·완료는 선택 삭제 가능
+                    LIVE·실패 post_blog는 ✓ 발행 확인 · LIVE는 ■ 강제 중단 · CAPTCHA·지연·완료는 선택 삭제
                   </span>
                 )}
               </div>
@@ -636,7 +637,7 @@ export function QueueManager() {
             const abortable = isAbortableQueueJob(job);
             const deletable = isDeletableQueueJob(job);
             const pausable = isPausableQueueJob(job);
-            const canReconcilePublish = job.job_type === 'post_blog' && job.status === 'failed';
+            const canReconcilePublish = isReconcilablePublishJob(job);
             return (
               <MQueueItem
                 key={job.id}
@@ -688,8 +689,11 @@ export function QueueManager() {
                   canReconcilePublish
                     ? () => {
                         void (async () => {
+                          const live = job.status === 'running' || job.status === 'awaiting_captcha';
                           const ok = await appConfirm(
-                            '네이버에서 동일 제목·발행 시각을 확인해 completed 처리합니다. 오늘(KST) 실제 발행된 글만 1/1에 집계됩니다.',
+                            live
+                              ? '네이버에서 이미 발행됐다면 동일 제목·발행 시각을 확인해 completed 처리합니다.\nLIVE 세션·동글·계정 락도 함께 해제됩니다.'
+                              : '네이버에서 동일 제목·발행 시각을 확인해 completed 처리합니다. 오늘(KST) 실제 발행된 글만 1/1에 집계됩니다.',
                           );
                           if (!ok) return;
                           try {

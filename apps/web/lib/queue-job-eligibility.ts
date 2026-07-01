@@ -27,3 +27,11 @@ export function isStaleOrFailedQueueJob(job: HumaJob): boolean {
 export function isPausableQueueJob(job: HumaJob): boolean {
   return ['pending', 'scheduled', 'paused'].includes(job.status);
 }
+
+/** post_blog — 네이버 발행 확인(✓) 가능 */
+export function isReconcilablePublishJob(job: HumaJob): boolean {
+  return (
+    job.job_type === 'post_blog' &&
+    (job.status === 'failed' || job.status === 'running' || job.status === 'awaiting_captcha')
+  );
+}
