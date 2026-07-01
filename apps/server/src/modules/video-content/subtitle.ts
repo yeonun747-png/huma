@@ -7,7 +7,7 @@ import type { SubtitleStyle, VideoConti, VideoContiShot } from './types.js';
 const ASS_COLOR_A = '&H00FFFFFF';
 const ASS_COLOR_B = '&H0000FFFF';
 const ASS_FONT_SIZE = 42;
-/** 하단 정렬(alignment 2) — MarginV가 클수록 화면에서 위 */
+/** 하단 정렬(alignment 2) — MarginV가 작을수록 화면에서 위 */
 const SUBTITLE_LINES_OFFSET_UP = 1;
 const SUBTITLE_LINE_HEIGHT_PX = Math.round(ASS_FONT_SIZE * 1.2);
 
@@ -282,7 +282,8 @@ export function buildAssDialogueRows(params: {
   const lineHeight = SUBTITLE_LINE_HEIGHT_PX;
   return physicalLines.map((line, index) => {
     const formatted = formatAssDialogueLine(line);
-    const marginV = pos.marginV + (physicalLines.length - 1 - index) * lineHeight;
+    // 입력 순서대로 위→아래: 첫 줄(index 0)이 더 작은 MarginV(화면 상단)
+    const marginV = pos.marginV + index * lineHeight;
     return { assStyle: formatted.style, marginV, text: formatted.text };
   });
 }

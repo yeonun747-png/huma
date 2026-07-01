@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { SubtitleStyle, VideoConti } from './types.js';
-import { buildAssContent, buildSubtitlePreviewEvents, formatAssDialogueText, parseDialogueSegments, stripSpeakerLabel } from './subtitle.js';
+import {
+  buildAssContent,
+  buildAssDialogueRows,
+  buildSubtitlePreviewEvents,
+  formatAssDialogueText,
+  parseDialogueSegments,
+  stripSpeakerLabel,
+} from './subtitle.js';
 
 describe('parseDialogueSegments', () => {
   it('parses single speaker with label', () => {
@@ -166,5 +173,16 @@ describe('buildAssContent', () => {
     expect(dialogueLines[0]).toContain('손님이 워낙 많아서');
     expect(dialogueLines[1]).toContain('SpeakerB');
     expect(dialogueLines[1]).toContain('최고 공감인데');
+  });
+
+  it('stacks multiline dialogue top-to-bottom in input order (A above B)', () => {
+    const dialogue = 'A: "손님이 워낙 많아서..."\nB: "최고 공감인데 단골은 안기억나요?"';
+    const rows = buildAssDialogueRows({ dialogue, style: subtitleStyle });
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.assStyle).toBe('SpeakerA');
+    expect(rows[0]!.text).toContain('손님이 워낙 많아서');
+    expect(rows[1]!.assStyle).toBe('SpeakerB');
+    expect(rows[1]!.text).toContain('최고 공감인데');
+    expect(rows[0]!.marginV).toBeLessThan(rows[1]!.marginV);
   });
 });
