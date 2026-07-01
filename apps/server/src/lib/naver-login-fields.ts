@@ -22,20 +22,42 @@ const NAVER_LOGIN_BTN_SELECTORS = [
   'button[type="submit"]',
 ];
 
-/** IP보안 슬라이드 — #ip_on 체크박스는 hidden, 클릭은 label·switch_btn */
+/** IP보안 — 구 UI #ip_on / 신 UI #switch (2025~ nidlogin 리뉴얼). 클릭은 label·switch_btn */
+const IP_SECURITY_INPUT_SELECTORS = ['#switch', '#ip_on'] as const;
+
 const IP_SECURITY_SWITCH_SELECTORS = [
+  'label[for="switch"]',
+  'label.switch_btn',
   '#label_ip_on',
   'label[for="ip_on"]',
+  '.ip_check .switch_btn',
   '.switch_btn',
   'span.switch',
-  '.switch_checkbox',
-  '.switch_on',
 ];
 
+async function findIpSecurityInput(page: Page) {
+  for (const sel of IP_SECURITY_INPUT_SELECTORS) {
+    const loc = page.locator(sel).first();
+    if ((await loc.count().catch(() => 0)) > 0) return loc;
+  }
+  return null;
+}
+
 async function isNaverIpSecurityOn(page: Page): Promise<boolean | null> {
-  const ipOn = page.locator('#ip_on');
-  if ((await ipOn.count().catch(() => 0)) === 0) return null;
-  return ipOn.isChecked().catch(() => null);
+  const ipInput = await findIpSecurityInput(page);
+  if (ipInput) return ipInput.isChecked().catch(() => null);
+
+  // 입력 요소가 없어도 스위치 UI만 보이면 evaluate로 한 번 더 확인
+  const hasSwitchUi =
+    (await page.locator('.ip_check .switch_btn, label.switch_btn').count().catch(() => 0)) > 0;
+  if (!hasSwitchUi) return null;
+
+  return page
+    .evaluate(() => {
+      const el = document.querySelector('#switch, #ip_on') as HTMLInputElement | null;
+      return el ? el.checked : null;
+    })
+    .catch(() => null);
 }
 
 async function findVisibleIpSecuritySwitch(page: Page) {
@@ -61,7 +83,7 @@ async function clickIpSecurityOffWithMouse(page: Page): Promise<boolean> {
     if ((await isNaverIpSecurityOn(page)) === false) return true;
   }
 
-  for (const sel of ['#label_ip_on', 'label[for="ip_on"]', '.switch_btn']) {
+  for (const sel of ['label[for="switch"]', '.ip_check .switch_btn', '#label_ip_on', 'label[for="ip_on"]', '.switch_btn']) {
     const loc = page.locator(sel).first();
     const box = await loc.boundingBox().catch(() => null);
     if (!box || box.width <= 0 || box.height <= 0) continue;
@@ -78,7 +100,7 @@ async function clickIpSecurityOffWithMouse(page: Page): Promise<boolean> {
   return false;
 }
 
-/** nidlogin IP보안(#ip_on) — 모뎀·프록시 환경에서는 OFF(슬라이드 클릭) 필요. JS 폴백 없이 마우스만. */
+/** nidlogin IP보안 — 모뎀·프록시 환경에서는 OFF(슬라이드 클릭) 필요. JS 폴백 없이 마우스만. */
 export async function ensureNaverIpSecurityOff(page: Page): Promise<void> {
   if (!page.url().includes('nidlogin')) return;
   if (await isNaverAuthChallengePage(page)) return;
@@ -97,7 +119,7 @@ export async function ensureNaverIpSecurityOff(page: Page): Promise<void> {
   if ((await isNaverIpSecurityOn(page)) === true) {
     await logOperation({
       level: 'warn',
-      message: '[login] IP보안 OFF 실패 — 슬라이드(#label_ip_on) 여전히 ON (마우스 3회 시도)',
+      message: '[login] IP보안 OFF 실패 — 슬라이드(#switch / #label_ip_on) 여전히 ON (마우스 3회 시도)',
     }).catch(() => {});
   }
 }
