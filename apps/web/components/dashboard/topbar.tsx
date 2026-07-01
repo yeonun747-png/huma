@@ -198,7 +198,7 @@ export function Topbar({ title }: { title: string }) {
             className="btn-ghost"
             onClick={async () => {
               const ok = await appConfirm(
-                `대기 중이던 큐 ${pendingCount}건은 그대로 유지됩니다.\n당일 C-Rank 큐가 없으면 자동 보정됩니다.\n재시작하시겠습니까?`,
+                `대기 중이던 큐 ${pendingCount}건은 그대로 유지됩니다.\n전체 중지 직전 ON이었던 자동발행은 다시 켜집니다.\n당일 C-Rank 큐가 없으면 자동 보정됩니다.\n재시작하시겠습니까?`,
               );
               if (!ok) return;
               api.resumeAll().then(() => {

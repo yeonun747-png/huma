@@ -342,6 +342,65 @@ export async function setAutoPublishEnabled(
   return enabled ? enableAutoPublish(workspace, accountId) : disableAutoPublish(workspace, accountId);
 }
 
+/** 전체 중지 — auto_publish ON 계정 모두 OFF + 스냅샷 반환 */
+export async function disableAllAutoPublish(): Promise<Array<{ id: string; workspace: string }>> {
+  const { data } = await supabase
+    .from('huma_accounts')
+    .select('id, workspace')
+    .eq('account_type', 'posting')
+    .eq('is_active', true)
+    .eq('auto_publish_enabled', true);
+
+  const snapshot: Array<{ id: string; workspace: string }> = [];
+  for (const row of data ?? []) {
+    const id = row.id as string;
+    const workspace = row.workspace as string;
+    snapshot.push({ id, workspace });
+    await disableAutoPublish(workspace, id);
+  }
+
+  if (snapshot.length) {
+    await logOperation({
+      level: 'info',
+      message: `[auto-publish] 전체 중지 — ${snapshot.length}계정 OFF`,
+      metadata: { account_ids: snapshot.map((s) => s.id) },
+    });
+  }
+
+  return snapshot;
+}
+
+/** 재시작 — 전체 중지 직전 ON 이었던 계정 복구 */
+export async function restoreAutoPublishFromSnapshot(
+  snapshot: Array<{ id: string; workspace: string }>,
+): Promise<number> {
+  if (!getPostingEnabled() || !snapshot.length) return 0;
+
+  let restored = 0;
+  for (const { id, workspace } of snapshot) {
+    try {
+      await enableAutoPublish(workspace, id);
+      restored++;
+    } catch (err) {
+      await logOperation({
+        level: 'warn',
+        message: `[auto-publish] 재시작 복구 실패 account=${id} — ${(err as Error).message}`,
+        workspace,
+        account_id: id,
+      });
+    }
+  }
+
+  if (restored > 0) {
+    await logOperation({
+      level: 'info',
+      message: `[auto-publish] 재시작 — ${restored}/${snapshot.length}계정 ON 복구`,
+    });
+  }
+
+  return restored;
+}
+
 export async function listAutoPublishEnabledAccounts(): Promise<AutoPublishAccountState[]> {
   const { data } = await supabase
     .from('huma_accounts')

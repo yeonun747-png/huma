@@ -3,7 +3,8 @@ import { authMiddleware, getWorkspaceFilter, requireSuper, supabase } from '../m
 import { logOperation } from '../lib/log-emitter.js';
 import { recoverCrankPipeline } from '../lib/crank-pipeline-recovery.js';
 import { ensureTodayCrankQueue } from '../lib/crank-scheduler.js';
-import { getSystemPaused, setSystemPaused } from '../lib/system-pause.js';
+import { getSystemPaused, getSystemPauseState, setSystemPaused } from '../lib/system-pause.js';
+import { disableAllAutoPublish, restoreAutoPublishFromSnapshot } from '../lib/auto-publish-state.js';
 import { getCrankEnabled, getPostingEnabled } from '../lib/activity-control.js';
 import {
   getActiveCaptchaDrillJobId,
@@ -64,26 +65,36 @@ export async function registerSystemRoutes(app: FastifyInstance) {
   app.post('/api/stop-all', { preHandler: [authMiddleware, requireSuper] }, async (request) => {
     const body = (request.body ?? {}) as { reason?: string };
     const reason = String(body.reason ?? '').trim() || '운영자 전체 정지';
-    await setSystemPaused(true, reason);
+    const autoPublishSnapshot = await disableAllAutoPublish();
+    await setSystemPaused(true, { reason, autoPublishSnapshot });
     await logOperation({
       level: 'INFO',
-      message: `HUMA 전체 정지 — ${reason}`,
-      metadata: { stop_reason: reason },
+      message: `HUMA 전체 정지 — ${reason} · 자동발행 ${autoPublishSnapshot.length}계정 OFF`,
+      metadata: { stop_reason: reason, auto_publish_off: autoPublishSnapshot.length },
     });
-    return { success: true, message: '전체 작업 중지됨', reason };
+    return {
+      success: true,
+      message: '전체 작업 중지됨',
+      reason,
+      auto_publish_disabled: autoPublishSnapshot.length,
+    };
   });
 
   app.post('/api/resume-all', { preHandler: [authMiddleware, requireSuper] }, async () => {
+    const pauseState = await getSystemPauseState();
     await setSystemPaused(false);
+    const autoPublishRestored = await restoreAutoPublishFromSnapshot(
+      pauseState.auto_publish_snapshot ?? [],
+    );
     if (getCrankEnabled()) {
       await ensureTodayCrankQueue();
       await recoverCrankPipeline();
     }
     await logOperation({
       level: 'INFO',
-      message: `HUMA 전체 재개 — C-Rank${getCrankEnabled() ? '·예약 큐 보정' : ' OFF'} · 포스팅${getPostingEnabled() ? ' ON' : ' OFF'}`,
+      message: `HUMA 전체 재개 — C-Rank${getCrankEnabled() ? '·예약 큐 보정' : ' OFF'} · 포스팅${getPostingEnabled() ? ' ON' : ' OFF'} · 자동발행 ${autoPublishRestored}계정 복구`,
     });
-    return { success: true, message: '작업 재개됨' };
+    return { success: true, message: '작업 재개됨', auto_publish_restored: autoPublishRestored };
   });
 
   app.get('/api/system/captcha-drill', { preHandler: authMiddleware }, async () => ({
