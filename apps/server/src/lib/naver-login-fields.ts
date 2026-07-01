@@ -32,6 +32,21 @@ async function findNaverLoginButton(page: Page): Promise<Locator | null> {
   return null;
 }
 
+async function isNaverLoginCaptchaOnPage(page: Page): Promise<boolean> {
+  for (const sel of ['#captcha', '#cptch', '.captcha_wrap', 'iframe[src*="captcha"]']) {
+    if (await page.locator(sel).first().isVisible({ timeout: 200 }).catch(() => false)) return true;
+  }
+  return false;
+}
+
+async function readNaverLoginInlineError(page: Page): Promise<string | null> {
+  for (const sel of ['#err_common', '.error_message', '.err_msg', '#err_caps_lock']) {
+    const text = await page.locator(sel).first().textContent({ timeout: 400 }).catch(() => null);
+    if (text?.trim()) return text.trim();
+  }
+  return null;
+}
+
 /** nidlogin — 캡차·ID/PW 입력 후 off 클래스가 빠져야 클릭 유효 */
 async function isNaverLoginButtonReady(btn: Locator): Promise<boolean> {
   if (!(await btn.isVisible().catch(() => false))) return false;
@@ -54,21 +69,54 @@ async function waitForNaverLoginButtonReady(page: Page, timeoutMs = 6000): Promi
   return null;
 }
 
-async function didNaverLoginSubmitStart(page: Page): Promise<boolean> {
-  if (await isNaverAuthChallengePage(page)) return true;
-  if (!page.url().includes('nidlogin')) return true;
-  await sleep(randomBetween(350, 650));
-  if (await isNaverAuthChallengePage(page)) return true;
-  return !page.url().includes('nidlogin');
+/** off 잔류 시 — ID/PW가 채워졌으면 nidlogin JS 지연으로 마지막 시도 허용 */
+async function canForceAttemptLoginButton(page: Page, btn: Locator): Promise<boolean> {
+  if (!(await btn.isVisible().catch(() => false))) return false;
+  const id = (await page.locator('#id').inputValue().catch(() => '')).trim();
+  const pw = (await page.locator('#pw').inputValue().catch(() => '')).trim();
+  return Boolean(id && pw);
 }
 
-async function clickNaverLoginButtonOnce(page: Page, btn: Locator, usePlaywrightClick: boolean): Promise<void> {
+async function didNaverLoginSubmitStart(page: Page): Promise<boolean> {
+  const deadline = Date.now() + 3200;
+  while (Date.now() < deadline) {
+    if (await isNaverAuthChallengePage(page)) return true;
+    if (await isNaverLoginCaptchaOnPage(page)) return true;
+    if (!page.url().includes('nidlogin')) return true;
+    await sleep(200);
+  }
+  return false;
+}
+
+async function tryNaverLoginSubmitFallback(page: Page, btn: Locator): Promise<boolean> {
+  await page.locator('#pw').press('Enter').catch(() => {});
+  await sleep(randomBetween(350, 650));
+  if (await didNaverLoginSubmitStart(page)) return true;
+
+  await page
+    .evaluate(() => {
+      const btnEl = document.getElementById('log.login') as HTMLButtonElement | null;
+      btnEl?.click();
+      const form = document.getElementById('frmNIDLogin') as HTMLFormElement | null;
+      form?.requestSubmit?.();
+    })
+    .catch(() => {});
+  await sleep(randomBetween(350, 650));
+  if (await didNaverLoginSubmitStart(page)) return true;
+
+  await btn.click({ timeout: 5000 }).catch(() => {});
+  await sleep(randomBetween(350, 650));
+  return didNaverLoginSubmitStart(page);
+}
+
+async function clickNaverLoginButtonOnce(page: Page, btn: Locator, round: number): Promise<void> {
   await btn.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
   // 캡차 입력칸 포커스가 남아 있으면 클릭이 빗나가는 경우가 있어 로그인 버튼 쪽으로 포커스 이동
   await btn.focus().catch(() => {});
   await sleep(randomBetween(80, 180));
 
-  if (usePlaywrightClick) {
+  // nidlogin #log.login(type=button) — Playwright click이 JS 핸들러에 더 잘 맞음
+  if (round % 2 === 0) {
     await btn.click({ timeout: 5000 });
     return;
   }
@@ -310,16 +358,18 @@ export async function clickNaverLoginButton(page: Page): Promise<void> {
   for (let round = 0; round < 4; round += 1) {
     if (await isNaverAuthChallengePage(page)) return;
 
-    const btn = await waitForNaverLoginButtonReady(page, round === 0 ? 6000 : 2500);
+    let btn = await waitForNaverLoginButtonReady(page, round === 0 ? 8000 : 3000);
+    if (!btn) btn = await findNaverLoginButton(page);
     if (!btn) break;
 
-    if (!(await isNaverLoginButtonReady(btn))) {
+    const ready = await isNaverLoginButtonReady(btn);
+    if (!ready && !(round >= 2 && (await canForceAttemptLoginButton(page, btn)))) {
       await sleep(randomBetween(200, 450));
       continue;
     }
 
     try {
-      await clickNaverLoginButtonOnce(page, btn, round >= 2);
+      await clickNaverLoginButtonOnce(page, btn, round);
     } catch (err) {
       lastErr = err as Error;
       await sleep(randomBetween(250, 500));
@@ -333,6 +383,21 @@ export async function clickNaverLoginButton(page: Page): Promise<void> {
   }
 
   if (await didNaverLoginSubmitStart(page)) return;
+  if (await isNaverLoginCaptchaOnPage(page)) return;
+
+  const fallbackBtn = await findNaverLoginButton(page);
+  if (fallbackBtn && (await tryNaverLoginSubmitFallback(page, fallbackBtn))) return;
+
+  const inlineErr = await readNaverLoginInlineError(page);
+  if (inlineErr) {
+    throw new Error(
+      /아이디|비밀번호|password/i.test(inlineErr)
+        ? 'NAVER_LOGIN_CREDENTIALS'
+        : `NAVER_LOGIN_FAILED:${inlineErr.slice(0, 120)}`,
+    );
+  }
+
+  if (await isNaverLoginCaptchaOnPage(page)) return;
 
   await logOperation({
     level: 'warn',

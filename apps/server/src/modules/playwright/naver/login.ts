@@ -153,7 +153,17 @@ async function performNaverLoginOnPage(
   await humanSleep(500, 1200);
   await typeIntoNaverLoginField(page, '#pw', password);
   await humanSleep(800, 1500);
-  await clickNaverLoginButton(page);
+  try {
+    await clickNaverLoginButton(page);
+  } catch (err) {
+    const msg = (err as Error).message ?? '';
+    if (msg.includes('NAVER_LOGIN_CREDENTIALS') || msg.includes('NAVER_LOGIN_2FA')) throw err;
+    if (await isNaverCaptchaVisible(page)) {
+      /* 다음(다단계) 클릭 후 캡차 — pollUntil에서 CAPTCHA_DETECTED 처리 */
+    } else {
+      throw err;
+    }
+  }
 
   const captchaCtx: NaverCaptchaVisionContext = {
     accountId,

@@ -407,6 +407,7 @@ export function shouldPreserveBrowserPageForVnc(err: unknown): boolean {
   if (msg.includes('reason=block_captcha')) return true;
   if (msg.includes('NAVER_LOGIN_FAILED:redirect_stuck')) return true;
   if (msg.includes('NAVER_LOGIN_TIMEOUT:redirect')) return true;
+  if (msg.includes('NAVER_LOGIN_BTN_CLICK_NO_SUBMIT')) return true;
   return false;
 }
 
