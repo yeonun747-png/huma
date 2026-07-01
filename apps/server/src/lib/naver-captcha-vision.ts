@@ -689,7 +689,7 @@ async function submitCaptcha(
   if (!confirmed) {
     // nidlogin 캡차는 별도 확인 버튼이 없다 — Enter(코드 제출) 대신 로그인 버튼 마우스 클릭
     if (page.url().includes('nidlogin') && !(await isNaverAuthChallengePage(page))) {
-      await clickNaverLoginButton(page).catch(() => {});
+      await clickNaverLoginButton(page);
       await sleep(randomBetween(350, 700));
     } else if (!page.url().includes('nidlogin')) {
       await page.keyboard.press('Enter').catch(() => {});
