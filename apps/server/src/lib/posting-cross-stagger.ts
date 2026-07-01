@@ -5,8 +5,14 @@ import { randomBetween } from './utils.js';
 /** post_blog 실행 — 다른 동글 간 최소 간격 (겹침 허용, VNC 혼선 완화) */
 export const CROSS_POSTING_STAGGER_MS = 10 * 60 * 1000;
 
-/** 같은 동글(동일 IP) 계정 — CAPTCHA/VNC 겹침 방지 */
-export const SAME_DONGLE_STAGGER_MS = 25 * 60 * 1000;
+/** 같은 동글(동일 IP) 계정 — CAPTCHA/VNC 겹침 방지 (1h ±10min) */
+export const SAME_DONGLE_STAGGER_MIN_MINUTES = 50;
+export const SAME_DONGLE_STAGGER_MAX_MINUTES = 70;
+export const SAME_DONGLE_STAGGER_MS = SAME_DONGLE_STAGGER_MIN_MINUTES * 60 * 1000;
+
+export function randomSameDongleStaggerMs(): number {
+  return randomBetween(SAME_DONGLE_STAGGER_MIN_MINUTES, SAME_DONGLE_STAGGER_MAX_MINUTES) * 60_000;
+}
 
 /** 자동발행 next_slot — 다른 동글 간 soft spread */
 export const CROSS_DONGLE_AUTO_PUBLISH_STAGGER_MS = 8 * 60 * 1000;
@@ -175,7 +181,13 @@ export function avoidDongleAwareScheduleCollision(
     }
 
     if (!conflict) return result;
-    result = new Date(conflict.at.getTime() + requiredGap + randomBetween(1, 4) * 60_000);
+    const bumpMs =
+      accountProxyPort != null &&
+      conflict.proxyPort != null &&
+      accountProxyPort === conflict.proxyPort
+        ? randomSameDongleStaggerMs()
+        : requiredGap + randomBetween(1, 4) * 60_000;
+    result = new Date(conflict.at.getTime() + bumpMs);
   }
   return result;
 }

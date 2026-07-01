@@ -22,7 +22,7 @@ describe('avoidCrossPostingCollision', () => {
 });
 
 describe('avoidDongleAwareScheduleCollision', () => {
-  it('same dongle — pushes at least 25min apart', () => {
+  it('same dongle — pushes at least 50min apart (1h ±10min)', () => {
     const peer = { at: new Date('2026-06-22T10:00:00+09:00'), proxyPort: 10001 };
     const candidate = new Date('2026-06-22T10:05:00+09:00');
     const result = avoidDongleAwareScheduleCollision(candidate, [peer], 10001);
