@@ -89,36 +89,26 @@ async function didNaverLoginSubmitStart(page: Page): Promise<boolean> {
 }
 
 async function tryNaverLoginSubmitFallback(page: Page, btn: Locator): Promise<boolean> {
-  await page.locator('#pw').press('Enter').catch(() => {});
-  await sleep(randomBetween(350, 650));
-  if (await didNaverLoginSubmitStart(page)) return true;
-
-  await page
-    .evaluate(() => {
-      const btnEl = document.getElementById('log.login') as HTMLButtonElement | null;
-      btnEl?.click();
-      const form = document.getElementById('frmNIDLogin') as HTMLFormElement | null;
-      form?.requestSubmit?.();
-    })
-    .catch(() => {});
-  await sleep(randomBetween(350, 650));
-  if (await didNaverLoginSubmitStart(page)) return true;
-
-  await btn.click({ timeout: 5000 }).catch(() => {});
-  await sleep(randomBetween(350, 650));
-  return didNaverLoginSubmitStart(page);
+  for (let i = 0; i < 2; i += 1) {
+    try {
+      await clickNaverLoginButtonWithMouse(page, btn);
+    } catch {
+      continue;
+    }
+    if (await didNaverLoginSubmitStart(page)) return true;
+    await sleep(randomBetween(300, 600));
+  }
+  return false;
 }
 
-async function clickNaverLoginButtonOnce(page: Page, btn: Locator, round: number): Promise<void> {
+/** nidlogin 로그인 버튼 — Playwright/JS click 금지, humanMouseMove + mouse.click 만 */
+async function clickNaverLoginButtonWithMouse(page: Page, btn: Locator): Promise<void> {
   await btn.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
-  // 캡차 입력칸 포커스가 남아 있으면 클릭이 빗나가는 경우가 있어 로그인 버튼 쪽으로 포커스 이동
-  await btn.focus().catch(() => {});
-  await sleep(randomBetween(80, 180));
-
-  // nidlogin #log.login(type=button) — Playwright click이 JS 핸들러에 더 잘 맞음
-  if (round % 2 === 0) {
-    await btn.click({ timeout: 5000 });
+  try {
+    await humanClickLocator(page, btn, 2, [120, 300]);
     return;
+  } catch {
+    /* humanClickLocator bbox 실패 시 좌표 마우스 클릭으로 폴백 */
   }
 
   const box = await btn.boundingBox().catch(() => null);
@@ -345,7 +335,7 @@ export async function submitNaverLoginAfterCaptcha(
   return !page.url().includes('nidlogin');
 }
 
-/** 로그인 버튼 — 활성(off 제거) 대기·클릭 검증·재시도. 2단계 인증 화면에서는 클릭 금지. */
+/** 로그인 버튼 — 마우스만(humanClickLocator). 활성 대기·제출 검증·재시도. 2단계 인증 화면에서는 클릭 금지. */
 export async function clickNaverLoginButton(page: Page): Promise<void> {
   if (await isNaverAuthChallengePage(page)) return;
   await ensureNaverLoginIdPhoneTab(page);
@@ -369,7 +359,7 @@ export async function clickNaverLoginButton(page: Page): Promise<void> {
     }
 
     try {
-      await clickNaverLoginButtonOnce(page, btn, round);
+      await clickNaverLoginButtonWithMouse(page, btn);
     } catch (err) {
       lastErr = err as Error;
       await sleep(randomBetween(250, 500));
