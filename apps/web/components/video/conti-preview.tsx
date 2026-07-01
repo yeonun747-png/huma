@@ -65,6 +65,17 @@ export function ContiPreview({
   onSaveDialogues?: (dialogues: ShotDialogueDraft[]) => Promise<void>;
 }) {
   const shots = conti.shots ?? [];
+  const shotsFingerprint = useMemo(
+    () =>
+      JSON.stringify(
+        shots.map((s, i) => ({
+          shotNumber: s.shotNumber ?? i + 1,
+          dialogue: s.dialogue ?? '',
+          action: s.action ?? '',
+        })),
+      ),
+    [shots],
+  );
   const initialDrafts = useMemo(
     () =>
       shots.map((s, i) => ({
@@ -72,14 +83,17 @@ export function ContiPreview({
         dialogue: s.dialogue ?? '',
         action: s.action ?? '',
       })),
-    [shots],
+    [shotsFingerprint],
   );
   const [drafts, setDrafts] = useState(initialDrafts);
   const [saving, setSaving] = useState(false);
+  const syncedFingerprintRef = useRef('');
 
   useEffect(() => {
+    if (syncedFingerprintRef.current === shotsFingerprint) return;
+    syncedFingerprintRef.current = shotsFingerprint;
     setDrafts(initialDrafts);
-  }, [initialDrafts]);
+  }, [shotsFingerprint, initialDrafts]);
 
   const dirty = drafts.some(
     (d, i) =>

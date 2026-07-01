@@ -594,11 +594,31 @@ export const api = {
     request(`/api/video-content/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   updateVideoContentShotDialogues: (
     id: string,
-    dialogues: Array<{ shotNumber: number; dialogue: string; action: string }>,
+    dialogues: Array<{ shotNumber: number; dialogue: string; action: string; startSec?: number; endSec?: number }>,
   ) =>
     request<HumaVideoContentHistory>(`/api/video-content/${id}/conti-dialogues`, {
       method: 'PATCH',
       body: JSON.stringify({ dialogues }),
+    }),
+  previewVideoSubtitles: (
+    id: string,
+    shots: Array<{ shotNumber: number; dialogue: string; action: string; startSec?: number; endSec?: number }>,
+  ) =>
+    request<{
+      events: Array<{
+        shotNumber: number;
+        startSec: number;
+        endSec: number;
+        text: string;
+        speakerStyle: 'A' | 'B' | 'default';
+      }>;
+    }>(`/api/video-content/${id}/subtitle-preview`, {
+      method: 'POST',
+      body: JSON.stringify({ shots }),
+    }),
+  restoreVideoSubtitles: (historyId: string) =>
+    request<HumaVideoContentHistory>(`/api/video-content/${historyId}/restore-subtitles`, {
+      method: 'POST',
     }),
   deleteVideoContent: (id: string) =>
     request<{ ok: boolean }>(`/api/video-content/${id}`, { method: 'DELETE' }),

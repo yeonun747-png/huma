@@ -1,4 +1,20 @@
 import { asContiShots } from './types.js';
+import type { VideoConti } from './types.js';
+
+export function parseVideoContiFromJson(raw: unknown): VideoConti {
+  const obj = (raw ?? {}) as Record<string, unknown>;
+  return {
+    characters: (obj.characters as VideoConti['characters']) ?? [],
+    location: String(obj.location ?? ''),
+    lighting: String(obj.lighting ?? ''),
+    timeOfDay: String(obj.timeOfDay ?? ''),
+    cutType: obj.cutType === 'single_shot' ? 'single_shot' : 'multi_shot',
+    duration: Number(obj.duration) > 0 ? Number(obj.duration) : 15,
+    shots: asContiShots(obj.shots),
+    scenarioSummary: String(obj.scenarioSummary ?? ''),
+    fullText: String(obj.fullText ?? obj.scenarioSummary ?? ''),
+  };
+}
 
 export const EDITABLE_CONTI_DIALOGUE_STATUSES = [
   'conti_ready',
@@ -17,6 +33,26 @@ export interface ShotDialoguePatch {
   shotNumber: number;
   dialogue: string;
   action: string;
+  startSec?: number;
+  endSec?: number;
+}
+
+function patchShotTiming(
+  shot: { shotNumber: number; startSec: number; endSec: number },
+  patch: Pick<ShotDialoguePatch, 'startSec' | 'endSec'>,
+): { startSec: number; endSec: number } {
+  let startSec = shot.startSec;
+  let endSec = shot.endSec;
+  if (patch.startSec !== undefined && Number.isFinite(patch.startSec)) {
+    startSec = Math.max(0, patch.startSec);
+  }
+  if (patch.endSec !== undefined && Number.isFinite(patch.endSec)) {
+    endSec = Math.max(0, patch.endSec);
+  }
+  if (startSec >= endSec) {
+    throw new Error(`샷 ${shot.shotNumber}: 시작 시각(${startSec}s)은 끝(${endSec}s)보다 작아야 합니다`);
+  }
+  return { startSec, endSec };
 }
 
 export function applyShotDialoguePatches(
@@ -33,7 +69,12 @@ export function applyShotDialoguePatches(
       .filter((p) => Number.isFinite(p.shotNumber) && p.shotNumber > 0)
       .map((p) => [
         p.shotNumber,
-        { dialogue: String(p.dialogue ?? '').trim(), action: String(p.action ?? '').trim() },
+        {
+          dialogue: String(p.dialogue ?? '').trim(),
+          action: String(p.action ?? '').trim(),
+          startSec: p.startSec,
+          endSec: p.endSec,
+        },
       ]),
   );
 
@@ -41,7 +82,8 @@ export function applyShotDialoguePatches(
     const shotNumber = shot.shotNumber > 0 ? shot.shotNumber : index + 1;
     const patch = byNumber.get(shotNumber);
     if (!patch) return shot;
-    return { ...shot, dialogue: patch.dialogue, action: patch.action };
+    const timing = patchShotTiming(shot, patch);
+    return { ...shot, dialogue: patch.dialogue, action: patch.action, ...timing };
   });
 
   return { ...contiJson, shots: nextShots };

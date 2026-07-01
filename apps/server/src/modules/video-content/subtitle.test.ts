@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SubtitleStyle, VideoConti } from './types.js';
-import { buildAssContent, formatAssDialogueText, parseDialogueSegments, stripSpeakerLabel } from './subtitle.js';
+import { buildAssContent, buildSubtitlePreviewEvents, formatAssDialogueText, parseDialogueSegments, stripSpeakerLabel } from './subtitle.js';
 
 describe('parseDialogueSegments', () => {
   it('parses single speaker with label', () => {
@@ -90,5 +90,33 @@ describe('buildAssContent', () => {
     expect(ass).toContain('SpeakerB');
     // bottom_center base 50 + 1 line × ~50px
     expect(ass).toContain(',20,20,100,1');
+  });
+
+  it('builds preview events with timing windows', () => {
+    const conti: VideoConti = {
+      characters: [],
+      location: '거실',
+      lighting: '밝음',
+      timeOfDay: '낮',
+      cutType: 'multi_shot',
+      duration: 6,
+      scenarioSummary: '테스트',
+      fullText: '테스트',
+      shots: [
+        {
+          shotNumber: 1,
+          startSec: 0,
+          endSec: 3,
+          camera: '와이드',
+          action: 'A',
+          dialogue: 'A: "안녕"',
+        },
+      ],
+    };
+    const events = buildSubtitlePreviewEvents(conti, subtitleStyle);
+    expect(events).toHaveLength(1);
+    expect(events[0]!.text).toBe('안녕');
+    expect(events[0]!.speakerStyle).toBe('A');
+    expect(events[0]!.startSec).toBeLessThan(events[0]!.endSec);
   });
 });

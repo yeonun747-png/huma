@@ -159,6 +159,46 @@ function subtitleWindow(
   return { startSec, endSec };
 }
 
+export interface SubtitlePreviewEvent {
+  shotNumber: number;
+  startSec: number;
+  endSec: number;
+  text: string;
+  speakerStyle: 'A' | 'B' | 'default';
+}
+
+export function buildSubtitlePreviewEvents(conti: VideoConti, style: SubtitleStyle): SubtitlePreviewEvent[] {
+  const totalDuration =
+    conti.shots.at(-1)?.endSec ?? conti.duration ?? conti.shots.reduce((m, s) => Math.max(m, s.endSec), 0);
+
+  const dialogueShots = conti.shots.filter((s) => stripSpeakerLabel(s.dialogue ?? '').length > 0);
+  const events: SubtitlePreviewEvent[] = [];
+
+  for (let i = 0; i < dialogueShots.length; i++) {
+    const shot = dialogueShots[i]!;
+    const nextStart = dialogueShots[i + 1]?.startSec ?? totalDuration;
+    const window = subtitleWindow(shot, style, totalDuration, nextStart);
+    if (!window) continue;
+
+    const { style: assStyle } = formatAssDialogueText(shot.dialogue!);
+    const displayText = stripSpeakerLabel(shot.dialogue!);
+    if (!displayText) continue;
+
+    const speakerStyle: SubtitlePreviewEvent['speakerStyle'] =
+      assStyle === 'SpeakerB' ? 'B' : assStyle === 'SpeakerA' ? 'A' : 'default';
+
+    events.push({
+      shotNumber: shot.shotNumber,
+      startSec: window.startSec,
+      endSec: window.endSec,
+      text: displayText,
+      speakerStyle,
+    });
+  }
+
+  return events;
+}
+
 export function buildAssContent(conti: VideoConti, style: SubtitleStyle): string {
   const pos = positionToAss(style);
   const box = boxStyleToAss(style);
@@ -179,23 +219,18 @@ Style: SpeakerB,${fontName},${ASS_FONT_SIZE},${ASS_COLOR_B},&H000000FF,&H0000000
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
 
-  const totalDuration =
-    conti.shots.at(-1)?.endSec ?? conti.duration ?? conti.shots.reduce((m, s) => Math.max(m, s.endSec), 0);
-
-  const dialogueShots = conti.shots.filter((s) => stripSpeakerLabel(s.dialogue ?? '').length > 0);
+  const events = buildSubtitlePreviewEvents(conti, style);
   const lines: string[] = [header];
 
-  for (let i = 0; i < dialogueShots.length; i++) {
-    const shot = dialogueShots[i]!;
-    const nextStart = dialogueShots[i + 1]?.startSec ?? totalDuration;
-    const window = subtitleWindow(shot, style, totalDuration, nextStart);
-    if (!window) continue;
-
-    const { text, style: assStyle } = formatAssDialogueText(shot.dialogue!);
+  for (const event of events) {
+    const assStyle =
+      event.speakerStyle === 'B' ? 'SpeakerB' : event.speakerStyle === 'A' ? 'SpeakerA' : 'Default';
+    const { text } = formatAssDialogueText(
+      conti.shots.find((s) => s.shotNumber === event.shotNumber)?.dialogue ?? event.text,
+    );
     if (!text) continue;
-
     lines.push(
-      `Dialogue: 0,${secToAssTime(window.startSec)},${secToAssTime(window.endSec)},${assStyle},,0,0,0,,${text.replace(/\n/g, '\\N')}`,
+      `Dialogue: 0,${secToAssTime(event.startSec)},${secToAssTime(event.endSec)},${assStyle},,0,0,0,,${text.replace(/\n/g, '\\N')}`,
     );
   }
 

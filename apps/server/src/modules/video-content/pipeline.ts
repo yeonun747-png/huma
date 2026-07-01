@@ -40,7 +40,7 @@ import {
 } from './selection.js';
 import { burnSubtitles } from './subtitle.js';
 import { videoContentFinalPath, videoContentSourcePath } from './paths.js';
-import { archiveCurrentVideoFiles, type SupersededVideoArchive } from './video-archive.js';
+import { archiveCurrentVideoFiles, archiveSubtitledBeforeReburn, restoreSubtitledReburnArchive, type SupersededVideoArchive, type SubtitledReburnArchive } from './video-archive.js';
 import { UPLOAD_PLATFORMS } from './storage.js';
 import { generateVideoContentThumbnails } from './thumbnail.js';
 import {
@@ -542,8 +542,13 @@ export async function runSubtitleReburn(historyId: string): Promise<void> {
   }
 
   const conti = parseContiFromJson(history.conti_json);
+  const contiJson = (history.conti_json as Record<string, unknown> | null) ?? {};
   const tmpDir = join(process.cwd(), 'tmp', 'video-content', historyId);
   await mkdir(tmpDir, { recursive: true });
+
+  const lastArchive = existsSync(videoContentFinalPath(historyId))
+    ? await archiveSubtitledBeforeReburn(historyId)
+    : null;
 
   const subtitleStyle = await pickSubtitleStyle(accountId);
   const subtitledPath = join(tmpDir, 'reburn_final.mp4');
@@ -588,6 +593,11 @@ export async function runSubtitleReburn(historyId: string): Promise<void> {
   const patch: Record<string, unknown> = {
     video_file_path: finalPath,
     error_message: null,
+    conti_json: {
+      ...contiJson,
+      subtitleReburnCount: Number(contiJson.subtitleReburnCount ?? 0) + 1,
+      ...(lastArchive ? { lastSubtitleArchive: lastArchive } : {}),
+    },
   };
   if (!history.source_video_path) {
     patch.source_video_path = sourcePath;
@@ -598,6 +608,54 @@ export async function runSubtitleReburn(historyId: string): Promise<void> {
   await logOperation({
     level: 'info',
     message: `[video-content] 자막 재입히기 완료 — history=${historyId}`,
+    workspace,
+    account_id: accountId,
+  });
+}
+
+/** reburn 직전 보관된 자막본 1회분 복원 */
+export async function runSubtitleRestore(historyId: string): Promise<void> {
+  const { data: history, error } = await supabase
+    .from('huma_video_content_history')
+    .select('id, account_id, workspace, status, conti_json, source_video_path, video_file_path')
+    .eq('id', historyId)
+    .maybeSingle();
+
+  if (error || !history) throw new Error('작업 없음');
+  if (history.status !== 'completed') {
+    throw new Error(`자막 복원 불가 상태: ${history.status}`);
+  }
+
+  const contiJson = (history.conti_json as Record<string, unknown> | null) ?? {};
+  const archive = contiJson.lastSubtitleArchive as SubtitledReburnArchive | undefined;
+  if (!archive?.subtitledPath) {
+    throw new Error('복원할 이전 자막본이 없습니다');
+  }
+
+  const accountId = history.account_id as string;
+  const workspace = history.workspace as Workspace;
+  const sourcePath =
+    (history.source_video_path as string | null) || videoContentSourcePath(historyId);
+
+  await restoreSubtitledReburnArchive(historyId, archive);
+
+  await generateVideoContentThumbnails({
+    historyId,
+    sourcePath: existsSync(sourcePath) ? sourcePath : undefined,
+    subtitledPath: videoContentFinalPath(historyId),
+  }).catch(() => {});
+
+  await supabase
+    .from('huma_video_content_history')
+    .update({
+      video_file_path: videoContentFinalPath(historyId),
+      conti_json: { ...contiJson, lastSubtitleArchive: null },
+    })
+    .eq('id', historyId);
+
+  await logOperation({
+    level: 'info',
+    message: `[video-content] 이전 자막본 복원 — history=${historyId}`,
     workspace,
     account_id: accountId,
   });

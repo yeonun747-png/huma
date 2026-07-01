@@ -35,6 +35,8 @@ import {
   resolveVideoContentProgressHistoryId,
 } from '@/lib/video-content-progress';
 import { ContiPreview, type ShotDialogueDraft } from '@/components/video/conti-preview';
+import { SubtitleEditPanel, type ShotSubtitleDraft } from '@/components/video/subtitle-edit-panel';
+import { SubtitlePreviewOverlay, type SubtitlePreviewEvent } from '@/components/video/subtitle-preview-overlay';
 import { ShortformVideoModelSettings } from '@/components/settings/shortform-video-model-settings';
 import { VideoContentHumorBadge } from '@/components/video/video-content-humor-badge';
 import { VideoContentStoragePanel } from '@/components/video/video-content-storage-panel';
@@ -173,10 +175,12 @@ function CompletedDetail({
   conti,
   accountName,
   reburning,
+  restoring,
   rerendering,
   deleting,
   videoRefreshKey,
   onReburn,
+  onRestoreSubtitles,
   onRerender,
   onDelete,
   onRefresh,
@@ -185,17 +189,23 @@ function CompletedDetail({
   conti: ReturnType<typeof parseContiPreview>;
   accountName?: string;
   reburning: boolean;
+  restoring: boolean;
   rerendering: boolean;
   deleting: boolean;
   videoRefreshKey: number;
-  onReburn: () => void;
+  onReburn: (opts?: { skipConfirm?: boolean }) => Promise<void>;
+  onRestoreSubtitles: () => Promise<void>;
   onRerender: () => void;
   onDelete: () => void;
   onRefresh: () => void;
 }) {
   const [tab, setTab] = useState<SocialPlatformKey>('youtube');
-  const [showConti, setShowConti] = useState(false);
   const [videoVariant, setVideoVariant] = useState<'subtitled' | 'source'>('subtitled');
+  const [previewEnabled, setPreviewEnabled] = useState(true);
+  const [previewEvents, setPreviewEvents] = useState<SubtitlePreviewEvent[]>([]);
+  const [videoCurrentTimeSec, setVideoCurrentTimeSec] = useState(0);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const lastPreviewTickRef = useRef(0);
   const { url: videoUrl, loadError: videoLoadError } = useVideoBlob(
     item.id,
     item.status === 'completed' &&
@@ -210,20 +220,68 @@ function CompletedDetail({
   const firstComment =
     tab === 'threads' ? item.first_comment_threads : tab === 'x' ? item.first_comment_x : null;
   const renderCount = Number(item.conti_json?.videoRenderCount ?? 1);
+  const reburnCount = Number(item.conti_json?.subtitleReburnCount ?? 0);
+  const canRestore = Boolean(
+    item.conti_json?.lastSubtitleArchive &&
+      typeof item.conti_json.lastSubtitleArchive === 'object',
+  );
 
-  const saveShotDialogues = useCallback(
-    async (dialogues: ShotDialogueDraft[]) => {
+  const persistDrafts = useCallback(
+    async (drafts: ShotSubtitleDraft[]) => {
       try {
-        await api.updateVideoContentShotDialogues(item.id, dialogues);
-        await appAlert('액션/멘트를 저장했습니다');
-        onRefresh();
+        await api.updateVideoContentShotDialogues(
+          item.id,
+          drafts.map((d) => ({
+            shotNumber: d.shotNumber,
+            dialogue: d.dialogue,
+            action: d.action,
+            startSec: d.startSec,
+            endSec: d.endSec,
+          })),
+        );
+        appToast('멘트·구간을 저장했습니다');
+        await onRefresh();
       } catch (e) {
-        await appAlert(e instanceof Error ? e.message : '액션/멘트 저장 실패');
+        await appAlert(e instanceof Error ? e.message : '저장 실패');
         throw e;
       }
     },
     [item.id, onRefresh],
   );
+
+  const saveAndApply = useCallback(
+    async (drafts: ShotSubtitleDraft[]) => {
+      try {
+        await api.updateVideoContentShotDialogues(
+          item.id,
+          drafts.map((d) => ({
+            shotNumber: d.shotNumber,
+            dialogue: d.dialogue,
+            action: d.action,
+            startSec: d.startSec,
+            endSec: d.endSec,
+          })),
+        );
+        await onReburn({ skipConfirm: true });
+        await appToast('자막이 적용되었습니다');
+      } catch (e) {
+        await appAlert(e instanceof Error ? e.message : '자막 적용 실패');
+        throw e;
+      }
+    },
+    [item.id, onReburn],
+  );
+
+  const seekVideo = useCallback((sec: number) => {
+    const el = videoRef.current;
+    if (!el) return;
+    el.currentTime = Math.max(0, sec);
+    void el.play().catch(() => {});
+  }, []);
+
+  const handlePreviewEventsChange = useCallback((events: SubtitlePreviewEvent[]) => {
+    setPreviewEvents(events);
+  }, []);
 
   const copyText = async (text: string) => {
     await navigator.clipboard.writeText(text);
@@ -241,11 +299,14 @@ function CompletedDetail({
           {renderCount > 1 ? (
             <span className="font-mono text-[10px] text-huma-t3">영상 {renderCount}회차</span>
           ) : null}
+          {reburnCount > 0 ? (
+            <span className="font-mono text-[10px] text-huma-t3">자막 수정 {reburnCount}회</span>
+          ) : null}
         </div>
         <button
           type="button"
           className="btn-ghost btn-sm shrink-0 text-huma-err"
-          disabled={deleting || rerendering || reburning}
+          disabled={deleting || rerendering || reburning || restoring}
           onClick={onDelete}
         >
           {deleting ? '삭제 중…' : '삭제'}
@@ -271,43 +332,75 @@ function CompletedDetail({
             원본
           </button>
         </div>
-        <div className="flex flex-wrap gap-1.5">
-          <button
-            type="button"
-            className={`${VIDEO_DETAIL_ACTION_BTN} ${rerendering ? 'animate-pulse' : ''}`}
-            disabled={rerendering || reburning || deleting}
-            onClick={onRerender}
-          >
-            {rerendering ? '🔄 재생성 중…' : '🔄 영상 재생성'}
-          </button>
-          <button
-            type="button"
-            className={`${VIDEO_DETAIL_ACTION_BTN} ${reburning ? 'animate-pulse' : ''}`}
-            disabled={!hasSource || reburning || rerendering || deleting}
-            title={hasSource ? undefined : '원본이 보관된 작업만 가능 (신규 생성분부터)'}
-            onClick={onReburn}
-          >
-            {reburning ? '💬 자막 입히는 중…' : '💬 자막 다시 입히기'}
-          </button>
-        </div>
+        <button
+          type="button"
+          className={`${VIDEO_DETAIL_ACTION_BTN} ${rerendering ? 'animate-pulse' : ''}`}
+          disabled={rerendering || reburning || restoring || deleting}
+          title="Kling 영상을 처음부터 다시 생성합니다"
+          onClick={onRerender}
+        >
+          {rerendering ? '🔄 재생성 중…' : '🔄 영상 재생성'}
+        </button>
       </div>
 
-      {videoUrl ? (
-        <video
-          src={videoUrl}
-          controls
-          className="mx-auto max-h-[380px] w-full max-w-[240px] rounded bg-black sm:mx-0"
-          playsInline
+      <div className="relative mx-auto w-full max-w-[240px] sm:mx-0">
+        {videoUrl ? (
+          <>
+            <video
+              ref={videoRef}
+              src={videoUrl}
+              controls
+              className={`max-h-[380px] w-full rounded bg-black ${reburning ? 'opacity-50' : ''}`}
+              playsInline
+              onTimeUpdate={(e) => {
+                if (!previewEnabled) return;
+                const now = performance.now();
+                if (now - lastPreviewTickRef.current < 120) return;
+                lastPreviewTickRef.current = now;
+                setVideoCurrentTimeSec(e.currentTarget.currentTime);
+              }}
+            />
+            <SubtitlePreviewOverlay
+              events={previewEvents}
+              currentTimeSec={videoCurrentTimeSec}
+              active={previewEnabled && videoVariant === 'subtitled'}
+            />
+            {reburning ? (
+              <div className="absolute inset-0 flex items-center justify-center rounded bg-black/40">
+                <span className="animate-pulse text-[11px] font-semibold text-white">자막 입히는 중…</span>
+              </div>
+            ) : null}
+          </>
+        ) : videoLoadError ? (
+          <p className="rounded border border-huma-bdr bg-huma-bg2 px-3 py-8 text-center text-[11px] text-huma-t3">
+            {videoVariant === 'source'
+              ? '원본 파일 없음 (이전 작업이거나 삭제됨)'
+              : '자막본 없음 — 아래 「저장 후 자막 적용」 사용'}
+          </p>
+        ) : (
+          <p className="text-[11px] text-huma-t3">영상 로드 중…</p>
+        )}
+      </div>
+
+      {conti ? (
+        <SubtitleEditPanel
+          historyId={item.id}
+          conti={conti}
+          hasSource={hasSource}
+          reburning={reburning}
+          restoring={restoring}
+          reburnCount={reburnCount}
+          canRestore={canRestore}
+          previewEnabled={previewEnabled}
+          onPreviewEnabledChange={setPreviewEnabled}
+          onPreviewEventsChange={handlePreviewEventsChange}
+          onSeek={seekVideo}
+          onSaveOnly={persistDrafts}
+          onSaveAndApply={saveAndApply}
+          onRestore={onRestoreSubtitles}
+          onApplyWithoutSave={() => onReburn()}
         />
-      ) : videoLoadError ? (
-        <p className="mx-auto max-w-[240px] rounded border border-huma-bdr bg-huma-bg2 px-3 py-8 text-center text-[11px] text-huma-t3 sm:mx-0">
-          {videoVariant === 'source'
-            ? '원본 파일 없음 (이전 작업이거나 삭제됨)'
-            : '자막본 없음 — 「자막 다시 입히기」 사용'}
-        </p>
-      ) : (
-        <p className="text-[11px] text-huma-t3">영상 로드 중…</p>
-      )}
+      ) : null}
 
       <div className="flex flex-wrap gap-1">
         {PLATFORMS.map((p) => (
@@ -338,11 +431,6 @@ function CompletedDetail({
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {conti ? (
-          <button type="button" className={VIDEO_DETAIL_ACTION_BTN} onClick={() => setShowConti((v) => !v)}>
-            {showConti ? '📝 콘티 닫기' : '📝 콘티 보기'}
-          </button>
-        ) : null}
         <button
           type="button"
           className={VIDEO_DETAIL_ACTION_BTN}
@@ -360,16 +448,6 @@ function CompletedDetail({
           </button>
         ) : null}
       </div>
-
-      {showConti && conti ? (
-        <div className="rounded border border-huma-bdr bg-huma-bg2 p-3">
-          <ContiPreview
-            conti={conti}
-            editable={canEditContiDialogues(item.status)}
-            onSaveDialogues={saveShotDialogues}
-          />
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -389,11 +467,13 @@ function DetailPanel({
   renderingStarting,
   deleting,
   reburning,
+  restoring,
   rerendering,
   videoRefreshKey,
   onRender,
   onDelete,
   onReburn,
+  onRestoreSubtitles,
   onRerender,
   onRefresh,
   progressStage,
@@ -407,12 +487,14 @@ function DetailPanel({
   renderingStarting: boolean;
   deleting: boolean;
   reburning: boolean;
+  restoring: boolean;
   rerendering: boolean;
   stopping: boolean;
   videoRefreshKey: number;
   onRender: () => void;
   onDelete: () => void;
-  onReburn: () => void;
+  onReburn: (opts?: { skipConfirm?: boolean }) => Promise<void>;
+  onRestoreSubtitles: () => Promise<void>;
   onRerender: () => void;
   onRefresh: () => void;
   progressStage?: string | null;
@@ -447,10 +529,12 @@ function DetailPanel({
         conti={conti}
         accountName={accountName}
         reburning={reburning}
+        restoring={restoring}
         rerendering={rerendering}
         deleting={deleting}
         videoRefreshKey={videoRefreshKey}
         onReburn={onReburn}
+        onRestoreSubtitles={onRestoreSubtitles}
         onRerender={onRerender}
         onDelete={onDelete}
         onRefresh={onRefresh}
@@ -578,26 +662,56 @@ export function VideoContentView() {
   const [renderingIds, setRenderingIds] = useState<Set<string>>(() => new Set());
   const [rerenderingIds, setRerenderingIds] = useState<Set<string>>(() => new Set());
   const [reburning, setReburning] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const [videoRefreshKey, setVideoRefreshKey] = useState(0);
   const [storageRefreshToken, setStorageRefreshToken] = useState(0);
   const [deleting, setDeleting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [progressStageById, setProgressStageById] = useState<Record<string, string>>({});
+  const [listLoading, setListLoading] = useState(true);
   const selectedStatusRef = useRef<string | null>(null);
   const hadProgressRef = useRef(false);
   const selectedIdRef = useRef<string | null>(null);
   const itemsRef = useRef(items);
+  const filterWorkspaceRef = useRef(filterWorkspace);
   selectedIdRef.current = selectedId;
   itemsRef.current = items;
+  filterWorkspaceRef.current = filterWorkspace;
 
-  const load = useCallback(async (opts?: { force?: boolean }) => {
-    const [accs, list] = await Promise.all([
-      api.accounts(),
-      api.videoContentList({ workspace: filterWorkspace }, { force: opts?.force }),
-    ]);
-    setAccounts(accs.filter((a) => a.account_type === 'posting'));
-    setItems(list);
-    return list;
+  const load = useCallback(async (opts?: { force?: boolean; silent?: boolean }) => {
+    const ws = filterWorkspace;
+    if (!opts?.silent) setListLoading(true);
+    try {
+      const [accs, list] = await Promise.all([
+        api.accounts({ force: opts?.force }),
+        api.videoContentList({ workspace: ws }, { force: opts?.force }),
+      ]);
+      if (ws !== filterWorkspaceRef.current) return list;
+      setAccounts(accs.filter((a) => a.account_type === 'posting'));
+      setItems(list);
+      return list;
+    } catch {
+      if (ws === filterWorkspaceRef.current) {
+        setAccounts([]);
+        setItems([]);
+      }
+      return [];
+    } finally {
+      if (ws === filterWorkspaceRef.current && !opts?.silent) {
+        setListLoading(false);
+      }
+    }
+  }, [filterWorkspace]);
+
+  useEffect(() => {
+    setItems([]);
+    setAccounts([]);
+    setSelectedId(null);
+    setDetail(null);
+    setProgressStageById({});
+    setLoadingDetail(false);
+    setListLoading(true);
+    setContiTarget('');
   }, [filterWorkspace]);
 
   const hasProgressItems = useMemo(
@@ -618,9 +732,9 @@ export function VideoContentView() {
 
   useEffect(() => {
     if (!shellActive) return;
-    void load().catch(() => {});
+    void load({ force: true }).catch(() => {});
     const pollMs = hasProgressItems ? 2_000 : 10_000;
-    const t = setInterval(() => void load({ force: true }).catch(() => {}), pollMs);
+    const t = setInterval(() => void load({ force: true, silent: true }).catch(() => {}), pollMs);
     return () => clearInterval(t);
   }, [load, hasProgressItems, shellActive]);
 
@@ -649,12 +763,12 @@ export function VideoContentView() {
       }
       if (debounce) clearTimeout(debounce);
       debounce = setTimeout(() => {
-        void load().catch(() => {});
+        void load({ silent: true }).catch(() => {});
       }, 250);
     };
     socket.connect();
     socket.on('log', onLog);
-    socket.on('connect', () => void load().catch(() => {}));
+    socket.on('connect', () => void load({ silent: true }).catch(() => {}));
     return () => {
       if (debounce) clearTimeout(debounce);
       socket.off('log', onLog);
@@ -891,9 +1005,10 @@ export function VideoContentView() {
     }
   };
 
-  const handleReburn = async () => {
+  const handleReburn = async (opts?: { skipConfirm?: boolean }) => {
     if (!selectedId) return;
     if (
+      !opts?.skipConfirm &&
       !(await appConfirm(
         'EvoLink 재호출 없이 원본 영상에 자막만 다시 입힙니다.\n자막 스타일·타이밍이 새로 적용됩니다. (수십 초 소요)',
       ))
@@ -905,12 +1020,34 @@ export function VideoContentView() {
       await api.reburnVideoSubtitles(selectedId);
       const row = await api.videoContentGet(selectedId);
       setDetail(row);
-      await load();
+      await load({ silent: true });
       setVideoRefreshKey((k) => k + 1);
+      if (!opts?.skipConfirm) {
+        appToast('자막이 적용되었습니다');
+      }
     } catch (e) {
       await appAlert(e instanceof Error ? e.message : '자막 재입히기 실패');
+      throw e;
     } finally {
       setReburning(false);
+    }
+  };
+
+  const handleRestoreSubtitles = async () => {
+    if (!selectedId) return;
+    if (!(await appConfirm('직전 자막본으로 되돌립니다. 계속할까요?'))) return;
+    setRestoring(true);
+    try {
+      const row = await api.restoreVideoSubtitles(selectedId);
+      setDetail(row);
+      await load({ silent: true });
+      setVideoRefreshKey((k) => k + 1);
+      appToast('이전 자막본으로 복원했습니다');
+    } catch (e) {
+      await appAlert(e instanceof Error ? e.message : '자막 복원 실패');
+      throw e;
+    } finally {
+      setRestoring(false);
     }
   };
 
@@ -996,7 +1133,9 @@ export function VideoContentView() {
 
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="min-h-0 flex-1 overflow-y-auto p-2">
-            {pagedItems.length ? (
+            {listLoading ? (
+              <p className="py-8 text-center text-[11px] text-huma-t3 animate-pulse">불러오는 중…</p>
+            ) : pagedItems.length ? (
               <ul className="space-y-1">
                 {pagedItems.map((item) => (
                   <li key={item.id}>
@@ -1014,6 +1153,11 @@ export function VideoContentView() {
                           {videoContentDisplayName(item.account_id, accounts)}
                         </span>
                         <div className="flex shrink-0 items-center gap-1">
+                          {Number(item.conti_json?.subtitleReburnCount ?? 0) > 0 ? (
+                            <span className="font-mono text-[8px] text-huma-t4">
+                              자막{Number(item.conti_json?.subtitleReburnCount)}
+                            </span>
+                          ) : null}
                           <VideoContentHumorBadge humor={item.self_assessed_humor} />
                           <MTag
                             tone={statusTone(item.status)}
@@ -1080,7 +1224,9 @@ export function VideoContentView() {
         {/* 우: 상세 패널 */}
         <MPanel title="📄 작업 상세" className="m-panel-fill min-h-0 min-w-0 flex-1">
           <div className="min-h-0 flex-1 overflow-y-auto">
-            {selectedItem ? (
+            {listLoading ? (
+              <div className="py-16 text-center text-[12px] text-huma-t3 animate-pulse">불러오는 중…</div>
+            ) : selectedItem ? (
               <DetailPanel
                 item={selectedItem}
                 detail={detail}
@@ -1090,11 +1236,13 @@ export function VideoContentView() {
                 rerendering={selectedId ? rerenderingIds.has(selectedId) : false}
                 deleting={deleting}
                 reburning={reburning}
+                restoring={restoring}
                 stopping={stopping}
                 videoRefreshKey={videoRefreshKey}
                 onRender={() => void handleRender()}
                 onDelete={() => void handleDelete()}
-                onReburn={() => void handleReburn()}
+                onReburn={handleReburn}
+                onRestoreSubtitles={handleRestoreSubtitles}
                 onRerender={() => void handleRender({ rerender: true })}
                 onRefresh={() => void refreshSelectedDetail()}
                 onCancel={() => void handleCancel()}

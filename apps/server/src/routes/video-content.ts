@@ -7,6 +7,7 @@ import {
   failStaleVideoContentJobs,
   recoverStuckVideoRender,
   runSubtitleReburn,
+  runSubtitleRestore,
   syncActiveVideoRenderStatuses,
   revertStaleRenderingJobs,
 } from '../modules/video-content/pipeline.js';
@@ -50,8 +51,11 @@ import {
 import {
   applyShotDialoguePatches,
   canEditContiDialogues,
+  parseVideoContiFromJson,
   type ShotDialoguePatch,
 } from '../modules/video-content/conti-dialogue-edit.js';
+import { pickSubtitleStyle } from '../modules/video-content/selection.js';
+import { buildSubtitlePreviewEvents } from '../modules/video-content/subtitle.js';
 import type { Workspace } from '@huma/shared';
 
 async function assertAccountAccess(
@@ -472,6 +476,66 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
       const msg = err instanceof Error ? err.message : '자막 재입히기 실패';
       return reply.code(500).send({ error: msg });
     }
+  });
+
+  app.post('/api/video-content/:id/restore-subtitles', { preHandler: authMiddleware }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const allowed = getWorkspaceFilter(request);
+    const { data: row } = await supabase
+      .from('huma_video_content_history')
+      .select('workspace, status, conti_json')
+      .eq('id', id)
+      .maybeSingle();
+    if (!row) return reply.code(404).send({ error: '없음' });
+    if (!allowed.includes(row.workspace)) return reply.code(403).send({ error: '권한 없음' });
+    if (row.status !== 'completed') {
+      return reply.code(409).send({ error: `자막 복원 불가 상태: ${row.status}` });
+    }
+    const archive = (row.conti_json as Record<string, unknown> | null)?.lastSubtitleArchive;
+    if (!archive || typeof archive !== 'object') {
+      return reply.code(404).send({ error: '복원할 이전 자막본이 없습니다' });
+    }
+
+    try {
+      await runSubtitleRestore(id);
+      const { data } = await supabase.from('huma_video_content_history').select().eq('id', id).single();
+      return mapVideoContentListRow({ ...data, conti_json: data.conti_json }, { keepContiJson: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '자막 복원 실패';
+      return reply.code(500).send({ error: msg });
+    }
+  });
+
+  app.post('/api/video-content/:id/subtitle-preview', { preHandler: authMiddleware }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const allowed = getWorkspaceFilter(request);
+    const { data: row } = await supabase
+      .from('huma_video_content_history')
+      .select('workspace, status, account_id, conti_json')
+      .eq('id', id)
+      .maybeSingle();
+    if (!row) return reply.code(404).send({ error: '없음' });
+    if (!allowed.includes(row.workspace)) return reply.code(403).send({ error: '권한 없음' });
+    if (!canEditContiDialogues(row.status)) {
+      return reply.code(409).send({ error: `자막 미리보기 불가 상태: ${row.status}` });
+    }
+
+    const body = request.body as { shots?: ShotDialoguePatch[] };
+    const contiJson = (row.conti_json as Record<string, unknown> | null) ?? {};
+    let previewJson = contiJson;
+    if (Array.isArray(body.shots) && body.shots.length) {
+      try {
+        previewJson = applyShotDialoguePatches(contiJson, body.shots);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : '미리보기 생성 실패';
+        return reply.code(400).send({ error: msg });
+      }
+    }
+
+    const conti = parseVideoContiFromJson(previewJson);
+    const style = await pickSubtitleStyle(row.account_id as string);
+    const events = buildSubtitlePreviewEvents(conti, style);
+    return { events };
   });
 
   app.delete('/api/video-content/:id/video-file', { preHandler: authMiddleware }, async (request, reply) => {
