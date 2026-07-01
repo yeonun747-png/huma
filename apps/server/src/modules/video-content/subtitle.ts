@@ -209,21 +209,6 @@ export interface SubtitlePreviewEvent {
   lines: SubtitlePreviewLine[];
 }
 
-function previewLinesForDialogue(dialogue: string): SubtitlePreviewLine[] {
-  return dialogue
-    .replace(/\r\n/g, '\n')
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const { style } = formatAssDialogueLine(line);
-      const speakerStyle: SubtitlePreviewLine['speakerStyle'] =
-        style === 'SpeakerB' ? 'B' : style === 'SpeakerA' ? 'A' : 'default';
-      return { text: stripSpeakerLabelLine(line), speakerStyle };
-    })
-    .filter((l) => l.text.length > 0);
-}
-
 export function buildSubtitlePreviewEvents(conti: VideoConti, style: SubtitleStyle): SubtitlePreviewEvent[] {
   const totalDuration =
     conti.shots.at(-1)?.endSec ?? conti.duration ?? conti.shots.reduce((m, s) => Math.max(m, s.endSec), 0);
@@ -237,22 +222,23 @@ export function buildSubtitlePreviewEvents(conti: VideoConti, style: SubtitleSty
     const window = subtitleWindow(shot, style, totalDuration, nextStart);
     if (!window) continue;
 
-    const { style: assStyle } = formatAssDialogueText(shot.dialogue!);
-    const lines = previewLinesForDialogue(shot.dialogue!);
-    const displayText = stripSpeakerLabel(shot.dialogue!);
-    if (!displayText) continue;
-
-    const speakerStyle: SubtitlePreviewEvent['speakerStyle'] =
-      assStyle === 'SpeakerB' ? 'B' : assStyle === 'SpeakerA' ? 'A' : 'default';
-
-    events.push({
-      shotNumber: shot.shotNumber,
+    const cues = buildTimedDialogueCues({
+      dialogue: shot.dialogue!,
+      style,
       startSec: window.startSec,
       endSec: window.endSec,
-      text: displayText,
-      speakerStyle,
-      lines,
     });
+
+    for (const cue of cues) {
+      events.push({
+        shotNumber: shot.shotNumber,
+        startSec: cue.startSec,
+        endSec: cue.endSec,
+        text: cue.displayText,
+        speakerStyle: cue.speakerStyle,
+        lines: [{ text: cue.displayText, speakerStyle: cue.speakerStyle }],
+      });
+    }
   }
 
   return events;
@@ -266,26 +252,88 @@ function splitPhysicalDialogueLines(dialogue: string): string[] {
     .filter(Boolean);
 }
 
-export function buildAssDialogueRows(params: {
+function estimateLineSpeechDurationSec(line: string): number {
+  const chars = stripSpeakerLabelLine(line).replace(/\s/g, '').length;
+  if (chars === 0) return 0.8;
+  return Math.max(0.8, chars / 5.5 + 0.3);
+}
+
+export interface TimedDialogueCue {
+  assStyle: 'Default' | 'SpeakerA' | 'SpeakerB';
+  marginV: number;
+  text: string;
+  startSec: number;
+  endSec: number;
+  speakerStyle: 'A' | 'B' | 'default';
+  displayText: string;
+}
+
+/** 멀티라인은 입력 순서대로 구간을 나눠 한 줄씩 순차 표시 */
+export function buildTimedDialogueCues(params: {
   dialogue: string;
   style: SubtitleStyle;
-}): Array<{ assStyle: 'Default' | 'SpeakerA' | 'SpeakerB'; marginV: number; text: string }> {
+  startSec: number;
+  endSec: number;
+}): TimedDialogueCue[] {
   const pos = positionToAss(params.style);
   const physicalLines = splitPhysicalDialogueLines(params.dialogue);
+  if (!physicalLines.length) return [];
 
-  if (physicalLines.length <= 1) {
-    const { text, style: assStyle } = formatAssDialogueText(params.dialogue);
-    if (!text) return [];
-    return [{ assStyle, marginV: pos.marginV, text }];
+  const windowSec = Math.max(0.5, params.endSec - params.startSec);
+
+  if (physicalLines.length === 1) {
+    const formatted = formatAssDialogueLine(physicalLines[0]!);
+    if (!formatted.text) return [];
+    const speakerStyle: TimedDialogueCue['speakerStyle'] =
+      formatted.style === 'SpeakerB' ? 'B' : formatted.style === 'SpeakerA' ? 'A' : 'default';
+    return [
+      {
+        assStyle: formatted.style,
+        marginV: pos.marginV,
+        text: formatted.text,
+        startSec: params.startSec,
+        endSec: params.endSec,
+        speakerStyle,
+        displayText: stripSpeakerLabelLine(physicalLines[0]!),
+      },
+    ];
   }
 
-  const lineHeight = SUBTITLE_LINE_HEIGHT_PX;
-  return physicalLines.map((line, index) => {
+  const durations = physicalLines.map(estimateLineSpeechDurationSec);
+  const totalSpeech = durations.reduce((sum, d) => sum + d, 0);
+  let cursor = params.startSec;
+  const cues: TimedDialogueCue[] = [];
+
+  for (let index = 0; index < physicalLines.length; index++) {
+    const line = physicalLines[index]!;
     const formatted = formatAssDialogueLine(line);
-    // 입력 순서대로 위→아래: 첫 줄(index 0)이 더 작은 MarginV(화면 상단)
-    const marginV = pos.marginV + index * lineHeight;
-    return { assStyle: formatted.style, marginV, text: formatted.text };
-  });
+    if (!formatted.text) continue;
+
+    const isLast = index === physicalLines.length - 1;
+    const share = durations[index]! / totalSpeech;
+    let lineEnd = isLast ? params.endSec : cursor + windowSec * share;
+    lineEnd = Math.max(lineEnd, cursor + 0.4);
+    if (!isLast) {
+      lineEnd = Math.min(lineEnd, params.endSec - 0.05 * (physicalLines.length - index - 1));
+    }
+    lineEnd = Math.min(lineEnd, params.endSec);
+
+    const speakerStyle: TimedDialogueCue['speakerStyle'] =
+      formatted.style === 'SpeakerB' ? 'B' : formatted.style === 'SpeakerA' ? 'A' : 'default';
+
+    cues.push({
+      assStyle: formatted.style,
+      marginV: pos.marginV,
+      text: formatted.text,
+      startSec: cursor,
+      endSec: lineEnd,
+      speakerStyle,
+      displayText: stripSpeakerLabelLine(line),
+    });
+    cursor = lineEnd;
+  }
+
+  return cues;
 }
 export function buildAssContent(conti: VideoConti, style: SubtitleStyle): string {
   const pos = positionToAss(style);
@@ -307,17 +355,28 @@ Style: SpeakerB,${fontName},${ASS_FONT_SIZE},${ASS_COLOR_B},&H000000FF,&H0000000
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
 
-  const events = buildSubtitlePreviewEvents(conti, style);
+  const totalDuration =
+    conti.shots.at(-1)?.endSec ?? conti.duration ?? conti.shots.reduce((m, s) => Math.max(m, s.endSec), 0);
+  const dialogueShots = conti.shots.filter((s) => stripSpeakerLabel(s.dialogue ?? '').length > 0);
   const lines: string[] = [header];
 
-  for (const event of events) {
-    const dialogueRaw =
-      conti.shots.find((s) => s.shotNumber === event.shotNumber)?.dialogue ?? event.text;
-    const rows = buildAssDialogueRows({ dialogue: dialogueRaw, style });
-    for (const row of rows) {
-      if (!row.text) continue;
+  for (let i = 0; i < dialogueShots.length; i++) {
+    const shot = dialogueShots[i]!;
+    const nextStart = dialogueShots[i + 1]?.startSec ?? totalDuration;
+    const window = subtitleWindow(shot, style, totalDuration, nextStart);
+    if (!window) continue;
+
+    const cues = buildTimedDialogueCues({
+      dialogue: shot.dialogue!,
+      style,
+      startSec: window.startSec,
+      endSec: window.endSec,
+    });
+
+    for (const cue of cues) {
+      if (!cue.text) continue;
       lines.push(
-        `Dialogue: 0,${secToAssTime(event.startSec)},${secToAssTime(event.endSec)},${row.assStyle},,0,0,${row.marginV},,${row.text}`,
+        `Dialogue: 0,${secToAssTime(cue.startSec)},${secToAssTime(cue.endSec)},${cue.assStyle},,0,0,${cue.marginV},,${cue.text}`,
       );
     }
   }
