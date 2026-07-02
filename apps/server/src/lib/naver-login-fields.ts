@@ -16,18 +16,97 @@ export { ensureNaverLoginIdPhoneTab, NAVER_LOGIN_ID_URL };
 
 const NAVER_LOGIN_BTN_SELECTORS = [
   '#log\\.login',
+  'button#log\\.login',
   'button.btn_login.next_step:not(.white)',
   'button.btn_login:not(.white)',
-  'input.btn_login',
-  '.btn_login',
-  'button[type="submit"]',
-];
+] as const;
+
+const NAVER_LOGIN_BTN_FALLBACK_SELECTORS = ['input.btn_login[type="submit"]', 'button[type="submit"]'] as const;
+
+const NAVER_LOGIN_FOOTER_TEXT = /비밀번호\s*찾기|아이디\s*찾기|회원가입|QR\s*코드|일회용/i;
+
+export interface NaverLoginSubmitSnapshot {
+  url: string;
+  err: string | null;
+  captchaVisible: boolean;
+  captchaImg: string | null;
+  btnClass: string | null;
+}
+
+/** 캡cha 제출 후 — URL·오류·캡cha 이미지 등 실제 변화가 있을 때만 true */
+export function naverLoginSubmitStateChanged(
+  before: NaverLoginSubmitSnapshot,
+  after: NaverLoginSubmitSnapshot,
+): boolean {
+  if (before.url !== after.url) return true;
+  if (before.captchaVisible && !after.captchaVisible) return true;
+  if (before.captchaImg && after.captchaImg && before.captchaImg !== after.captchaImg) return true;
+  if (after.err && after.err !== before.err) return true;
+  if (before.btnClass !== after.btnClass && /\bloading\b|\bsubmitting\b|\bwait\b/i.test(after.btnClass ?? '')) {
+    return true;
+  }
+  return false;
+}
+
+async function snapshotNaverLoginSubmitState(page: Page): Promise<NaverLoginSubmitSnapshot> {
+  return {
+    url: page.url(),
+    err: await readNaverLoginInlineError(page),
+    captchaVisible: await isNaverLoginCaptchaOnPage(page),
+    captchaImg: await page
+      .locator('#captcha img, .captcha_wrap img, .captcha_box img, #cptch img')
+      .first()
+      .getAttribute('src')
+      .catch(() => null),
+    btnClass: await page.locator('#log\\.login').first().getAttribute('class').catch(() => null),
+  };
+}
+
+async function isValidNaverLoginSubmitButton(btn: Locator): Promise<boolean> {
+  if (!(await btn.isVisible().catch(() => false))) return false;
+  if (await btn.isDisabled().catch(() => false)) return false;
+
+  const meta = await btn
+    .evaluate((el) => {
+      const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim();
+      const value = el instanceof HTMLInputElement ? (el.value ?? '').trim() : '';
+      const label = text || value;
+      const tag = el.tagName;
+      const id = el.id;
+      const cls = el.className ?? '';
+      const r = el.getBoundingClientRect();
+      return { label, tag, id, cls, width: r.width, height: r.height };
+    })
+    .catch(() => null);
+  if (!meta) return false;
+
+  if (meta.tag !== 'BUTTON' && meta.tag !== 'INPUT') return false;
+  if (/\bwhite\b/.test(meta.cls)) return false;
+  if (NAVER_LOGIN_FOOTER_TEXT.test(meta.label)) return false;
+  if (meta.width < 120 || meta.height < 28 || meta.height > 96) return false;
+
+  if (meta.id === 'log.login') return true;
+  if (meta.label === '로그인') return true;
+  return meta.width >= 180 && meta.height >= 36 && meta.height <= 72;
+}
 
 async function findNaverLoginButton(page: Page): Promise<Locator | null> {
   for (const sel of NAVER_LOGIN_BTN_SELECTORS) {
     const btn = page.locator(sel).first();
     if ((await btn.count().catch(() => 0)) === 0) continue;
-    if (await btn.isVisible().catch(() => false)) return btn;
+    if (await isValidNaverLoginSubmitButton(btn)) return btn;
+  }
+
+  const roleCount = await page.getByRole('button', { name: '로그인', exact: true }).count().catch(() => 0);
+  for (let i = 0; i < roleCount; i += 1) {
+    const btn = page.getByRole('button', { name: '로그인', exact: true }).nth(i);
+    if (await isValidNaverLoginSubmitButton(btn)) return btn;
+  }
+
+  for (const sel of NAVER_LOGIN_BTN_FALLBACK_SELECTORS) {
+    const btn = page.locator(sel).first();
+    if ((await btn.count().catch(() => 0)) === 0) continue;
+    if (await isValidNaverLoginSubmitButton(btn)) return btn;
   }
   return null;
 }
@@ -77,12 +156,24 @@ async function canForceAttemptLoginButton(page: Page, btn: Locator): Promise<boo
   return Boolean(id && pw);
 }
 
-async function didNaverLoginSubmitStart(page: Page): Promise<boolean> {
+async function didNaverLoginSubmitStart(
+  page: Page,
+  baseline?: NaverLoginSubmitSnapshot,
+): Promise<boolean> {
+  const before = baseline ?? (await snapshotNaverLoginSubmitState(page));
+  const hadCaptcha = before.captchaVisible;
+
   const deadline = Date.now() + 3200;
   while (Date.now() < deadline) {
     if (await isNaverAuthChallengePage(page)) return true;
-    if (await isNaverLoginCaptchaOnPage(page)) return true;
     if (!page.url().includes('nidlogin')) return true;
+
+    const now = await snapshotNaverLoginSubmitState(page);
+    if (naverLoginSubmitStateChanged(before, now)) return true;
+
+    // 캡cha 없던 일반 로그인 — 캡cha 등장은 제출 시도로 간주
+    if (!hadCaptcha && now.captchaVisible) return true;
+
     await sleep(200);
   }
   return false;
@@ -90,29 +181,47 @@ async function didNaverLoginSubmitStart(page: Page): Promise<boolean> {
 
 async function tryNaverLoginSubmitFallback(page: Page, btn: Locator): Promise<boolean> {
   for (let i = 0; i < 2; i += 1) {
+    const baseline = await snapshotNaverLoginSubmitState(page);
     try {
       await clickNaverLoginButtonWithMouse(page, btn);
     } catch {
       continue;
     }
-    if (await didNaverLoginSubmitStart(page)) return true;
+    if (await didNaverLoginSubmitStart(page, baseline)) return true;
     await sleep(randomBetween(300, 600));
   }
   return false;
 }
 
-/** nidlogin 로그인 버튼 — Playwright/JS click 금지, humanClick만 */
+/** 캡cha 입력칸 포커스 해제 — 로그인 버튼 아래 빈 영역 오클릭 방지 */
+async function blurNaverCaptchaInputFocus(page: Page): Promise<void> {
+  await page
+    .evaluate(() => {
+      const active = document.activeElement;
+      if (!(active instanceof HTMLElement)) return;
+      if (active.closest('#captcha, #cptch, .captcha_wrap, .captcha_box, .captcha')) {
+        active.blur();
+      }
+    })
+    .catch(() => {});
+}
+
+/** nidlogin 로그인 버튼 — Playwright/JS click 금지, humanClick만 (상단 중앙 — 푸터 쪽 오클릭 방지) */
 async function clickNaverLoginButtonWithMouse(page: Page, btn: Locator): Promise<void> {
-  if (await humanClickLocatorFallback(page, btn, [120, 300])) return;
+  await blurNaverCaptchaInputFocus(page);
+  await btn.scrollIntoViewIfNeeded({ timeout: 5000, block: 'center' }).catch(() => {});
+  await sleep(randomBetween(160, 360));
 
   const box = await btn.boundingBox().catch(() => null);
   if (!box || box.width <= 0 || box.height <= 0) {
+    if (await humanClickLocatorFallback(page, btn, [120, 300])) return;
     throw new Error('NAVER_LOGIN_BTN_NO_BBOX');
   }
-  const marginX = box.width * 0.3;
-  const marginY = box.height * 0.28;
-  const cx = box.x + marginX + randomBetween(0, Math.max(1, Math.round(box.width - marginX * 2)));
-  const cy = box.y + marginY + randomBetween(0, Math.max(1, Math.round(box.height - marginY * 2)));
+
+  const bandTop = box.height * 0.2;
+  const bandHeight = Math.max(10, Math.min(box.height * 0.38, 32));
+  const cx = box.x + box.width / 2 + randomBetween(-4, 4);
+  const cy = box.y + bandTop + randomBetween(0, Math.max(0, bandHeight - 1));
   await humanClickAtPoint(page, cx, cy, 2, [120, 280]);
 }
 
@@ -343,6 +452,8 @@ export async function clickNaverLoginButton(page: Page): Promise<void> {
       continue;
     }
 
+    const submitBaseline = await snapshotNaverLoginSubmitState(page);
+
     try {
       await clickNaverLoginButtonWithMouse(page, btn);
     } catch (err) {
@@ -351,7 +462,7 @@ export async function clickNaverLoginButton(page: Page): Promise<void> {
       continue;
     }
 
-    if (await didNaverLoginSubmitStart(page)) return;
+    if (await didNaverLoginSubmitStart(page, submitBaseline)) return;
 
     lastErr = new Error('NAVER_LOGIN_BTN_CLICK_NO_SUBMIT');
     await sleep(randomBetween(300, 600));
