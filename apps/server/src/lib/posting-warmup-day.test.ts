@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getPostingWarmupWeekdayCap } from './posting-warmup.js';
-import { resolveWarmupPublishKstDateKey } from './posting-warmup-day.js';
+import { postingWarmupResetPatch, resolveWarmupPublishKstDateKey } from './posting-warmup-day.js';
 
 describe('posting warmup day caps', () => {
   it('day 6 uses expand stage cap (3)', () => {
@@ -9,6 +9,16 @@ describe('posting warmup day caps', () => {
 
   it('day 0 uses initial cap (1)', () => {
     expect(getPostingWarmupWeekdayCap(0)).toBe(1);
+  });
+});
+
+describe('postingWarmupResetPatch', () => {
+  it('clears warmup counters and sets epoch', () => {
+    const patch = postingWarmupResetPatch(new Date('2026-07-01T12:00:00.000Z'));
+    expect(patch.warmup_day).toBe(0);
+    expect(patch.warmup_last_increment_date).toBeNull();
+    expect(patch.posting_warmup_started_kst).toBeNull();
+    expect(patch.posting_warmup_epoch_at).toBe('2026-07-01T12:00:00.000Z');
   });
 });
 

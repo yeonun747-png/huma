@@ -21,6 +21,7 @@ import {
   resolvePostingProxyPortForCreate,
 } from '../lib/posting-proxy.js';
 import { mergeBlogWritingPersonaField } from '../lib/account-persona.js';
+import { postingWarmupResetPatch } from '../lib/posting-warmup-day.js';
 import { type Workspace } from '@huma/shared';
 
 const UUID_RE =
@@ -319,6 +320,12 @@ export async function registerAccountRoutes(app: FastifyInstance) {
         return reply.code(400).send({ error: '네이버 ID는 비울 수 없습니다' });
       }
       patch.naver_id = naverId;
+      if (accountType === 'posting') {
+        const prevNaverId = String(existing.naver_id ?? '').trim();
+        if (prevNaverId && prevNaverId !== naverId) {
+          Object.assign(patch, postingWarmupResetPatch());
+        }
+      }
     }
     if (body.wpm !== undefined) patch.wpm = body.wpm;
     if (body.health_score !== undefined) patch.health_score = body.health_score;

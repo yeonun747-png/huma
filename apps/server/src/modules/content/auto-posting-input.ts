@@ -14,7 +14,7 @@ import {
 } from '../video-content/panana-characters.js';
 import { listYeonunProducts } from '../video-content/yeonun-product-picker.js';
 import { logOperation } from '../../lib/log-emitter.js';
-import { loadRecentPostingSubjectKeys } from '../../lib/posting-recent-subjects.js';
+import { loadRecentPostingSubjectKeys, postingRecentSubjectExcludeLimit } from '../../lib/posting-recent-subjects.js';
 
 export const YEONUN_POSTING_URL_BASE = 'https://yeonun.com/fortune';
 export const QUIZOASIS_POSTING_URL_BASE = 'https://www.myquizoasis.com/ko/test';
@@ -79,7 +79,10 @@ async function pickPostingSubject(
   workspace: string,
   accountId?: string | null,
 ): Promise<{ title: string; source_url: string; label: string }> {
-  const excludeRecentPostingKeys = await loadRecentPostingSubjectKeys(workspace);
+  const excludeRecentPostingKeys = await loadRecentPostingSubjectKeys(
+    workspace,
+    postingRecentSubjectExcludeLimit(workspace),
+  );
   const pickOpts = { excludeRecentPostingKeys };
 
   if (workspace === 'yeonun') {

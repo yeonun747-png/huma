@@ -45,6 +45,48 @@ type PostBlogWarmupJob = {
   platform_schedule: unknown;
 };
 
+function resolveWarmupJobInstantIso(
+  job: PostBlogWarmupJob,
+  postPublishedByUrl?: Map<string, string | null>,
+): string | null {
+  const publishedAt = resolveJobPublishedAtIso(job, postPublishedByUrl);
+  if (publishedAt?.trim()) return publishedAt;
+  const scheduled = job.scheduled_at?.trim();
+  if (scheduled) return scheduled;
+  const completed = job.completed_at?.trim();
+  if (completed) return completed;
+  return null;
+}
+
+function isWarmupJobAfterEpoch(
+  job: PostBlogWarmupJob,
+  epochIso: string | null | undefined,
+  postPublishedByUrl?: Map<string, string | null>,
+): boolean {
+  if (!epochIso?.trim()) return true;
+  const epochMs = Date.parse(epochIso);
+  if (!Number.isFinite(epochMs)) return true;
+  const instant = resolveWarmupJobInstantIso(job, postPublishedByUrl);
+  if (!instant) return false;
+  const ms = Date.parse(instant);
+  return Number.isFinite(ms) && ms >= epochMs;
+}
+
+/** 네이버 ID 교체 — 워밍업 단계·일차·평일상한 UI를 처음부터 */
+export function postingWarmupResetPatch(now = new Date()): {
+  warmup_day: number;
+  warmup_last_increment_date: null;
+  posting_warmup_started_kst: null;
+  posting_warmup_epoch_at: string;
+} {
+  return {
+    warmup_day: 0,
+    warmup_last_increment_date: null,
+    posting_warmup_started_kst: null,
+    posting_warmup_epoch_at: now.toISOString(),
+  };
+}
+
 /** 워밍업 일차 집계 — 발행 시각 우선, 없으면 scheduled_at·completed_at(KST) fallback */
 export function resolveWarmupPublishKstDateKey(
   job: PostBlogWarmupJob,
@@ -78,12 +120,13 @@ export async function ensurePostingWarmupStartedKst(accountId: string): Promise<
 
   const { data: acc, error: accErr } = await supabase
     .from('huma_accounts')
-    .select('posting_warmup_started_kst, auto_publish_enabled')
+    .select('posting_warmup_started_kst, auto_publish_enabled, posting_warmup_epoch_at')
     .eq('id', key)
     .maybeSingle();
 
   if (accErr) throw new Error(`워밍업 기준일 조회 실패: ${accErr.message}`);
   const stored = (acc?.posting_warmup_started_kst as string | null)?.trim();
+  const epochAt = (acc?.posting_warmup_epoch_at as string | null)?.trim() ?? null;
   if (stored) return stored;
 
   const { data: firstAutoContent } = await supabase
@@ -112,6 +155,7 @@ export async function ensurePostingWarmupStartedKst(accountId: string): Promise<
 
     for (const job of jobs ?? []) {
       if (acc?.auto_publish_enabled && !isAutoPublishWarmupJob(job.platform_schedule)) continue;
+      if (!isWarmupJobAfterEpoch(job as PostBlogWarmupJob, epochAt)) continue;
       const kst = resolveWarmupPublishKstDateKey(job as PostBlogWarmupJob);
       if (kst) {
         started = kst;
@@ -141,13 +185,14 @@ export async function countDistinctPostingWarmupDays(
 
   const { data: accMeta } = await supabase
     .from('huma_accounts')
-    .select('auto_publish_enabled, posting_warmup_started_kst')
+    .select('auto_publish_enabled, posting_warmup_started_kst, posting_warmup_epoch_at')
     .eq('id', key)
     .maybeSingle();
 
   const startedKst =
     (accMeta?.posting_warmup_started_kst as string | null)?.trim() ??
     (await ensurePostingWarmupStartedKst(key));
+  const epochAt = (accMeta?.posting_warmup_epoch_at as string | null)?.trim() ?? null;
 
   const kstDates = new Set<string>();
 
@@ -171,6 +216,7 @@ export async function countDistinctPostingWarmupDays(
 
     const postPublishedByUrl = await loadPostPublishedByUrl(key, jobsToCount);
     for (const job of jobsToCount) {
+      if (!isWarmupJobAfterEpoch(job, epochAt, postPublishedByUrl)) continue;
       const kstDate = resolveWarmupPublishKstDateKey(job, postPublishedByUrl);
       if (!kstDate) continue;
       if (startedKst && kstDate < startedKst) continue;

@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest';
 import {
   extractPostingSubjectKey,
   filterPostingSubjectCandidates,
+  postingRecentSubjectExcludeLimit,
+  POSTING_RECENT_SUBJECT_EXCLUDE_NON_PRODUCT,
+  POSTING_RECENT_SUBJECT_EXCLUDE_PRODUCT,
 } from './posting-recent-subjects.js';
 
 describe('extractPostingSubjectKey', () => {
@@ -20,6 +23,18 @@ describe('extractPostingSubjectKey', () => {
 
   it('parses panana character id', () => {
     expect(extractPostingSubjectKey('panana', 'https://panana.kr/c/char-42')).toBe('char-42');
+  });
+});
+
+describe('postingRecentSubjectExcludeLimit', () => {
+  it('uses 5 for yeonun products and 3 for non-product workspaces', () => {
+    expect(postingRecentSubjectExcludeLimit('yeonun')).toBe(POSTING_RECENT_SUBJECT_EXCLUDE_PRODUCT);
+    expect(postingRecentSubjectExcludeLimit('quizoasis')).toBe(
+      POSTING_RECENT_SUBJECT_EXCLUDE_NON_PRODUCT,
+    );
+    expect(postingRecentSubjectExcludeLimit('panana')).toBe(
+      POSTING_RECENT_SUBJECT_EXCLUDE_NON_PRODUCT,
+    );
   });
 });
 

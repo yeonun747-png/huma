@@ -3,8 +3,20 @@ import { extractFortuneSlug } from '../modules/content/yeonun-context.js';
 import { extractQuizTestSlug } from '../modules/content/quizoasis-context.js';
 import { extractPananaCharacterKey } from '../modules/content/panana-context.js';
 
-/** 포스팅 자동 선택 — 직전 N건에 쓴 상품/주제 제외 */
-export const POSTING_RECENT_SUBJECT_EXCLUDE = 5;
+/** 포스팅 자동 선택 — 직전 N건에 쓴 상품/주제 제외 (연운 상품) */
+export const POSTING_RECENT_SUBJECT_EXCLUDE_PRODUCT = 5;
+
+/** 퀴즈·파나나 등 상품이 아닌 포스팅 — 직전 비교 건수 */
+export const POSTING_RECENT_SUBJECT_EXCLUDE_NON_PRODUCT = 3;
+
+/** @deprecated postingRecentSubjectExcludeLimit(workspace) 사용 */
+export const POSTING_RECENT_SUBJECT_EXCLUDE = POSTING_RECENT_SUBJECT_EXCLUDE_PRODUCT;
+
+export function postingRecentSubjectExcludeLimit(workspace: string): number {
+  return workspace === 'yeonun'
+    ? POSTING_RECENT_SUBJECT_EXCLUDE_PRODUCT
+    : POSTING_RECENT_SUBJECT_EXCLUDE_NON_PRODUCT;
+}
 
 const POSTING_SUBJECT_WORKSPACES = new Set(['yeonun', 'quizoasis', 'panana']);
 
