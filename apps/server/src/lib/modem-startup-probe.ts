@@ -25,7 +25,7 @@ export async function probePhysicalModemsOnStartup(
 
   if (process.env.HUMA_MODEM_STARTUP_RESTORE === 'true') {
     log('[modem-startup-probe] restore-dongle-by-subnet 실행');
-    const restored = runRestoreDongleNetwork();
+    const restored = runRestoreDongleNetwork({ force: true });
     if (!restored.ok) {
       log(`[modem-startup-probe] restore 실패: ${restored.error ?? 'unknown'}`);
     }

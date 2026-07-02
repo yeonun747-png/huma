@@ -104,7 +104,7 @@ export async function registerModemRoutes(app: FastifyInstance) {
 
   /** DHCP + policy routing + 3proxy 일괄 복구 (UI 「동글 네트워크 복구」) */
   app.post('/api/modems/restore-network', { preHandler: [authMiddleware, requireSuper] }, async (_request, reply) => {
-    const result = runRestoreDongleNetwork();
+    const result = runRestoreDongleNetwork({ force: true });
     if (!result.ok) {
       await logOperation({
         level: 'ERROR',

@@ -39,6 +39,20 @@ is_iface_carrier_up() {
   [ "$carrier" = "1" ]
 }
 
+# C-Rank 실폰 RNDIS — 1단계 DHCP·default route 삭제 대상에서 제외 (restore-phone-crank.sh 가 처리)
+is_phone_tether_iface() {
+  local iface="$1" ip="${2:-}"
+  if [ -z "$ip" ]; then
+    ip=$(ip -4 addr show dev "$iface" 2>/dev/null | grep -oP '(?<=inet\s)\d+\.\d+\.\d+\.\d+' | head -1 || true)
+  fi
+  [[ "${ip:-}" =~ ^192\.168\.42\. ]] && return 0
+  [[ "${ip:-}" =~ ^10\. ]] && return 0
+  if [[ "$iface" =~ ^enx ]] && [ -z "${ip:-}" ]; then
+    return 0
+  fi
+  return 1
+}
+
 dongle_guess_gateway() {
   local ip="$1"
   echo "${ip%.*}.1"
@@ -78,6 +92,11 @@ if [ "${#IFACES[@]}" -eq 0 ]; then
 fi
 
 for iface in "${IFACES[@]}"; do
+  ip_full=$(ip -4 addr show dev "$iface" 2>/dev/null | grep -oP '(?<=inet\s)\d+\.\d+\.\d+\.\d+' | head -1 || true)
+  if is_phone_tether_iface "$iface" "$ip_full"; then
+    echo "  ⊘ ${iface} ${ip_full:-no-ip} — 실폰 테더, 1단계 DHCP 스킵"
+    continue
+  fi
   nmcli dev set "$iface" managed no 2>/dev/null || true
   ip link set "$iface" up 2>/dev/null || true
   if ! ip -4 addr show dev "$iface" 2>/dev/null | grep -q 'inet '; then
@@ -211,8 +230,13 @@ mkdir -p /etc/huma
 echo ""
 echo "→ /etc/huma/dongle-slot-interfaces.conf 갱신"
 
-echo ""
-echo "=== 5) SOCKS 테스트 ==="
-PORTS=()
-for arg in "${ALL_ROUTE_ARGS[@]}"; do PORTS+=("${arg##*:}"); done
-bash "$DIR/check-socks-proxy.sh" "${PORTS[@]}"
+if [ "${HUMA_RESTORE_SKIP_SOCKS_TEST:-}" = "1" ]; then
+  echo ""
+  echo "=== 5) SOCKS 테스트 — 자동 복구 경로에서 생략 (HUMA_RESTORE_SKIP_SOCKS_TEST) ==="
+else
+  echo ""
+  echo "=== 5) SOCKS 테스트 ==="
+  PORTS=()
+  for arg in "${ALL_ROUTE_ARGS[@]}"; do PORTS+=("${arg##*:}"); done
+  bash "$DIR/check-socks-proxy.sh" "${PORTS[@]}"
+fi

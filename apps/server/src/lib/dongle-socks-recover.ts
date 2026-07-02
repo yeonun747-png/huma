@@ -2,17 +2,25 @@ import { execSync } from 'child_process';
 import { supabase } from '../middleware/auth.js';
 import { readDongleInterfaceFromConf, isPlaceholderInterfaceName } from './dongle-interfaces.js';
 import { readInterfaceIp } from './dongle-health.js';
-import { applyDonglePolicyRoute, runRestoreDongleNetwork } from './restore-dongle-network.js';
+import {
+  applyDonglePolicyRoute,
+  runRestoreDongleNetwork,
+  isDongleFullRestoreCooldownActive,
+} from './restore-dongle-network.js';
+import { warmPostingDonglePath } from './dongle-route-warm.js';
 import { applyModemProxyProbe } from './modem-proxy-probe.js';
 import { probeModemSocks } from './modem-socks-probe.js';
 import { isPostingProxyPort, proxyPortToSlot } from './modem-ports.js';
 import { logOperation } from './log-emitter.js';
+import { sleep } from './utils.js';
 
 export type DongleSocksRecoverResult = {
   ok: boolean;
   method: 'skip' | 'route_3proxy' | 'full_restore';
   detail: string;
 };
+
+const LIGHTWEIGHT_RECOVER_ATTEMPTS = 3;
 
 /** 3proxy egress IP 동기화 — 사설(RNDIS) IP, 공인 IP 재발급 아님 */
 export function sync3proxyExternalIp(proxyPort: number, egressIp: string): void {
@@ -54,6 +62,46 @@ async function verifySocksAndPatch(
   return socks.ok;
 }
 
+async function tryRouteAnd3proxyOnce(
+  proxyPort: number,
+  slot: number,
+  modemId: string | undefined,
+  iface: string,
+  modemStatus: string,
+): Promise<boolean> {
+  const ip = readInterfaceIp(iface);
+  if (!ip) return false;
+  try {
+    applyDonglePolicyRoute(iface, proxyPort);
+    sync3proxyExternalIp(proxyPort, ip);
+    return verifySocksAndPatch(proxyPort, slot, modemId, iface, modemStatus);
+  } catch {
+    return false;
+  }
+}
+
+/** SOCKS 일시 지연 시 즉시 full restore 하지 않도록 경량 복구를 여러 번 시도 */
+async function tryRouteAnd3proxyWithWarm(
+  proxyPort: number,
+  slot: number,
+  modemId: string | undefined,
+  initialIface: string | null,
+  modemStatus: string,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < LIGHTWEIGHT_RECOVER_ATTEMPTS; attempt += 1) {
+    const iface = readDongleInterfaceFromConf(slot) ?? initialIface;
+    if (!iface) return false;
+    warmPostingDonglePath(slot, iface);
+    if (await tryRouteAnd3proxyOnce(proxyPort, slot, modemId, iface, modemStatus)) {
+      return true;
+    }
+    if (attempt < LIGHTWEIGHT_RECOVER_ATTEMPTS - 1) {
+      await sleep(700 + attempt * 600);
+    }
+  }
+  return false;
+}
+
 /** SOCKS 실패 — LTE·공인 IP 재발급 없이 policy routing + 3proxy → 실패 시 일괄 복구 */
 export async function recoverPostingDongleSocksPath(
   proxyPort: number,
@@ -77,21 +125,16 @@ export async function recoverPostingDongleSocksPath(
   const iface = resolveIface(slot, modem?.interface_name as string | null | undefined);
   const modemStatus = String(modem?.status ?? 'error');
 
-  const tryRouteAnd3proxy = async (): Promise<boolean> => {
-    if (!iface) return false;
-    const ip = readInterfaceIp(iface);
-    if (!ip) return false;
-    try {
-      applyDonglePolicyRoute(iface, proxyPort);
-      sync3proxyExternalIp(proxyPort, ip);
-      return verifySocksAndPatch(proxyPort, slot, resolvedModemId, iface, modemStatus);
-    } catch {
-      return false;
-    }
-  };
-
-  if (await tryRouteAnd3proxy()) {
+  if (await tryRouteAnd3proxyWithWarm(proxyPort, slot, resolvedModemId, iface, modemStatus)) {
     return { ok: true, method: 'route_3proxy', detail: `slot${slot} routing·3proxy (:${proxyPort})` };
+  }
+
+  if (isDongleFullRestoreCooldownActive()) {
+    return {
+      ok: false,
+      method: 'route_3proxy',
+      detail: `slot${slot} 경량 복구 실패 — 일괄 복구 쿨다운 중 (전 슬롯 3proxy 재시작 방지)`,
+    };
   }
 
   await logOperation({
@@ -100,20 +143,21 @@ export async function recoverPostingDongleSocksPath(
     modem_id: resolvedModemId,
   }).catch(() => undefined);
 
-  const full = runRestoreDongleNetwork();
+  const full = runRestoreDongleNetwork({ quick: true });
   if (!full.ok) {
     return {
       ok: false,
-      method: 'full_restore',
+      method: full.skipped === 'cooldown' || full.skipped === 'locked' ? 'route_3proxy' : 'full_restore',
       detail: full.error ?? 'restore-dongle-by-subnet.sh 실패',
     };
   }
 
+  const ifaceAfter = readDongleInterfaceFromConf(slot) ?? iface;
   const socksOk = await verifySocksAndPatch(
     proxyPort,
     slot,
     resolvedModemId,
-    iface,
+    ifaceAfter,
     modemStatus,
   );
   return socksOk
