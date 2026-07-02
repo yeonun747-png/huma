@@ -3,6 +3,7 @@ import {
   bodyIndicatesNaverAccountProtection,
   isNaverAccountProtectionError,
   parseNaverAccountProtectionPhase,
+  urlIndicatesNaverAccountProtection,
 } from './naver-account-protection.js';
 
 describe('bodyIndicatesNaverAccountProtection', () => {
@@ -16,6 +17,20 @@ describe('bodyIndicatesNaverAccountProtection', () => {
 
   it('ignores normal login body', () => {
     expect(bodyIndicatesNaverAccountProtection('네이버 로그인')).toBe(false);
+  });
+});
+
+describe('urlIndicatesNaverAccountProtection', () => {
+  it('detects idSafetyRelease help URL', () => {
+    expect(
+      urlIndicatesNaverAccountProtection(
+        'https://nid.naver.com/user2/help/idSafetyRelease?m=viewIdSafetyInfo&token_help=abc',
+      ),
+    ).toBe(true);
+  });
+
+  it('ignores nidlogin', () => {
+    expect(urlIndicatesNaverAccountProtection('https://nid.naver.com/nidlogin.login')).toBe(false);
   });
 });
 

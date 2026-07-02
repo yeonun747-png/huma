@@ -6,6 +6,12 @@ import { disableAutoPublish } from './auto-publish-state.js';
 import { logOperation } from './log-emitter.js';
 import { shouldNotifySlack } from './human-engine-policy.js';
 import { notifyLayer4Telegram } from '../modules/watcher/telegram.js';
+import { closeBrowserContext } from '../modules/playwright/browser.js';
+import { forceReleaseModemForAccount } from '../modules/proxy/manager.js';
+import { forceReleaseAccount } from './account-lock.js';
+import { deleteJobsByIds } from './delete-job.js';
+import { resetPostingQuotaReservation } from './posting-quota-reserve.js';
+import { cancelCaptchaHold } from '../modules/watcher/captcha-hold.js';
 
 export const NAVER_ACCOUNT_PROTECTED = 'NAVER_ACCOUNT_PROTECTED';
 
@@ -22,6 +28,15 @@ const PROTECTION_BODY_PATTERNS = [
   /보호조치\s*해제/,
 ];
 
+export function urlIndicatesNaverAccountProtection(url: string): boolean {
+  const lower = url.toLowerCase();
+  return (
+    lower.includes('idsafetyrelease') ||
+    lower.includes('viewidsafetyinfo') ||
+    lower.includes('/help/idsafety')
+  );
+}
+
 export function bodyIndicatesNaverAccountProtection(body: string): boolean {
   return PROTECTION_BODY_PATTERNS.some((re) => re.test(body));
 }
@@ -29,6 +44,7 @@ export function bodyIndicatesNaverAccountProtection(body: string): boolean {
 export async function isNaverAccountProtectionPage(page: Page): Promise<boolean> {
   const url = page.url().toLowerCase();
   if (!url.includes('naver.com')) return false;
+  if (urlIndicatesNaverAccountProtection(url)) return true;
 
   const body = await page.locator('body').innerText({ timeout: 2000 }).catch(() => '');
   return bodyIndicatesNaverAccountProtection(body);
@@ -62,9 +78,9 @@ export async function throwIfNaverAccountProtection(
   page: Page,
   phase: NaverAccountProtectionPhase,
 ): Promise<void> {
-  if (await isNaverAccountProtectionPage(page)) {
-    throw naverAccountProtectedError(phase);
-  }
+  if (!(await isNaverAccountProtectionPage(page))) return;
+  await closeBrowserContext(page.context()).catch(() => {});
+  throw naverAccountProtectedError(phase);
 }
 
 export async function throwIfNaverAccountProtectionInContext(
@@ -72,7 +88,31 @@ export async function throwIfNaverAccountProtectionInContext(
   phase: NaverAccountProtectionPhase,
 ): Promise<void> {
   const hit = await findNaverAccountProtectionPage(context);
-  if (hit) throw naverAccountProtectedError(phase);
+  if (!hit) return;
+  await closeBrowserContext(context).catch(() => {});
+  throw naverAccountProtectedError(phase);
+}
+
+/** 아이디 보호조치 — 큐 삭제 · 동글·계정 락 해제 · 자동발행 OFF · is_active OFF */
+async function purgeAccountPostingQueue(accountId: string): Promise<number> {
+  const { data: rows } = await supabase
+    .from('huma_jobs')
+    .select('id, status')
+    .eq('account_id', accountId)
+    .in('job_type', ['content_full', 'post_blog'])
+    .in('status', ['pending', 'scheduled', 'running', 'awaiting_captcha']);
+
+  const ids = (rows ?? []).map((r) => r.id as string);
+  if (!ids.length) return 0;
+
+  for (const row of rows ?? []) {
+    if (row.status === 'awaiting_captcha') {
+      await cancelCaptchaHold(row.id as string).catch(() => {});
+    }
+  }
+
+  const { deleted } = await deleteJobsByIds(ids);
+  return deleted;
 }
 
 /** 아이디 보호조치 — 자동발행 OFF · is_active OFF · 오퍼레이션 로그 · Telegram */
@@ -101,14 +141,26 @@ export async function handleNaverAccountProtection(params: {
     await disableAutoPublish(workspace, accountId).catch((err) => {
       console.error('[naver] disableAutoPublish on protection:', (err as Error).message);
     });
-  } else if (acc.auto_publish_enabled) {
-    await supabase.from('huma_accounts').update({ auto_publish_enabled: false }).eq('id', accountId);
+  } else {
+    if (acc.auto_publish_enabled) {
+      await supabase.from('huma_accounts').update({ auto_publish_enabled: false }).eq('id', accountId);
+    }
+    await resetPostingQuotaReservation(accountId).catch(() => {});
   }
+
+  const purgedJobs = await purgeAccountPostingQueue(accountId);
+
+  await forceReleaseModemForAccount(accountId).catch((err) => {
+    console.error('[naver] forceReleaseModem on protection:', (err as Error).message);
+  });
+  await forceReleaseAccount(accountId).catch(() => {});
 
   await supabase.from('huma_accounts').update({ is_active: false }).eq('id', accountId);
 
   const phaseKo = PHASE_LABEL[phase];
-  const logMessage = `[naver] 아이디 보호조치 (${phaseKo}) — 계정 사용 중지 · 자동발행 OFF (${label}/${naverId})`;
+  const logMessage =
+    `[naver] 아이디 보호조치 (${phaseKo}) — 큐 ${purgedJobs}건 삭제 · 동글·계정 락 해제 · ` +
+    `자동발행 OFF · 계정 사용 중지 (${label}/${naverId})`;
 
   await logOperation({
     level: 'ERROR',
@@ -124,7 +176,7 @@ export async function handleNaverAccountProtection(params: {
     '🛑 네이버 아이디 보호조치',
     `계정: ${label} (${naverId})`,
     `감지: ${phaseKo}`,
-    '조치: is_active OFF · 자동발행 OFF',
+    `조치: 큐 ${purgedJobs}건 삭제 · 동글·계정 락 해제 · 자동발행 OFF · is_active OFF`,
     'VNC에서 「보호조치 해제」 후 계정관리에서 수동 재투입',
   ].join('\n');
 

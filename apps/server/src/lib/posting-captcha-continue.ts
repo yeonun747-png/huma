@@ -19,6 +19,7 @@ import { recordPublishedPost } from '../modules/blog-check/post-record.js';
 import {
   handleNaverAccountProtection,
   isNaverAccountProtectionError,
+  NAVER_ACCOUNT_PROTECTED,
   parseNaverAccountProtectionPhase,
 } from './naver-account-protection.js';
 
@@ -188,6 +189,7 @@ export async function continuePostBlogFromCaptchaHold(params: {
       }).catch((handlerErr) => {
         console.error('[naver] protection handler:', (handlerErr as Error).message);
       });
+      return { ok: false, error: (err as Error).message ?? NAVER_ACCOUNT_PROTECTED };
     }
     const message = (err as Error).message ?? 'post_blog_continue_failed';
     await supabase

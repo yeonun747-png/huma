@@ -7,6 +7,13 @@ export function isPlaywrightTimeout(err: unknown): boolean {
 
 export function classifyNaverLoginPage(url: string, errText: string | null): string | null {
   const lower = url.toLowerCase();
+  if (
+    lower.includes('idsafetyrelease') ||
+    lower.includes('viewidsafetyinfo') ||
+    lower.includes('/help/idsafety')
+  ) {
+    return 'NAVER_ACCOUNT_PROTECTED:login';
+  }
   if (lower.includes('captcha') || lower.includes('challenge')) return 'CAPTCHA_DETECTED';
   if (lower.includes('device') || lower.includes('new_env') || lower.includes('otp')) {
     return 'NAVER_LOGIN_DEVICE_VERIFY';

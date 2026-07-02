@@ -3,6 +3,7 @@ import type { BrowserContext, Page } from 'playwright';
 import { humanSleep } from '../modules/human-engine/typing.js';
 import { submitNaverLoginAfterCaptcha } from './naver-login-fields.js';
 import { isNaverAuthChallengePage } from './naver-auth-challenge.js';
+import { throwIfNaverAccountProtection } from './naver-account-protection.js';
 import { isNaverCaptchaVisible, pickNaverCaptchaPage } from './naver-captcha-vision.js';
 import { gotoBlogPortal, waitForBlogPortalReady } from './naver-blog-portal.js';
 import { findNaverPostwritePage } from '../modules/playwright/naver/enter-blog-editor.js';
@@ -117,6 +118,7 @@ export async function pollUntilNaverLoginRedirect(
 ): Promise<void> {
   const deadline = Date.now() + options.timeoutMs;
   while (Date.now() < deadline) {
+    await throwIfNaverAccountProtection(page, 'login');
     if (!page.url().includes('nidlogin.login')) {
       if (options.assertOk) await options.assertOk(page);
       return;

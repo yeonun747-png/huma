@@ -88,6 +88,37 @@ export async function releaseModem(session: ModemSession | number): Promise<void
   }
 }
 
+/** 보호조치 등 — Redis·프로세스 동글 락 강제 해제 */
+export async function forceReleaseModemForAccount(accountId: string): Promise<void> {
+  const { data: account } = await supabase
+    .from('huma_accounts')
+    .select('proxy_port, modem_id')
+    .eq('id', accountId)
+    .maybeSingle();
+
+  const port = account?.proxy_port as number | null | undefined;
+  if (!port) return;
+
+  busyModems.delete(String(port));
+  await releaseModemLocks(port, 'posting');
+  await releaseModemLocks(port, 'crank');
+
+  const modemId = (account?.modem_id as string | null) ?? (await getModemIdByProxyPort(port));
+  if (modemId) {
+    await supabase
+      .from('huma_modems')
+      .update({ status: 'idle' })
+      .eq('id', modemId)
+      .neq('status', 'reconnecting');
+  } else {
+    await supabase
+      .from('huma_modems')
+      .update({ status: 'idle' })
+      .eq('proxy_port', port)
+      .neq('status', 'reconnecting');
+  }
+}
+
 export async function getModemIdByProxyPort(proxyPort: number): Promise<string | null> {
   const { data } = await supabase
     .from('huma_modems')
