@@ -38,7 +38,7 @@ export function ModemPanel() {
             </div>
             <div className="font-mono text-[10.5px] text-huma-t3">{m.response_ms != null ? `${m.response_ms}ms` : '—'}</div>
             <button type="button" className="btn-ghost mt-2 w-full text-[10px]" onClick={() => api.reconnectModem(m.id).then(() => api.modems({ probe: true }).then(setModems))}>
-              IP 재발급
+              복구
             </button>
           </div>
         ))}

@@ -146,7 +146,7 @@ async function resolveModemId(session?: ModemSession, proxyPort?: number): Promi
 async function handle429Reconnect(accountId: string, session?: ModemSession) {
   const modemId = await resolveModemId(session, session?.proxyPort);
   if (!modemId) {
-    await postWatcherAlert(`⚠️ 429 탐지 — 모뎀 ID 없음\n계정: ${accountId}\n수동 IP 재발급 필요`);
+    await postWatcherAlert(`⚠️ 429 탐지 — 모뎀 ID 없음\n계정: ${accountId}\n수동 동글 복구 필요`);
     return;
   }
 
@@ -154,7 +154,7 @@ async function handle429Reconnect(accountId: string, session?: ModemSession) {
     const result = await reconnectModem(modemId);
     if (!result.success) {
       await postWatcherAlert(
-        `🚨 429 후 IP 재발급 실패\n계정: ${accountId}\n슬롯: ${result.slotNumber ?? '?'}\nold: ${result.oldIp ?? '?'} new: ${result.newIp ?? '?'}\n수동 대응 필요`,
+        `🚨 429 후 동글 복구 실패\n계정: ${accountId}\n슬롯: ${result.slotNumber ?? '?'}\nold: ${result.oldIp ?? '?'} new: ${result.newIp ?? '?'}\n수동 대응 필요`,
       );
     }
   } catch (err) {

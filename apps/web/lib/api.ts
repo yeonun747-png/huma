@@ -490,10 +490,27 @@ export const api = {
   },
   restoreModemNetwork: async () => {
     invalidateApiCache('modems');
-    return request<{ success: boolean; message?: string; output?: string; error?: string }>(
-      '/api/modems/restore-network',
-      { method: 'POST', timeoutMs: 200_000 },
-    );
+    const token = getToken();
+    const url = resolveRequestUrl('/api/modems/restore-network');
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: token ? { 'X-HUMA-KEY': token } : {},
+      signal: requestTimeoutSignal(200_000),
+    });
+    const body = (await res.json().catch(() => ({}))) as {
+      success?: boolean;
+      message?: string;
+      output?: string;
+      error?: string;
+    };
+    if (!res.ok) {
+      const detail =
+        body.message?.trim() ||
+        [body.error, body.output?.slice(-1500)].filter(Boolean).join('\n\n') ||
+        '동글 네트워크 복구 실패';
+      throw new Error(detail);
+    }
+    return body as { success: boolean; message?: string; output?: string; error?: string };
   },
   logs: (params?: { level?: string; platform?: string; limit?: string }, opts?: { force?: boolean }) =>
     cachedFetch(

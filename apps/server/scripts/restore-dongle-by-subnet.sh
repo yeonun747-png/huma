@@ -5,10 +5,16 @@
 #
 # eth/enx 이름·192.168.{n}.100 서브넷이 바뀌어도 restore 시 재매핑
 #
-# Usage: sudo bash restore-dongle-by-subnet.sh
+# Usage: sudo bash restore-dongle-by-subnet.sh [--skip-socks-test]
 # 사전: isc-dhcp-client (dhclient), 동글 USB 인식·LTE 연결
 
 set -euo pipefail
+
+for arg in "$@"; do
+  case "$arg" in
+    --skip-socks-test) HUMA_RESTORE_SKIP_SOCKS_TEST=1 ;;
+  esac
+done
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 

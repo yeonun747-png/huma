@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DONGLE_FULL_RESTORE_COOLDOWN_MS,
   DONGLE_SLOT_RESTORE_COOLDOWN_MS,
+  formatRestoreExecError,
   isDongleFullRestoreCooldownActive,
   isDongleSlotRestoreCooldownActive,
   remainingDongleFullRestoreCooldownMs,
@@ -44,5 +45,23 @@ describe('dongle slot restore cooldown', () => {
     expect(remainingDongleSlotRestoreCooldownMs(3, now, DONGLE_SLOT_RESTORE_COOLDOWN_MS, slot3Last)).toBe(
       30_000,
     );
+  });
+});
+
+describe('formatRestoreExecError', () => {
+  it('prefers script 오류 line over Command failed message', () => {
+    const out = formatRestoreExecError(
+      '=== 2) USB ===\n오류: 192.168.* RNDIS 동글 없음',
+      'Command failed: sudo bash "/path/restore-dongle-by-subnet.sh"',
+    );
+    expect(out).toBe('오류: 192.168.* RNDIS 동글 없음');
+  });
+
+  it('hints sudoers when sudo password required', () => {
+    const out = formatRestoreExecError(
+      'sudo: a password is required',
+      'Command failed: sudo bash script',
+    );
+    expect(out).toContain('setup-huma-modem-sudoers.sh');
   });
 });

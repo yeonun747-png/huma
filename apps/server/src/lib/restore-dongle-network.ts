@@ -7,6 +7,8 @@ export { applyDonglePolicyRoute } from './dongle-policy-route.js';
 
 const RESTORE_TIMEOUT_MS = 180_000;
 const SLOT_RESTORE_TIMEOUT_MS = 90_000;
+const SUDO_BIN = process.env.HUMA_RESTORE_SUDO?.trim() || '/usr/bin/sudo';
+const BASH_BIN = process.env.HUMA_RESTORE_BASH?.trim() || '/usr/bin/bash';
 const RESTORE_STATE_DIR = process.env.HUMA_DONGLE_RESTORE_STATE_DIR?.trim() || '/run/huma';
 const RESTORE_LOCK_FILE =
   process.env.HUMA_DONGLE_RESTORE_LOCK_FILE?.trim() || `${RESTORE_STATE_DIR}/dongle-restore.lock`;
@@ -128,27 +130,65 @@ export function remainingDongleFullRestoreCooldownMs(
   return Math.max(0, cooldownMs - (nowMs - lastMs));
 }
 
+/** execSync 실패 시 stdout·stderr에서 사용자용 원인 추출 */
+export function formatRestoreExecError(combinedOutput: string, execMessage?: string): string {
+  const lines = combinedOutput
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const sudoLine = [...lines].reverse().find((l) => /sudo:/i.test(l));
+  if (sudoLine) {
+    if (/password is required|a terminal is required|not allowed/i.test(sudoLine)) {
+      return `${sudoLine} — i7에서 sudo HUMA_USER=songchunho bash apps/server/deploy/setup-huma-modem-sudoers.sh 실행 후 pm2 restart huma-server`;
+    }
+    return sudoLine;
+  }
+
+  const scriptLine = [...lines]
+    .reverse()
+    .find((l) => /^(오류|error|✗|⚠)/i.test(l) || /실패|없음|NOT LISTEN|FAIL/i.test(l));
+  if (scriptLine) return scriptLine;
+
+  const tail = lines.slice(-4).join(' | ');
+  if (tail) return tail;
+
+  if (execMessage && !/^Command failed:/i.test(execMessage)) return execMessage;
+  return 'restore-dongle-by-subnet.sh 실패 — i7에서 동글 USB·LTE·sudoers 확인';
+}
+
 function buildRestoreShell(scriptPath: string, options?: RestoreDongleNetworkOptions): string {
-  const envParts: string[] = [];
-  if (options?.quick) envParts.push('HUMA_RESTORE_SKIP_SOCKS_TEST=1');
-  const envPrefix = envParts.length ? `${envParts.join(' ')} ` : '';
+  const scriptArgs = options?.quick ? ' --skip-socks-test' : '';
   const quoted = `"${scriptPath}"`;
+  const sudo = `${SUDO_BIN} -n`;
+  const bash = BASH_BIN;
   if (options?.force) {
-    return `sudo ${envPrefix}bash ${quoted}`;
+    return `${sudo} ${bash} ${quoted}${scriptArgs}`;
   }
   if (existsSync('/usr/bin/flock')) {
-    return `flock -w 10 "${RESTORE_LOCK_FILE}" sudo ${envPrefix}bash ${quoted}`;
+    return `flock -w 10 "${RESTORE_LOCK_FILE}" ${sudo} ${bash} ${quoted}${scriptArgs}`;
   }
-  return `sudo ${envPrefix}bash ${quoted}`;
+  return `${sudo} ${bash} ${quoted}${scriptArgs}`;
 }
 
 function buildSlotRestoreShell(scriptPath: string, slot: number): string {
   const quoted = `"${scriptPath}"`;
+  const sudo = `${SUDO_BIN} -n`;
+  const bash = BASH_BIN;
   const lock = slotRestoreLockFile(slot);
   if (existsSync('/usr/bin/flock')) {
-    return `flock -w 10 "${lock}" sudo bash ${quoted} ${slot}`;
+    return `flock -w 10 "${lock}" ${sudo} ${bash} ${quoted} ${slot}`;
   }
-  return `sudo bash ${quoted} ${slot}`;
+  return `${sudo} ${bash} ${quoted} ${slot}`;
+}
+
+function mapRestoreExecFailure(
+  combined: string,
+  stderr: string,
+  execMessage?: string,
+  fallback = 'restore-dongle-by-subnet.sh 실패',
+): string {
+  return formatRestoreExecError(combined, execMessage) || stderr.slice(-800) || execMessage || fallback;
 }
 
 /** 포스팅 동글 단일 슬롯 — DHCP·route·3proxy reload (다른 슬롯 유지) */
@@ -202,7 +242,7 @@ export function runRestoreDongleSlot(slot: number): RestoreDongleSlotResult {
     return {
       ok: false,
       output: tail,
-      error: stderr.slice(-800) || e.message || 'restore-dongle-slot.sh 실패',
+      error: mapRestoreExecFailure(combined, stderr, e.message, 'restore-dongle-slot.sh 실패'),
     };
   }
 }
@@ -257,7 +297,7 @@ export function runRestoreDongleNetwork(
     return {
       ok: false,
       output: tail,
-      error: stderr.slice(-800) || e.message || 'restore-dongle-by-subnet.sh 실패',
+      error: mapRestoreExecFailure(combined, stderr, e.message),
     };
   }
 }

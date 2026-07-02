@@ -61,9 +61,9 @@ function modemStatusTag(
   opts?: { probing?: boolean; reconnecting?: boolean },
 ): { label: string; tone: 'ok' | 'warn' | 'err' | 'idle' } {
   if (opts?.probing) return { label: '검사중', tone: 'idle' };
-  if (opts?.reconnecting) return { label: '재발급중', tone: 'warn' };
+  if (opts?.reconnecting) return { label: '복구 중', tone: 'warn' };
   if (m.status === 'error') return { label: '오류', tone: 'err' };
-  if (m.status === 'reconnecting') return { label: '재연결', tone: 'warn' };
+  if (m.status === 'reconnecting') return { label: '복구 중', tone: 'warn' };
   if (m.status === 'offline') {
     return isPhoneModem(m)
       ? { label: '오류', tone: 'err' }
@@ -237,7 +237,7 @@ export function ModemsView() {
 
     if (
       !(await appConfirm(
-        `동글 ${slot} IP를 재발급합니다.\n현재 IP: ${oldLabel}\nLTE 리셋·SOCKS 갱신에 1~2분 걸릴 수 있습니다. 계속할까요?`,
+        `동글 ${slot} 복구를 시작합니다.\n현재 IP: ${oldLabel}\nLTE 리셋·routing·SOCKS 갱신에 1~2분 걸릴 수 있습니다. 계속할까요?`,
       ))
     ) {
       return;
@@ -274,20 +274,20 @@ export function ModemsView() {
       const newLabel = newPublicIp || updated.current_ip?.trim() || '—';
 
       if (updated.status === 'error') {
-        await appAlert(`동글 ${slot} IP 재발급 실패 (상태: 오류).\nOperation Log를 확인하세요.`);
+        await appAlert(`동글 ${slot} 복구 실패 (상태: 오류).\nOperation Log를 확인하세요.`);
       } else if (oldPublicIp && newPublicIp && newPublicIp !== oldPublicIp) {
-        await appAlert(`동글 ${slot} IP 재발급 완료.\n${oldPublicIp} → ${newPublicIp}`);
+        await appAlert(`동글 ${slot} 복구 완료.\n공인 IP: ${oldPublicIp} → ${newPublicIp}`);
       } else if (newPublicIp) {
-        await appAlert(`동글 ${slot} 재발급 완료.\n공인 IP: ${newPublicIp}`);
+        await appAlert(`동글 ${slot} 복구 완료.\n공인 IP: ${newPublicIp}`);
       } else if (newLabel !== '—') {
-        await appAlert(`동글 ${slot} 재발급 완료.\n인터페이스 IP: ${newLabel}`);
+        await appAlert(`동글 ${slot} 복구 완료.\n인터페이스 IP: ${newLabel}`);
       } else {
         await appAlert(
-          `동글 ${slot} 재발급이 종료되었습니다.\n공인 IP를 가져오지 못했습니다. 「다시 검사」로 확인하세요.`,
+          `동글 ${slot} 복구가 종료되었습니다.\n공인 IP를 가져오지 못했습니다. 「다시 검사」로 확인하세요.`,
         );
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'IP 재발급 요청 실패';
+      const msg = err instanceof Error ? err.message : '동글 복구 요청 실패';
       setLoadError(msg);
       await appAlert(msg);
     } finally {
@@ -448,8 +448,8 @@ export function ModemsView() {
                   onClick={() => void reconnectSlot(m)}
                 >
                   {reconnectingSlot === m.slot_number
-                    ? `동글 ${m.slot_number} 재발급중…`
-                    : `동글 ${m.slot_number} IP 재발급`}
+                    ? `동글 ${m.slot_number} 복구 중…`
+                    : `동글 ${m.slot_number} 복구`}
                 </button>
               ))}
           </div>
@@ -464,7 +464,7 @@ export function ModemsView() {
         </p>
         <p className="mt-1 font-mono text-[10px] text-huma-t3">
           <strong>오류가 계속되면</strong> 「동글 네트워크 일괄 복구」(DHCP·routing·3proxy) → 「다시 검사」 순서.
-          단일 슬롯만 IP 바꿀 때는 「IP 재발급」.
+          단일 슬롯만 복구할 때는 「동글 N 복구」.
         </p>
       </MPanel>
     </div>

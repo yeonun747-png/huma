@@ -96,15 +96,15 @@ export async function registerModemRoutes(app: FastifyInstance) {
         .eq('id', id)
         .select()
         .single();
-      return { ...data, message: '재연결 시작됨 (IP 재할당 중)' };
+      return { ...data, message: '동글 복구 시작됨' };
     } catch (err) {
       return reply.code(500).send({ error: (err as Error).message });
     }
   });
 
-  /** DHCP + policy routing + 3proxy 일괄 복구 (UI 「동글 네트워크 복구」) */
+  /** UI 「동글 네트워크 복구」 — 쿨다운·락 대기 무시, SOCKS curl은 UI 재검사에 맡김 */
   app.post('/api/modems/restore-network', { preHandler: [authMiddleware, requireSuper] }, async (_request, reply) => {
-    const result = runRestoreDongleNetwork({ force: true });
+    const result = runRestoreDongleNetwork({ force: true, quick: true });
     if (!result.ok) {
       await logOperation({
         level: 'ERROR',
@@ -114,6 +114,9 @@ export async function registerModemRoutes(app: FastifyInstance) {
         success: false,
         error: result.error ?? '복구 실패',
         output: result.output,
+        message: result.output
+          ? `${result.error ?? '복구 실패'}\n\n${result.output.slice(-2000)}`
+          : result.error ?? '복구 실패',
       });
     }
 

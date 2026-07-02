@@ -84,7 +84,7 @@ export async function reconnectModemBySlot(
     }
     const newIp = readInterfaceIp(iface);
     if (!newIp) {
-      throw new Error(`${iface} IP 재발급 실패`);
+      throw new Error(`${iface} 복구 실패 — 인터페이스 IP 없음`);
     }
 
     if (process.platform !== 'win32') {
@@ -112,7 +112,7 @@ export async function reconnectModemBySlot(
 
     await logOperation({
       level: 'info',
-      message: `모뎀 slot ${slotNumber} IP 재발급 ${oldIp ?? '?'} → ${newIp} (공인 ${geo.public_ip ?? '?'})`,
+      message: `모뎀 slot ${slotNumber} 복구 완료 ${oldIp ?? '?'} → ${newIp} (공인 ${geo.public_ip ?? '?'})`,
       modem_id: modem.id,
     });
 
@@ -177,7 +177,7 @@ export async function reconnectModem(modemId: string): Promise<ReconnectResult> 
     await supabase.from('huma_modems').update({ status: 'error' }).eq('id', modemId);
     await logOperation({
       level: 'ERROR',
-      message: `모뎀 ${slotNumber} IP 변경 실패: ${(err as Error).message}`,
+      message: `모뎀 ${slotNumber} 복구 실패: ${(err as Error).message}`,
       modem_id: modemId,
     });
     return {
