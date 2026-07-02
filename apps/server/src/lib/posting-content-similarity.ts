@@ -17,8 +17,11 @@ export const POSTING_TITLE_COMPARE_LIMIT = 300;
 /** 본문 — 최초 생성 후 재생성 상한 1회 */
 export const MAX_POSTING_BODY_SIMILARITY_RETRIES = 1;
 
-/** 제목 — 0.85 이하까지 재생성 (무한 루프 방지 안전 상한) */
-export const MAX_POSTING_TITLE_SIMILARITY_ATTEMPTS = 50;
+/** 제목 — 0.85 이하까지 LLM 재생성 (과거 50회는 8분+ 지연 유발) */
+export const MAX_POSTING_TITLE_SIMILARITY_ATTEMPTS = 8;
+
+/** 이 횟수 이후 LLM 대신 휴리스틱 제목 변형 시도 */
+export const POSTING_TITLE_HEURISTIC_FALLBACK_AFTER = 4;
 
 /** @deprecated MAX_POSTING_BODY_SIMILARITY_RETRIES 사용 */
 export const MAX_POSTING_SIMILARITY_RETRIES = MAX_POSTING_BODY_SIMILARITY_RETRIES;

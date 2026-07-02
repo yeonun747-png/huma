@@ -35,6 +35,7 @@ import {
   maxPostingTitleSimilarity,
   MAX_POSTING_BODY_SIMILARITY_RETRIES,
   MAX_POSTING_TITLE_SIMILARITY_ATTEMPTS,
+  POSTING_TITLE_HEURISTIC_FALLBACK_AFTER,
   PostingSimilarityCorpusLoadError,
   PostingSimilaritySkipError,
   POSTING_SIMILARITY_THRESHOLD,
@@ -177,6 +178,27 @@ function forceDistinctSeoTitle(operatorTitle: string, synopsis?: string, blogExc
     if (normalizeTitleCompare(t) !== normalizeTitleCompare(operatorTitle)) return t;
   }
   return truncateSeoTitle(`${operatorTitle.slice(0, 28)} 정리`);
+}
+
+/** SEO 제목 유사도 루프 — LLM 재시도 상한 후 빠른 휴리스틱 변형 */
+function pickSeoTitleHeuristicFallback(
+  operatorTitle: string,
+  synopsis: string | undefined,
+  blogExcerpt: string,
+  attempt: number,
+): string {
+  const variants = [
+    forceDistinctSeoTitle(operatorTitle, synopsis, blogExcerpt),
+    truncateSeoTitle(`${operatorTitle.slice(0, 20)} 총정리`),
+    truncateSeoTitle(`${operatorTitle.slice(0, 18)} 후기`),
+    truncateSeoTitle(`${operatorTitle.slice(0, 16)} 추천`),
+    truncateSeoTitle(`${operatorTitle.slice(0, 22)} 정리`),
+    truncateSeoTitle(`${operatorTitle.slice(0, 14)} 솔직후기`),
+    truncateSeoTitle(`${operatorTitle.slice(0, 12)} 써봤어요`),
+    truncateSeoTitle(`${operatorTitle.slice(0, 10)} 사용기`),
+  ];
+  const picked = variants[(attempt - 1) % variants.length] ?? variants[0]!;
+  return finalizeSeoTitleCandidate(picked);
 }
 
 async function generateSeoTitleOnly(params: {
@@ -704,23 +726,32 @@ async function generateAllContentWithSimilarity(
       }
 
       const titleCheck = checkPostingSimilarity(result.seo_title, result.blog_post, corpus);
+      const useHeuristic = titleRegenerations >= POSTING_TITLE_HEURISTIC_FALLBACK_AFTER;
       await logOperation({
         level: 'warn',
         message:
-          `[posting-similarity] SEO 제목 재생성 ${titleRegenerations} — ` +
+          `[posting-similarity] SEO 제목 재생성 ${titleRegenerations}/${MAX_POSTING_TITLE_SIMILARITY_ATTEMPTS}` +
+          `${useHeuristic ? ' (휴리스틱)' : ''} — ` +
           `제목유사도=${titleCheck.titleSimilarity.toFixed(3)} account=${accountId}`,
         workspace: input.workspace,
       });
 
       result = {
         ...result,
-        seo_title: await regenerateSeoTitleForSimilarity({
-          operatorTitle: input.title,
-          synopsis: input.synopsis,
-          urlSummary,
-          blogExcerpt: result.blog_post,
-          extraPrompt: buildPostingTitleSimilarityFeedback(titleCheck),
-        }),
+        seo_title: useHeuristic
+          ? pickSeoTitleHeuristicFallback(
+              input.title,
+              input.synopsis,
+              result.blog_post,
+              titleRegenerations,
+            )
+          : await regenerateSeoTitleForSimilarity({
+              operatorTitle: input.title,
+              synopsis: input.synopsis,
+              urlSummary,
+              blogExcerpt: result.blog_post,
+              extraPrompt: buildPostingTitleSimilarityFeedback(titleCheck),
+            }),
       };
     }
 
