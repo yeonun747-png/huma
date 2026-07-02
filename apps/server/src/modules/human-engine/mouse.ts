@@ -140,6 +140,50 @@ export async function humanClickLocator(
   setMousePosition(page, { x: cx, y: cy });
 }
 
+/** viewport 좌표 — 베지어 이동·jitter·클릭 전 딜레이 */
+export async function humanClickAtPoint(
+  page: Page,
+  x: number,
+  y: number,
+  jitterPx?: number,
+  preClickDelayMs: [number, number] = [80, 220],
+): Promise<void> {
+  if (await skipClickIfNaverAuthChallenge(page)) return;
+
+  const jitter = jitterPx ?? (await getClickJitterPx());
+  const cx = x + randomBetween(-jitter, jitter);
+  const cy = y + randomBetween(-jitter, jitter);
+  await humanMouseMove(page, cx, cy);
+  await sleep(randomBetween(preClickDelayMs[0], preClickDelayMs[1]));
+  await page.mouse.click(cx, cy);
+  await showVncAutomationPointer(page, cx, cy, { click: true });
+  setMousePosition(page, { x: cx, y: cy });
+}
+
+/** humanClickLocator 실패 시 bbox 중심 humanClickAtPoint — Playwright .click() 금지 */
+export async function humanClickLocatorFallback(
+  page: Page,
+  locator: Locator,
+  preClickDelayMs: [number, number] = [80, 260],
+): Promise<boolean> {
+  try {
+    await humanClickLocator(page, locator, undefined, preClickDelayMs);
+    return true;
+  } catch {
+    await locator.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+    const box = await locator.boundingBox().catch(() => null);
+    if (!box || box.width <= 0 || box.height <= 0) return false;
+    await humanClickAtPoint(
+      page,
+      box.x + box.width / 2,
+      box.y + box.height / 2,
+      undefined,
+      preClickDelayMs,
+    );
+    return true;
+  }
+}
+
 export async function humanClick(page: Page, selector: string, jitterPx?: number) {
   await humanClickLocator(page, page.locator(selector).first(), jitterPx);
 }

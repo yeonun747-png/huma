@@ -1,4 +1,5 @@
 import type { Page } from 'playwright';
+import { humanClickLocatorFallback } from '../../human-engine/mouse.js';
 import { humanSleep } from '../../human-engine/typing.js';
 import { scrollWithReverse } from '../../human-engine/timing.js';
 import { randomBetween } from '../../../lib/utils.js';
@@ -22,6 +23,15 @@ const KEYWORD_POOL: Record<string, string[]> = {
 };
 
 const SEARCH_TAB_LABELS = ['뉴스', '블로그', '카페', '지식iN', '이미지'] as const;
+
+async function humanClickWarmup(
+  page: Page,
+  locator: ReturnType<Page['locator']>,
+  preClickDelayMs: [number, number] = [100, 260],
+): Promise<void> {
+  await humanClickLocatorFallback(page, locator, preClickDelayMs);
+  await humanSleep(120, 320);
+}
 
 function shuffle<T>(items: T[]): T[] {
   const copy = [...items];
@@ -118,7 +128,7 @@ async function maybeBrowseInPageMenus(page: Page, accountType: WarmupAccountType
     const text = (await link.innerText().catch(() => '')) ?? '';
     if (isShoppingWarmupTarget(href, text)) continue;
 
-    await link.click({ timeout: 6000 }).catch(() => {});
+    await humanClickWarmup(page, link, [90, 240]);
     await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => {});
     if (isShoppingWarmupTarget(page.url())) {
       await page.goBack({ waitUntil: 'domcontentloaded', timeout: 15_000 }).catch(() => {});
@@ -212,9 +222,13 @@ async function searchViaNaverHomepage(
     return 'search_box_not_found';
   }
 
-  await searchBox.click({ timeout: 5000 }).catch(() => {});
+  await humanClickWarmup(page, searchBox, [120, 280]);
   await humanSleep(150, 350);
-  await searchBox.fill('');
+  const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
+  await searchBox.focus().catch(() => {});
+  await page.keyboard.press(`${mod}+a`).catch(() => {});
+  await humanSleep(40, 90);
+  await page.keyboard.press('Backspace').catch(() => {});
   // humanType(humanClick)는 검색창 bbox 유실 시 HUMAN_CLICK_NO_BBOX — 워밍업은 pressSequentially만
   await searchBox.pressSequentially(keyword, { delay: randomBetween(45, 95) });
   await humanSleep(200, 450);
@@ -239,7 +253,7 @@ async function maybeClickSearchTab(page: Page): Promise<void> {
     const href = (await tabLink.getAttribute('href').catch(() => '')) ?? '';
     const text = (await tabLink.innerText().catch(() => '')) ?? '';
     if (isShoppingWarmupTarget(href, text)) return;
-    await tabLink.click({ timeout: 5000 }).catch(() => {});
+    await humanClickWarmup(page, tabLink, [100, 260]);
     await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => {});
     if (isShoppingWarmupTarget(page.url())) {
       await page.goBack({ waitUntil: 'domcontentloaded', timeout: 15_000 }).catch(() => {});

@@ -1,6 +1,6 @@
 import type { BrowserContext, Page } from 'playwright';
 
-import { humanClickLocator, humanMouseMove } from '../../human-engine/mouse.js';
+import { humanClickLocator, humanClickLocatorFallback, humanMouseMove } from '../../human-engine/mouse.js';
 import { humanSleep } from '../../human-engine/typing.js';
 
 import type { HumanEngineConfig } from '../../../lib/settings.js';
@@ -25,6 +25,7 @@ import {
   isSeOneEditorShellReady,
   shouldResumeDraftForJob,
 } from './naver-editor-locators.js';
+import { isPublishLayerVisible } from './naver-publish-layer.js';
 
 function scaledSleep(min: number, max: number): Promise<void> {
   const s = vncFastSleepScale();
@@ -87,13 +88,15 @@ export function findNaverPostwritePage(context: BrowserContext): Page | undefine
   return context.pages().find((p) => !p.isClosed() && POSTWRITE_URL_RE.test(p.url()));
 }
 
-async function clickIfVisible(root: Page | ReturnType<Page['frameLocator']>, selector: string): Promise<boolean> {
+async function clickIfVisible(
+  editorPage: Page,
+  root: Page | ReturnType<Page['frameLocator']>,
+  selector: string,
+): Promise<boolean> {
   const loc = root.locator(selector).first();
-  if (await loc.isVisible({ timeout: 600 }).catch(() => false)) {
-    await loc.click({ timeout: 4000 }).catch(() => {});
-    return true;
-  }
-  return false;
+  if (!(await loc.isVisible({ timeout: 600 }).catch(() => false))) return false;
+  await humanClickLocatorFallback(editorPage, loc, [80, 220]);
+  return true;
 }
 
 type DraftDismissGuard = { inFlight: boolean; cooledUntil: number };
@@ -152,10 +155,7 @@ async function clickDraftResumePopupButton(
     try {
       await humanClickLocator(editorPage, btn, undefined, [60, 160]);
     } catch {
-      const box = await btn.boundingBox().catch(() => null);
-      if (!box) continue;
-      await humanMouseMove(editorPage, box.x + box.width / 2, box.y + box.height / 2);
-      await editorPage.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      if (!(await humanClickLocatorFallback(editorPage, btn, [60, 160]))) continue;
     }
 
     for (let i = 0; i < 12; i += 1) {
@@ -301,6 +301,8 @@ export async function dismissNaverBlogEditorOverlays(
   editorPage: Page,
   options?: { includeDraftPopup?: boolean } & EditorWaitOptions,
 ): Promise<void> {
+  if (await isPublishLayerVisible(editorPage)) return;
+
   await dismissSeOneHelpPanel(editorPage);
 
   if (options?.includeDraftPopup !== false) {
@@ -316,21 +318,28 @@ export async function dismissNaverBlogEditorOverlays(
 
     for (const scope of scopes) {
       for (const sel of LEGACY_HELP_CLOSE_SELECTORS) {
-        if (await clickIfVisible(scope, sel)) dismissed = true;
+        if (await clickIfVisible(editorPage, scope, sel)) dismissed = true;
       }
       if (
-        await clickIfVisible(scope, '.se-popup-dim, .se_dim, .layer_popup .btn_close, .se-popup-dim-button')
+        await clickIfVisible(
+          editorPage,
+          scope,
+          '.se-popup-dim, .se_dim, .layer_popup .btn_close, .se-popup-dim-button',
+        )
       ) {
         dismissed = true;
       }
     }
 
-    if (await clickIfVisible(editorPage, '#cookie_close, .cookie_btn_close, button:has-text("동의")')) {
+    if (await clickIfVisible(editorPage, editorPage, '#cookie_close, .cookie_btn_close, button:has-text("동의")')) {
       dismissed = true;
     }
 
-    // 임시저장 팝업이 떠 있을 때 Escape는 포커스·블록 선택만 꼬이게 함
-    if (!(await isDraftResumePopupVisible(editorPage))) {
+    // 임시저장·발행 레이어가 떠 있을 때 Escape는 포커스·발행 팝업을 닫을 수 있음
+    if (
+      !(await isDraftResumePopupVisible(editorPage)) &&
+      !(await isPublishLayerVisible(editorPage))
+    ) {
       await editorPage.keyboard.press('Escape').catch(() => {});
     }
     if (!dismissed) break;
@@ -344,6 +353,8 @@ export async function prepareSeOneEditorSurface(
   maxMs = 25_000,
   options?: { destructiveDraftDismiss?: boolean; expectedTitle?: string; expectedContent?: string },
 ): Promise<void> {
+  if (await isPublishLayerVisible(editorPage)) return;
+
   if (options?.destructiveDraftDismiss === false) {
     await dismissDraftPopupIfVisible(editorPage, {
       expectedTitle: options.expectedTitle,

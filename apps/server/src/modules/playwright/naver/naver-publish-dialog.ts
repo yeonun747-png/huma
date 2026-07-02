@@ -14,6 +14,11 @@ import {
   clickVisibleLocator,
 } from './naver-editor-locators.js';
 import { waitForNaverPublishSuccess } from './blog-editor-pipeline.js';
+import {
+  isPublishLayerVisible,
+  waitForPublishLayer,
+  PUBLISH_LAYER_SELECTORS,
+} from './naver-publish-layer.js';
 
 const PUBLISH_BTN_SELECTORS = [
   '[class*="publish_btn"]',
@@ -21,14 +26,6 @@ const PUBLISH_BTN_SELECTORS = [
   'button.publish_btn',
   'header button:has-text("발행")',
   '.se-publish-button',
-];
-
-const PUBLISH_LAYER_SELECTORS = [
-  '[class*="publish_layer"]',
-  '[class*="PublishLayer"]',
-  '.se-popup-publish',
-  '[class*="layer_publish"]',
-  '.publish_popup',
 ];
 
 const CATEGORY_SELECTORS = [
@@ -85,30 +82,6 @@ export async function clickTopPublishButton(page: Page): Promise<void> {
   await clickVisibleLocator(page, btn);
 }
 
-async function waitForPublishLayer(page: Page, timeoutMs = 15_000): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    for (const sel of PUBLISH_LAYER_SELECTORS) {
-      const loc = page.locator(sel).first();
-      if ((await loc.count()) > 0 && (await loc.isVisible().catch(() => false))) {
-        return true;
-      }
-    }
-    await sleep(300);
-  }
-  return false;
-}
-
-async function isPublishLayerVisible(page: Page): Promise<boolean> {
-  for (const sel of PUBLISH_LAYER_SELECTORS) {
-    const loc = page.locator(sel).first();
-    if ((await loc.count()) > 0 && (await loc.isVisible().catch(() => false))) {
-      return true;
-    }
-  }
-  return false;
-}
-
 export async function selectPublishCategory(
   page: Page,
   categoryName: string,
@@ -151,7 +124,7 @@ export async function pastePublishTags(
   if (!input) return false;
 
   for (let i = 0; i < tags.length; i += 1) {
-    await humanClickLocator(page, input);
+    await humanClickLocator(page, input, undefined, [100, 280]);
     await humanSleep(
       Math.floor(humanBriefPauseMs(humanConfig, 0.1, 0.2) * scale),
       Math.floor(humanBriefPauseMs(humanConfig, 0.15, 0.35) * scale),
@@ -223,6 +196,50 @@ export async function clickConfirmPublish(page: Page): Promise<void> {
   throw new Error('NAVER_CONFIRM_PUBLISH_NOT_FOUND');
 }
 
+async function fillPublishLayerFields(params: {
+  page: Page;
+  category: string;
+  hashtags?: string[];
+  humanConfig: HumanEngineConfig;
+  scale: number;
+}): Promise<void> {
+  await selectPublishCategory(params.page, params.category, params.scale).catch(() => false);
+  if (params.hashtags?.length) {
+    await pastePublishTags(params.page, params.hashtags, params.humanConfig, params.scale);
+  }
+}
+
+/** 발행 레이어가 닫혔으면 상단 발행 재클릭 후 카테고리·태그까지 다시 채움 */
+async function ensurePublishLayerFilled(params: {
+  page: Page;
+  category: string;
+  hashtags?: string[];
+  humanConfig: HumanEngineConfig;
+  scale: number;
+}): Promise<void> {
+  const { page, scale } = params;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (!(await isPublishLayerVisible(page))) {
+      await clickTopPublishButton(page);
+      await scaledHumanSleep(600, 1200, scale);
+      if (!(await waitForPublishLayer(page, 12_000))) {
+        if (attempt >= 2) throw new Error('NAVER_PUBLISH_LAYER_NOT_FOUND');
+        continue;
+      }
+    }
+
+    await fillPublishLayerFields(params);
+    await scaledHumanSleep(400, 900, scale);
+
+    if (await isPublishLayerVisible(page)) return;
+
+    await scaledHumanSleep(500, 1000, scale);
+  }
+
+  throw new Error('NAVER_PUBLISH_LAYER_CLOSED');
+}
+
 export async function completeNaverPublishDialog(params: {
   page: Page;
   workspace?: string;
@@ -236,33 +253,52 @@ export async function completeNaverPublishDialog(params: {
 
   await prepareSeOneEditorSurface(page, 6_000, { destructiveDraftDismiss: false });
 
-  await clickTopPublishButton(page);
-  await scaledHumanSleep(600, 1200, scale);
-
-  if (!(await waitForPublishLayer(page))) {
-    throw new Error('NAVER_PUBLISH_LAYER_NOT_FOUND');
-  }
-
   const category =
     params.category?.trim() ||
     DEFAULT_CATEGORY_BY_WORKSPACE[params.workspace ?? 'yeonun'] ||
     '포스팅';
 
-  await selectPublishCategory(page, category, scale).catch(() => false);
+  await ensurePublishLayerFilled({
+    page,
+    category,
+    hashtags: params.hashtags,
+    humanConfig: params.humanConfig,
+    scale,
+  });
 
-  if (params.hashtags?.length) {
-    await pastePublishTags(page, params.hashtags, params.humanConfig, scale);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (!(await isPublishLayerVisible(page))) {
+      await ensurePublishLayerFilled({
+        page,
+        category,
+        hashtags: params.hashtags,
+        humanConfig: params.humanConfig,
+        scale,
+      });
+    }
+
+    try {
+      await clickConfirmPublish(page);
+      break;
+    } catch (err) {
+      const msg = (err as Error).message ?? '';
+      const retryable =
+        msg.includes('NAVER_PUBLISH_LAYER_CLOSED') || msg.includes('NAVER_CONFIRM_PUBLISH_NOT_FOUND');
+      if (!retryable || attempt >= 2) throw err;
+      await ensurePublishLayerFilled({
+        page,
+        category,
+        hashtags: params.hashtags,
+        humanConfig: params.humanConfig,
+        scale,
+      });
+    }
   }
 
-  await scaledHumanSleep(400, 900, scale);
-
-  if (!(await isPublishLayerVisible(page))) {
-    await clickTopPublishButton(page);
-    await waitForPublishLayer(page);
-  }
-
-  await clickConfirmPublish(page);
   await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => {});
 
   return waitForNaverPublishSuccess(page);
 }
+
+/** 발행 레이어 보호용 re-export */
+export { isPublishLayerVisible } from './naver-publish-layer.js';

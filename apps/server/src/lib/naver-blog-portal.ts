@@ -1,5 +1,6 @@
 import type { Locator, Page } from 'playwright';
 
+import { humanClickLocatorFallback } from '../modules/human-engine/mouse.js';
 import { sleep } from './utils.js';
 import { PLAYWRIGHT_NAV_TIMEOUT_MS } from './playwright-nav-timeout.js';
 
@@ -125,7 +126,7 @@ export async function ensureBlogWriteEntry(
     .locator('a[href*="blog.naver.com/"]:not([href*="section.blog"]):not([href*="BlogHome"])')
     .first();
   if (await myBlogLink.isVisible().catch(() => false)) {
-    await myBlogLink.click({ timeout: 8000 }).catch(() => {});
+    await humanClickLocatorFallback(page, myBlogLink, [100, 260]);
     await page.waitForLoadState('domcontentloaded').catch(() => {});
     return findBlogWriteEntry(page, 10_000);
   }

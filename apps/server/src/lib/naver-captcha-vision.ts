@@ -13,6 +13,7 @@ import { logOperation } from './log-emitter.js';
 import { humanSleep } from '../modules/human-engine/typing.js';
 import {
   humanClickLocator,
+  humanClickLocatorFallback,
   humanDragLocatorHorizontal,
 } from '../modules/human-engine/mouse.js';
 import { randomBetween, sleep } from './utils.js';
@@ -363,12 +364,9 @@ async function readCaptchaQuestion(page: Page): Promise<string> {
 async function safeHumanClick(page: Page, locator: Locator): Promise<void> {
   if (await isNaverAuthChallengePage(page)) return;
   await locator.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
-  const box = await locator.boundingBox().catch(() => null);
-  if (box && box.width > 0 && box.height > 0) {
-    await humanClickLocator(page, locator);
-    return;
+  if (!(await humanClickLocatorFallback(page, locator, [90, 260]))) {
+    throw new Error('CAPTCHA_CLICK_NO_BBOX');
   }
-  await locator.click({ force: true, timeout: 8000 });
 }
 
 async function refreshCaptchaImage(page: Page): Promise<void> {

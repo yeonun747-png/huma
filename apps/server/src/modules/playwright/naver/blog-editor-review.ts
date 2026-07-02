@@ -1,6 +1,6 @@
 import type { Page } from 'playwright';
 
-import { humanMouseMove } from '../../human-engine/mouse.js';
+import { humanMouseMove, humanClickAtPoint } from '../../human-engine/mouse.js';
 import { scaledHumanSleep } from '../../human-engine/timing.js';
 import { randomBetween, sleep } from '../../../lib/utils.js';
 
@@ -36,9 +36,7 @@ export async function moveMouseToBodyCenterForReview(page: Page): Promise<void> 
     if (box && box.width > 160 && box.height > 120) {
       const x = box.x + box.width * 0.5;
       const y = box.y + Math.min(box.height * 0.55, box.height - 80);
-      await humanMouseMove(page, x, y);
-      await sleep(120);
-      await page.mouse.click(x, y);
+      await humanClickAtPoint(page, x, y, undefined, [90, 220]);
       await sleep(200);
       return;
     }

@@ -3,7 +3,7 @@ import type { Locator, Page } from 'playwright';
 import { supabase } from '../middleware/auth.js';
 import { decrypt } from './crypto.js';
 import { humanSleep } from '../modules/human-engine/typing.js';
-import { humanClickLocator, humanMouseMove } from '../modules/human-engine/mouse.js';
+import { humanClickLocator, humanClickAtPoint, humanClickLocatorFallback } from '../modules/human-engine/mouse.js';
 import { logOperation } from './log-emitter.js';
 import { randomBetween, sleep } from './utils.js';
 import {
@@ -101,28 +101,19 @@ async function tryNaverLoginSubmitFallback(page: Page, btn: Locator): Promise<bo
   return false;
 }
 
-/** nidlogin 로그인 버튼 — Playwright/JS click 금지, humanMouseMove + mouse.click 만 */
+/** nidlogin 로그인 버튼 — Playwright/JS click 금지, humanClick만 */
 async function clickNaverLoginButtonWithMouse(page: Page, btn: Locator): Promise<void> {
-  await btn.scrollIntoViewIfNeeded({ timeout: 8000 }).catch(() => {});
-  try {
-    await humanClickLocator(page, btn, 2, [120, 300]);
-    return;
-  } catch {
-    /* humanClickLocator bbox 실패 시 좌표 마우스 클릭으로 폴백 */
-  }
+  if (await humanClickLocatorFallback(page, btn, [120, 300])) return;
 
   const box = await btn.boundingBox().catch(() => null);
   if (!box || box.width <= 0 || box.height <= 0) {
     throw new Error('NAVER_LOGIN_BTN_NO_BBOX');
   }
-  // 가장자리·IP보안 토글 오클릭 방지 — 중앙 40% 영역
   const marginX = box.width * 0.3;
   const marginY = box.height * 0.28;
   const cx = box.x + marginX + randomBetween(0, Math.max(1, Math.round(box.width - marginX * 2)));
   const cy = box.y + marginY + randomBetween(0, Math.max(1, Math.round(box.height - marginY * 2)));
-  await humanMouseMove(page, cx, cy);
-  await sleep(randomBetween(120, 280));
-  await page.mouse.click(cx, cy);
+  await humanClickAtPoint(page, cx, cy, 2, [120, 280]);
 }
 
 /** IP보안 — 구 UI #ip_on / 신 UI #switch (2025~ nidlogin 리뉴얼). 클릭은 label·switch_btn */
@@ -177,11 +168,7 @@ async function clickIpSecurityOffWithMouse(page: Page): Promise<boolean> {
 
   const switchLoc = await findVisibleIpSecuritySwitch(page);
   if (switchLoc) {
-    try {
-      await humanClickLocator(page, switchLoc);
-    } catch {
-      /* bbox 실패 시 좌표 클릭으로 폴백 */
-    }
+    await humanClickLocatorFallback(page, switchLoc, [100, 250]);
     await sleep(randomBetween(220, 480));
     if ((await isNaverIpSecurityOn(page)) === false) return true;
   }
@@ -192,10 +179,8 @@ async function clickIpSecurityOffWithMouse(page: Page): Promise<boolean> {
     if (!box || box.width <= 0 || box.height <= 0) continue;
     const cx = box.x + box.width / 2 + randomBetween(-2, 2);
     const cy = box.y + box.height / 2 + randomBetween(-2, 2);
-    await humanMouseMove(page, cx, cy);
-    await sleep(randomBetween(100, 250));
     if (await isNaverAuthChallengePage(page)) return false;
-    await page.mouse.click(cx, cy);
+    await humanClickAtPoint(page, cx, cy, 2, [100, 250]);
     await sleep(randomBetween(220, 480));
     if ((await isNaverIpSecurityOn(page)) === false) return true;
   }

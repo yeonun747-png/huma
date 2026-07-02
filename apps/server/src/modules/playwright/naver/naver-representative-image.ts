@@ -1,8 +1,7 @@
 import type { Page } from 'playwright';
 
-import { humanMouseMove } from '../../human-engine/mouse.js';
+import { humanClickLocatorFallback } from '../../human-engine/mouse.js';
 import { humanSleep } from '../../human-engine/typing.js';
-import { sleep } from '../../../lib/utils.js';
 import { dismissSeOneMaterialPopup } from './naver-editor-locators.js';
 import { logOperation } from '../../../lib/log-emitter.js';
 
@@ -22,53 +21,45 @@ export async function countBodyImageModules(page: Page): Promise<number> {
 }
 
 async function clickBodyImageModule(page: Page, index: number): Promise<boolean> {
-  const clicked = await page
-    .evaluate(
-      ({ sel, idx }) => {
-        const modules = Array.from(document.querySelectorAll(sel));
-        const mod = modules[idx] as HTMLElement | undefined;
-        if (!mod) return false;
-        mod.scrollIntoView({ block: 'center', inline: 'nearest' });
-        const target = (mod.querySelector('img, .se-image, .se-image-resource') ?? mod) as HTMLElement;
-        target.click();
-        return true;
-      },
-      { sel: BODY_IMAGE_MODULE_SELECTOR, idx: index },
-    )
-    .catch(() => false);
+  const mod = page.locator(BODY_IMAGE_MODULE_SELECTOR).nth(index);
+  if ((await mod.count().catch(() => 0)) === 0) return false;
+  if (!(await mod.isVisible({ timeout: 3000 }).catch(() => false))) return false;
 
-  if (!clicked) return false;
-  await sleep(450);
+  await mod.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+
+  const inner = mod.locator('img, .se-image, .se-image-resource').first();
+  const target = (await inner.count().catch(() => 0)) > 0 ? inner : mod;
+  if (!(await humanClickLocatorFallback(page, target, [90, 240]))) return false;
+
+  await humanSleep(350, 650);
   return true;
 }
 
 /** 뷰포트 안의 대표 버튼 — 동일 클래스가 이미지마다 존재 */
 async function clickVisibleRepresentativeButton(page: Page): Promise<boolean> {
-  const rect = await page
-    .evaluate(() => {
-      const buttons = Array.from(document.querySelectorAll('button.se-set-rep-image-button'));
-      const visible = buttons.filter((btn) => {
-        const r = btn.getBoundingClientRect();
-        return r.width > 4 && r.height > 4 && r.y >= 0 && r.y < window.innerHeight;
-      });
-      const target =
-        visible.find((btn) => !btn.classList.contains('se-is-selected')) ??
-        visible.find((btn) => btn.classList.contains('se-is-selected')) ??
-        visible[visible.length - 1];
-      if (!target) return null;
-      const r = target.getBoundingClientRect();
-      return { x: r.x, y: r.y, w: r.width, h: r.height, selected: target.classList.contains('se-is-selected') };
-    })
-    .catch(() => null);
+  const buttons = page.locator('button.se-set-rep-image-button');
+  const count = await buttons.count().catch(() => 0);
+  const vpH = page.viewportSize()?.height ?? 9999;
 
-  if (!rect) return false;
-  if (rect.selected) return true;
+  for (let i = 0; i < count; i += 1) {
+    const btn = buttons.nth(i);
+    if (!(await btn.isVisible().catch(() => false))) continue;
 
-  await humanMouseMove(page, rect.x + rect.w / 2, rect.y + rect.h / 2);
-  await sleep(120);
-  await page.mouse.click(rect.x + rect.w / 2, rect.y + rect.h / 2);
-  await humanSleep(450, 900);
-  return isBlogRepresentativeImageSet(page);
+    const box = await btn.boundingBox().catch(() => null);
+    if (!box || box.width <= 4 || box.height <= 4 || box.y < 0 || box.y >= vpH) continue;
+
+    const selected = await btn
+      .evaluate((el) => el.classList.contains('se-is-selected'))
+      .catch(() => false);
+    if (selected) return true;
+
+    if (await humanClickLocatorFallback(page, btn, [80, 200])) {
+      await humanSleep(450, 900);
+      return isBlogRepresentativeImageSet(page);
+    }
+  }
+
+  return false;
 }
 
 /** 본문 이미지 모듈(0-based)을 네이버 블로그 대표이미지로 지정 */

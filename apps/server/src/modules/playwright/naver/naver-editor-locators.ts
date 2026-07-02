@@ -1,12 +1,13 @@
 import type { FrameLocator, Locator, Page } from 'playwright';
 import { planParagraphPaste } from '@huma/shared';
 
-import { humanClickLocator, humanMouseMove } from '../../human-engine/mouse.js';
+import { humanClickLocator, humanClickAtPoint, humanClickLocatorFallback, humanMouseMove } from '../../human-engine/mouse.js';
 import { humanBriefPauseMs, humanPressSequentially } from '../../human-engine/korean-ime.js';
 import { humanSleep } from '../../human-engine/typing.js';
 import type { HumanEngineConfig } from '../../../lib/settings.js';
 import { resolvePasteRatio } from '../../../lib/settings.js';
 import { pasteTextViaClipboardEvent } from './paste-clipboard-event.js';
+import { isPublishLayerVisible } from './naver-publish-layer.js';
 import { randomBetween, sleep } from '../../../lib/utils.js';
 import { logOperation } from '../../../lib/log-emitter.js';
 
@@ -79,15 +80,54 @@ async function clickHelpCloseInScope(page: Page, scope: Page | FrameLocator): Pr
   for (const sel of HELP_PANEL_CLOSE_SELECTORS) {
     const btn = scope.locator(sel).first();
     if (!(await btn.isVisible({ timeout: 350 }).catch(() => false))) continue;
-    try {
-      await humanClickLocator(page, btn, undefined, [70, 160]);
-      return true;
-    } catch {
-      await btn.click({ timeout: 2500, force: true }).catch(() => {});
-      return true;
-    }
+    if (await humanClickLocatorFallback(page, btn, [70, 160])) return true;
   }
   return false;
+}
+
+/** 셀렉터 미매칭 시 DOM에서 닫기 버튼 rect만 읽고 마우스 클릭 (JS .click 금지) */
+async function clickHelpCloseViaDomRect(page: Page): Promise<boolean> {
+  const rect = await page
+    .evaluate(() => {
+      const roots = [
+        ...document.querySelectorAll(
+          '.se-help-panel, [class*="se-help-panel"], [class*="help-panel"], .se-sidebar',
+        ),
+      ];
+      for (const root of roots) {
+        const rootRect = root.getBoundingClientRect();
+        if (rootRect.width < 80 || rootRect.height < 80) continue;
+        if (rootRect.left < window.innerWidth * 0.45) continue;
+
+        const close = root.querySelector<HTMLElement>(
+          'button[class*="close"], .se-help-panel-close-button, [aria-label="닫기"], [aria-label*="닫"]',
+        );
+        if (close) {
+          const r = close.getBoundingClientRect();
+          if (r.width > 4 && r.height > 4) return { x: r.x, y: r.y, w: r.width, h: r.height };
+        }
+
+        const heading = [...root.querySelectorAll('h1,h2,h3,strong,span,div,p')].find(
+          (el) => (el.textContent ?? '').trim() === '도움말',
+        );
+        if (heading) {
+          const panel = heading.closest('.se-help-panel, .se-sidebar, aside, [class*="sidebar"]');
+          const panelClose = panel?.querySelector<HTMLElement>(
+            'button[class*="close"], [aria-label="닫기"], [aria-label*="닫"]',
+          );
+          if (panelClose) {
+            const r = panelClose.getBoundingClientRect();
+            if (r.width > 4 && r.height > 4) return { x: r.x, y: r.y, w: r.width, h: r.height };
+          }
+        }
+      }
+      return null;
+    })
+    .catch(() => null);
+
+  if (!rect) return false;
+  await humanClickAtPoint(page, rect.x + rect.w / 2, rect.y + rect.h / 2, undefined, [70, 180]);
+  return true;
 }
 
 /** 도움말 사이드바 닫기 — 에디터 진입 직후·입력 직전 최우선 */
@@ -106,47 +146,7 @@ export async function dismissSeOneHelpPanel(page: Page): Promise<boolean> {
       if (await clickHelpCloseInScope(page, scope)) acted = true;
     }
 
-    const jsClosed = await page
-      .evaluate(() => {
-        const roots = [
-          ...document.querySelectorAll(
-            '.se-help-panel, [class*="se-help-panel"], [class*="help-panel"], .se-sidebar',
-          ),
-        ];
-        for (const root of roots) {
-          const rect = root.getBoundingClientRect();
-          if (rect.width < 80 || rect.height < 80) continue;
-          if (rect.left < window.innerWidth * 0.45) continue;
-
-          const close = root.querySelector<HTMLElement>(
-            'button[class*="close"], .se-help-panel-close-button, [aria-label="닫기"], [aria-label*="닫"]',
-          );
-          if (close) {
-            close.click();
-            return true;
-          }
-
-          const heading = [...root.querySelectorAll('h1,h2,h3,strong,span,div,p')].find(
-            (el) => (el.textContent ?? '').trim() === '도움말',
-          );
-          if (heading) {
-            const panel = heading.closest('.se-help-panel, .se-sidebar, aside, [class*="sidebar"]');
-            const panelClose = panel?.querySelector<HTMLElement>(
-              'button[class*="close"], [aria-label="닫기"], [aria-label*="닫"]',
-            );
-            if (panelClose) {
-              panelClose.click();
-              return true;
-            }
-          }
-
-          root.remove();
-          return true;
-        }
-        return false;
-      })
-      .catch(() => false);
-    if (jsClosed) acted = true;
+    if (await clickHelpCloseViaDomRect(page)) acted = true;
 
     await sleep(280);
     if (!(await isSeOneHelpPanelVisible(page))) {
@@ -605,9 +605,13 @@ async function isLocatorBodySection(page: Page, loc: Locator): Promise<boolean> 
     .catch(() => false);
 }
 
-/** 글감 검색 팝업 — 본문 포커스 전 닫기 */
+/** 글감 검색 팝업 — 본문 포커스 전 닫기 (발행 설정 레이어는 건드리지 않음) */
 export async function dismissSeOneMaterialPopup(page: Page): Promise<void> {
+  if (await isPublishLayerVisible(page)) return;
+
   for (let round = 0; round < 3; round += 1) {
+    if (await isPublishLayerVisible(page)) return;
+
     let dismissed = false;
 
     const popup = page
@@ -619,8 +623,8 @@ export async function dismissSeOneMaterialPopup(page: Page): Promise<void> {
         .locator('button[aria-label*="닫"], .btn_close, button[class*="close"], button:has-text("닫기")')
         .first();
       if (await closeBtn.isVisible({ timeout: 200 }).catch(() => false)) {
-        await closeBtn.click({ timeout: 3000 }).catch(() => {});
-      } else {
+        await clickVisibleLocator(page, closeBtn).catch(() => {});
+      } else if (!(await isPublishLayerVisible(page))) {
         await page.keyboard.press('Escape').catch(() => {});
       }
       dismissed = true;
@@ -629,7 +633,9 @@ export async function dismissSeOneMaterialPopup(page: Page): Promise<void> {
 
     const materialInput = page.locator('input[placeholder*="글감"], input[placeholder*="검색"]').first();
     if (await materialInput.isVisible({ timeout: 200 }).catch(() => false)) {
-      await page.keyboard.press('Escape').catch(() => {});
+      if (!(await isPublishLayerVisible(page))) {
+        await page.keyboard.press('Escape').catch(() => {});
+      }
       dismissed = true;
       await sleep(200);
     }
@@ -1224,9 +1230,7 @@ export async function focusBlogBodyEnd(page: Page, bodyLoc: Locator): Promise<vo
   if (paraBox && paraBox.width > 12) {
     const x = paraBox.x + paraBox.width - 4;
     const y = paraBox.y + paraBox.height / 2;
-    await humanMouseMove(page, x, y);
-    await sleep(80);
-    await page.mouse.click(x, y);
+    await humanClickAtPoint(page, x, y, undefined, [80, 180]);
     await sleep(120);
     await page.keyboard.press('End');
     await sleep(60);
@@ -1645,9 +1649,7 @@ async function humanClickBodyParagraph(page: Page, bodyLoc: Locator): Promise<vo
   const jitter = 6 + Math.floor(Math.random() * 6);
   const x = box.x + box.width / 2 + Math.floor(Math.random() * jitter * 2) - jitter;
   const y = box.y + Math.min(Math.max(box.height * 0.22, 24), 72) + Math.floor(Math.random() * 10);
-  await humanMouseMove(page, x, y);
-  await sleep(100 + Math.floor(Math.random() * 200));
-  await page.mouse.click(x, y);
+  await humanClickAtPoint(page, x, y, jitter, [100, 320]);
 }
 
 /** 제목 입력 직후 — 포인터를 본문 placeholder로 이동(blur만, 클릭은 clickBlogBodyPlaceholder) */
@@ -2072,9 +2074,7 @@ async function clickSeOneBodyPlaceholder(page: Page, titleLoc: Locator | null): 
   if (!box) return;
   const x = box.x + box.width / 2;
   const y = box.y + box.height + 56;
-  await humanMouseMove(page, x, y);
-  await sleep(120);
-  await page.mouse.click(x, y);
+  await humanClickAtPoint(page, x, y, undefined, [90, 220]);
   await sleep(300);
 }
 

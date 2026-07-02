@@ -3,7 +3,7 @@ import { extname } from 'path';
 import type { FileChooser, Page } from 'playwright';
 
 import { humanSleep } from '../../human-engine/typing.js';
-import { humanClickLocator } from '../../human-engine/mouse.js';
+import { humanClickLocatorFallback } from '../../human-engine/mouse.js';
 import { sleep } from '../../../lib/utils.js';
 import {
   blurBlogTitleField,
@@ -45,11 +45,7 @@ async function openPhotoFileChooser(page: Page): Promise<FileChooser | null> {
     if (!loc) continue;
 
     const chooserPromise = page.waitForEvent('filechooser', { timeout: 12_000 }).catch(() => null);
-    try {
-      await humanClickLocator(page, loc);
-    } catch {
-      await loc.click({ timeout: 5000 }).catch(() => {});
-    }
+    await humanClickLocatorFallback(page, loc, [90, 240]);
     const chooser = await chooserPromise;
     if (chooser) return chooser;
     await sleep(300);
