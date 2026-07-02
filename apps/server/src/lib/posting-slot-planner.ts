@@ -1,11 +1,14 @@
 import { supabase } from '../middleware/auth.js';
 import {
-  avoidCrossPostingCollision,
+  avoidDongleAwareScheduleCollision,
+  CROSS_POSTING_STAGGER_MS,
   listCrossPostingOccupiedTimes,
+  loadPostingAccountProxyPort,
+  SAME_DONGLE_STAGGER_MS,
 } from './posting-cross-stagger.js';
 import {
   computeDynamicPublishIntervalHours,
-  computeEarliestPostingCandidate,
+  computePostingScheduleCandidate,
   deriveActiveHourWindow,
   getActivePostingWindowHours,
 } from './posting-interval.js';
@@ -14,7 +17,7 @@ import {
   isNightBanActive,
   msUntilNextActiveHour,
 } from './human-engine-policy.js';
-import { msUntilNightBanEnd } from './crank-schedule-config.js';
+import { DEFAULT_NIGHT_BAN_END, DEFAULT_NIGHT_BAN_START, msUntilNightBanEnd } from './crank-schedule-config.js';
 import { randomBetween } from './utils.js';
 import { getDailyPostingTarget } from './posting-daily-target.js';
 import { kstTodayStartIso } from './posting-daily-status.js';
@@ -76,7 +79,7 @@ function latestTime(times: Date[]): Date | null {
 async function ensureActivePostingWindow(candidate: Date, activeHours: number[]): Promise<Date> {
   const human = await getHumanEngineScheduleConfig();
   if (await isNightBanActive()) {
-    const wait = msUntilNightBanEnd(human.night_ban_start ?? 0, human.night_ban_end ?? 7);
+    const wait = msUntilNightBanEnd(human.night_ban_start ?? DEFAULT_NIGHT_BAN_START, human.night_ban_end ?? DEFAULT_NIGHT_BAN_END);
     if (wait > 0) {
       return new Date(Date.now() + wait + randomBetween(1, 5) * 60_000);
     }
@@ -89,7 +92,7 @@ async function ensureActivePostingWindow(candidate: Date, activeHours: number[])
   return new Date(Date.now() + wait + randomBetween(1, 5) * 60_000);
 }
 
-/** 계정·오늘 목표 기준 다음 post_blog scheduled_at — 가능한 한 이른 시각 우선. */
+/** 계정·오늘 목표 기준 다음 post_blog scheduled_at — warmup_day에 따라 활성창 내 분산. */
 export async function planNextPostBlogScheduledAt(accountId: string, date = new Date()): Promise<string> {
   const warmupDay = await loadAccountWarmupDay(accountId);
   const targetInfo = getDailyPostingTarget(accountId, date, { warmupDay });
@@ -107,7 +110,7 @@ export async function planNextPostBlogScheduledAt(accountId: string, date = new 
 
   const { completed, scheduled } = await listTodayPostBlogTimes(accountId);
 
-  const { start: winStart } = deriveActiveHourWindow(
+  const { start: winStart, end: winEnd } = deriveActiveHourWindow(
     activeHours.length === 24 ? activeHours : [],
     0.25,
   );
@@ -118,24 +121,35 @@ export async function planNextPostBlogScheduledAt(accountId: string, date = new 
     [...(lastCompleted ? [lastCompleted] : []), ...(lastScheduled ? [lastScheduled] : [])],
   );
 
-  let candidate = computeEarliestPostingCandidate({
+  let candidate = computePostingScheduleCandidate({
     now: date,
     winStartHour: winStart,
+    winEndHour: winEnd,
     minGapMs,
     lastAnchor,
+    warmupDay,
   });
 
   const now = Date.now();
 
   candidate = await ensureActivePostingWindow(candidate, activeHours);
 
+  const accountProxyPort = await loadPostingAccountProxyPort(accountId);
   const crossOccupied = await listCrossPostingOccupiedTimes(accountId);
-  candidate = avoidCrossPostingCollision(candidate, crossOccupied);
+  candidate = avoidDongleAwareScheduleCollision(candidate, crossOccupied, accountProxyPort, {
+    sameDongleMs: SAME_DONGLE_STAGGER_MS,
+    crossDongleMs: CROSS_POSTING_STAGGER_MS,
+  });
 
   if (candidate.getTime() <= now + 60_000) {
-    candidate = avoidCrossPostingCollision(
+    candidate = avoidDongleAwareScheduleCollision(
       await ensureActivePostingWindow(new Date(now + randomBetween(2, 8) * 60_000), activeHours),
       crossOccupied,
+      accountProxyPort,
+      {
+        sameDongleMs: SAME_DONGLE_STAGGER_MS,
+        crossDongleMs: CROSS_POSTING_STAGGER_MS,
+      },
     );
   }
 

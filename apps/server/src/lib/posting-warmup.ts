@@ -36,6 +36,19 @@ export function applyPostingWarmupCap(
 
 export type PostingWarmupStage = 'initial' | 'adapt' | 'expand' | 'late' | 'complete';
 
+/**
+ * 발행 가능 시간대 내 랜덤 분산 비율 — warmup_day가 낮을수록 넓게(초기 계정 시간 군집 완화).
+ * 1 = 활성창 전체, ~0.08 = 최소 간격 직후 근처만.
+ */
+export function postingWarmupScheduleSpreadFraction(warmupDay: number): number {
+  const d = Math.max(0, warmupDay);
+  if (d <= 2) return 1;
+  if (d <= 5) return 0.75;
+  if (d <= 9) return 0.5;
+  if (d <= 14) return 0.25;
+  return 0.08;
+}
+
 /** UI·설정 — warmup_day 단계 설명 */
 export function describePostingWarmupPhase(warmupDay: number): {
   stage: PostingWarmupStage;

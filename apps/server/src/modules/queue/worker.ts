@@ -46,6 +46,12 @@ import { checkSharedWorkspaceLimit } from '../../lib/shared-limit.js';
 import { assertAccountPostingQuota } from '../../lib/posting-daily-status.js';
 import { checkCrossPostingStagger } from '../../lib/posting-cross-stagger.js';
 import { logOperation } from '../../lib/log-emitter.js';
+import {
+  handleNaverAccountProtection,
+  isNaverAccountProtectionError,
+  parseNaverAccountProtectionPhase,
+  throwIfNaverAccountProtectionInContext,
+} from '../../lib/naver-account-protection.js';
 import { executePostBlog } from './jobs/post-blog.js';
 import { applyPostingResourceBlocking } from '../playwright/naver/posting-resource-block.js';
 import { executeCafePost } from './jobs/cafe-post.js';
@@ -600,6 +606,17 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
             if (humaJobId && resultUrl) await completeJob(humaJobId, resultUrl);
             if (accountId && !heldForCaptcha) await incrementAccountCount(accountId, dailyCountField(type));
           } catch (err) {
+            if (accountId && isNaverAccountProtectionError(err)) {
+              await handleNaverAccountProtection({
+                accountId,
+                workspace: jobWorkspace,
+                phase: parseNaverAccountProtectionPhase(err),
+                humaJobId,
+              }).catch((handlerErr) => {
+                console.error('[naver] protection handler:', (handlerErr as Error).message);
+              });
+              throw err;
+            }
             if (
               humaJobId &&
               accountId &&
@@ -620,6 +637,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
                   jobType: type,
                 });
                 if (vision === 'solved') {
+                  await throwIfNaverAccountProtectionInContext(context, 'captcha');
                   const pendingLogin = await isNaverLoginPagePendingSubmit(captchaPage);
                   if (!pendingLogin) {
                   try {
@@ -786,6 +804,17 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
 
         await logOperation({ level: 'info', message: `작업 완료: ${type}`, job_id: humaJobId, account_id: accountId });
       } catch (err) {
+        if (accountId && isNaverAccountProtectionError(err)) {
+          const jobWorkspace = (payload.workspace as string | undefined) ?? undefined;
+          await handleNaverAccountProtection({
+            accountId,
+            workspace: jobWorkspace,
+            phase: parseNaverAccountProtectionPhase(err),
+            humaJobId,
+          }).catch((handlerErr) => {
+            console.error('[naver] protection handler:', (handlerErr as Error).message);
+          });
+        }
         if (type === 'social_crank' && isCrankCaptchaHoldSignal(err)) {
           skipReleaseAccount = true;
           return;

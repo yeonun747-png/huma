@@ -16,6 +16,7 @@ import {
   humanDragLocatorHorizontal,
 } from '../modules/human-engine/mouse.js';
 import { randomBetween, sleep } from './utils.js';
+import { throwIfNaverAccountProtection } from './naver-account-protection.js';
 
 const VISION_MODEL = 'claude-sonnet-4-6';
 const MAX_ATTEMPTS = 3;
@@ -867,6 +868,7 @@ export async function tryAutoSolveNaverCaptcha(
 
       await sleep(randomBetween(800, 1500));
       if (await captchaCleared(page)) {
+        await throwIfNaverAccountProtection(page, 'captcha');
         await logOperation({
           level: 'info',
           message: `[captcha-vision] ${captchaType} 자동 해결 성공 (시도 ${attempt})`,

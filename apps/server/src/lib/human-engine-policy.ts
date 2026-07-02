@@ -1,5 +1,5 @@
 import { supabase } from '../middleware/auth.js';
-import { getKstClock, isKstNightBan } from './crank-schedule-config.js';
+import { DEFAULT_NIGHT_BAN_END, DEFAULT_NIGHT_BAN_START, formatNightBanRangeLabel, getKstClock, isKstNightBan } from './crank-schedule-config.js';
 import { PLATFORM_DAILY_LIMITS } from './limits.js';
 import { getDailyPostingTarget } from './posting-daily-target.js';
 import {
@@ -155,7 +155,7 @@ export async function getHumanEngineScheduleConfig(): Promise<HumanEngineSchedul
 export function isKstNightBanFromConfig(
   human: Pick<HumanEngineConfig, 'night_ban_start' | 'night_ban_end'>,
 ): boolean {
-  return isKstNightBan(human.night_ban_start ?? 0, human.night_ban_end ?? 7);
+  return isKstNightBan(human.night_ban_start ?? DEFAULT_NIGHT_BAN_START, human.night_ban_end ?? DEFAULT_NIGHT_BAN_END);
 }
 
 /** app_settings.night_ban + human_engine 야간 구간 (KST) */
@@ -163,6 +163,15 @@ export async function isNightBanActive(): Promise<boolean> {
   const app = await getAppSettings();
   if (app.night_ban === false) return false;
   return isKstNightBanFromConfig(await getHumanEngineConfig());
+}
+
+export async function getNightBanBlockMessage(): Promise<string> {
+  const human = await getHumanEngineConfig();
+  const range = formatNightBanRangeLabel(
+    human.night_ban_start ?? DEFAULT_NIGHT_BAN_START,
+    human.night_ban_end ?? DEFAULT_NIGHT_BAN_END,
+  );
+  return `야간 발행 금지 시간대 (${range} KST)`;
 }
 
 /** 활성 시간대 히트맵 — intensity 0이면 차단, 그 외 확률 통과 */

@@ -91,6 +91,9 @@ export function formatJobErrorLabel(message: string | null | undefined): string 
   if (raw.includes('CAPTCHA_DETECTED') || (raw.includes('CAPTCHA') && !raw.includes('LAYER4'))) {
     return '네이버 로그인 실패: 캡차(보안문자) 감지';
   }
+  if (raw.includes('NAVER_ACCOUNT_PROTECTED')) {
+    return '네이버 아이디 보호조치 — 계정 사용 중지 · 자동발행 OFF';
+  }
   if (raw.includes('NAVER_LOGIN_TIMEOUT:page_load')) {
     return '네이버 로그인 실패: 로그인 페이지 로드 타임아웃';
   }

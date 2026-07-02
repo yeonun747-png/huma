@@ -300,6 +300,38 @@ export function SettingsView() {
             value={activity.crank_enabled}
             onChange={(v) => patchActivity('crank_enabled', v)}
           />
+          <div className="mb-3 rounded border border-huma-bdr/40 bg-huma-bg2/30 px-3 py-2.5 text-[11px] leading-relaxed text-huma-t3">
+            <p className="mb-2 font-mono text-[10px] uppercase tracking-[0.12em] text-huma-t2">
+              C-Rank 동작 요약
+            </p>
+            <p className="mb-1.5 font-medium text-huma-t2">활동 금지·시간</p>
+            <ul className="mb-2 list-disc space-y-0.5 pl-4">
+              <li>
+                아래 「야간 발행 금지(21~08시)」가 C-Rank에도 적용됩니다 — 해당 시간 job은 1시간 뒤 재예약.
+              </li>
+              <li>
+                Human Engine 24시간 활성도 — 수동·일반 큐만 검사(확률). 스케줄 자동 큐는 야간 금지만 적용.
+              </li>
+              <li>스케줄 배치 창: KST 08:00~22:00 (세션 scheduled_at 상한).</li>
+            </ul>
+            <p className="mb-1.5 font-medium text-huma-t2">CAPTCHA</p>
+            <ul className="mb-2 list-disc space-y-0.5 pl-4">
+              <li>
+                Human Engine 「CAPTCHA Vision 자동 해결」ON + Anthropic API 키 — 포스팅과 동일 루틴(로그인·세션 중, 최대 3회).
+              </li>
+              <li>2FA·기기인증은 VNC 수동. Vision 3회 실패 시 Telegram·CAPTCHA hold.</li>
+            </ul>
+            <p className="mb-1.5 font-medium text-huma-t2">로그인 워밍업</p>
+            <ul className="list-disc space-y-0.5 pl-4">
+              <li>
+                세션 시작 시 로그인 전 네이버 검색·체류 — 일반 2~3라운드+블로그 1라운드, 48h 이내 성공 이력이면 익스프레스(1라운드).
+              </li>
+              <li>CAPTCHA 재개 세션은 워밍업 생략. 포스팅처럼 확률 생략 설정은 없음.</li>
+              <li>
+                warmup_day(일차): 0~6일 방문 3·일 2건, 7~13일 방문 6, 14일+ 방문 10·일 30건. 30일 미만 수동 큐 등록 제한(스케줄러는 허용).
+              </li>
+            </ul>
+          </div>
           <SettingsToggle
             label="포스팅 활동"
             sub="OFF — AI 생성·네이버 발행 큐 생성·실행 중지"
@@ -314,7 +346,7 @@ export function SettingsView() {
             onChange={(v) => patchApp('daily_limit', v)}
           />
           <SettingsToggle
-            label="야간 발행 금지 (00~07시)"
+            label="야간 발행 금지 (21~08시)"
             value={Boolean(app.night_ban ?? true)}
             onChange={(v) => patchApp('night_ban', v)}
           />

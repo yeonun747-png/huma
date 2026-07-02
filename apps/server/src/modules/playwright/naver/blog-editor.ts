@@ -52,6 +52,7 @@ import {
 } from './naver-representative-image.js';
 import { completeNaverPublishDialog, moveMouseToTopPublishButton } from './naver-publish-dialog.js';
 import { logOperation } from '../../../lib/log-emitter.js';
+import { throwIfNaverAccountProtectionInContext } from '../../../lib/naver-account-protection.js';
 import { sleep } from '../../../lib/utils.js';
 
 function mergePersonaConfig(base: HumanEngineConfig, persona: AccountPersona): HumanEngineConfig {
@@ -251,6 +252,7 @@ export async function postNaverBlog(params: {
 
   const publishedEarly = extractPublishedPostUrl(page.url());
   if (publishedEarly) {
+    await throwIfNaverAccountProtectionInContext(page.context(), 'posting');
     return { resultUrl: publishedEarly };
   }
 
@@ -464,11 +466,13 @@ export async function postNaverBlog(params: {
       scale,
     });
     await humanSleep(5000, 10_000);
+    await throwIfNaverAccountProtectionInContext(page.context(), 'posting');
     return { resultUrl };
   }
 
   await humanSleep(1000, 2000);
   const resultUrl = await waitForNaverPublishSuccess(page);
   await humanSleep(5000, 10_000);
+  await throwIfNaverAccountProtectionInContext(page.context(), 'posting');
   return { resultUrl };
 }

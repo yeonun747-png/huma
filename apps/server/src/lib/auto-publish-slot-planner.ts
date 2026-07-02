@@ -14,7 +14,7 @@ import { countTodaySimilaritySkipped } from './posting-content-similarity.js';
 import { formatKstDateKey, getDailyPostingTarget } from './posting-daily-target.js';
 import {
   computeDynamicPublishIntervalHours,
-  computeEarliestPostingCandidate,
+  computePostingScheduleCandidate,
   deriveActiveHourWindow,
   getActivePostingWindowHours,
 } from './posting-interval.js';
@@ -23,7 +23,7 @@ import {
   isNightBanActive,
   msUntilNextActiveHour,
 } from './human-engine-policy.js';
-import { msUntilNightBanEnd } from './crank-schedule-config.js';
+import { DEFAULT_NIGHT_BAN_END, DEFAULT_NIGHT_BAN_START, msUntilNightBanEnd } from './crank-schedule-config.js';
 import { ABSOLUTE_MIN_PUBLISH_INTERVAL_HOURS } from './posting-warmup.js';
 import { getPostingWarmupDay } from './posting-warmup-day.js';
 import { randomBetween } from './utils.js';
@@ -52,7 +52,7 @@ async function loadAccountWarmupDay(accountId: string): Promise<number> {
 async function ensureActivePostingWindow(candidate: Date, activeHours: number[]): Promise<Date> {
   const human = await getHumanEngineScheduleConfig();
   if (await isNightBanActive()) {
-    const wait = msUntilNightBanEnd(human.night_ban_start ?? 0, human.night_ban_end ?? 7);
+    const wait = msUntilNightBanEnd(human.night_ban_start ?? DEFAULT_NIGHT_BAN_START, human.night_ban_end ?? DEFAULT_NIGHT_BAN_END);
     if (wait > 0) {
       return new Date(Date.now() + wait + randomBetween(1, 5) * 60_000);
     }
@@ -104,7 +104,7 @@ export async function planNextAutoPublishTriggerAt(
   );
   const minGapMs = minIntervalH * 3600_000;
 
-  const { start: winStart } = deriveActiveHourWindow(
+  const { start: winStart, end: winEnd } = deriveActiveHourWindow(
     activeHours.length === 24 ? activeHours : [],
     0.25,
   );
@@ -120,11 +120,13 @@ export async function planNextAutoPublishTriggerAt(
 
   const lastAt = lastJobs?.[0]?.created_at ? new Date(lastJobs[0].created_at as string) : null;
 
-  let candidate = computeEarliestPostingCandidate({
+  let candidate = computePostingScheduleCandidate({
     now: date,
     winStartHour: winStart,
+    winEndHour: winEnd,
     minGapMs,
     lastAnchor: lastAt,
+    warmupDay,
   });
   const now = Date.now();
 

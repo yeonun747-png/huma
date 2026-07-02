@@ -16,6 +16,11 @@ import { pickPostingWorkflowPage } from './posting-captcha-session.js';
 import { sleep } from './utils.js';
 import { shouldPreserveBrowserPageForVnc } from '../modules/watcher/captcha-hold.js';
 import { recordPublishedPost } from '../modules/blog-check/post-record.js';
+import {
+  handleNaverAccountProtection,
+  isNaverAccountProtectionError,
+  parseNaverAccountProtectionPhase,
+} from './naver-account-protection.js';
 
 async function incrementPostCount(accountId: string): Promise<void> {
   const { data } = await supabase.from('huma_accounts').select('post_count_today').eq('id', accountId).single();
@@ -174,6 +179,16 @@ export async function continuePostBlogFromCaptchaHold(params: {
 
     return { ok: true, resultUrl };
   } catch (err) {
+    if (isNaverAccountProtectionError(err)) {
+      await handleNaverAccountProtection({
+        accountId,
+        workspace,
+        phase: parseNaverAccountProtectionPhase(err),
+        humaJobId: jobId,
+      }).catch((handlerErr) => {
+        console.error('[naver] protection handler:', (handlerErr as Error).message);
+      });
+    }
     const message = (err as Error).message ?? 'post_blog_continue_failed';
     await supabase
       .from('huma_jobs')

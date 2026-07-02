@@ -29,6 +29,7 @@ import {
 import { shouldPreserveBrowserPageForVnc } from '../../watcher/captcha-hold.js';
 import { escapeBlogHomeAfterLogin } from '../../../lib/naver-blog-portal.js';
 import { isNaverAuthChallengePage, pollUntilNaverLoginRedirect } from '../../../lib/posting-captcha-session.js';
+import { throwIfNaverAccountProtection } from '../../../lib/naver-account-protection.js';
 
 const NAV_TIMEOUT_MS = 60_000;
 
@@ -66,6 +67,8 @@ async function assertLoginSucceeded(
   captchaCtx?: NaverCaptchaVisionContext,
 ): Promise<void> {
   await resolveLoginCaptchaIfNeeded(page, captchaCtx);
+
+  await throwIfNaverAccountProtection(page, 'login');
 
   const captchaVisible =
     (await page.locator('#captcha, .captcha, iframe[src*="captcha"]').count().catch(() => 0)) > 0;
@@ -177,6 +180,7 @@ async function performNaverLoginOnPage(
   await humanSleep(2000, 4000);
 
   await assertLoginSucceeded(page, captchaCtx);
+  await throwIfNaverAccountProtection(page, 'login');
   await escapeBlogHomeAfterLogin(page);
 }
 

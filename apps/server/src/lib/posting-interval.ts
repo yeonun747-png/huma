@@ -1,4 +1,7 @@
-import { ABSOLUTE_MIN_PUBLISH_INTERVAL_HOURS } from './posting-warmup.js';
+import {
+  ABSOLUTE_MIN_PUBLISH_INTERVAL_HOURS,
+  postingWarmupScheduleSpreadFraction,
+} from './posting-warmup.js';
 import { randomBetween } from './utils.js';
 
 export function kstNowParts(date = new Date()): {
@@ -50,6 +53,43 @@ export function computeEarliestPostingCandidate(opts: {
     if (candidate.getTime() < earliest) candidate = new Date(earliest);
   }
   return candidate;
+}
+
+/**
+ * warmup_day에 따라 활성창 안에서 earliest~latest 사이 랜덤 시각 — 초기 단계일수록 분산 폭 확대.
+ */
+export function computePostingScheduleCandidate(opts: {
+  now?: Date;
+  winStartHour: number;
+  winEndHour: number;
+  minGapMs: number;
+  lastAnchor: Date | null;
+  warmupDay?: number;
+}): Date {
+  const earliest = computeEarliestPostingCandidate({
+    now: opts.now,
+    winStartHour: opts.winStartHour,
+    minGapMs: opts.minGapMs,
+    lastAnchor: opts.lastAnchor,
+  });
+
+  const fraction = postingWarmupScheduleSpreadFraction(opts.warmupDay ?? 0);
+  if (fraction <= 0.05) return earliest;
+
+  const now = opts.now ?? new Date();
+  const kst = kstNowParts(now);
+  const windowStartMs = kstDateTimeToUtc(kst.y, kst.m, kst.d, opts.winStartHour, 0).getTime();
+  const windowEndMs = kstDateTimeToUtc(kst.y, kst.m, kst.d, opts.winEndHour, 0).getTime();
+  const windowMs = Math.max(30 * 60_000, windowEndMs - windowStartMs);
+
+  const earliestMs = earliest.getTime();
+  const maxSpreadMs = Math.floor(windowMs * fraction);
+  const endBufferMs = randomBetween(5, 15) * 60_000;
+  const latestMs = Math.min(windowEndMs - endBufferMs, earliestMs + maxSpreadMs);
+
+  if (latestMs <= earliestMs + 60_000) return earliest;
+
+  return new Date(randomBetween(earliestMs, latestMs));
 }
 
 /** active_hours intensity ≥ threshold 인 시간대 창 */

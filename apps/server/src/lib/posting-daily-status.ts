@@ -2,7 +2,7 @@ import { supabase } from '../middleware/auth.js';
 
 import { getPostingEnabled } from './activity-control.js';
 
-import { getEffectiveDailyLimit, isNightBanActive } from './human-engine-policy.js';
+import { getEffectiveDailyLimit, getNightBanBlockMessage, isNightBanActive } from './human-engine-policy.js';
 
 import { isWeekendKst } from './posting-schedule.js';
 
@@ -341,7 +341,7 @@ async function buildAccountPublishStatus(
 
       block_reason: 'NIGHT_BAN',
 
-      block_message: '야간 발행 금지 시간대 (00~07시 KST)',
+      block_message: await getNightBanBlockMessage(),
 
     };
 
@@ -645,7 +645,7 @@ export async function assertAccountPostingQuotaBeforeGeneration(
 
   if (await isNightBanActive()) {
 
-    throw new Error('야간 발행 금지 시간대 (00~07시 KST)');
+    throw new Error(await getNightBanBlockMessage());
 
   }
 
