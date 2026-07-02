@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   DONGLE_FULL_RESTORE_COOLDOWN_MS,
+  DONGLE_SLOT_RESTORE_COOLDOWN_MS,
   isDongleFullRestoreCooldownActive,
+  isDongleSlotRestoreCooldownActive,
   remainingDongleFullRestoreCooldownMs,
+  remainingDongleSlotRestoreCooldownMs,
 } from './restore-dongle-network.js';
 
 describe('dongle full restore cooldown', () => {
@@ -23,6 +26,23 @@ describe('dongle full restore cooldown', () => {
     const now = last + DONGLE_FULL_RESTORE_COOLDOWN_MS + 1;
     expect(isDongleFullRestoreCooldownActive(now, DONGLE_FULL_RESTORE_COOLDOWN_MS, last)).toBe(
       false,
+    );
+  });
+});
+
+describe('dongle slot restore cooldown', () => {
+  it('tracks per slot independently', () => {
+    const now = 2_000_000;
+    const slot3Last = now - 30_000;
+    const slot5Last = now - 120_000;
+    expect(isDongleSlotRestoreCooldownActive(3, now, DONGLE_SLOT_RESTORE_COOLDOWN_MS, slot3Last)).toBe(
+      true,
+    );
+    expect(isDongleSlotRestoreCooldownActive(5, now, DONGLE_SLOT_RESTORE_COOLDOWN_MS, slot5Last)).toBe(
+      false,
+    );
+    expect(remainingDongleSlotRestoreCooldownMs(3, now, DONGLE_SLOT_RESTORE_COOLDOWN_MS, slot3Last)).toBe(
+      30_000,
     );
   });
 });

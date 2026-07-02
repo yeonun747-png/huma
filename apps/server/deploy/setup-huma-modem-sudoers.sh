@@ -12,6 +12,8 @@ PHONE_RESET_SCRIPT="${SCRIPTS}/huma-phone-airplane-reset.sh"
 PHONE_TETHER_SCRIPT="${SCRIPTS}/huma-phone-ensure-tether.sh"
 PHONE_RESTORE_SCRIPT="${SCRIPTS}/restore-phone-crank.sh"
 NETWORK_RESTORE_SCRIPT="${SCRIPTS}/restore-dongle-by-subnet.sh"
+SLOT_RESTORE_SCRIPT="${SCRIPTS}/restore-dongle-slot.sh"
+SETUP_PROXY_SLOT_SCRIPT="${SCRIPTS}/setup-proxy-socks-slot.sh"
 ADB_BIN="$(command -v adb 2>/dev/null || echo /usr/bin/adb)"
 DEST="/etc/sudoers.d/huma-modem"
 TMP="$(mktemp)"
@@ -24,6 +26,8 @@ ${HUMA_USER} ALL=(ALL) NOPASSWD: /usr/bin/bash ${PHONE_RESET_SCRIPT} *
 ${HUMA_USER} ALL=(ALL) NOPASSWD: /usr/bin/bash ${PHONE_TETHER_SCRIPT} *
 ${HUMA_USER} ALL=(ALL) NOPASSWD: /usr/bin/bash ${PHONE_RESTORE_SCRIPT} *
 ${HUMA_USER} ALL=(ALL) NOPASSWD: /usr/bin/bash ${NETWORK_RESTORE_SCRIPT}
+${HUMA_USER} ALL=(ALL) NOPASSWD: /usr/bin/bash ${SLOT_RESTORE_SCRIPT} *
+${HUMA_USER} ALL=(ALL) NOPASSWD: /usr/bin/bash ${SETUP_PROXY_SLOT_SCRIPT} *
 ${HUMA_USER} ALL=(ALL) NOPASSWD: ${ADB_BIN} *
 EOF
 

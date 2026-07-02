@@ -4,8 +4,8 @@ import { readDongleInterfaceFromConf, isPlaceholderInterfaceName } from './dongl
 import { readInterfaceIp } from './dongle-health.js';
 import {
   applyDonglePolicyRoute,
-  runRestoreDongleNetwork,
-  isDongleFullRestoreCooldownActive,
+  runRestoreDongleSlot,
+  isDongleSlotRestoreCooldownActive,
 } from './restore-dongle-network.js';
 import { warmPostingDonglePath } from './dongle-route-warm.js';
 import { applyModemProxyProbe } from './modem-proxy-probe.js';
@@ -16,7 +16,7 @@ import { sleep } from './utils.js';
 
 export type DongleSocksRecoverResult = {
   ok: boolean;
-  method: 'skip' | 'route_3proxy' | 'full_restore';
+  method: 'skip' | 'route_3proxy' | 'slot_restore';
   detail: string;
 };
 
@@ -80,7 +80,7 @@ async function tryRouteAnd3proxyOnce(
   }
 }
 
-/** SOCKS 일시 지연 시 즉시 full restore 하지 않도록 경량 복구를 여러 번 시도 */
+/** SOCKS 일시 지연 시 즉시 슬롯 복구하지 않도록 경량 복구를 여러 번 시도 */
 async function tryRouteAnd3proxyWithWarm(
   proxyPort: number,
   slot: number,
@@ -102,7 +102,7 @@ async function tryRouteAnd3proxyWithWarm(
   return false;
 }
 
-/** SOCKS 실패 — LTE·공인 IP 재발급 없이 policy routing + 3proxy → 실패 시 일괄 복구 */
+/** SOCKS 실패 — 경량 route+3proxy → 실패 시 해당 슬롯만 복구 (다른 슬롯 유지) */
 export async function recoverPostingDongleSocksPath(
   proxyPort: number,
   modemId?: string,
@@ -129,26 +129,26 @@ export async function recoverPostingDongleSocksPath(
     return { ok: true, method: 'route_3proxy', detail: `slot${slot} routing·3proxy (:${proxyPort})` };
   }
 
-  if (isDongleFullRestoreCooldownActive()) {
+  if (isDongleSlotRestoreCooldownActive(slot)) {
     return {
       ok: false,
       method: 'route_3proxy',
-      detail: `slot${slot} 경량 복구 실패 — 일괄 복구 쿨다운 중 (전 슬롯 3proxy 재시작 방지)`,
+      detail: `slot${slot} 경량 복구 실패 — 슬롯 복구 쿨다운 중`,
     };
   }
 
   await logOperation({
     level: 'warn',
-    message: `[dongle-recover] slot${slot} (:${proxyPort}) routing·3proxy 실패 — restore-dongle-by-subnet.sh`,
+    message: `[dongle-recover] slot${slot} (:${proxyPort}) 경량 복구 실패 — restore-dongle-slot.sh`,
     modem_id: resolvedModemId,
   }).catch(() => undefined);
 
-  const full = runRestoreDongleNetwork({ quick: true });
-  if (!full.ok) {
+  const slotRestore = runRestoreDongleSlot(slot);
+  if (!slotRestore.ok) {
     return {
       ok: false,
-      method: full.skipped === 'cooldown' || full.skipped === 'locked' ? 'route_3proxy' : 'full_restore',
-      detail: full.error ?? 'restore-dongle-by-subnet.sh 실패',
+      method: slotRestore.skipped === 'cooldown' || slotRestore.skipped === 'locked' ? 'route_3proxy' : 'slot_restore',
+      detail: slotRestore.error ?? 'restore-dongle-slot.sh 실패',
     };
   }
 
@@ -161,10 +161,10 @@ export async function recoverPostingDongleSocksPath(
     modemStatus,
   );
   return socksOk
-    ? { ok: true, method: 'full_restore', detail: 'restore-dongle-by-subnet.sh' }
+    ? { ok: true, method: 'slot_restore', detail: `restore-dongle-slot.sh slot${slot}` }
     : {
         ok: false,
-        method: 'full_restore',
-        detail: `복구 후 SOCKS 실패 (:${proxyPort})`,
+        method: 'slot_restore',
+        detail: `슬롯 복구 후 SOCKS 실패 (:${proxyPort})`,
       };
 }
