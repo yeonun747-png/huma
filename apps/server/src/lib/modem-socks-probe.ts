@@ -20,9 +20,12 @@ function resolveCurlBin(): string {
 
 export const CURL_BIN = resolveCurlBin();
 
-/** check-socks-proxy.sh · restore 5단계 와 동일 */
+/** check-socks-proxy.sh · restore 5단계 와 동일 (LTE 지연 여유) */
 export const MODEM_SOCKS_PROBE_CONNECT_TIMEOUT_SEC = 15;
-export const MODEM_SOCKS_PROBE_MAX_TIME_SEC = 45;
+export const MODEM_SOCKS_PROBE_MAX_TIME_SEC = (() => {
+  const raw = Number(process.env.HUMA_MODEM_SOCKS_PROBE_MAX_TIME_SEC);
+  return Number.isFinite(raw) && raw >= 20 ? Math.floor(raw) : 60;
+})();
 
 /** LTE 동글 SOCKS naver GET — i7 SSH 기준 30초+ 성공도 흔함 */
 export const MODEM_SOCKS_PROBE_TIMEOUT_MS = (() => {

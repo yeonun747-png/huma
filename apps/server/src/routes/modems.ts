@@ -55,10 +55,11 @@ async function probeModemsInRoute(
   return modems.map((modem) => {
     const probed = probedBySlot.get(modem.slot_number);
     if (!probed) return modem;
+    const probeFailedSoft = !probed.probe_ok && probed.status !== 'error';
     return {
       ...modem,
       status: probed.status,
-      response_ms: probed.response_ms,
+      ...(probeFailedSoft ? {} : { response_ms: probed.response_ms }),
       ...(probed.current_ip ? { current_ip: probed.current_ip } : {}),
       ...(probed.public_ip ? { public_ip: probed.public_ip } : {}),
       ...(probed.geo_region ? { geo_region: probed.geo_region } : {}),

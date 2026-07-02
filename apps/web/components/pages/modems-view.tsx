@@ -72,7 +72,7 @@ function modemStatusTag(
   if (m.status === 'busy') return { label: '사용중', tone: 'warn' };
   if (m.status === 'idle' && !m.public_ip && m.response_ms == null) return { label: '대기', tone: 'idle' };
   if (m.status === 'idle' && !m.public_ip && m.response_ms != null) {
-    return { label: '오류', tone: 'err' };
+    return { label: '정상', tone: 'warn' };
   }
   if (m.status === 'idle' && m.public_ip) return { label: '정상', tone: 'ok' };
   if (m.status === 'idle') return { label: '정상', tone: 'ok' };
@@ -458,8 +458,7 @@ export function ModemsView() {
           응답 ms = SOCKS naver.com GET 전체 수신 시간(restore check-socks·최대 45초, HTTP 200/301/302) ·
           VNC에서 홈이 더 느리면 JS·이미지·CPU 렌더(Xvfb) 추가 로딩 — ms와 체감은 다를 수 있음 ·
           화면 갱신까지는 슬롯당 공인IP·지역 조회가 추가되어 시계로 재면 더 길 수 있음 ·{' '}
-          <strong>오류</strong> = SOCKS 연결 실패(느려서
-          아님, 타임아웃 45초) · IP — = probe 실패 · 지역 = 표시된 공인 IP 기준(ip-api·ipwho.is, LTE Geo는
+          <strong>오류</strong> = SOCKS 연속 3회 실패(기본, env HUMA_MODEM_PROBE_ERROR_STREAK) · 슬롯당 curl 최대 60초×2 · 1~2회 타임아웃은 상태 유지 · IP — = probe 실패 또는 공인 IP 미조회 · 지역 = 표시된 공인 IP 기준(ip-api·ipwho.is, LTE Geo는
           참고용) · UI 오류만으로 포스팅 큐가 막히지는 않으나 SOCKS 불가 시 작업 실행 중 실패할 수 있음
         </p>
         <p className="mt-1 font-mono text-[10px] text-huma-t3">
