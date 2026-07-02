@@ -72,6 +72,17 @@ function isWarmupJobAfterEpoch(
   return Number.isFinite(ms) && ms >= epochMs;
 }
 
+/** reconcile 시 epoch 이후면 distinctDays만 반영(감소 허용), 없으면 기존처럼 상향만 */
+export function resolveReconcileWarmupDay(
+  current: number,
+  distinctDays: number,
+  epochAt: string | null | undefined,
+): number {
+  if (distinctDays <= 0) return current;
+  const next = epochAt?.trim() ? distinctDays : Math.max(current, distinctDays);
+  return Math.min(MAX_WARMUP_DAY, next);
+}
+
 /** 네이버 ID 교체 — 워밍업 단계·일차·평일상한 UI를 처음부터 */
 export function postingWarmupResetPatch(now = new Date()): {
   warmup_day: number;
@@ -141,8 +152,12 @@ export async function ensurePostingWarmupStartedKst(accountId: string): Promise<
 
   let started: string | null = null;
   if (firstAutoContent?.created_at) {
-    started = formatKstDateKey(new Date(firstAutoContent.created_at as string));
-  } else {
+    const createdIso = firstAutoContent.created_at as string;
+    if (!epochAt?.trim() || isWarmupJobAfterEpoch({ result_url: 'x', completed_at: createdIso, platform_schedule: {} }, epochAt)) {
+      started = formatKstDateKey(new Date(createdIso));
+    }
+  }
+  if (!started) {
     const { data: jobs } = await supabase
       .from('huma_jobs')
       .select('completed_at, scheduled_at, platform_schedule, result_url')
@@ -240,38 +255,45 @@ export async function reconcilePostingWarmupDay(
   const key = accountId.trim();
   if (!key) return 0;
 
+  const { data: accountMeta } = await supabase
+    .from('huma_accounts')
+    .select('warmup_day, warmup_last_increment_date, posting_warmup_epoch_at')
+    .eq('id', key)
+    .maybeSingle();
+
+  if (!accountMeta) return 0;
+
+  const epochAt = (accountMeta.posting_warmup_epoch_at as string | null)?.trim() ?? null;
+  const current = (accountMeta.warmup_day as number | undefined) ?? 0;
+
   await ensurePostingWarmupStartedKst(key).catch((err) => {
     console.error('[warmup] ensurePostingWarmupStartedKst:', (err as Error).message);
   });
 
   const { distinctDays, includesToday } = await countDistinctPostingWarmupDays(key, now);
   if (distinctDays <= 0) {
-    const { data: acc } = await supabase
-      .from('huma_accounts')
-      .select('warmup_day')
-      .eq('id', key)
-      .maybeSingle();
-    return (acc?.warmup_day as number | undefined) ?? 0;
+    if (epochAt && current > 0) {
+      const { error: updErr } = await supabase
+        .from('huma_accounts')
+        .update({ warmup_day: 0, warmup_last_increment_date: null })
+        .eq('id', key);
+      if (updErr) throw new Error(`warmup_day 초기화 저장 실패: ${updErr.message}`);
+      return 0;
+    }
+    return current;
   }
 
-  const { data: account } = await supabase
-    .from('huma_accounts')
-    .select('warmup_day, warmup_last_increment_date')
-    .eq('id', key)
-    .maybeSingle();
-
-  if (!account) return 0;
-
-  const current = (account.warmup_day as number | undefined) ?? 0;
-  const next = Math.min(MAX_WARMUP_DAY, Math.max(current, distinctDays));
+  const next = resolveReconcileWarmupDay(current, distinctDays, epochAt);
   if (next === current) return current;
 
   const today = kstTodayKey(now);
-  const patch: { warmup_day: number; warmup_last_increment_date?: string } = {
+  const patch: { warmup_day: number; warmup_last_increment_date?: string | null } = {
     warmup_day: next,
   };
-  if (includesToday && account.warmup_last_increment_date !== today) {
+  if (includesToday && accountMeta.warmup_last_increment_date !== today) {
     patch.warmup_last_increment_date = today;
+  } else if (epochAt && next < current) {
+    patch.warmup_last_increment_date = null;
   }
 
   const { error: updErr } = await supabase.from('huma_accounts').update(patch).eq('id', key);
@@ -308,11 +330,12 @@ export async function getPostingWarmupDay(accountId: string, now = new Date()): 
 
   const { data } = await supabase
     .from('huma_accounts')
-    .select('warmup_day')
+    .select('warmup_day, posting_warmup_epoch_at')
     .eq('id', key)
     .maybeSingle();
   const stored = (data?.warmup_day as number | undefined) ?? 0;
-  if (stored > 0) return stored;
+  const hasEpoch = Boolean((data?.posting_warmup_epoch_at as string | null)?.trim());
+  if (stored > 0 && !hasEpoch) return stored;
   return reconcilePostingWarmupDay(key, now);
 }
 
