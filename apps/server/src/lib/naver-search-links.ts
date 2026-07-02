@@ -74,6 +74,17 @@ function isBlockedWarmupNav(url: string): boolean {
   );
 }
 
+/** 로그인 전 워밍업 — 쇼핑 GNB·탭·검색결과 링크 모두 제외 */
+export function isShoppingWarmupTarget(href: string, text = ''): boolean {
+  const h = href.toLowerCase();
+  const t = text.trim();
+  if (/shopping\.naver\.com|search\.shopping\.naver\.com/i.test(h)) return true;
+  if (/ssc=tab\.shopping|where=shopping|tab_shopping|\/shopping\b/i.test(h)) return true;
+  if (/brand\.naver\.com\/n\/shopping/i.test(h)) return true;
+  if (t.includes('쇼핑')) return true;
+  return false;
+}
+
 /** namu·tistory 등 SPA — LTE SOCKS에서 30s+ 로드, 워밍업 타임아웃 유발 */
 function isHeavyWarmupHost(url: string): boolean {
   return (
@@ -86,6 +97,7 @@ function isHeavyWarmupHost(url: string): boolean {
 
 export function isIntegratedWarmupLink(url: string): boolean {
   if (isBlockedWarmupNav(url)) return false;
+  if (isShoppingWarmupTarget(url)) return false;
   if (url.includes('blog.naver.com')) return false;
   if (isHeavyWarmupHost(url)) return false;
   return url.startsWith('http');

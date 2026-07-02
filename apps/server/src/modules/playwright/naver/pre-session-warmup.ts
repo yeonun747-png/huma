@@ -4,7 +4,7 @@ import { scrollWithReverse } from '../../human-engine/timing.js';
 import { randomBetween } from '../../../lib/utils.js';
 import type { HumanEngineConfig } from '../../../lib/settings.js';
 import type { AccountPersona } from '../persona.js';
-import { collectNaverSearchUrlsDetailed } from '../../../lib/naver-search-links.js';
+import { collectNaverSearchUrlsDetailed, isShoppingWarmupTarget } from '../../../lib/naver-search-links.js';
 import { CRANK_NAV_TIMEOUT_MS, PLAYWRIGHT_NAV_TIMEOUT_MS } from '../../../lib/playwright-nav-timeout.js';
 import { getPostingWarmupSettings } from '../../../lib/human-engine-policy.js';
 import { throwWarmupFailure } from '../../../lib/warmup-failure.js';
@@ -96,22 +96,13 @@ async function quickWarmupGlance(page: Page, accountType: WarmupAccountType): Pr
   await humanSleep(accountType === 'posting' ? 300 : 1500, accountType === 'posting' ? 1000 : 4000);
 }
 
-/** 로그인 워밍업(light/full) 시 GNB·검색 탭 중 쇼핑 링크 식별 */
-function isShoppingNavLink(href: string, text: string): boolean {
-  const h = href.toLowerCase();
-  const t = text.trim();
-  if (/shopping\.naver\.com|\/shopping\b|brand\.naver\.com\/n\/shopping/i.test(h)) return true;
-  if (t.includes('쇼핑')) return true;
-  return false;
-}
-
 /** 방문 페이지에서 naver 내부 메뉴·탭 클릭 (posting: 1~2회 필수, 쇼핑 탭 제외) */
 async function maybeBrowseInPageMenus(page: Page, accountType: WarmupAccountType): Promise<void> {
   if (accountType !== 'posting') return;
   const clicks = randomBetween(1, 2);
 
   const menuLinks = page.locator(
-    'nav a[href*="naver.com"], .lnb a[href*="naver.com"], .tab_menu a, a[role="tab"]',
+    'nav a[href*="naver.com"], .lnb a[href*="naver.com"], .tab_menu a, a[role="tab"], .api_subject_bx a',
   );
   const count = await menuLinks.count().catch(() => 0);
   if (count === 0) return;
@@ -125,10 +116,14 @@ async function maybeBrowseInPageMenus(page: Page, accountType: WarmupAccountType
 
     const href = (await link.getAttribute('href').catch(() => '')) ?? '';
     const text = (await link.innerText().catch(() => '')) ?? '';
-    if (isShoppingNavLink(href, text)) continue;
+    if (isShoppingWarmupTarget(href, text)) continue;
 
     await link.click({ timeout: 6000 }).catch(() => {});
     await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => {});
+    if (isShoppingWarmupTarget(page.url())) {
+      await page.goBack({ waitUntil: 'domcontentloaded', timeout: 15_000 }).catch(() => {});
+      continue;
+    }
     await quickWarmupGlance(page, accountType);
     clicked += 1;
   }
@@ -156,7 +151,12 @@ async function visitWarmupUrls(
   let visited = 0;
   for (const url of urls) {
     if (visited >= visitCount) break;
+    if (isShoppingWarmupTarget(url)) continue;
     if (!(await safeWarmupGoto(page, url, navTimeoutMs))) continue;
+    if (isShoppingWarmupTarget(page.url())) {
+      await page.goBack({ waitUntil: 'domcontentloaded', timeout: navTimeoutMs }).catch(() => {});
+      continue;
+    }
     visited += 1;
     await quickWarmupGlance(page, accountType);
     await maybeBrowseInPageMenus(page, accountType);
@@ -236,8 +236,15 @@ async function maybeClickSearchTab(page: Page): Promise<void> {
     .filter({ hasText: tab })
     .first();
   if (await tabLink.isVisible({ timeout: 1500 }).catch(() => false)) {
+    const href = (await tabLink.getAttribute('href').catch(() => '')) ?? '';
+    const text = (await tabLink.innerText().catch(() => '')) ?? '';
+    if (isShoppingWarmupTarget(href, text)) return;
     await tabLink.click({ timeout: 5000 }).catch(() => {});
     await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => {});
+    if (isShoppingWarmupTarget(page.url())) {
+      await page.goBack({ waitUntil: 'domcontentloaded', timeout: 15_000 }).catch(() => {});
+      return;
+    }
     await humanSleep(350, 700);
   }
 }
