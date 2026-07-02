@@ -40,6 +40,7 @@ import {
   listActiveQuizContent,
   syncQuizContentCache,
 } from '../modules/video-content/quiz-content-cache.js';
+import { listYeonunProductsWithUsage } from '../modules/video-content/yeonun-product-picker.js';
 import {
   loadVideoPersonaText,
   saveVideoPersonaText,
@@ -694,6 +695,19 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
     const result = await syncQuizContentCache();
     if (result.error && result.synced === 0) return reply.code(502).send(result);
     return result;
+  });
+
+  /** 연운 상품 — Supabase products 실시간 조회 (캐시·동기화 없음) */
+  app.get('/api/yeonun-products', { preHandler: authMiddleware }, async (request) => {
+    const allowed = getWorkspaceFilter(request);
+    if (!allowed.includes('yeonun')) return { products: [], source: 'supabase_products', fetchedAt: null };
+
+    const products = await listYeonunProductsWithUsage();
+    return {
+      products,
+      source: 'supabase_products',
+      fetchedAt: new Date().toISOString(),
+    };
   });
 
   /** EvoLink 작업 완료/실패 콜백 (인증 없음 — HTTPS 공개 URL) */

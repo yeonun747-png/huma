@@ -1,6 +1,7 @@
 import { supabase } from '../../middleware/auth.js';
 import {
   buildYeonunProductContextForVideo,
+  extractFortuneSlug,
   type YeonunProductRow,
 } from '../content/yeonun-context.js';
 import { filterPostingSubjectCandidates } from '../../lib/posting-recent-subjects.js';
@@ -10,6 +11,11 @@ export type YeonunProductPick = {
   slug: string;
   title: string | null;
   contextText: string;
+};
+
+export type YeonunProductListItem = YeonunProductRow & {
+  postingCount: number;
+  videoCount: number;
 };
 
 function formatProductContextFallback(data: YeonunProductRow): string {
@@ -30,6 +36,61 @@ export async function listYeonunProducts(): Promise<YeonunProductRow[]> {
 
   if (error) throw new Error(error.message);
   return (data ?? []) as YeonunProductRow[];
+}
+
+/** 포스팅·영상 사용 횟수 — UI 표시·자동 pick 가중치 */
+export async function getYeonunProductUsageCounts(): Promise<
+  Map<string, { posting: number; video: number }>
+> {
+  const counts = new Map<string, { posting: number; video: number }>();
+
+  const bump = (slug: string, field: 'posting' | 'video') => {
+    const prev = counts.get(slug) ?? { posting: 0, video: 0 };
+    prev[field] += 1;
+    counts.set(slug, prev);
+  };
+
+  const { data: jobs, error: jobsErr } = await supabase
+    .from('huma_jobs')
+    .select('link_url')
+    .eq('workspace', 'yeonun')
+    .in('job_type', ['content_full', 'post_blog'])
+    .in('status', ['pending', 'scheduled', 'running', 'paused', 'completed'])
+    .not('link_url', 'is', null);
+
+  if (jobsErr) throw new Error(jobsErr.message);
+
+  for (const row of jobs ?? []) {
+    const slug = extractFortuneSlug(String(row.link_url ?? ''));
+    if (slug) bump(slug, 'posting');
+  }
+
+  const { data: videos, error: videosErr } = await supabase
+    .from('huma_video_content_history')
+    .select('used_product')
+    .eq('workspace', 'yeonun')
+    .not('used_product', 'is', null);
+
+  if (videosErr) throw new Error(videosErr.message);
+
+  for (const row of videos ?? []) {
+    const slug = String(row.used_product ?? '').trim();
+    if (slug) bump(slug, 'video');
+  }
+
+  return counts;
+}
+
+export async function listYeonunProductsWithUsage(): Promise<YeonunProductListItem[]> {
+  const [products, usage] = await Promise.all([listYeonunProducts(), getYeonunProductUsageCounts()]);
+  return products.map((p) => {
+    const u = usage.get(p.slug);
+    return {
+      ...p,
+      postingCount: u?.posting ?? 0,
+      videoCount: u?.video ?? 0,
+    };
+  });
 }
 
 async function loadRecentUsedProducts(workspace: string, limit = 20): Promise<string[]> {
@@ -65,14 +126,12 @@ export async function pickYeonunProduct(opts?: {
   }
 
   const recent = await loadRecentUsedProducts('yeonun');
-  const counts = new Map<string, number>();
-  for (const slug of recent) {
-    counts.set(slug, (counts.get(slug) ?? 0) + 1);
-  }
-
+  const usage = await getYeonunProductUsageCounts();
   const weights = pool.map((p) => {
-    const count = counts.get(p.slug) ?? 0;
-    return { product: p, weight: 1 / (1 + count) };
+    const u = usage.get(p.slug);
+    const postingN = u?.posting ?? 0;
+    const recentVideoN = recent.filter((slug) => slug === p.slug).length;
+    return { product: p, weight: 1 / (1 + postingN + recentVideoN) };
   });
 
   const total = weights.reduce((s, w) => s + w.weight, 0);

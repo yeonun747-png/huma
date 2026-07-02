@@ -680,6 +680,21 @@ export const api = {
     }>('/api/quiz-content'),
   syncQuizContent: () =>
     request<{ synced: number; error?: string }>('/api/quiz-content/sync', { method: 'POST' }),
+  yeonunProducts: () =>
+    request<{
+      products: Array<{
+        slug: string;
+        title: string | null;
+        quote: string | null;
+        category_slug: string | null;
+        tags: string[] | null;
+        character_key: string | null;
+        postingCount: number;
+        videoCount: number;
+      }>;
+      source: string;
+      fetchedAt: string | null;
+    }>('/api/yeonun-products'),
   settings: () => request<Array<{ key: string; value: unknown }>>('/api/settings'),
   getSetting: (key: string) => request<Record<string, unknown>>(`/api/settings/${key}`),
   updateSetting: (key: string, value: unknown) =>

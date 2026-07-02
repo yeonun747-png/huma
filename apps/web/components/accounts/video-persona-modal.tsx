@@ -34,7 +34,18 @@ export function VideoPersonaModal({ account, open, onClose }: VideoPersonaModalP
       usageCount?: number;
     }>
   >([]);
+  const [yeonunProducts, setYeonunProducts] = useState<
+    Array<{
+      slug: string;
+      title: string | null;
+      quote: string | null;
+      category_slug: string | null;
+      postingCount: number;
+      videoCount: number;
+    }>
+  >([]);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [yeonunFetchedAt, setYeonunFetchedAt] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showToast = (message: string) => {
@@ -58,12 +69,23 @@ export function VideoPersonaModal({ account, open, onClose }: VideoPersonaModalP
         const pan = await api.pananaCharacters(account.id);
         setPananaChars(pan.characters ?? []);
         setLastSyncedAt(pan.lastSyncedAt ?? null);
+        setYeonunProducts([]);
+        setYeonunFetchedAt(null);
       } else if (ws === 'quizoasis') {
         const quiz = await api.quizContent();
         setQuizItems(quiz.quizzes ?? []);
         setLastSyncedAt(quiz.lastSyncedAt ?? null);
+        setYeonunProducts([]);
+        setYeonunFetchedAt(null);
+      } else if (ws === 'yeonun') {
+        const yeonun = await api.yeonunProducts();
+        setYeonunProducts(yeonun.products ?? []);
+        setYeonunFetchedAt(yeonun.fetchedAt ?? null);
+        setLastSyncedAt(null);
       } else {
         setLastSyncedAt(null);
+        setYeonunProducts([]);
+        setYeonunFetchedAt(null);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : '로드 실패');
@@ -244,6 +266,43 @@ export function VideoPersonaModal({ account, open, onClose }: VideoPersonaModalP
                   </ul>
                 ) : (
                   <p className="text-[11px] text-huma-t3">활성 퀴즈 없음 — QUIZOASIS_CONTENT_API_URL 확인</p>
+                )}
+              </div>
+            ) : null}
+
+            {ws === 'yeonun' ? (
+              <div className="m-panel mb-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-[12px] font-semibold text-huma-t">연운 상품 (Supabase 실시간)</div>
+                  <button type="button" className="btn-ghost btn-sm" onClick={() => void load()} disabled={loading}>
+                    새로고침
+                  </button>
+                </div>
+                <p className="text-[10px] text-huma-t3">
+                  캐시·동기화 없이 DB <span className="font-mono">products</span> 테이블을 바로 읽습니다. 모달을 열거나
+                  새로고침할 때마다 최신 목록입니다.
+                  {yeonunFetchedAt ? (
+                    <>
+                      {' '}
+                      조회: {new Date(yeonunFetchedAt).toLocaleString('ko-KR')}
+                    </>
+                  ) : null}
+                </p>
+                {yeonunProducts.length ? (
+                  <ul className="max-h-[180px] space-y-1 overflow-y-auto text-[11px]">
+                    {yeonunProducts.map((p) => (
+                      <li key={p.slug} className="rounded border border-huma-bdr px-2 py-1">
+                        <span className="font-semibold">{p.title ?? p.slug}</span>
+                        <span className="ml-2 font-mono text-huma-t4">{p.slug}</span>
+                        <span className="ml-2 text-huma-t3">
+                          포스팅 {p.postingCount} · 영상 {p.videoCount}
+                        </span>
+                        {p.quote ? <div className="truncate text-huma-t3">{p.quote.slice(0, 100)}…</div> : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-[11px] text-huma-t3">상품 없음 — Supabase products 테이블 확인</p>
                 )}
               </div>
             ) : null}
