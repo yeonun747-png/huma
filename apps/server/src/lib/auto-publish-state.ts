@@ -125,9 +125,13 @@ export async function loadAutoPublishAccountState(accountId: string): Promise<Au
   if (error || !data) return null;
 
   const consumed = await countAutoPublishConsumedToday(accountId);
-  const planned = data.auto_publish_planned_count as number | null;
-  const remaining =
-    planned != null ? Math.max(0, planned - consumed) : 0;
+  const kstDate = formatKstDateKey();
+  const planned = await resolveAutoPublishPlannedCountForDay(
+    accountId,
+    (data.auto_publish_kst_date as string | null) ?? null,
+    data.auto_publish_planned_count as number | null,
+  );
+  const remaining = Math.max(0, planned - consumed);
 
   return {
     id: data.id as string,
@@ -199,9 +203,10 @@ async function persistAutoPublishPlan(
     planned_count: number;
     next_slot_at: string | null;
   },
+  opts?: { replaceSlot?: boolean },
 ): Promise<void> {
   let nextSlotAt = patch.next_slot_at;
-  if (nextSlotAt != null) {
+  if (nextSlotAt != null && !opts?.replaceSlot) {
     const { data: row } = await supabase
       .from('huma_accounts')
       .select('auto_publish_next_slot_at')
@@ -283,12 +288,16 @@ export async function enableAutoPublish(workspace: string, accountId: string): P
     consumedCount: consumed,
   });
 
-  await persistAutoPublishPlan(accountId, {
-    enabled: true,
-    kst_date: kstDate,
-    planned_count: planned,
-    next_slot_at: nextSlot,
-  });
+  await persistAutoPublishPlan(
+    accountId,
+    {
+      enabled: true,
+      kst_date: kstDate,
+      planned_count: planned,
+      next_slot_at: nextSlot,
+    },
+    { replaceSlot: true },
+  );
 
   await logOperation({
     level: 'info',

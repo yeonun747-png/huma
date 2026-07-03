@@ -69,7 +69,7 @@ export function resolvePasteRatio(config: HumanEngineConfig): number {
 }
 
 export async function getHumanEngineConfig(): Promise<HumanEngineConfig> {
-  return getSetting('human_engine', {
+  const raw = await getSetting<HumanEngineConfig>('human_engine', {
     wpm_mean: 55,
     wpm_sigma: 18,
     typo_rate: 0.04,
@@ -79,9 +79,23 @@ export async function getHumanEngineConfig(): Promise<HumanEngineConfig> {
     night_ban_start: DEFAULT_NIGHT_BAN_START,
     night_ban_end: DEFAULT_NIGHT_BAN_END,
     paste_ratio: 0.55,
-    // 합성 composition 입력이 기본(fcitx/CDP 비의존, 한글 정확). OS IME는 명시 활성 시에만.
     use_os_ime: false,
   });
+  const legacyMidnightBan =
+    (raw.night_ban_start ?? DEFAULT_NIGHT_BAN_START) === 0 &&
+    ((raw.night_ban_end ?? DEFAULT_NIGHT_BAN_END) === 7 ||
+      (raw.night_ban_end ?? DEFAULT_NIGHT_BAN_END) === 8);
+  const legacyEveningBan =
+    (raw.night_ban_start ?? DEFAULT_NIGHT_BAN_START) === 21 &&
+    (raw.night_ban_end ?? DEFAULT_NIGHT_BAN_END) === 8;
+  const useDefaultBan = legacyMidnightBan || legacyEveningBan;
+  return {
+    ...raw,
+    night_ban_start: useDefaultBan ? DEFAULT_NIGHT_BAN_START : (raw.night_ban_start ?? DEFAULT_NIGHT_BAN_START),
+    night_ban_end: useDefaultBan ? DEFAULT_NIGHT_BAN_END : (raw.night_ban_end ?? DEFAULT_NIGHT_BAN_END),
+    paste_ratio: raw.paste_ratio ?? 0.55,
+    use_os_ime: raw.use_os_ime ?? false,
+  };
 }
 
 /** @deprecated worker는 isNightBanActive() 사용 (KST + app_settings) */

@@ -19,6 +19,8 @@ describe('postingWarmupResetPatch', () => {
     expect(patch.warmup_last_increment_date).toBeNull();
     expect(patch.posting_warmup_started_kst).toBeNull();
     expect(patch.posting_warmup_epoch_at).toBe('2026-07-01T12:00:00.000Z');
+    expect(patch.auto_publish_planned_count).toBeNull();
+    expect(patch.auto_publish_next_slot_at).toBeNull();
   });
 });
 

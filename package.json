@@ -10,8 +10,9 @@
     "build": "turbo build --filter=@huma/web --filter=@huma/server",
     "build:web": "turbo build --filter=@huma/web",
     "lint": "turbo lint",
-    "dev:web": "turbo dev --filter=@huma/web",
-    "dev:server": "turbo dev --filter=@huma/server"
+    "clean:dev": "node scripts/dev-clean.mjs",
+    "dev:web": "npm run dev --workspace=@huma/web",
+    "dev:server": "npm run dev --workspace=@huma/server"
   },
   "devDependencies": {
     "turbo": "^2.3.3",

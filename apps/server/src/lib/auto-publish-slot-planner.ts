@@ -14,10 +14,13 @@ import { countTodaySimilaritySkipped } from './posting-content-similarity.js';
 import { formatKstDateKey, getDailyPostingTarget } from './posting-daily-target.js';
 import {
   computeDynamicPublishIntervalHours,
-  computePostingScheduleCandidate,
   deriveActiveHourWindow,
   getActivePostingWindowHours,
 } from './posting-interval.js';
+import {
+  computePostingScheduleCandidateWithPolicy,
+  resolvePostingDayWindow,
+} from './posting-schedule-window.js';
 import {
   getHumanEngineScheduleConfig,
   isNightBanActive,
@@ -96,6 +99,8 @@ export async function planNextAutoPublishTriggerAt(
 
   const human = await getHumanEngineScheduleConfig();
   const activeHours = human.active_hours ?? [];
+  const nightBanStart = human.night_ban_start ?? DEFAULT_NIGHT_BAN_START;
+  const nightBanEnd = human.night_ban_end ?? DEFAULT_NIGHT_BAN_END;
   const windowHours = getActivePostingWindowHours(activeHours);
   const minIntervalH = computeDynamicPublishIntervalHours(
     dailyTarget,
@@ -104,10 +109,7 @@ export async function planNextAutoPublishTriggerAt(
   );
   const minGapMs = minIntervalH * 3600_000;
 
-  const { start: winStart, end: winEnd } = deriveActiveHourWindow(
-    activeHours.length === 24 ? activeHours : [],
-    0.25,
-  );
+  const { start: winStart, end: winEnd } = resolvePostingDayWindow(activeHours, nightBanStart);
 
   const { data: lastJobs } = await supabase
     .from('huma_jobs')
@@ -120,13 +122,16 @@ export async function planNextAutoPublishTriggerAt(
 
   const lastAt = lastJobs?.[0]?.created_at ? new Date(lastJobs[0].created_at as string) : null;
 
-  let candidate = computePostingScheduleCandidate({
+  let candidate = computePostingScheduleCandidateWithPolicy({
     now: date,
     winStartHour: winStart,
     winEndHour: winEnd,
     minGapMs,
     lastAnchor: lastAt,
     warmupDay,
+    remainingSlots: plannedCount - consumedCount,
+    nightBanStart,
+    nightBanEnd,
   });
   const now = Date.now();
 

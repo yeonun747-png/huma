@@ -20,6 +20,7 @@ import { getPostingReservedToday } from './posting-quota-reserve.js';
 import { countTodaySimilaritySkipped } from './posting-content-similarity.js';
 import { countTodayPostBlogPublished } from './post-blog-publish-day.js';
 import { getPostingWarmupDay } from './posting-warmup-day.js';
+import { resolveAutoPublishPlannedCountForDay } from './auto-publish-slot-planner.js';
 
 
 
@@ -245,7 +246,7 @@ async function buildAccountPublishStatus(
 
     .from('huma_accounts')
 
-    .select('warmup_day, auto_publish_enabled, auto_publish_planned_count, auto_publish_next_slot_at, proxy_port')
+    .select('warmup_day, auto_publish_enabled, auto_publish_kst_date, auto_publish_planned_count, auto_publish_next_slot_at, proxy_port')
 
     .eq('id', account.id)
 
@@ -268,6 +269,27 @@ async function buildAccountPublishStatus(
   const daily_target = targetInfo.target;
 
   const remaining = Math.max(0, daily_target - today_completed - today_skipped - in_flight);
+
+  const storedPlanned = (accRow?.auto_publish_planned_count as number | null) ?? null;
+  const storedKstDate = (accRow?.auto_publish_kst_date as string | null) ?? null;
+  let auto_publish_planned_count = storedPlanned;
+  if (storedPlanned != null) {
+    auto_publish_planned_count = await resolveAutoPublishPlannedCountForDay(
+      account.id,
+      storedKstDate,
+      storedPlanned,
+    );
+    if (
+      Boolean(accRow?.auto_publish_enabled) &&
+      storedKstDate === formatKstDateKey() &&
+      auto_publish_planned_count !== storedPlanned
+    ) {
+      await supabase
+        .from('huma_accounts')
+        .update({ auto_publish_planned_count })
+        .eq('id', account.id);
+    }
+  }
 
 
 
@@ -305,7 +327,7 @@ async function buildAccountPublishStatus(
 
     auto_publish_enabled: Boolean(accRow?.auto_publish_enabled),
 
-    auto_publish_planned_count: (accRow?.auto_publish_planned_count as number | null) ?? null,
+    auto_publish_planned_count,
 
     auto_publish_next_slot_at: (accRow?.auto_publish_next_slot_at as string | null) ?? null,
 

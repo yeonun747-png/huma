@@ -89,12 +89,18 @@ export function postingWarmupResetPatch(now = new Date()): {
   warmup_last_increment_date: null;
   posting_warmup_started_kst: null;
   posting_warmup_epoch_at: string;
+  auto_publish_kst_date: null;
+  auto_publish_planned_count: null;
+  auto_publish_next_slot_at: null;
 } {
   return {
     warmup_day: 0,
     warmup_last_increment_date: null,
     posting_warmup_started_kst: null,
     posting_warmup_epoch_at: now.toISOString(),
+    auto_publish_kst_date: null,
+    auto_publish_planned_count: null,
+    auto_publish_next_slot_at: null,
   };
 }
 

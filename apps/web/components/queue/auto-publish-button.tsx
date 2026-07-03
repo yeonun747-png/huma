@@ -67,6 +67,7 @@ function formatNextSlotTime(iso: string): string {
 function resolvePlannedTotal(status: AutoPublishStatus): number | null {
   const raw = status.auto_publish_planned_count ?? status.daily_target;
   if (raw == null || raw === 0) return null;
+  if (status.daily_target > 0) return Math.min(raw, status.daily_target);
   return raw;
 }
 
@@ -137,8 +138,8 @@ export function AutoPublishChip({
   onToggle,
 }: AutoPublishChipProps) {
   const done = status.today_completed ?? 0;
-  const quota = status.auto_publish_planned_count ?? (status.daily_target ? status.daily_target : '—');
   const planned = resolvePlannedTotal(status);
+  const quota = planned ?? (status.daily_target ? status.daily_target : '—');
   const progressPct =
     planned != null && planned > 0 ? Math.min(100, Math.round((done / planned) * 100)) : null;
   const scheduleLine = enabled ? formatAutoPublishScheduleLine(status) : null;

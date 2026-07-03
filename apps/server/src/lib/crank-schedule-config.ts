@@ -213,8 +213,8 @@ export function getKstClock(from = new Date()): { hour: number; minute: number; 
   return { hour, minute, day };
 }
 
-/** KST 야간 발행 금지 기본 구간 — 21~08 (밤 9시~오전 8시) */
-export const DEFAULT_NIGHT_BAN_START = 21;
+/** KST 야간 발행 금지 기본 구간 — 23~08 (밤 11시~오전 8시) */
+export const DEFAULT_NIGHT_BAN_START = 23;
 export const DEFAULT_NIGHT_BAN_END = 8;
 
 export function formatNightBanRangeLabel(
@@ -246,6 +246,20 @@ export function msUntilNightBanEnd(
   let hoursToEnd = nightBanEnd - hour;
   if (hoursToEnd <= 0) hoursToEnd += 24;
   return Math.max(60_000, hoursToEnd * 3_600_000 - minute * 60_000);
+}
+
+/** KST 당일 야간 금지 시작(예: 23:00)까지 남은 ms — 이미 금지 구간이면 0 */
+export function msUntilNightBanStart(
+  nightBanStart = DEFAULT_NIGHT_BAN_START,
+  nightBanEnd = DEFAULT_NIGHT_BAN_END,
+  from = new Date(),
+): number {
+  if (isKstNightBan(nightBanStart, nightBanEnd, from)) return 0;
+  const { hour, minute } = getKstClock(from);
+  let hoursUntil = nightBanStart - hour;
+  if (hoursUntil < 0) hoursUntil += 24;
+  if (hoursUntil === 0 && minute > 0) hoursUntil = 24;
+  return Math.max(60_000, hoursUntil * 3_600_000 - minute * 60_000);
 }
 
 export function addDaysToIso(iso: string | null | undefined, days: number): string | null {

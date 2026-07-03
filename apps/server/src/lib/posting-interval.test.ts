@@ -11,12 +11,12 @@ import {
 } from './posting-interval.js';
 import { postingWarmupScheduleSpreadFraction } from './posting-warmup.js';
 
-describe('KST night ban 21~08', () => {
-  it('blocks evening and early morning, allows hour 8 and 20', () => {
-    expect(isKstNightBan(DEFAULT_NIGHT_BAN_START, DEFAULT_NIGHT_BAN_END, new Date('2026-07-01T21:30:00+09:00'))).toBe(true);
+describe('KST night ban 23~08', () => {
+  it('blocks late evening and early morning, allows hour 8 and 22', () => {
+    expect(isKstNightBan(DEFAULT_NIGHT_BAN_START, DEFAULT_NIGHT_BAN_END, new Date('2026-07-01T23:30:00+09:00'))).toBe(true);
     expect(isKstNightBan(DEFAULT_NIGHT_BAN_START, DEFAULT_NIGHT_BAN_END, new Date('2026-07-01T07:59:00+09:00'))).toBe(true);
     expect(isKstNightBan(DEFAULT_NIGHT_BAN_START, DEFAULT_NIGHT_BAN_END, new Date('2026-07-01T08:00:00+09:00'))).toBe(false);
-    expect(isKstNightBan(DEFAULT_NIGHT_BAN_START, DEFAULT_NIGHT_BAN_END, new Date('2026-07-01T20:59:00+09:00'))).toBe(false);
+    expect(isKstNightBan(DEFAULT_NIGHT_BAN_START, DEFAULT_NIGHT_BAN_END, new Date('2026-07-01T22:59:00+09:00'))).toBe(false);
   });
 
   it('msUntilNightBanEnd from 02:00 targets ~6h to 08:00', () => {
@@ -25,10 +25,10 @@ describe('KST night ban 21~08', () => {
     expect(ms).toBeLessThanOrEqual(6.1 * 3_600_000);
   });
 
-  it('msUntilNightBanEnd from 22:00 targets ~10h to 08:00', () => {
-    const ms = msUntilNightBanEnd(DEFAULT_NIGHT_BAN_START, DEFAULT_NIGHT_BAN_END, new Date('2026-07-01T22:00:00+09:00'));
-    expect(ms).toBeGreaterThanOrEqual(9.9 * 3_600_000);
-    expect(ms).toBeLessThanOrEqual(10.1 * 3_600_000);
+  it('msUntilNightBanEnd from 23:30 targets ~8.5h to 08:00', () => {
+    const ms = msUntilNightBanEnd(DEFAULT_NIGHT_BAN_START, DEFAULT_NIGHT_BAN_END, new Date('2026-07-01T23:30:00+09:00'));
+    expect(ms).toBeGreaterThanOrEqual(8.4 * 3_600_000);
+    expect(ms).toBeLessThanOrEqual(8.6 * 3_600_000);
   });
 });
 

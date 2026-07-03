@@ -307,7 +307,7 @@ export function SettingsView() {
             <p className="mb-1.5 font-medium text-huma-t2">활동 금지·시간</p>
             <ul className="mb-2 list-disc space-y-0.5 pl-4">
               <li>
-                아래 「야간 발행 금지(21~08시)」가 C-Rank에도 적용됩니다 — 해당 시간 job은 1시간 뒤 재예약.
+                아래 「야간 발행 금지(23~08시)」가 C-Rank에도 적용됩니다 — 해당 시간 job은 1시간 뒤 재예약.
               </li>
               <li>
                 Human Engine 24시간 활성도 — 수동·일반 큐만 검사(확률). 스케줄 자동 큐는 야간 금지만 적용.
@@ -346,7 +346,7 @@ export function SettingsView() {
             onChange={(v) => patchApp('daily_limit', v)}
           />
           <SettingsToggle
-            label="야간 발행 금지 (21~08시)"
+            label="야간 발행 금지 (23~08시)"
             value={Boolean(app.night_ban ?? true)}
             onChange={(v) => patchApp('night_ban', v)}
           />

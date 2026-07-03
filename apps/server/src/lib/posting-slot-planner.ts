@@ -8,10 +8,12 @@ import {
 } from './posting-cross-stagger.js';
 import {
   computeDynamicPublishIntervalHours,
-  computePostingScheduleCandidate,
-  deriveActiveHourWindow,
   getActivePostingWindowHours,
 } from './posting-interval.js';
+import {
+  computePostingScheduleCandidateWithPolicy,
+  resolvePostingDayWindow,
+} from './posting-schedule-window.js';
 import {
   getHumanEngineScheduleConfig,
   isNightBanActive,
@@ -100,6 +102,8 @@ export async function planNextPostBlogScheduledAt(accountId: string, date = new 
 
   const human = await getHumanEngineScheduleConfig();
   const activeHours = human.active_hours ?? [];
+  const nightBanStart = human.night_ban_start ?? DEFAULT_NIGHT_BAN_START;
+  const nightBanEnd = human.night_ban_end ?? DEFAULT_NIGHT_BAN_END;
   const windowHours = getActivePostingWindowHours(activeHours);
   const minIntervalH = computeDynamicPublishIntervalHours(
     dailyTarget,
@@ -110,10 +114,7 @@ export async function planNextPostBlogScheduledAt(accountId: string, date = new 
 
   const { completed, scheduled } = await listTodayPostBlogTimes(accountId);
 
-  const { start: winStart, end: winEnd } = deriveActiveHourWindow(
-    activeHours.length === 24 ? activeHours : [],
-    0.25,
-  );
+  const { start: winStart, end: winEnd } = resolvePostingDayWindow(activeHours, nightBanStart);
 
   const lastCompleted = latestTime(completed);
   const lastScheduled = latestTime(scheduled);
@@ -121,13 +122,19 @@ export async function planNextPostBlogScheduledAt(accountId: string, date = new 
     [...(lastCompleted ? [lastCompleted] : []), ...(lastScheduled ? [lastScheduled] : [])],
   );
 
-  let candidate = computePostingScheduleCandidate({
+  const slotsUsed = completed.length + scheduled.length;
+  const remainingSlots = Math.max(1, dailyTarget - slotsUsed);
+
+  let candidate = computePostingScheduleCandidateWithPolicy({
     now: date,
     winStartHour: winStart,
     winEndHour: winEnd,
     minGapMs,
     lastAnchor,
     warmupDay,
+    remainingSlots,
+    nightBanStart,
+    nightBanEnd,
   });
 
   const now = Date.now();
