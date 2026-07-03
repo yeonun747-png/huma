@@ -6,7 +6,8 @@ import type { VideoConti } from './types.js';
 describe('generatePlatformCaptions JSON', () => {
   it('repairs unescaped quotes inside caption strings', () => {
     const raw = `{
-  "captionYoutube": "오늘 "관재궁" 주의했는데 진열대가 무너졌어요 #연운",
+  "captionYoutubeTitle": "오늘 "관재궁" 주의 #연운 #Shorts",
+  "captionYoutubeDescription": "2줄 설명\\n\\nhttps://example.com",
   "captionTiktok": "짧은 캡션",
   "captionInstagram": "짧은 캡션",
   "captionThreads": "짧은 캡션",
@@ -15,7 +16,7 @@ describe('generatePlatformCaptions JSON', () => {
   "firstCommentX": null
 }`;
     const parsed = parseLlmJsonBlock(raw) as Record<string, unknown>;
-    expect(String(parsed.captionYoutube)).toContain('관재궁');
+    expect(String(parsed.captionYoutubeTitle)).toContain('관재궁');
   });
 });
 
@@ -33,6 +34,9 @@ describe('fallbackPlatformCaptions', () => {
       shots: [],
     };
     const caps = fallbackPlatformCaptions('yeonun', conti);
-    expect(caps.captionYoutube).toContain('편의점');
+    expect(caps.captionYoutubeTitle).toContain('편의점');
+    expect(caps.captionYoutubeDescription).toContain('편의점');
+    expect(caps.captionYoutubeTitle).toContain('#Shorts');
+    expect(caps.captionYoutubeDescription).not.toContain('#Shorts');
   });
 });

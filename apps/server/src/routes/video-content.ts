@@ -125,7 +125,7 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
     let query = supabase
       .from('huma_video_content_history')
       .select(
-        'id, account_id, workspace, status, relationship_axis, emotion_curve, hook_type, cut_type, duration, scenario_summary, similarity_score, self_assessed_humor, retry_count_for_humor, character_used, caption_youtube, caption_tiktok, caption_instagram, caption_threads, caption_x, first_comment_threads, first_comment_x, uploaded_youtube, uploaded_youtube_at, uploaded_tiktok, uploaded_tiktok_at, uploaded_instagram, uploaded_instagram_at, uploaded_threads, uploaded_threads_at, uploaded_x, uploaded_x_at, video_file_path, source_video_path, error_message, conti_generation_sec, created_at, conti_json',
+        'id, account_id, workspace, status, relationship_axis, emotion_curve, hook_type, cut_type, duration, scenario_summary, similarity_score, self_assessed_humor, retry_count_for_humor, character_used, caption_youtube, caption_youtube_title, caption_youtube_description, caption_tiktok, caption_instagram, caption_threads, caption_x, first_comment_threads, first_comment_x, uploaded_youtube, uploaded_youtube_at, uploaded_tiktok, uploaded_tiktok_at, uploaded_instagram, uploaded_instagram_at, uploaded_threads, uploaded_threads_at, uploaded_x, uploaded_x_at, video_file_path, source_video_path, error_message, conti_generation_sec, created_at, conti_json',
       )
       .in('workspace', allowed)
       .order('created_at', { ascending: false })

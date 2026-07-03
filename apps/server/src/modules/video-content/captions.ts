@@ -12,8 +12,17 @@ function normalizePlatformCaptions(parsed: Record<string, unknown>): PlatformCap
     const s = String(v).trim();
     return s || null;
   };
+
+  let captionYoutubeTitle = text('captionYoutubeTitle') || text('youtubeTitle');
+  let captionYoutubeDescription = text('captionYoutubeDescription') || text('youtubeDescription');
+  if (!captionYoutubeTitle && !captionYoutubeDescription) {
+    const legacy = text('captionYoutube');
+    if (legacy) captionYoutubeDescription = legacy;
+  }
+
   return {
-    captionYoutube: text('captionYoutube'),
+    captionYoutubeTitle,
+    captionYoutubeDescription,
     captionTiktok: text('captionTiktok'),
     captionInstagram: text('captionInstagram'),
     captionThreads: text('captionThreads'),
@@ -27,8 +36,10 @@ export function fallbackPlatformCaptions(workspace: Workspace, conti: VideoConti
   const summary = (conti.scenarioSummary ?? conti.fullText ?? '숏폼 영상').trim().slice(0, 280);
   const url = SERVICE_URLS[workspace];
   const linkComment = url ? `👉 ${url}` : null;
+  const shortTitle = summary.slice(0, 70);
   return {
-    captionYoutube: summary,
+    captionYoutubeTitle: `${shortTitle} #Shorts`,
+    captionYoutubeDescription: url ? `${summary}\n\n${url}` : summary,
     captionTiktok: summary,
     captionInstagram: summary,
     captionThreads: summary,
@@ -59,7 +70,9 @@ export async function generatePlatformCaptions(params: {
 ${recentBlock}
 
 플랫폼별 규칙:
-- youtube: 짧은 캡션 + 2~4줄 긴 설명(서비스 URL 포함) + 해시태그 3~5개
+- youtube (YouTube Shorts — 제목·설명 입력란이 분리됨):
+  - captionYoutubeTitle: 「제목」 입력란 — 1줄 짧은 제목 + 해시태그 3~5개 + #Shorts (100자 이내, URL·긴 설명 금지)
+  - captionYoutubeDescription: 「설명」 입력란 — 2~4줄 긴 설명 + 서비스 URL (해시태그·#Shorts 금지)
 - tiktok: 1~2줄 + 해시태그 3~5개, URL 본문 금지, 프로필 링크 유도(매번 다른 표현)
 - instagram: tiktok과 동일
 - threads: 1~2줄 + "첫 댓글에 링크" 유도, firstCommentThreads에 URL 포함 댓글
@@ -69,7 +82,8 @@ JSON 문자열 값 안의 큰따옴표(")는 반드시 \\" 로 이스케이프�
 
 JSON:
 {
-  "captionYoutube": "완성 텍스트",
+  "captionYoutubeTitle": "짧은 제목 #해시태그 #Shorts",
+  "captionYoutubeDescription": "2~4줄 설명\\n\\n${serviceUrl}",
   "captionTiktok": "...",
   "captionInstagram": "...",
   "captionThreads": "...",

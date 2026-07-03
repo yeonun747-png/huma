@@ -96,7 +96,10 @@ export interface SubtitleStyle {
 }
 
 export interface PlatformCaptions {
-  captionYoutube: string;
+  /** YouTube Shorts 제목란 — 짧은 제목 + 해시태그 (설명·URL 금지) */
+  captionYoutubeTitle: string;
+  /** YouTube Shorts 설명란 — 본문 설명 + 서비스 URL (해시태그 금지) */
+  captionYoutubeDescription: string;
   captionTiktok: string;
   captionInstagram: string;
   captionThreads: string;

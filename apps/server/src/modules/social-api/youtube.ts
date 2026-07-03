@@ -60,9 +60,22 @@ export async function uploadYouTubeShorts(params: {
   }
 
   const tagLine = params.hashtags.map((h) => (h.startsWith('#') ? h : `#${h}`)).join(' ');
-  const shortsTags = tagLine.includes('#Shorts') ? tagLine : `${tagLine} #Shorts`.trim();
-  const fullTitle = `${params.title}`.slice(0, 90);
-  const description = `${params.description}\n\n${shortsTags}`.slice(0, 5000);
+  const titleBase = params.title.trim();
+  const titleParts = [titleBase];
+  if (tagLine) {
+    const missingTags = params.hashtags.filter((h) => {
+      const bare = h.replace(/^#/, '');
+      return !titleBase.includes(bare) && !titleBase.includes(`#${bare}`);
+    });
+    if (missingTags.length) {
+      titleParts.push(missingTags.map((h) => (h.startsWith('#') ? h : `#${h}`)).join(' '));
+    }
+  }
+  if (!titleParts.join(' ').includes('#Shorts')) {
+    titleParts.push('#Shorts');
+  }
+  const fullTitle = titleParts.join(' ').trim().slice(0, 100);
+  const description = params.description.trim().slice(0, 5000);
 
   try {
     const res = await youtube.videos.insert({

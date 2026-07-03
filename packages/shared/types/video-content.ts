@@ -35,6 +35,8 @@ export interface HumaVideoContentHistory {
   /** v3.55 — 콘티에 부여된 등장인물 이름 (A/B 라벨 제외) */
   character_names?: string[] | null;
   caption_youtube?: string | null;
+  caption_youtube_title?: string | null;
+  caption_youtube_description?: string | null;
   caption_tiktok?: string | null;
   caption_instagram?: string | null;
   caption_threads?: string | null;

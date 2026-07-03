@@ -44,6 +44,7 @@ import { VIDEO_DETAIL_ACTION_BTN, VIDEO_PLATFORM_TAB_BTN, VIDEO_PRIMARY_BTN } fr
 import { MGrid, MPanel, MTag } from '@/components/mockup/primitives';
 import { SocialPlatformIcon, type SocialPlatformKey } from '@/components/video/social-platform-icon';
 import { useShellViewActive } from '@/components/dashboard/shell-view-active';
+import { resolveYoutubeShortsCaptionFields } from '@/lib/video-content-youtube-caption';
 
 const PLATFORMS: Array<{
   key: SocialPlatformKey;
@@ -216,7 +217,12 @@ function CompletedDetail({
   const hasSubtitled = Boolean(item.video_file_path);
   const hasSource = Boolean(item.source_video_path);
   const platform = PLATFORMS.find((p) => p.key === tab)!;
-  const captionText = String(item[platform.captionKey] ?? '');
+  const youtubeCaption =
+    tab === 'youtube' ? resolveYoutubeShortsCaptionFields(item) : null;
+  const captionText =
+    tab === 'youtube'
+      ? ''
+      : String(item[platform.captionKey] ?? '');
   const firstComment =
     tab === 'threads' ? item.first_comment_threads : tab === 'x' ? item.first_comment_x : null;
   const renderCount = Number(item.conti_json?.videoRenderCount ?? 1);
@@ -429,7 +435,18 @@ function CompletedDetail({
       </div>
 
       <div className="rounded border border-huma-bdr bg-huma-bg2 p-2.5 text-[11px] leading-relaxed whitespace-pre-wrap">
-        {captionText || '(캡션 없음)'}
+        {tab === 'youtube' ? (
+          <>
+            <p className="mb-1 text-[10px] font-semibold text-huma-t2">제목 + 해시태그</p>
+            <p>{youtubeCaption?.title || '(제목 없음)'}</p>
+            <p className="mb-1 mt-3 border-t border-huma-bdr pt-2 text-[10px] font-semibold text-huma-t2">
+              설명
+            </p>
+            <p>{youtubeCaption?.description || '(설명 없음)'}</p>
+          </>
+        ) : (
+          captionText || '(캡션 없음)'
+        )}
         {firstComment ? (
           <p className="mt-2 border-t border-huma-bdr pt-2 text-[10px] text-huma-t3">
             <span className="font-semibold text-huma-t2">첫 댓글</span>
@@ -448,9 +465,30 @@ function CompletedDetail({
         >
           {videoVariant === 'source' ? '⬇️ 원본 다운로드' : '⬇️ 자막본 다운로드'}
         </button>
-        <button type="button" className={VIDEO_DETAIL_ACTION_BTN} onClick={() => void copyText(captionText)}>
-          📋 캡션 복사
-        </button>
+        {tab === 'youtube' ? (
+          <>
+            <button
+              type="button"
+              className={VIDEO_DETAIL_ACTION_BTN}
+              disabled={!youtubeCaption?.title}
+              onClick={() => void copyText(youtubeCaption?.title ?? '')}
+            >
+              📋 제목+해시태그 복사
+            </button>
+            <button
+              type="button"
+              className={VIDEO_DETAIL_ACTION_BTN}
+              disabled={!youtubeCaption?.description}
+              onClick={() => void copyText(youtubeCaption?.description ?? '')}
+            >
+              📋 설명 복사
+            </button>
+          </>
+        ) : (
+          <button type="button" className={VIDEO_DETAIL_ACTION_BTN} onClick={() => void copyText(captionText)}>
+            📋 캡션 복사
+          </button>
+        )}
         {firstComment ? (
           <button type="button" className={VIDEO_DETAIL_ACTION_BTN} onClick={() => void copyText(firstComment)}>
             첫 댓글 복사
