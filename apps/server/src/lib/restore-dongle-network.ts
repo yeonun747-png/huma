@@ -7,6 +7,11 @@ export { applyDonglePolicyRoute } from './dongle-policy-route.js';
 
 const RESTORE_TIMEOUT_MS = 180_000;
 const SLOT_RESTORE_TIMEOUT_MS = 90_000;
+/** flock 대기(초) — 다른 슬롯 복구와 겹칠 때 */
+const RESTORE_FLOCK_WAIT_SEC = (() => {
+  const raw = Number(process.env.HUMA_DONGLE_RESTORE_FLOCK_WAIT_SEC);
+  return Number.isFinite(raw) && raw >= 5 ? Math.floor(raw) : 30;
+})();
 const SUDO_BIN = process.env.HUMA_RESTORE_SUDO?.trim() || '/usr/bin/sudo';
 const BASH_BIN = process.env.HUMA_RESTORE_BASH?.trim() || '/usr/bin/bash';
 const RESTORE_STATE_DIR = process.env.HUMA_DONGLE_RESTORE_STATE_DIR?.trim() || '/run/huma';
@@ -157,6 +162,11 @@ export function formatRestoreExecError(combinedOutput: string, execMessage?: str
   return 'restore-dongle-by-subnet.sh 실패 — i7에서 동글 USB·LTE·sudoers 확인';
 }
 
+/** flock 잠금 메시지 (en/ko) */
+export function isRestoreFlockBusyError(text: string): boolean {
+  return /flock:.*(failed|would block|Resource temporarily unavailable|잠긴|잠금)/i.test(text);
+}
+
 function buildRestoreShell(scriptPath: string, options?: RestoreDongleNetworkOptions): string {
   const scriptArgs = options?.quick ? ' --skip-socks-test' : '';
   const quoted = `"${scriptPath}"`;
@@ -166,7 +176,7 @@ function buildRestoreShell(scriptPath: string, options?: RestoreDongleNetworkOpt
     return `${sudo} ${bash} ${quoted}${scriptArgs}`;
   }
   if (existsSync('/usr/bin/flock')) {
-    return `flock -w 10 "${RESTORE_LOCK_FILE}" ${sudo} ${bash} ${quoted}${scriptArgs}`;
+    return `flock -w ${RESTORE_FLOCK_WAIT_SEC} "${RESTORE_LOCK_FILE}" ${sudo} ${bash} ${quoted}${scriptArgs}`;
   }
   return `${sudo} ${bash} ${quoted}${scriptArgs}`;
 }
@@ -177,7 +187,7 @@ function buildSlotRestoreShell(scriptPath: string, slot: number): string {
   const bash = BASH_BIN;
   const lock = slotRestoreLockFile(slot);
   if (existsSync('/usr/bin/flock')) {
-    return `flock -w 10 "${lock}" ${sudo} ${bash} ${quoted} ${slot}`;
+    return `flock -w ${RESTORE_FLOCK_WAIT_SEC} "${lock}" ${sudo} ${bash} ${quoted} ${slot}`;
   }
   return `${sudo} ${bash} ${quoted} ${slot}`;
 }
@@ -230,7 +240,7 @@ export function runRestoreDongleSlot(slot: number): RestoreDongleSlotResult {
     const stderr = typeof e.stderr === 'string' ? e.stderr : e.stderr?.toString() ?? '';
     const combined = `${stdout}\n${stderr}`.trim();
     const tail = combined.length > 4000 ? combined.slice(-4000) : combined;
-    const lockBusy = /flock:.*(failed|would block|Resource temporarily unavailable)/i.test(combined);
+    const lockBusy = isRestoreFlockBusyError(combined);
     if (lockBusy) {
       return {
         ok: false,
@@ -285,7 +295,7 @@ export function runRestoreDongleNetwork(
     const stderr = typeof e.stderr === 'string' ? e.stderr : e.stderr?.toString() ?? '';
     const combined = `${stdout}\n${stderr}`.trim();
     const tail = combined.length > 6000 ? combined.slice(-6000) : combined;
-    const lockBusy = /flock:.*(failed|would block|Resource temporarily unavailable)/i.test(combined);
+    const lockBusy = isRestoreFlockBusyError(combined);
     if (lockBusy && !options?.force) {
       return {
         ok: false,

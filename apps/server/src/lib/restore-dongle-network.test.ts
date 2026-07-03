@@ -5,6 +5,7 @@ import {
   formatRestoreExecError,
   isDongleFullRestoreCooldownActive,
   isDongleSlotRestoreCooldownActive,
+  isRestoreFlockBusyError,
   remainingDongleFullRestoreCooldownMs,
   remainingDongleSlotRestoreCooldownMs,
 } from './restore-dongle-network.js';
@@ -45,6 +46,14 @@ describe('dongle slot restore cooldown', () => {
     expect(remainingDongleSlotRestoreCooldownMs(3, now, DONGLE_SLOT_RESTORE_COOLDOWN_MS, slot3Last)).toBe(
       30_000,
     );
+  });
+});
+
+describe('isRestoreFlockBusyError', () => {
+  it('detects Korean flock lock message', () => {
+    expect(isRestoreFlockBusyError('flock: 잠긴 /run/huma/dongle-restore-slot3.lock')).toBe(true);
+    expect(isRestoreFlockBusyError('flock: Resource temporarily unavailable')).toBe(true);
+    expect(isRestoreFlockBusyError('오류: RNDIS 없음')).toBe(false);
   });
 });
 

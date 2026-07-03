@@ -35,6 +35,7 @@ import {
   isWarmupConnectionError,
   recoverPostingDongleAfterWarmupConnection,
 } from '../../lib/warmup-dongle-recover.js';
+import { ensurePostingDongleSocksReady } from '../../lib/ensure-posting-dongle-socks.js';
 import { proxyPortToSlot } from '../../lib/modem-ports.js';
 import { handleLayer4Detection, isBlockError, isCaptchaError, isNaverHumanHoldError } from '../watcher/detector.js';
 import { enterCaptchaHold } from '../watcher/captcha-hold.js';
@@ -427,6 +428,25 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
           if (!deferMarkRunning) await markRunning();
           let modemSession: ModemSession | undefined;
           if (accountId) modemSession = await acquireModem(accountId);
+
+          if (type === 'post_blog' && modemSession?.proxyPort) {
+            const socks = await ensurePostingDongleSocksReady(
+              modemSession.proxyPort,
+              modemSession.modemId || undefined,
+              { context: 'post_blog' },
+            );
+            if (!socks.ok) {
+              await deferHumaJob(job, humaJobId, 5 * 60_000, {
+                reason: 'SOCKS_PROBE',
+                accountId,
+                token,
+                logMessage: `[post_blog] ${socks.detail} — 5분 후 재시도`,
+                level: 'warn',
+              });
+              if (modemSession) await releaseModem(modemSession).catch(() => {});
+              throw new DelayedError();
+            }
+          }
 
           const accountCtx = accountId
             ? await loadAccountForBrowser(accountId, modemSession?.proxyPort)

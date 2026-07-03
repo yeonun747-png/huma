@@ -82,7 +82,6 @@ export async function runDonglePreSlotHealthChecks(): Promise<number> {
     const proxyPort = row.proxy_port as number | null | undefined;
     if (!proxyPort || !isPostingProxyPort(proxyPort)) continue;
 
-    preSlotHealthDone.set(accountId, slotAt);
     const slot = proxyPortToSlot(proxyPort);
     const label = (row.slot_label as string | null) ?? (row.name as string | null) ?? `slot${slot}`;
     const remainingMin = Math.max(1, Math.round((Date.parse(slotAt) - now) / 60_000));
@@ -119,6 +118,7 @@ export async function runDonglePreSlotHealthChecks(): Promise<number> {
         account_id: accountId,
         modem_id: modem?.id ? String(modem.id) : undefined,
       }).catch(() => undefined);
+      preSlotHealthDone.set(accountId, slotAt);
       continue;
     }
 
@@ -142,6 +142,9 @@ export async function runDonglePreSlotHealthChecks(): Promise<number> {
     }).catch(() => undefined);
 
     if (recover.ok) recovered += 1;
+    else continue;
+
+    preSlotHealthDone.set(accountId, slotAt);
   }
 
   return recovered;

@@ -11,6 +11,7 @@ import { enforceVncWindowBounds } from './vnc-window-guard.js';
 import { setVncFocusPort } from './vnc-tile-state.js';
 import { vncSlotLabelKo } from './vnc-window-layout.js';
 import { resolveVncUrl } from '../modules/watcher/telegram.js';
+import { ensurePostingDongleSocksReady } from './ensure-posting-dongle-socks.js';
 
 const NAVER_HOME = 'https://www.naver.com';
 const REMOTE_ACCESS_TIMEOUT_MS = 30 * 60 * 1000;
@@ -56,9 +57,16 @@ async function focusSession(entry: RemoteAccessEntry): Promise<void> {
   if (!entry.page.isClosed()) {
     await entry.page.bringToFront().catch(() => {});
     if (!/naver\.com/i.test(entry.page.url())) {
-      await entry.page
-        .goto(NAVER_HOME, { waitUntil: 'domcontentloaded', timeout: 60_000 })
-        .catch(() => {});
+      const socks = await ensurePostingDongleSocksReady(
+        entry.modemSession.proxyPort,
+        entry.modemSession.modemId || undefined,
+        { context: '원격접속 재포커스' },
+      );
+      if (socks.ok) {
+        await entry.page
+          .goto(NAVER_HOME, { waitUntil: 'domcontentloaded', timeout: 60_000 })
+          .catch(() => {});
+      }
     }
   }
   await setVncFocusPort(entry.modemSession.proxyPort);
@@ -108,6 +116,17 @@ export async function startPostingRemoteAccess(accountId: string): Promise<{
   try {
     modemSession = await acquireModem(accountId);
     if (!modemSession) throw new Error('NO_MODEM');
+
+    const socks = await ensurePostingDongleSocksReady(
+      modemSession.proxyPort,
+      modemSession.modemId || undefined,
+      { context: '원격접속' },
+    );
+    if (!socks.ok) {
+      throw new Error(
+        `동글 SOCKS 연결 실패 (${socks.detail}). 프록시 관리에서 해당 슬롯 복구 후 다시 시도하세요.`,
+      );
+    }
 
     const accountCtx = await loadAccountForBrowser(accountId, modemSession.proxyPort);
     const { context } = await createBrowserForAccount(accountCtx);
