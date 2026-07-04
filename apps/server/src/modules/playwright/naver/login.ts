@@ -150,15 +150,15 @@ async function performNaverLoginOnPage(
     throw wrapNaverLoginTimeout('login_form', err);
   }
   await ensureNaverIpSecurityOff(page);
-  await humanSleep(300, 600);
+  await humanSleep(250, 500);
 
   const password = decrypt(account.naver_pw_enc);
   const fieldOpts = { fast: true, skipSetup: true } as const;
   await typeIntoNaverLoginField(page, '#id', account.naver_id, fieldOpts);
-  await humanSleep(120, 280);
+  await humanSleep(200, 450);
   await typeIntoNaverLoginField(page, '#pw', password, fieldOpts);
   await nudgeNaverLoginFormAfterPassword(page);
-  await humanSleep(80, 180);
+  await humanSleep(150, 320);
   try {
     await clickNaverLoginButton(page, { skipIpSecurity: true, credentialsReady: true });
   } catch (err) {

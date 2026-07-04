@@ -164,6 +164,25 @@ export function formatKstWritingContext(from: Date = new Date()): string {
   return `${y}년 ${m}월 ${d}일(${wd}) ${hms} KST`;
 }
 
+/** KST 시각 — 발행 순간과 어긋난 「지금」 서사 금지 (특정 단어 금지 아님) */
+export function buildKstDaypartWritingGuide(from: Date = new Date()): string {
+  const kst = new Date(from.toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
+  const h = kst.getHours();
+  let moment: string;
+  if (h >= 5 && h < 11) moment = '아침·오전';
+  else if (h >= 11 && h < 14) moment = '점심 무렵';
+  else if (h >= 14 && h < 18) moment = '오후';
+  else if (h >= 18 && h < 23) moment = '저녁·밤';
+  else moment = '심야·새벽';
+
+  return (
+    `지금 이 글이 올라가는 순간: ${moment} (${h}시 KST). ` +
+    '독자가 「방금·지금」 읽는 것처럼, 그 시간대에 자연스러운 활동·식사·분위기로 쓸 것. ' +
+    '다른 시간대를 마치 지금 일어난 일처럼 쓰지 말 것 ' +
+    '(예: 오전인데 「저녁에 된장찌개 끓였어요」, 점심이 아닌데 「점심에 삼각김밥 먹었어요」).'
+  );
+}
+
 /** KST YYYY-MM-DD HH:mm */
 export function formatKstYmdHm(iso: string | null | undefined): string | null {
   if (!iso) return null;

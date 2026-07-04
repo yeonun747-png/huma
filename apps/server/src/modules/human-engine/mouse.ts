@@ -77,13 +77,18 @@ export async function humanMouseMove(
   page: Page,
   x: number,
   y: number,
-  opts?: { lite?: boolean },
+  opts?: { lite?: boolean; login?: boolean },
 ) {
   const start = getMousePosition(page);
   const end: Point = { x, y };
   const dx = end.x - start.x;
   const dy = end.y - start.y;
-  const steps = opts?.lite ? randomBetween(5, 9) : randomBetween(18, 32);
+  const steps = opts?.lite
+    ? randomBetween(5, 9)
+    : opts?.login
+      ? randomBetween(10, 16)
+      : randomBetween(18, 32);
+  const skipX11 = opts?.lite === true || opts?.login === true;
   const cp1: Point = {
     x: start.x + dx * 0.25 + randomBetween(-80, 80),
     y: start.y + dy * 0.15 + randomBetween(-60, 60),
@@ -98,25 +103,30 @@ export async function humanMouseMove(
     const p = cubicBezier(t, start, cp1, cp2, end);
     await page.mouse.move(p.x, p.y);
     await showVncAutomationPointer(page, p.x, p.y, {
-      skipX11Sync: opts?.lite === true && i < steps,
+      skipX11Sync: skipX11 && i < steps,
     });
-    await sleep(randomBetween(opts?.lite ? 4 : 8, opts?.lite ? 12 : 22));
+    await sleep(
+      randomBetween(
+        opts?.lite ? 4 : opts?.login ? 10 : 8,
+        opts?.lite ? 12 : opts?.login ? 26 : 22,
+      ),
+    );
   }
 
-  if (Math.random() < (opts?.lite ? 0.04 : 0.12)) {
+  if (Math.random() < (opts?.lite ? 0.04 : opts?.login ? 0.06 : 0.12)) {
     const ox = x + randomBetween(-10, 10);
     const oy = y + randomBetween(-8, 8);
     await page.mouse.move(ox, oy);
-    await showVncAutomationPointer(page, ox, oy, { skipX11Sync: opts?.lite === true });
-    await sleep(randomBetween(opts?.lite ? 8 : 18, opts?.lite ? 20 : 48));
+    await showVncAutomationPointer(page, ox, oy, { skipX11Sync: skipX11 });
+    await sleep(randomBetween(opts?.lite ? 8 : opts?.login ? 14 : 18, opts?.lite ? 20 : opts?.login ? 32 : 48));
     await page.mouse.move(x, y);
-    await showVncAutomationPointer(page, x, y, { skipX11Sync: opts?.lite === true });
-    await sleep(randomBetween(opts?.lite ? 6 : 10, opts?.lite ? 14 : 24));
+    await showVncAutomationPointer(page, x, y, { skipX11Sync: skipX11 });
+    await sleep(randomBetween(opts?.lite ? 6 : opts?.login ? 10 : 10, opts?.lite ? 14 : opts?.login ? 22 : 24));
   }
 
   setMousePosition(page, { x, y });
-  if (opts?.lite) {
-    await showVncAutomationPointer(page, x, y);
+  if (skipX11) {
+    await showVncAutomationPointer(page, x, y, { skipX11Sync: true });
   }
 }
 
@@ -125,12 +135,12 @@ export async function humanClickLocator(
   locator: Locator,
   jitterPx?: number,
   preClickDelayMs: [number, number] = [100, 400],
-  opts?: { lite?: boolean },
+  opts?: { lite?: boolean; login?: boolean },
 ) {
   if (await skipClickIfNaverAuthChallenge(page)) return;
 
-  const scrollTimeout = opts?.lite ? 2500 : 5000;
-  const visibleTimeout = opts?.lite ? 2000 : 5000;
+  const scrollTimeout = opts?.lite || opts?.login ? 2500 : 5000;
+  const visibleTimeout = opts?.lite ? 2000 : opts?.login ? 2500 : 5000;
   let lastBox: Awaited<ReturnType<Locator['boundingBox']>> = null;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     await locator.scrollIntoViewIfNeeded({ timeout: scrollTimeout }).catch(() => {});
@@ -148,11 +158,15 @@ export async function humanClickLocator(
   const jitter = jitterPx ?? (await getClickJitterPx());
   const cx = box.x + box.width / 2 + randomBetween(-jitter, jitter);
   const cy = box.y + box.height / 2 + randomBetween(-jitter, jitter);
-  await humanMouseMove(page, cx, cy, { lite: opts?.lite });
-  const delay = opts?.lite ? ([40, 120] as [number, number]) : preClickDelayMs;
+  await humanMouseMove(page, cx, cy, { lite: opts?.lite, login: opts?.login });
+  const delay = opts?.lite
+    ? ([40, 120] as [number, number])
+    : opts?.login
+      ? ([120, 280] as [number, number])
+      : preClickDelayMs;
   await sleep(randomBetween(delay[0], delay[1]));
   await page.mouse.click(cx, cy);
-  await showVncAutomationPointer(page, cx, cy, { click: true });
+  await showVncAutomationPointer(page, cx, cy, { click: true, skipX11Sync: opts?.lite || opts?.login });
   setMousePosition(page, { x: cx, y: cy });
 }
 
@@ -163,18 +177,25 @@ export async function humanClickAtPoint(
   y: number,
   jitterPx?: number,
   preClickDelayMs: [number, number] = [80, 220],
-  opts?: { lite?: boolean },
+  opts?: { lite?: boolean; login?: boolean },
 ): Promise<void> {
   if (await skipClickIfNaverAuthChallenge(page)) return;
 
   const jitter = jitterPx ?? (await getClickJitterPx());
   const cx = x + randomBetween(-jitter, jitter);
   const cy = y + randomBetween(-jitter, jitter);
-  await humanMouseMove(page, cx, cy, { lite: opts?.lite });
-  const delay = opts?.lite ? ([35, 100] as [number, number]) : preClickDelayMs;
+  await humanMouseMove(page, cx, cy, { lite: opts?.lite, login: opts?.login });
+  const delay = opts?.lite
+    ? ([35, 100] as [number, number])
+    : opts?.login
+      ? ([100, 240] as [number, number])
+      : preClickDelayMs;
   await sleep(randomBetween(delay[0], delay[1]));
   await page.mouse.click(cx, cy);
-  await showVncAutomationPointer(page, cx, cy, { click: true });
+  await showVncAutomationPointer(page, cx, cy, {
+    click: true,
+    skipX11Sync: opts?.lite || opts?.login,
+  });
   setMousePosition(page, { x: cx, y: cy });
 }
 
@@ -183,7 +204,7 @@ export async function humanClickLocatorFallback(
   page: Page,
   locator: Locator,
   preClickDelayMs: [number, number] = [80, 260],
-  opts?: { lite?: boolean },
+  opts?: { lite?: boolean; login?: boolean },
 ): Promise<boolean> {
   try {
     await humanClickLocator(page, locator, undefined, preClickDelayMs, opts);

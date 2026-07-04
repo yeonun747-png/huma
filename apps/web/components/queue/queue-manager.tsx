@@ -249,9 +249,6 @@ export function QueueManager() {
       setJobs(visible.slice(offset, offset + pageSize));
       setLoadError(null);
     } catch {
-      setJobs([]);
-      setTotal(0);
-      setStats({ pending: 0, running: 0, doneToday: 0, doneAll: 0 });
       setLoadError('큐 데이터를 불러오지 못했습니다. 서버 연결을 확인하세요.');
     }
     setAccountsTick((n) => n + 1);
@@ -572,9 +569,14 @@ export function QueueManager() {
           <AutoPublishPanel workspace={workspace} onDone={load} accountsRefresh={accountsTick} />
         </div>
         {loadError ? (
-          <div className="py-8 text-center text-sm text-huma-t3">{loadError}</div>
-        ) : total === 0 && jobs.length === 0 ? (
+          <div className="mb-2 rounded border border-huma-err/30 bg-huma-err/5 px-3 py-2 text-center text-xs text-huma-err">
+            {loadError} · 5초마다 재시도 중
+          </div>
+        ) : null}
+        {total === 0 && jobs.length === 0 && !loadError ? (
           <div className="py-8 text-center text-sm text-huma-t3">등록된 작업이 없습니다</div>
+        ) : total === 0 && jobs.length === 0 && loadError ? (
+          <div className="py-6 text-center text-sm text-huma-t3">이전 목록 없음 — 새로고침 또는 잠시 후 다시 시도</div>
         ) : (
           <>
             <div className="m-qi-toolbar">

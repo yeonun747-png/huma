@@ -541,7 +541,7 @@ async function humanTypeCaptchaAnswer(page: Page, input: Locator, text: string):
   await input.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
   const box = await input.boundingBox().catch(() => null);
   if (box && box.width > 0 && box.height > 0) {
-    await humanClickLocator(page, input);
+    await humanClickLocator(page, input, undefined, [120, 280], { login: true });
   } else {
     await input.focus().catch(() => {});
     await sleep(randomBetween(100, 300));

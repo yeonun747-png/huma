@@ -107,6 +107,9 @@ async function resolveScreenOffset(page: Page): Promise<ScreenOffset | null> {
 
 async function syncX11Cursor(page: Page, viewportX: number, viewportY: number): Promise<void> {
   if (!isVncX11CursorSyncEnabled()) return;
+  // nidlogin·캡cha — xdotool --sync가 수십 초~분 단위로 블로킹되는 환경 있음 (Playwright mouse만 사용)
+  const url = page.url().toLowerCase();
+  if (url.includes('nidlogin') || url.includes('nid.naver.com')) return;
 
   if (xdotoolAvailable === false) return;
   if (xdotoolAvailable === null) {

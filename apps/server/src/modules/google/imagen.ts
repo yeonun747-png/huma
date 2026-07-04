@@ -5,6 +5,43 @@ import { getSubClaudeModel } from '../../lib/ai-engine.js';
 import { isGoogleImagenEnabled, isHaikuSubEnabled } from '../../lib/human-engine-policy.js';
 import { uploadHumaMediaJpeg } from '../../lib/huma-media-storage.js';
 
+const IMAGEN_NO_PEOPLE_SUFFIX =
+  'No people, no human figures, no faces, no hands, no silhouettes, no body parts, no portraits. Still life and symbolic objects only.';
+
+/** Claude가 생성한 image_prompt → Imagen 4용 영문 요약 (Haiku). 모델 선택과 별도. */
+export async function prepareImagenPrompt(rawPrompt: string): Promise<string> {
+  const trimmed = rawPrompt.trim();
+  if (!trimmed) return IMAGEN_NO_PEOPLE_SUFFIX;
+
+  if (!(await isHaikuSubEnabled())) {
+    return `${trimmed}. ${IMAGEN_NO_PEOPLE_SUFFIX}`;
+  }
+
+  try {
+    const model = (await getSubClaudeModel()) || 'claude-haiku-4-5-20251001';
+    const raw = await askClaudeWithModel({
+      model,
+      max_tokens: 220,
+      prompt: `아래 이미지 주제를 Google Imagen 4용 영문 프롬프트 한 단락으로 요약해줘 (120단어 이내).
+
+원문:
+"${trimmed.slice(0, 600)}"
+
+필수 규칙:
+- still life, symbolic objects, scenery만 — 사람·얼굴·손·상반신·실루엣·인체 어떤 형태도 금지
+- text, logo, watermark 금지
+- 9:16 vertical cinematic mood
+- 영문 프롬프트만 출력 (따옴표·설명 없이)`,
+    });
+    const out = raw?.trim().replace(/^["']|["']$/g, '') ?? '';
+    if (!out) return `${trimmed}. ${IMAGEN_NO_PEOPLE_SUFFIX}`;
+    if (/no people|no human|still life/i.test(out)) return out;
+    return `${out} ${IMAGEN_NO_PEOPLE_SUFFIX}`;
+  } catch {
+    return `${trimmed}. ${IMAGEN_NO_PEOPLE_SUFFIX}`;
+  }
+}
+
 /** v3.26 §7-2 — Google Imagen 4 (이미지 전용) */
 export type ImagenModel =
   | 'imagen-4.0-fast-generate-001'
@@ -81,6 +118,7 @@ export async function generateImage(params: {
 
   const model = await resolveModel(params.model, params.prompt);
   const aspectRatio = params.aspectRatio || '9:16';
+  const prompt = await prepareImagenPrompt(params.prompt);
 
   // Gemini Developer API — Imagen 4는 :predict (generateImages 아님 → 404)
   const res = await fetch(
@@ -92,7 +130,7 @@ export async function generateImage(params: {
         'x-goog-api-key': apiKey,
       },
       body: JSON.stringify({
-        instances: [{ prompt: params.prompt }],
+        instances: [{ prompt }],
         parameters: {
           sampleCount: 1,
           aspectRatio,

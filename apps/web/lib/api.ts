@@ -159,7 +159,7 @@ export const api = {
           items: HumaJob[];
           total: number;
           stats: { pending: number; running: number; doneToday: number; doneAll: number };
-        }>(`/api/jobs/page${qs(params)}`),
+        }>(`/api/jobs/page${qs(params)}`, { timeoutMs: 45_000 }),
       opts,
     ),
   createJob: async (body: Partial<HumaJob>) => {

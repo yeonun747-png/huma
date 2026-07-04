@@ -5,7 +5,7 @@ import {
   withHumanWritingSystem,
   withLongformWritingMandate,
 } from '../../lib/ai-human-writing.js';
-import { formatKstWritingContext } from '../../lib/dashboard-period.js';
+import { formatKstWritingContext, buildKstDaypartWritingGuide } from '../../lib/dashboard-period.js';
 import { buildYeonunContextWithPrompt } from '../content/yeonun-context.js';
 import { buildQuizOasisContextWithPrompt } from '../content/quizoasis-context.js';
 import { buildPananaContextWithPrompt } from '../content/panana-context.js';
@@ -381,14 +381,16 @@ async function generateMainContent(
   const lengthGuide = blogPostLengthPromptGuide(lengthRange);
   const { min, max } = lengthRange;
   const writingNow = formatKstWritingContext();
+  const daypartGuide = buildKstDaypartWritingGuide();
   const sourceUrl = input.sourceUrl?.trim() || '(없음)';
   const synopsisGuide = input.synopsis
     ? `\n[운영자 시놉시스 - 반드시 참고]\n"${input.synopsis}"`
     : '\n[시놉시스 없음 — 아래 참조 URL·URL 요약을 반드시 반영해 작성]';
 
-  const datetimeGuide = `\n[현재 시각 — 글은 이 순간에 실제 발행되는 것처럼 작성]
+  const datetimeGuide = `\n[현재 시각 — 글은 이 순간 KST에 실제 발행되는 것처럼 작성]
 ${writingNow}
-「지금·이번 달·오늘」 관점으로 쓸 것. 과거 회고(저번달에 봤었는데)도 현재 시각 기준 자연스럽게 허용. 날짜·시각을 본문에 그대로 밝히 쓸 필요는 없음.`;
+${daypartGuide}
+「지금·오늘·이번 달」 관점. 발행 KST 시각과 어긋난 시간대를 「지금 일어난 일」처럼 쓰지 말 것 (예: 오전 발행인데 저녁 요리, 점심이 아닌데 점심 식사 회상). 날짜·시각을 본문에 그대로 밝힐 필요 없음.`;
 
   const typeGuide =
     input.content_type === 'A'
@@ -425,7 +427,7 @@ ${serviceMentionGuide}
   "instagram_caption": "Instagram 캡션 300자 이내",
   "threads_text": "Threads 텍스트 500자 이내, 링크 포함",
   "x_text": "X 텍스트 280자 이내, 링크 포함",
-  "image_prompt": "Imagen 4 영문. 주제 상징 중심 still life/scene — 돈·재물 강조 시 coins/gold/wallet, 사랑·재회 시 hearts/cherry blossom/warm pink, 직장·사업 시 office/success symbols. 사람이 폰·화면 보며 사주 보는 장면 금지. 텍스트·로고·워터마크 없음. 9:16 cinematic",
+  "image_prompt": "Imagen 4 영문. still life·상징 오브젝트만 — 사람·얼굴·손·상반신·실루엣·인체 일부 절대 금지. 돈→coins/gold, 사랑→hearts/cherry blossom, 직장→office symbols. 텍스트·로고 없음. 9:16 cinematic",
   "video_prompt": "Kling 3.0 9:16 영상 프롬프트 (영문, 내장 오디오)"
 }`),
     },
