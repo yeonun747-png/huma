@@ -429,8 +429,29 @@ export async function ensureNaverLoginCredentialsForCaptcha(
   }
 }
 
+/** nidlogin — PW 입력 직후 Enter 제출 (사람과 동일). 반응 없으면 로그인 버튼 마우스 클릭 */
+export async function submitNaverLoginAfterPasswordEnter(
+  page: Page,
+  opts?: { skipIpSecurity?: boolean },
+): Promise<void> {
+  if (await isNaverAuthChallengePage(page)) return;
+  if (!page.url().includes('nidlogin')) return;
+
+  const baseline = await snapshotNaverLoginSubmitState(page);
+  await page.locator('#pw').focus().catch(() => {});
+  await sleep(randomBetween(40, 90));
+  await page.locator('#pw').press('Enter').catch(() => {});
+
+  if (await didNaverLoginSubmitStart(page, baseline, 2800)) return;
+
+  await clickNaverLoginButton(page, {
+    skipIpSecurity: opts?.skipIpSecurity ?? true,
+    credentialsReady: true,
+  });
+}
+
 /**
- * CAPTCHA 통과 후 nidlogin — 필요 시 ID·PW 재입력 후 로그인 버튼 클릭.
+ * CAPTCHA 통과 후 nidlogin — 필요 시 ID·PW 재입력 후 로그인 버튼 마우스 클릭.
  */
 export async function submitNaverLoginAfterCaptcha(
   page: Page,
@@ -516,11 +537,6 @@ export async function clickNaverLoginButton(
     }
 
     if (await didNaverLoginSubmitStart(page, submitBaseline, submitWaitMs)) return;
-
-    if (credsReady && round === 0) {
-      await page.locator('#pw').press('Enter').catch(() => {});
-      if (await didNaverLoginSubmitStart(page, submitBaseline, 900)) return;
-    }
 
     lastErr = new Error('NAVER_LOGIN_BTN_CLICK_NO_SUBMIT');
     await sleep(randomBetween(credsReady ? 100 : 300, credsReady ? 220 : 600));

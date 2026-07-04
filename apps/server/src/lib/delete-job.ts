@@ -7,6 +7,7 @@ import {
   reconcilePostingAfterJobRemoval,
   type PostingReconcileTarget,
 } from './reconcile-posting-after-job-removal.js';
+import { scheduleWorkspaceQueueStatsRefreshMany } from './workspace-queue-stats.js';
 
 const VIDEO_JOB_FK_COLS = ['blog_job_id', 'threads_job_id', 'twitter_job_id'] as const;
 
@@ -106,6 +107,12 @@ async function deleteSingleJobRecord(
   return { ok: true };
 }
 
+async function collectWorkspacesForJobIds(ids: string[]): Promise<string[]> {
+  if (ids.length === 0) return [];
+  const { data } = await supabase.from('huma_jobs').select('workspace').in('id', ids);
+  return [...new Set((data ?? []).map((row) => row.workspace).filter(Boolean) as string[])];
+}
+
 async function collectPostingReconcileTargets(ids: string[]): Promise<PostingReconcileTarget[]> {
   const targets: PostingReconcileTarget[] = [];
   const seen = new Set<string>();
@@ -134,6 +141,7 @@ export async function deleteJobById(id: string): Promise<{ ok: true } | { ok: fa
   if (ids.length === 0) return { ok: false, error: '작업 없음' };
 
   const reconcileTargets = await collectPostingReconcileTargets(ids);
+  const workspaces = await collectWorkspacesForJobIds(ids);
 
   for (const jobId of ids) {
     const { data: existing, error: selectErr } = await supabase
@@ -150,12 +158,14 @@ export async function deleteJobById(id: string): Promise<{ ok: true } | { ok: fa
   }
 
   await reconcilePostingAfterJobRemoval(reconcileTargets);
+  scheduleWorkspaceQueueStatsRefreshMany(workspaces);
   return { ok: true };
 }
 
 export async function deleteJobsByIds(ids: string[]): Promise<{ deleted: number; failed: number; errors: string[] }> {
   const expanded = await expandJobDeleteSet(ids);
   const reconcileTargets = await collectPostingReconcileTargets(expanded);
+  const workspaces = await collectWorkspacesForJobIds(expanded);
   let deleted = 0;
   let failed = 0;
   const errors: string[] = [];
@@ -185,6 +195,7 @@ export async function deleteJobsByIds(ids: string[]): Promise<{ deleted: number;
 
   if (deleted > 0) {
     await reconcilePostingAfterJobRemoval(reconcileTargets);
+    scheduleWorkspaceQueueStatsRefreshMany(workspaces);
   }
 
   return { deleted, failed, errors: [...new Set(errors)] };

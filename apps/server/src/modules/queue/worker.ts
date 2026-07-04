@@ -93,6 +93,7 @@ import { purgePostBlogStorageMedia } from '../../lib/cleanup-post-blog-storage.j
 import { finalizePostBlogJob } from '../../lib/post-blog-job-complete.js';
 import { isPostingConnectionError } from '../../lib/posting-connection-error.js';
 import { tryReconcilePostBlogJobCompletion } from '../../lib/post-blog-reconcile.js';
+import { scheduleWorkspaceQueueStatsRefresh } from '../../lib/workspace-queue-stats.js';
 
 async function getTodayCount(accountId: string, field: 'post_count_today' | 'crank_count_today'): Promise<number> {
   const { data } = await supabase.from('huma_accounts').select(`${field}`).eq('id', accountId).single();
@@ -150,7 +151,10 @@ async function completeJob(jobId: string, resultUrl?: string) {
     });
   }
 
-  if (fullJob) await scheduleRepeatIfNeeded(fullJob as import('../../lib/job-scheduler.js').JobRecord);
+  if (fullJob) {
+    await scheduleRepeatIfNeeded(fullJob as import('../../lib/job-scheduler.js').JobRecord);
+    scheduleWorkspaceQueueStatsRefresh(fullJob.workspace as string | null);
+  }
 }
 
 const PLAYWRIGHT_JOBS = ['post_blog', 'cafe_new_post', 'cafe_reply'];

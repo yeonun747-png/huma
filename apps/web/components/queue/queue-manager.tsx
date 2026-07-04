@@ -30,6 +30,7 @@ import {
 import { CaptchaCompleteModal } from './captcha-complete-modal';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { getLogSocket } from '@/lib/socket';
 import type { QueuePrefill } from '@/lib/queue-prefill';
 
 const QUEUE_PAGE_SIZE_KEY = 'huma_queue_page_size';
@@ -258,11 +259,32 @@ export function QueueManager() {
     if (!shellActive) return;
     void load();
     setSelectedIds(new Set());
-    const id = setInterval(() => {
-      void load({ force: true });
-    }, 5000);
-    return () => clearInterval(id);
-  }, [load, shellActive]);
+
+    const socket = getLogSocket();
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+    const scheduleLoad = (entry?: { workspace?: string | null }) => {
+      if (entry?.workspace && entry.workspace !== workspace) return;
+      if (debounce) clearTimeout(debounce);
+      debounce = setTimeout(() => void load({ force: true }), 350);
+    };
+    const onConnect = () => void load({ force: true });
+
+    socket.connect();
+    socket.on('log', scheduleLoad);
+    socket.on('connect', onConnect);
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void load({ force: true });
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      if (debounce) clearTimeout(debounce);
+      socket.off('log', scheduleLoad);
+      socket.off('connect', onConnect);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [load, shellActive, workspace]);
 
   useEffect(() => {
     const jobId = searchParams.get('job');
@@ -570,7 +592,7 @@ export function QueueManager() {
         </div>
         {loadError ? (
           <div className="mb-2 rounded border border-huma-err/30 bg-huma-err/5 px-3 py-2 text-center text-xs text-huma-err">
-            {loadError} · 5초마다 재시도 중
+            {loadError} · 작업 로그 수신·탭 복귀 시 다시 불러옵니다
           </div>
         ) : null}
         {total === 0 && jobs.length === 0 && !loadError ? (

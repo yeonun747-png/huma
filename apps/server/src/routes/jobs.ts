@@ -42,11 +42,11 @@ import {
   getCaptchaHoldPublicInfo,
 } from '../modules/watcher/captcha-hold.js';
 import { resolveVncUrl, buildJobWebUrl } from '../modules/watcher/telegram.js';
+import { computeVisibleQueueStats, filterOutPipelineShells } from '../lib/job-pipeline-shell.js';
 import {
-  computeVisibleQueueStats,
-  countContentFullPipelineShells,
-  filterOutPipelineShells,
-} from '../lib/job-pipeline-shell.js';
+  readWorkspaceQueueStatsForApi,
+  scheduleWorkspaceQueueStatsRefresh,
+} from '../lib/workspace-queue-stats.js';
 import { attachPostingAccountLabels, pickPostingAccount } from '../lib/posting-accounts.js';
 
 const JOB_ACCOUNT_SELECT = '*, huma_accounts(name, slot_label)';
@@ -76,23 +76,6 @@ function postingQuotaErrorStatus(message: string): number {
     return 429;
   }
   return 500;
-}
-
-async function fetchQueueStats(workspace: string) {
-  const todayStart = kstTodayStartIso();
-  const base = () => supabase.from('huma_jobs').select('*', { count: 'exact', head: true }).eq('workspace', workspace);
-  const [pendingRes, runningRes, captchaRes, visibleCompleted] = await Promise.all([
-    base().in('status', ['pending', 'scheduled']),
-    base().eq('status', 'running'),
-    base().eq('status', 'awaiting_captcha'),
-    computeVisibleQueueStats(workspace, todayStart),
-  ]);
-  return {
-    pending: pendingRes.count ?? 0,
-    running: (runningRes.count ?? 0) + (captchaRes.count ?? 0),
-    doneToday: visibleCompleted.doneToday,
-    doneAll: visibleCompleted.doneAll,
-  };
 }
 
 export async function registerJobRoutes(app: FastifyInstance) {
@@ -139,7 +122,7 @@ export async function registerJobRoutes(app: FastifyInstance) {
     const from = skip;
     const to = skip + take - 1;
 
-    const [{ data: liveJobs }, { data, error, count }] = await Promise.all([
+    const [{ data: liveJobs }, { data, error }, pageMeta] = await Promise.all([
       supabase
         .from('huma_jobs')
         .select(JOB_ACCOUNT_SELECT)
@@ -148,10 +131,11 @@ export async function registerJobRoutes(app: FastifyInstance) {
         .order('started_at', { ascending: false }),
       supabase
         .from('huma_jobs')
-        .select(JOB_ACCOUNT_SELECT, { count: 'exact' })
+        .select(JOB_ACCOUNT_SELECT)
         .eq('workspace', workspace)
         .order('created_at', { ascending: false })
         .range(from, to),
+      readWorkspaceQueueStatsForApi(workspace),
     ]);
 
     if (error) {
@@ -162,13 +146,10 @@ export async function registerJobRoutes(app: FastifyInstance) {
     const liveIds = new Set(live.map((j) => j.id));
     const pageRows = (data ?? []).filter((j) => !liveIds.has(j.id));
     const items = attachPostingAccountLabels(filterOutPipelineShells([...live, ...pageRows]));
-    const shellTotal = await countContentFullPipelineShells(workspace);
-
-    const stats = await fetchQueueStats(workspace);
     return {
       items,
-      total: Math.max(0, (count ?? 0) - shellTotal),
-      stats,
+      total: pageMeta.queueVisibleTotal,
+      stats: pageMeta.stats,
     };
   });
 
@@ -253,6 +234,7 @@ export async function registerJobRoutes(app: FastifyInstance) {
           scheduled_at: scheduledAt,
           repeat_rule: (body.repeat_rule as string) || null,
         });
+        scheduleWorkspaceQueueStatsRefresh(body.workspace as string);
         return {
           ...result.primary_job,
           _meta: { jobs_created: result.jobs_created, video_queue_id: result.video_queue_id },
@@ -286,6 +268,7 @@ export async function registerJobRoutes(app: FastifyInstance) {
     if (error) return reply.code(400).send({ error: error.message });
 
     if (data) {
+      scheduleWorkspaceQueueStatsRefresh(data.workspace as string | null);
       await enqueueHumaJob(data as JobRecord);
       const { data: updated } = await supabase.from('huma_jobs').select('*').eq('id', data.id).single();
       return updated ?? data;
@@ -489,6 +472,7 @@ export async function registerJobRoutes(app: FastifyInstance) {
         repeat_rule: body.repeat_rule || null,
         dry_run: body.dry_run === true,
       });
+      scheduleWorkspaceQueueStatsRefresh(body.workspace);
       return {
         ...result.primary_job,
         _meta: {

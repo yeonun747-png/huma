@@ -11,6 +11,7 @@ import {
   type ContentType,
 } from '../queue/jobs/content-orchestrator.js';
 import { isAutoPublishJob, replanAutoPublishSlot } from '../../lib/auto-publish-state.js';
+import { scheduleWorkspaceQueueStatsRefresh } from '../../lib/workspace-queue-stats.js';
 
 export interface AutoContentRequest {
   workspace: string;
@@ -214,6 +215,7 @@ export async function executeContentFull(humaJobId: string) {
       await replanAutoPublishSlot(job.account_id as string, job.workspace as string).catch(() => undefined);
     }
 
+    scheduleWorkspaceQueueStatsRefresh(job.workspace as string);
     return {
       jobs_created: 0,
       similarity_skipped: true,
@@ -231,6 +233,8 @@ export async function executeContentFull(humaJobId: string) {
       result_url: result.primaryJobId,
     })
     .eq('id', humaJobId);
+
+  scheduleWorkspaceQueueStatsRefresh(job.workspace as string);
 
   return {
     jobs_created: result.jobsCreated,

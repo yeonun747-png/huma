@@ -26,6 +26,7 @@ import { isNaverAuthChallengePage } from '../../lib/naver-auth-challenge.js';
 import { vncSlotLabelKo } from '../../lib/vnc-window-layout.js';
 import { enforceVncWindowBounds } from '../../lib/vnc-window-guard.js';
 import { purgePostBlogStorageMedia } from '../../lib/cleanup-post-blog-storage.js';
+import { scheduleWorkspaceQueueStatsRefresh } from '../../lib/workspace-queue-stats.js';
 import { notifyCaptchaTelegram, resolveTelegramChatId, resolveVncUrl, buildJobWebUrl } from './telegram.js';
 import { deleteCaptchaHoldScreenshot, saveCaptchaHoldScreenshot } from '../../lib/captcha-hold-screenshot.js';
 import { clearCaptchaTelegramMessagesForJob } from '../../lib/captcha-telegram-registry.js';
@@ -238,7 +239,7 @@ async function completeJobRecord(jobId: string, resultUrl?: string): Promise<voi
   const published = Boolean(resultUrl?.trim());
   const { data: job } = await supabase
     .from('huma_jobs')
-    .select('job_type, image_urls, account_id, title, content, link_url')
+    .select('job_type, image_urls, account_id, title, content, link_url, workspace, content_type')
     .eq('id', jobId)
     .maybeSingle();
 
@@ -273,6 +274,8 @@ async function completeJobRecord(jobId: string, resultUrl?: string): Promise<voi
       hasVideo: job.content_type === 'B',
     });
   }
+
+  scheduleWorkspaceQueueStatsRefresh(job?.workspace as string | null | undefined);
 }
 
 function scheduleReminders(entry: CaptchaHoldEntry): void {

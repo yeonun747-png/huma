@@ -10,6 +10,7 @@ import {
   resolveFinalizePublishAtIso,
 } from './post-blog-publish-day.js';
 import { maybeIncrementWarmupDay } from './posting-warmup-day.js';
+import { scheduleWorkspaceQueueStatsRefresh } from './workspace-queue-stats.js';
 
 export type FinalizePostBlogOpts = {
   /** 네이버 실제 발행 시각 — reconcile 시 필수 */
@@ -90,5 +91,6 @@ export async function finalizePostBlogJob(
   }
 
   await scheduleRepeatIfNeeded(job as JobRecord);
+  scheduleWorkspaceQueueStatsRefresh(job.workspace as string | null);
   return true;
 }

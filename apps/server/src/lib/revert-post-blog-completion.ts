@@ -7,6 +7,7 @@ import {
   RECONCILE_PUBLISH_AT_KEY,
   resolveJobPublishedAtIso,
 } from './post-blog-publish-day.js';
+import { scheduleWorkspaceQueueStatsRefresh } from './workspace-queue-stats.js';
 
 /**
  * ✓ 발행 확인 오적용만 되돌림 — 오늘 실제 발행·워커 정상 완료는 취소 불가.
@@ -55,5 +56,6 @@ export async function revertPostBlogCompletion(jobId: string): Promise<boolean> 
     account_id: job.account_id as string | undefined,
   });
 
+  scheduleWorkspaceQueueStatsRefresh(job.workspace as string | null);
   return true;
 }

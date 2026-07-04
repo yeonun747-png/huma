@@ -33,6 +33,7 @@ import {
 } from '../../../lib/posting-content-similarity.js';
 import { postingSlotByWorkspace } from '../../../lib/dongle-slots.js';
 import { notifyTelegram } from '../../watcher/telegram.js';
+import { scheduleWorkspaceQueueStatsRefresh } from '../../../lib/workspace-queue-stats.js';
 
 export type ContentType = 'A' | 'B';
 
@@ -123,6 +124,7 @@ async function pickPlatformAccount(workspace: string, platform: string): Promise
 async function insertJob(row: Record<string, unknown>): Promise<JobRecord> {
   const { data, error } = await supabase.from('huma_jobs').insert(row).select().single();
   if (error || !data) throw new Error(error?.message ?? '작업 등록 실패');
+  scheduleWorkspaceQueueStatsRefresh(data.workspace as string | null);
   return data as JobRecord;
 }
 

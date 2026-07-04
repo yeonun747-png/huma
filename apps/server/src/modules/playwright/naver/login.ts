@@ -7,9 +7,8 @@ import {
   wrapNaverLoginTimeout,
 } from '../../../lib/naver-login-error.js';
 import {
-  clickNaverLoginButton,
   ensureNaverLoginIdPhoneTab,
-  nudgeNaverLoginFormAfterPassword,
+  submitNaverLoginAfterPasswordEnter,
   typeIntoNaverLoginField,
   ensureNaverIpSecurityOff,
 } from '../../../lib/naver-login-fields.js';
@@ -157,10 +156,8 @@ async function performNaverLoginOnPage(
   await typeIntoNaverLoginField(page, '#id', account.naver_id, fieldOpts);
   await humanSleep(200, 450);
   await typeIntoNaverLoginField(page, '#pw', password, fieldOpts);
-  await nudgeNaverLoginFormAfterPassword(page);
-  await humanSleep(150, 320);
   try {
-    await clickNaverLoginButton(page, { skipIpSecurity: true, credentialsReady: true });
+    await submitNaverLoginAfterPasswordEnter(page, { skipIpSecurity: true });
   } catch (err) {
     const msg = (err as Error).message ?? '';
     if (msg.includes('NAVER_LOGIN_CREDENTIALS') || msg.includes('NAVER_LOGIN_2FA')) throw err;
