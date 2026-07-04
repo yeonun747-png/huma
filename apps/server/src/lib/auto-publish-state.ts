@@ -426,11 +426,42 @@ export async function listAutoPublishEnabledAccounts(): Promise<AutoPublishAccou
   return states;
 }
 
-export async function replanAutoPublishSlot(accountId: string, workspace: string): Promise<void> {
+/** 상태 조회·삭제 후 next_slot_at=null 고착 방지 — 짧은 쿨다운 */
+const ensureAutoPublishSlotLastAt = new Map<string, number>();
+const ENSURE_AUTO_PUBLISH_SLOT_COOLDOWN_MS = 15_000;
+
+export async function ensureAutoPublishNextSlot(
+  accountId: string,
+  workspace: string,
+): Promise<string | null> {
+  const state = await loadAutoPublishAccountState(accountId);
+  if (!state?.enabled || state.remaining_today <= 0) return state?.next_slot_at ?? null;
+
+  const slotAt = state.next_slot_at;
+  const slotMissing = !slotAt;
+  const slotStale =
+    slotAt != null && new Date(slotAt).getTime() < Date.now() - SHORT_SLOT_CLAIM_MS;
+  if (!slotMissing && !slotStale) return slotAt;
+
+  const now = Date.now();
+  const last = ensureAutoPublishSlotLastAt.get(accountId) ?? 0;
+  if (now - last < ENSURE_AUTO_PUBLISH_SLOT_COOLDOWN_MS) return slotAt;
+  ensureAutoPublishSlotLastAt.set(accountId, now);
+
+  await replanAutoPublishSlot(accountId, workspace, { force: true });
+  const refreshed = await loadAutoPublishAccountState(accountId);
+  return refreshed?.next_slot_at ?? null;
+}
+
+export async function replanAutoPublishSlot(
+  accountId: string,
+  workspace: string,
+  opts?: { force?: boolean },
+): Promise<void> {
   const state = await loadAutoPublishAccountState(accountId);
   if (!state?.enabled) return;
 
-  if (isFutureAutoPublishSlot(state.next_slot_at)) {
+  if (!opts?.force && isFutureAutoPublishSlot(state.next_slot_at)) {
     await logOperation({
       level: 'info',
       message: `[auto-publish] replan skipped — future slot preserved (${state.next_slot_at})`,
@@ -440,7 +471,7 @@ export async function replanAutoPublishSlot(accountId: string, workspace: string
     return;
   }
 
-  if (isRecentDueRetrySlot(state.next_slot_at)) {
+  if (!opts?.force && isRecentDueRetrySlot(state.next_slot_at)) {
     await logOperation({
       level: 'info',
       message: `[auto-publish] replan skipped — due retry slot preserved (${state.next_slot_at})`,
@@ -462,16 +493,20 @@ export async function replanAutoPublishSlot(accountId: string, workspace: string
       ? null
       : await planNextAutoPublishTriggerAt({ accountId, plannedCount: planned, consumedCount: consumed });
 
-  await persistAutoPublishPlan(accountId, {
-    enabled: true,
-    kst_date: kstDate,
-    planned_count: planned,
-    next_slot_at: nextSlot,
-  });
+  await persistAutoPublishPlan(
+    accountId,
+    {
+      enabled: true,
+      kst_date: kstDate,
+      planned_count: planned,
+      next_slot_at: nextSlot,
+    },
+    { replaceSlot: Boolean(opts?.force) },
+  );
 
   await logOperation({
     level: 'info',
-    message: `[auto-publish] replan account=${accountId} consumed=${consumed}/${planned} next=${nextSlot ?? '없음'}`,
+    message: `[auto-publish] replan account=${accountId} consumed=${consumed}/${planned} next=${nextSlot ?? '없음'}${opts?.force ? ' (force)' : ''}`,
     workspace,
     account_id: accountId,
   });
@@ -602,16 +637,17 @@ export async function triggerDueAutoPublishJobs(): Promise<number> {
       try {
         const reserveOk = await reservePostingQuotaSlot(accountId);
         if (!reserveOk) {
+          const retryAt = deferAutoPublishRetryIso(2, 4);
           await persistAutoPublishPlan(accountId, {
             enabled: true,
             kst_date: kstDate,
             planned_count: planned,
-            next_slot_at: null,
+            next_slot_at: retryAt,
           });
           await logOperation({
             level: 'warn',
             message:
-              `[auto-publish] due stopped account=${state.label ?? accountId} reserve denied ` +
+              `[auto-publish] due deferred account=${state.label ?? accountId} reserve denied ` +
               `(TS completed=${publishStatus.today_completed}/${publishStatus.daily_target} ` +
               `consumed=${consumed}/${planned}) — Supabase v3_66 SQL 적용·잘못된 completed job 정리 확인`,
             workspace,

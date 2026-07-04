@@ -138,14 +138,31 @@ async function isNaverLoginButtonReady(btn: Locator): Promise<boolean> {
 
 async function waitForNaverLoginButtonReady(page: Page, timeoutMs = 6000): Promise<Locator | null> {
   const deadline = Date.now() + timeoutMs;
+  const pollMs = timeoutMs <= 2500 ? 70 : 120;
   while (Date.now() < deadline) {
     const btn = await findNaverLoginButton(page);
     if (btn && (await isNaverLoginButtonReady(btn))) return btn;
-    await sleep(120);
+    await sleep(pollMs);
   }
   const btn = await findNaverLoginButton(page);
   if (btn && (await isNaverLoginButtonReady(btn))) return btn;
   return null;
+}
+
+/** PW 입력 직후 blur — nidlogin이 로그인 버튼 off→활성 전환하도록 유도 */
+export async function nudgeNaverLoginFormAfterPassword(page: Page): Promise<void> {
+  await page
+    .locator('#pw')
+    .evaluate((el) => {
+      (el as HTMLElement).blur();
+    })
+    .catch(() => {});
+  const deadline = Date.now() + 700;
+  while (Date.now() < deadline) {
+    const btn = await findNaverLoginButton(page);
+    if (btn && (await isNaverLoginButtonReady(btn))) return;
+    await sleep(70);
+  }
 }
 
 /** off 잔류 시 — ID/PW가 채워졌으면 nidlogin JS 지연으로 마지막 시도 허용 */
@@ -159,11 +176,12 @@ async function canForceAttemptLoginButton(page: Page, btn: Locator): Promise<boo
 async function didNaverLoginSubmitStart(
   page: Page,
   baseline?: NaverLoginSubmitSnapshot,
+  timeoutMs = 3200,
 ): Promise<boolean> {
   const before = baseline ?? (await snapshotNaverLoginSubmitState(page));
   const hadCaptcha = before.captchaVisible;
 
-  const deadline = Date.now() + 3200;
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (await isNaverAuthChallengePage(page)) return true;
     if (!page.url().includes('nidlogin')) return true;
@@ -209,12 +227,12 @@ async function blurNaverCaptchaInputFocus(page: Page): Promise<void> {
 /** nidlogin 로그인 버튼 — Playwright/JS click 금지, humanClick만 (상단 중앙 — 푸터 쪽 오클릭 방지) */
 async function clickNaverLoginButtonWithMouse(page: Page, btn: Locator): Promise<void> {
   await blurNaverCaptchaInputFocus(page);
-  await btn.scrollIntoViewIfNeeded({ timeout: 5000, block: 'center' }).catch(() => {});
-  await sleep(randomBetween(160, 360));
+  await btn.scrollIntoViewIfNeeded({ timeout: 2500, block: 'center' }).catch(() => {});
+  await sleep(randomBetween(50, 120));
 
   const box = await btn.boundingBox().catch(() => null);
   if (!box || box.width <= 0 || box.height <= 0) {
-    if (await humanClickLocatorFallback(page, btn, [120, 300])) return;
+    if (await humanClickLocatorFallback(page, btn, [40, 100], { lite: true })) return;
     throw new Error('NAVER_LOGIN_BTN_NO_BBOX');
   }
 
@@ -222,7 +240,7 @@ async function clickNaverLoginButtonWithMouse(page: Page, btn: Locator): Promise
   const bandHeight = Math.max(10, Math.min(box.height * 0.38, 32));
   const cx = box.x + box.width / 2 + randomBetween(-4, 4);
   const cy = box.y + bandTop + randomBetween(0, Math.max(0, bandHeight - 1));
-  await humanClickAtPoint(page, cx, cy, 2, [120, 280]);
+  await humanClickAtPoint(page, cx, cy, 2, [35, 100], { lite: true });
 }
 
 /** IP보안 — 구 UI #ip_on / 신 UI #switch (2025~ nidlogin 리뉴얼). 클릭은 label·switch_btn */
@@ -326,21 +344,24 @@ export async function typeIntoNaverLoginField(
   page: Page,
   selector: string,
   value: string,
-  options?: { fast?: boolean; clear?: boolean },
+  options?: { fast?: boolean; clear?: boolean; skipSetup?: boolean },
 ): Promise<void> {
   if (await isNaverAuthChallengePage(page)) return;
-  await ensureNaverLoginIdPhoneTab(page);
-  await ensureNaverIpSecurityOff(page);
+  if (!options?.skipSetup) {
+    await ensureNaverLoginIdPhoneTab(page);
+    await ensureNaverIpSecurityOff(page);
+  }
 
+  const lite = Boolean(options?.fast || options?.skipSetup);
   const loc = page.locator(selector);
-  await loc.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+  await loc.scrollIntoViewIfNeeded({ timeout: lite ? 2500 : 5000 }).catch(() => {});
   const box = await loc.boundingBox().catch(() => null);
   if (box && box.width > 0 && box.height > 0) {
-    await humanClickLocator(page, loc);
+    await humanClickLocator(page, loc, undefined, lite ? [40, 120] : [100, 400], { lite });
   } else {
     await loc.focus().catch(() => {});
   }
-  await sleep(options?.fast ? randomBetween(80, 180) : randomBetween(150, 400));
+  await sleep(options?.fast ? randomBetween(50, 120) : randomBetween(150, 400));
 
   if (options?.clear !== false) {
     const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
@@ -396,7 +417,8 @@ export async function ensureNaverLoginCredentialsForCaptcha(
   if (needId || needPw) {
     const password = decrypt(account.naver_pw_enc);
     await typeIntoNaverLoginField(page, '#pw', password, { fast: options?.fast });
-    await humanSleep(options?.fast ? 120 : 400, options?.fast ? 280 : 900);
+    await nudgeNaverLoginFormAfterPassword(page);
+    await humanSleep(options?.fast ? 80 : 180, options?.fast ? 200 : 400);
   }
 }
 
@@ -416,10 +438,10 @@ export async function submitNaverLoginAfterCaptcha(
   if (accountId) {
     await ensureNaverLoginCredentialsForCaptcha(page, accountId, { fast: true }).catch(() => {});
   }
-  await humanSleep(350, 700);
+  await humanSleep(200, 400);
   if (await isNaverAuthChallengePage(page)) return false;
   try {
-    await clickNaverLoginButton(page);
+    await clickNaverLoginButton(page, { skipIpSecurity: true, credentialsReady: true });
   } catch {
     return false;
   }
@@ -430,25 +452,45 @@ export async function submitNaverLoginAfterCaptcha(
 }
 
 /** 로그인 버튼 — 마우스만(humanClickLocator). 활성 대기·제출 검증·재시도. 2단계 인증 화면에서는 클릭 금지. */
-export async function clickNaverLoginButton(page: Page): Promise<void> {
+export async function clickNaverLoginButton(
+  page: Page,
+  opts?: { skipIpSecurity?: boolean; credentialsReady?: boolean },
+): Promise<void> {
   if (await isNaverAuthChallengePage(page)) return;
   await ensureNaverLoginIdPhoneTab(page);
   if (await isNaverAuthChallengePage(page)) return;
-  await ensureNaverIpSecurityOff(page);
+  if (!opts?.skipIpSecurity) {
+    await ensureNaverIpSecurityOff(page);
+  }
   if (await isNaverAuthChallengePage(page)) return;
+
+  const credsReady = Boolean(opts?.credentialsReady);
+  const initialWaitMs = credsReady ? 800 : 8000;
+  const retryWaitMs = credsReady ? 600 : 3000;
+  const submitWaitMs = credsReady ? 1500 : 3200;
 
   let lastErr: Error | undefined;
 
   for (let round = 0; round < 4; round += 1) {
     if (await isNaverAuthChallengePage(page)) return;
 
-    let btn = await waitForNaverLoginButtonReady(page, round === 0 ? 8000 : 3000);
-    if (!btn) btn = await findNaverLoginButton(page);
+    let btn: Locator | null = null;
+    if (credsReady && round === 0) {
+      btn = await findNaverLoginButton(page);
+      if (!btn) {
+        await nudgeNaverLoginFormAfterPassword(page).catch(() => undefined);
+        btn = await findNaverLoginButton(page);
+      }
+    } else {
+      btn = await waitForNaverLoginButtonReady(page, round === 0 ? initialWaitMs : retryWaitMs);
+      if (!btn) btn = await findNaverLoginButton(page);
+    }
     if (!btn) break;
 
     const ready = await isNaverLoginButtonReady(btn);
-    if (!ready && !(round >= 2 && (await canForceAttemptLoginButton(page, btn)))) {
-      await sleep(randomBetween(200, 450));
+    const canForce = await canForceAttemptLoginButton(page, btn);
+    if (!ready && !canForce) {
+      await sleep(randomBetween(credsReady ? 80 : 200, credsReady ? 180 : 450));
       continue;
     }
 
@@ -458,14 +500,14 @@ export async function clickNaverLoginButton(page: Page): Promise<void> {
       await clickNaverLoginButtonWithMouse(page, btn);
     } catch (err) {
       lastErr = err as Error;
-      await sleep(randomBetween(250, 500));
+      await sleep(randomBetween(150, 320));
       continue;
     }
 
-    if (await didNaverLoginSubmitStart(page, submitBaseline)) return;
+    if (await didNaverLoginSubmitStart(page, submitBaseline, submitWaitMs)) return;
 
     lastErr = new Error('NAVER_LOGIN_BTN_CLICK_NO_SUBMIT');
-    await sleep(randomBetween(300, 600));
+    await sleep(randomBetween(credsReady ? 150 : 300, credsReady ? 320 : 600));
   }
 
   if (await didNaverLoginSubmitStart(page)) return;

@@ -295,7 +295,18 @@ async function buildAccountPublishStatus(
     }
   }
 
-
+  let auto_publish_next_slot_at = (accRow?.auto_publish_next_slot_at as string | null) ?? null;
+  if (Boolean(accRow?.auto_publish_enabled) && !auto_publish_next_slot_at) {
+    const plannedForEnsure =
+      auto_publish_planned_count ?? daily_target;
+    const consumedForEnsure = today_completed + today_skipped + in_flight;
+    if (plannedForEnsure > 0 && consumedForEnsure < plannedForEnsure) {
+      const { ensureAutoPublishNextSlot } = await import('./auto-publish-state.js');
+      auto_publish_next_slot_at =
+        (await ensureAutoPublishNextSlot(account.id, workspace).catch(() => null)) ??
+        auto_publish_next_slot_at;
+    }
+  }
 
   const base: AutoPublishStatus = {
 
@@ -333,7 +344,7 @@ async function buildAccountPublishStatus(
 
     auto_publish_planned_count,
 
-    auto_publish_next_slot_at: (accRow?.auto_publish_next_slot_at as string | null) ?? null,
+    auto_publish_next_slot_at,
 
     proxy_port:
       account.proxy_port ??

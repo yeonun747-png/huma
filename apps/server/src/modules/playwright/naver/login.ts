@@ -9,6 +9,7 @@ import {
 import {
   clickNaverLoginButton,
   ensureNaverLoginIdPhoneTab,
+  nudgeNaverLoginFormAfterPassword,
   typeIntoNaverLoginField,
   ensureNaverIpSecurityOff,
 } from '../../../lib/naver-login-fields.js';
@@ -149,15 +150,17 @@ async function performNaverLoginOnPage(
     throw wrapNaverLoginTimeout('login_form', err);
   }
   await ensureNaverIpSecurityOff(page);
-  await humanSleep(1000, 2000);
+  await humanSleep(300, 600);
 
   const password = decrypt(account.naver_pw_enc);
-  await typeIntoNaverLoginField(page, '#id', account.naver_id);
-  await humanSleep(500, 1200);
-  await typeIntoNaverLoginField(page, '#pw', password);
-  await humanSleep(800, 1500);
+  const fieldOpts = { fast: true, skipSetup: true } as const;
+  await typeIntoNaverLoginField(page, '#id', account.naver_id, fieldOpts);
+  await humanSleep(120, 280);
+  await typeIntoNaverLoginField(page, '#pw', password, fieldOpts);
+  await nudgeNaverLoginFormAfterPassword(page);
+  await humanSleep(80, 180);
   try {
-    await clickNaverLoginButton(page);
+    await clickNaverLoginButton(page, { skipIpSecurity: true, credentialsReady: true });
   } catch (err) {
     const msg = (err as Error).message ?? '';
     if (msg.includes('NAVER_LOGIN_CREDENTIALS') || msg.includes('NAVER_LOGIN_2FA')) throw err;

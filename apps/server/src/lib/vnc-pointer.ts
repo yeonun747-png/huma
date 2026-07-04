@@ -137,7 +137,7 @@ export async function showVncAutomationPointer(
   page: Page,
   x: number,
   y: number,
-  options?: { click?: boolean },
+  options?: { click?: boolean; skipX11Sync?: boolean },
 ): Promise<void> {
   if (!isVncPointerOverlayEnabled()) return;
 
@@ -158,7 +158,9 @@ export async function showVncAutomationPointer(
     )
     .catch(() => {});
 
-  await syncX11Cursor(page, x, y);
+  if (!options?.skipX11Sync) {
+    await syncX11Cursor(page, x, y);
+  }
 }
 
 export function invalidateVncScreenOffset(page: Page): void {

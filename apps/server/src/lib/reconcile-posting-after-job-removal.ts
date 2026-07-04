@@ -22,6 +22,6 @@ export async function reconcilePostingAfterJobRemoval(
 
     const pipelineJobs = await countInFlightPostingPipeline(accountId);
     await clearOrphanPostingReservations(accountId, pipelineJobs).catch(() => undefined);
-    await replanAutoPublishSlot(accountId, workspace).catch(() => undefined);
+    await replanAutoPublishSlot(accountId, workspace, { force: true }).catch(() => undefined);
   }
 }

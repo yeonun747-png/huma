@@ -688,8 +688,8 @@ async function submitCaptcha(
   if (!confirmed) {
     // nidlogin 캡차는 별도 확인 버튼이 없다 — 로그인 버튼 마우스 클릭
     if (page.url().includes('nidlogin') && !(await isNaverAuthChallengePage(page))) {
-      await clickNaverLoginButton(page);
-      await sleep(randomBetween(350, 700));
+      await clickNaverLoginButton(page, { skipIpSecurity: true, credentialsReady: true });
+      await sleep(randomBetween(250, 500));
     } else if (!page.url().includes('nidlogin')) {
       await page.keyboard.press('Enter').catch(() => {});
       await sleep(randomBetween(350, 700));
@@ -700,7 +700,7 @@ async function submitCaptcha(
     if (ctx.resubmit) {
       await ctx.resubmit();
     } else if (page.url().includes('nidlogin') && !(await isNaverAuthChallengePage(page))) {
-      await clickNaverLoginButton(page);
+      await clickNaverLoginButton(page, { skipIpSecurity: true, credentialsReady: true });
     }
   }
 }
