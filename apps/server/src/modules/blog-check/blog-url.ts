@@ -122,10 +122,6 @@ export function countExternalLinks(content: string | null | undefined, linkUrl?:
   const bare = content?.matchAll(/https?:\/\/[^\s)\]"'<>]+/g) ?? [];
   for (const m of bare) add(m[0]);
 
-  if (/yeonun\.com/i.test(content ?? '')) add('https://yeonun.com');
-  else if (/myquizoasis\.com/i.test(content ?? '')) add('https://myquizoasis.com');
-  else if (/panana\.com/i.test(content ?? '')) add('https://panana.com');
-
   return count;
 }
 

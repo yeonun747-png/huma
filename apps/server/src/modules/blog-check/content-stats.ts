@@ -1,4 +1,7 @@
-import { countExternalLinks, plainTextLength, resolveExtLinkCount } from './blog-url.js';
+import type { ContentType } from '@huma/shared';
+
+import { sanitizeBlogPostForNaver } from '../../lib/naver-post-sanitize.js';
+import { countExternalLinks, plainTextLength } from './blog-url.js';
 
 export interface PostContentStats {
   char_count: number;
@@ -24,11 +27,17 @@ export function parsePostContentStats(
   options?: {
     linkUrl?: string | null;
     workspace?: string | null;
+    contentType?: ContentType | null;
     imageUrls?: string[] | null;
     hasVideo?: boolean;
   },
 ): PostContentStats {
   const text = content ?? '';
+  const publishedBody = sanitizeBlogPostForNaver(text, {
+    contentType: options?.contentType ?? undefined,
+    linkUrl: options?.linkUrl,
+    workspace: options?.workspace ?? 'yeonun',
+  });
   const imgFromMarkdown = countMatches(text, /!\[[^\]]*\]\([^)]+\)/g);
   const imgCount = Math.max(options?.imageUrls?.length ?? 0, imgFromMarkdown);
 
@@ -49,7 +58,8 @@ export function parsePostContentStats(
     countMatches(text, /spoiler|스포일러/gi);
 
   const intLinkCount = countInternalBlogLinks(text);
-  const extLinkCount = resolveExtLinkCount(text, options?.linkUrl);
+  /** 발행 본문(sanitize 후)에 실제로 남는 외부 URL만 — link_url·워크스페이스 홈은 발행 시 제거됨 */
+  const extLinkCount = countExternalLinks(publishedBody, null);
 
   return {
     char_count: plainTextLength(text),

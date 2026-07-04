@@ -17,7 +17,6 @@ import {
   postBelongsToBlog,
   postNoFromDbRow,
   postRowMergeKey,
-  resolveExtLinkCount,
 } from './blog-url.js';
 import {
   getCachedBlogPostList,
@@ -339,11 +338,12 @@ interface JobPostSource {
   created_at: string;
 }
 
-/** posts.ext_link_count 보정 — huma_jobs 본문·link_url 기준 */
+/** posts.ext_link_count 보정 — huma_jobs 발행 본문(sanitize 후) 기준 */
 async function reconcileExtLinkCountsFromJobs(
   accountId: string,
   posts: Map<string, PostRow>,
   jobs: JobPostSource[] | null,
+  workspace?: string | null,
 ): Promise<void> {
   if (!jobs?.length) return;
 
@@ -361,16 +361,17 @@ async function reconcileExtLinkCountsFromJobs(
       jobByKey.get(postRowMergeKey(row.post_url, extractPostNoFromUrl(row.post_url)));
     if (!job) continue;
 
-    const fromJob = resolveExtLinkCount(job.content, job.link_url);
-    let next = row.ext_link_count;
-    if (fromJob > row.ext_link_count) {
-      next = fromJob;
-    } else if (row.ext_link_count === 1 && fromJob === 0) {
-      next = 0;
-    }
-    if (next === row.ext_link_count) continue;
+    const fromJob = parsePostContentStats(job.content, {
+      linkUrl: job.link_url,
+      workspace,
+      imageUrls: job.image_urls,
+      hasVideo: job.content_type === 'B',
+      contentType: job.content_type as import('@huma/shared').ContentType | undefined,
+    }).ext_link_count;
+    if (fromJob === row.ext_link_count) continue;
 
-    row.ext_link_count = next;
+    row.ext_link_count = fromJob;
+    const next = fromJob;
     let q = supabase
       .from('posts')
       .update({ ext_link_count: next })
@@ -398,6 +399,7 @@ function jobToPostRow(
     workspace,
     imageUrls: job.image_urls,
     hasVideo: job.content_type === 'B',
+    contentType: job.content_type as import('@huma/shared').ContentType | undefined,
   });
   return {
     id: postUrl,
@@ -531,7 +533,7 @@ async function fetchRecentPosts(
     }
   }
 
-  await reconcileExtLinkCountsFromJobs(accountId, merged, (jobs ?? []) as JobPostSource[]);
+  await reconcileExtLinkCountsFromJobs(accountId, merged, (jobs ?? []) as JobPostSource[], workspace);
 
   const rows = Array.from(merged.values());
   const filtered = blogId ? rows.filter((p) => postBelongsToBlog(p.post_url, blogId)) : rows;
@@ -1011,7 +1013,14 @@ async function computePostScanResult(
           ext_link_count: post.ext_link_cleared ? 0 : crawled.ext_link_count,
         }
       : hasStoredContent
-        ? mergePostContentStats(fromPost, crawled)
+        ? {
+            ...mergePostContentStats(fromPost, crawled),
+            ext_link_count: post.ext_link_cleared
+              ? 0
+              : crawled.char_count > 0
+                ? crawled.ext_link_count
+                : fromPost.ext_link_count,
+          }
         : crawled;
   const exposure = {
     status: rankResult.rank != null ? rankToExposureStatus(rankResult.rank) : rankResult.status,
@@ -1781,6 +1790,12 @@ export async function buildBlogCheckPostsResponse(accountId: string) {
         ? statsFromStatusRow(st, post.ext_link_cleared)
         : statsFromDbRow(post as unknown as Record<string, unknown>, workspace);
       const displayStatus = st ? resolveExposureStatusFromRow(st) : null;
+      const postExtLink = post.ext_link_cleared ? 0 : Number(post.ext_link_count ?? 0);
+      const extLinkCount = post.ext_link_cleared
+        ? 0
+        : st
+          ? Math.min(stats.ext_link_count, postExtLink)
+          : stats.ext_link_count;
 
       return {
         post_url: post.post_url,
@@ -1799,7 +1814,7 @@ export async function buildBlogCheckPostsResponse(accountId: string) {
         map_count: stats.map_count,
         hidden_count: stats.hidden_count,
         int_link_count: stats.int_link_count,
-        ext_link_count: stats.ext_link_count,
+        ext_link_count: extLinkCount,
       };
     }),
   };
