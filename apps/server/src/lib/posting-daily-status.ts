@@ -16,7 +16,7 @@ import { listActivePananaCharacters } from '../modules/video-content/panana-char
 
 import { listYeonunProducts } from '../modules/video-content/yeonun-product-picker.js';
 
-import { getPostingReservedToday } from './posting-quota-reserve.js';
+import { getPostingReservedToday, isOrphanPostingReservation, clearOrphanPostingReservations } from './posting-quota-reserve.js';
 import { countTodaySimilaritySkipped } from './posting-content-similarity.js';
 import { countTodayPostBlogPublished } from './post-blog-publish-day.js';
 import { getPostingWarmupDay } from './posting-warmup-day.js';
@@ -262,7 +262,11 @@ async function buildAccountPublishStatus(
 
   const pipeline_jobs = await countInFlightPostingPipeline(account.id);
 
-  const reserved_slots = await getPostingReservedToday(account.id);
+  let reserved_slots = await getPostingReservedToday(account.id);
+  if (isOrphanPostingReservation(pipeline_jobs, reserved_slots)) {
+    await clearOrphanPostingReservations(account.id, pipeline_jobs).catch(() => undefined);
+    reserved_slots = 0;
+  }
 
   const in_flight = pipeline_jobs + reserved_slots;
 

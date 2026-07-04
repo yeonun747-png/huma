@@ -2,6 +2,11 @@ import { supabase } from '../middleware/auth.js';
 import { removeBullJob } from './job-scheduler.js';
 import { isCaptchaDrillJob } from '@huma/shared';
 import { cancelCaptchaHold } from '../modules/watcher/captcha-hold.js';
+import {
+  isPostingPipelineJobType,
+  reconcilePostingAfterJobRemoval,
+  type PostingReconcileTarget,
+} from './reconcile-posting-after-job-removal.js';
 
 const VIDEO_JOB_FK_COLS = ['blog_job_id', 'threads_job_id', 'twitter_job_id'] as const;
 
@@ -101,10 +106,34 @@ async function deleteSingleJobRecord(
   return { ok: true };
 }
 
+async function collectPostingReconcileTargets(ids: string[]): Promise<PostingReconcileTarget[]> {
+  const targets: PostingReconcileTarget[] = [];
+  const seen = new Set<string>();
+
+  for (const id of ids) {
+    const { data: job } = await supabase
+      .from('huma_jobs')
+      .select('account_id, workspace, job_type')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (!job?.account_id || !job.workspace || !isPostingPipelineJobType(job.job_type)) continue;
+
+    const key = `${job.account_id}:${job.workspace}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    targets.push({ accountId: job.account_id as string, workspace: job.workspace as string });
+  }
+
+  return targets;
+}
+
 /** huma_logs·video_queue FK 정리 후 job 삭제 (연동 content_full·post_blog 포함) */
 export async function deleteJobById(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
   const ids = await expandJobDeleteSet([id]);
   if (ids.length === 0) return { ok: false, error: '작업 없음' };
+
+  const reconcileTargets = await collectPostingReconcileTargets(ids);
 
   for (const jobId of ids) {
     const { data: existing, error: selectErr } = await supabase
@@ -120,11 +149,13 @@ export async function deleteJobById(id: string): Promise<{ ok: true } | { ok: fa
     if (!result.ok) return result;
   }
 
+  await reconcilePostingAfterJobRemoval(reconcileTargets);
   return { ok: true };
 }
 
 export async function deleteJobsByIds(ids: string[]): Promise<{ deleted: number; failed: number; errors: string[] }> {
   const expanded = await expandJobDeleteSet(ids);
+  const reconcileTargets = await collectPostingReconcileTargets(expanded);
   let deleted = 0;
   let failed = 0;
   const errors: string[] = [];
@@ -150,6 +181,10 @@ export async function deleteJobsByIds(ids: string[]): Promise<{ deleted: number;
       failed += 1;
       errors.push(result.error);
     }
+  }
+
+  if (deleted > 0) {
+    await reconcilePostingAfterJobRemoval(reconcileTargets);
   }
 
   return { deleted, failed, errors: [...new Set(errors)] };

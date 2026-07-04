@@ -6,6 +6,10 @@ import { logOperation } from './log-emitter.js';
 import { removeBullJob } from './job-scheduler.js';
 import { cancelCaptchaHold, getCaptchaHold } from '../modules/watcher/captcha-hold.js';
 import { deleteJobById } from './delete-job.js';
+import {
+  isPostingPipelineJobType,
+  reconcilePostingAfterJobRemoval,
+} from './reconcile-posting-after-job-removal.js';
 
 function postingLockKey(port: number) {
   return `modem_lock:posting:${port}`;
@@ -74,7 +78,7 @@ export async function abortHumaJobById(
 ): Promise<{ ok: true; deleted: boolean } | { ok: false; error: string }> {
   const { data: job, error: selectErr } = await supabase
     .from('huma_jobs')
-    .select('id, status, bull_job_id, account_id, job_type, title')
+    .select('id, status, bull_job_id, account_id, workspace, job_type, title')
     .eq('id', id)
     .maybeSingle();
 
@@ -119,6 +123,16 @@ export async function abortHumaJobById(
     job_id: id,
     account_id: job.account_id ?? undefined,
   });
+
+  if (
+    job.account_id &&
+    job.workspace &&
+    isPostingPipelineJobType(String(job.job_type))
+  ) {
+    await reconcilePostingAfterJobRemoval([
+      { accountId: job.account_id as string, workspace: job.workspace as string },
+    ]);
+  }
 
   return { ok: true, deleted: false };
 }
