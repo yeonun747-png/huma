@@ -79,6 +79,30 @@ export async function waitForBlogPortalReady(
 }
 
 /**
+ * www.naver.com — 상단 「블로그」 서비스 링크 클릭 우선, 실패 시 blog.naver.com goto
+ */
+async function reachBlogPortalFromPage(page: Page): Promise<BlogPortalState> {
+  if (await probeWriteEntry(page)) return 'write_ready';
+
+  const current = page.url();
+  if (current.includes('www.naver.com') && !current.includes('nidlogin')) {
+    const blogNav = page
+      .locator(
+        '.link_service:has-text("블로그"), a.link_service[href*="blog"], a[href*="section.blog.naver.com"]',
+      )
+      .first();
+    if (await blogNav.isVisible({ timeout: 2500 }).catch(() => false)) {
+      await humanClickLocatorFallback(page, blogNav, [140, 320]);
+      await page.waitForLoadState('domcontentloaded', { timeout: PLAYWRIGHT_NAV_TIMEOUT_MS }).catch(() => {});
+      const state = await waitForBlogPortalReady(page, 12_000);
+      if (state !== 'timeout') return state;
+    }
+  }
+
+  return gotoBlogPortal(page);
+}
+
+/**
  * 블로그 포털 보장 — 이미 글쓰기 진입점이 보이면 즉시 반환.
  * 블로그 도메인(BlogHome 포함)이면 네비게이션 없이 렌더만 대기.
  * 그 외 도메인일 때만 1회 goto (8초 debounce). 재-goto 루프 금지.
@@ -111,7 +135,7 @@ export async function ensureBlogWriteEntry(
   page: Page,
   personalBlogUrl?: string,
 ): Promise<Locator | null> {
-  const state = await gotoBlogPortal(page);
+  const state = await reachBlogPortalFromPage(page);
   if (state === 'write_ready') return probeWriteEntry(page);
   if (state === 'logged_out') return null;
 
@@ -123,10 +147,12 @@ export async function ensureBlogWriteEntry(
   }
 
   const myBlogLink = page
-    .locator('a[href*="blog.naver.com/"]:not([href*="section.blog"]):not([href*="BlogHome"])')
+    .locator(
+      'a:has-text("내 블로그"), a[href*="blog.naver.com/"]:not([href*="section.blog"]):not([href*="BlogHome"])',
+    )
     .first();
   if (await myBlogLink.isVisible().catch(() => false)) {
-    await humanClickLocatorFallback(page, myBlogLink, [100, 260]);
+    await humanClickLocatorFallback(page, myBlogLink, [120, 280]);
     await page.waitForLoadState('domcontentloaded').catch(() => {});
     return findBlogWriteEntry(page, 10_000);
   }

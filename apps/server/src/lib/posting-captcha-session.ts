@@ -6,15 +6,25 @@ import { isNaverAuthChallengePage } from './naver-auth-challenge.js';
 import { throwIfNaverAccountProtection } from './naver-account-protection.js';
 import { isNaverCaptchaVisible, pickNaverCaptchaPage } from './naver-captcha-vision.js';
 import { gotoBlogPortal, waitForBlogPortalReady } from './naver-blog-portal.js';
-import { findNaverPostwritePage } from '../modules/playwright/naver/enter-blog-editor.js';
+import {
+  findNaverPostwritePage,
+  loadBlogIdForAccount,
+  openBlogPostwritePreferUiClick,
+} from '../modules/playwright/naver/enter-blog-editor.js';
 import { sleep } from './utils.js';
 import { vncFastSleepScale } from './vnc-session.js';
 
 /** CAPTCHA hold — VNC 수동 로그인 클릭 직후 감지 주기 */
 export const POSTING_LOGIN_POLL_MS = 800;
 
+/** PW Enter·로그인 버튼 직후 — nidlogin 이탈·캡cha 감지 (구 60s 폴링 단축) */
+export const NAVER_LOGIN_POST_SUBMIT_POLL_MS = 250;
+export const NAVER_LOGIN_POST_SUBMIT_TIMEOUT_MS = 25_000;
+
 const LOGGED_IN_CSS =
-  'a[href*="nidlogout"], a[href*="nidlogin.logout"], .gnb_my, #account, [class*="MyView"]';
+  'a[href*="nidlogout"], a[href*="nidlogin.logout"], .gnb_my, #account, [class*="MyView"], .profile_area, .area_profile';
+
+const LOGGED_IN_TEXT_CSS = 'a:has-text("로그아웃"), button:has-text("로그아웃")';
 
 function scaleMs(min: number, max: number): [number, number] {
   const s = vncFastSleepScale();
@@ -58,6 +68,9 @@ export async function isNaverLoggedInOnPage(page: Page): Promise<boolean> {
   if (await page.locator(LOGGED_IN_CSS).first().isVisible({ timeout: 600 }).catch(() => false)) {
     return true;
   }
+  if (await page.locator(LOGGED_IN_TEXT_CSS).first().isVisible({ timeout: 400 }).catch(() => false)) {
+    return true;
+  }
 
   if (url.includes('blog.naver.com') || url.includes('section.blog')) {
     const state = await waitForBlogPortalReady(page, 4000);
@@ -65,12 +78,15 @@ export async function isNaverLoggedInOnPage(page: Page): Promise<boolean> {
   }
 
   if (url.includes('www.naver.com')) {
-    await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => {});
-    if (await page.locator(LOGGED_IN_CSS).first().isVisible({ timeout: 1000 }).catch(() => false)) {
+    await page.waitForLoadState('domcontentloaded', { timeout: 2500 }).catch(() => {});
+    if (await page.locator(LOGGED_IN_CSS).first().isVisible({ timeout: 800 }).catch(() => false)) {
+      return true;
+    }
+    if (await page.locator(LOGGED_IN_TEXT_CSS).first().isVisible({ timeout: 500 }).catch(() => false)) {
       return true;
     }
     const loginLink = page.locator('a[href*="nidlogin.login"], a.link_login').first();
-    if (await loginLink.isVisible({ timeout: 800 }).catch(() => false)) return false;
+    if (await loginLink.isVisible({ timeout: 500 }).catch(() => false)) return false;
     return false;
   }
 
@@ -129,16 +145,20 @@ export async function pollUntilNaverLoginRedirect(
     if (await isNaverAuthChallengePage(page)) {
       throw new Error('NAVER_LOGIN_2FA');
     }
-    await sleep(POSTING_LOGIN_POLL_MS);
+    const pollMs = page.url().includes('nidlogin') ? NAVER_LOGIN_POST_SUBMIT_POLL_MS : POSTING_LOGIN_POLL_MS;
+    await sleep(pollMs);
   }
-  await page.waitForLoadState('domcontentloaded').catch(() => {});
+  await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
   if (options.assertOk) await options.assertOk(page);
   if (!page.url().includes('nidlogin.login')) return;
   throw new Error('NAVER_LOGIN_TIMEOUT:redirect');
 }
 
 /** CAPTCHA hold 종료 전 — postwrite 탭이 있으면 생략(발행 재개 버튼과 동일·에디터 직행) */
-export async function persistPostingSessionBeforeHoldClose(context: BrowserContext): Promise<void> {
+export async function persistPostingSessionBeforeHoldClose(
+  context: BrowserContext,
+  accountId?: string,
+): Promise<void> {
   if (findNaverPostwritePage(context)) return;
 
   const page = pickPostingWorkflowPage(context) ?? (await pickNaverCaptchaPage(context));
@@ -149,12 +169,22 @@ export async function persistPostingSessionBeforeHoldClose(context: BrowserConte
 
   if (page.url().includes('nidlogin.login')) {
     await page
-      .waitForURL((u) => !u.href.includes('nidlogin.login'), { timeout: 20_000 })
+      .waitForURL((u) => !u.href.includes('nidlogin.login'), { timeout: 12_000 })
       .catch(() => {});
   }
 
+  await page.bringToFront().catch(() => {});
+
+  if (accountId) {
+    const blogId = await loadBlogIdForAccount(accountId);
+    if (blogId && (await openBlogPostwritePreferUiClick(page, blogId))) {
+      await humanSleep(...scaleMs(400, 900));
+      return;
+    }
+  }
+
   await gotoBlogPortal(page).catch(() => {});
-  await humanSleep(...scaleMs(800, 1800));
+  await humanSleep(...scaleMs(400, 900));
 }
 
 /** huma_jobs 행 → post_blog worker payload (hold 소실·재개 폴백) */
@@ -200,11 +230,16 @@ export async function ensurePostingSessionAfterCaptcha(
   options?: { allowAutoLoginSubmit?: boolean; loginWaitMs?: number },
 ): Promise<boolean> {
   const allowAutoLoginSubmit = options?.allowAutoLoginSubmit === true;
+  const loginWaitMs = options?.loginWaitMs ?? 12_000;
+  const loginDeadline = Date.now() + loginWaitMs;
 
-  const loggedIn = await findLoggedInPostingPage(context);
-  if (loggedIn) {
-    await persistPostingSessionBeforeHoldClose(context);
-    return true;
+  while (Date.now() < loginDeadline) {
+    const loggedIn = await findLoggedInPostingPage(context);
+    if (loggedIn) {
+      await persistPostingSessionBeforeHoldClose(context, accountId);
+      return true;
+    }
+    await sleep(350);
   }
 
   let page = pickPostingWorkflowPage(context) ?? (await pickNaverCaptchaPage(context));
@@ -218,37 +253,62 @@ export async function ensurePostingSessionAfterCaptcha(
 
   if (allowAutoLoginSubmit && page.url().includes('nidlogin')) {
     await submitNaverLoginAfterCaptcha(page, accountId);
-    await humanSleep(...scaleMs(800, 1500));
+    await humanSleep(...scaleMs(500, 1000));
   } else if (page.url().includes('nidlogin')) {
     return false;
   }
 
   const probe = pickPostingWorkflowPage(context) ?? page;
   if (await isBlogWriteReady(probe)) {
-    await persistPostingSessionBeforeHoldClose(context);
+    await persistPostingSessionBeforeHoldClose(context, accountId);
     return true;
+  }
+
+  if (accountId) {
+    const blogId = await loadBlogIdForAccount(accountId);
+    if (blogId && (await openBlogPostwritePreferUiClick(probe, blogId))) {
+      await humanSleep(...scaleMs(400, 900));
+      if (await isBlogWriteReady(probe)) {
+        await persistPostingSessionBeforeHoldClose(context, accountId);
+        return true;
+      }
+    }
   }
 
   await gotoBlogPortal(probe).catch(() => {});
-  await humanSleep(...scaleMs(600, 1200));
+  await humanSleep(...scaleMs(400, 900));
   if (await isBlogWriteReady(probe)) {
-    await persistPostingSessionBeforeHoldClose(context);
+    await persistPostingSessionBeforeHoldClose(context, accountId);
     return true;
   }
 
-  return probeBlogSessionAfterCaptcha(context);
+  return probeBlogSessionAfterCaptcha(context, accountId);
 }
 
 /** VNC CAPTCHA 해결 직후 — blog.naver.com 글쓰기 가능 여부만 확인 */
-export async function probeBlogSessionAfterCaptcha(context: BrowserContext): Promise<boolean> {
+export async function probeBlogSessionAfterCaptcha(
+  context: BrowserContext,
+  accountId?: string,
+): Promise<boolean> {
   const page = await context.newPage().catch(() => null);
   if (!page) return false;
   try {
+    if (accountId) {
+      const blogId = await loadBlogIdForAccount(accountId);
+      if (blogId && (await openBlogPostwritePreferUiClick(page, blogId))) {
+        await humanSleep(...scaleMs(400, 900));
+        const ready = await isBlogWriteReady(page);
+        if (ready) {
+          await persistPostingSessionBeforeHoldClose(context, accountId);
+        }
+        return ready;
+      }
+    }
     await gotoBlogPortal(page);
     await humanSleep(...scaleMs(400, 900));
     const ready = await isBlogWriteReady(page);
     if (ready) {
-      await persistPostingSessionBeforeHoldClose(context);
+      await persistPostingSessionBeforeHoldClose(context, accountId);
     }
     return ready;
   } catch {

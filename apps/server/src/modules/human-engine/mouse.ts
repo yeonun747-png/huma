@@ -6,6 +6,7 @@ import { showVncAutomationPointer } from '../../lib/vnc-pointer.js';
 
 function isNaverLoginOrChallengeUrl(url: string): boolean {
   const u = url.toLowerCase();
+  if (u.includes('captcha.naver.com') || u.includes('/captcha')) return true;
   if (!u.includes('naver.com')) return false;
   return (
     u.includes('nidlogin') ||
@@ -18,6 +19,17 @@ function isNaverLoginOrChallengeUrl(url: string): boolean {
     u.includes('certify') ||
     u.includes('loginpolicy')
   );
+}
+
+/** nidlogin·캡cha — 베지어를 느리게( lite 금지 ). 호출부에서 login 미지정 시 URL로 자동 판별 */
+function resolveMousePace(
+  page: Page,
+  opts?: { lite?: boolean; login?: boolean },
+): { lite: boolean; login: boolean } {
+  if (opts?.lite) return { lite: true, login: false };
+  if (opts?.login) return { lite: false, login: true };
+  if (isNaverLoginOrChallengeUrl(page.url())) return { lite: false, login: true };
+  return { lite: false, login: false };
 }
 
 async function skipClickIfNaverAuthChallenge(page: Page): Promise<boolean> {
@@ -79,23 +91,26 @@ export async function humanMouseMove(
   y: number,
   opts?: { lite?: boolean; login?: boolean },
 ) {
+  const pace = resolveMousePace(page, opts);
   const start = getMousePosition(page);
   const end: Point = { x, y };
   const dx = end.x - start.x;
   const dy = end.y - start.y;
-  const steps = opts?.lite
+  const dist = Math.hypot(dx, dy);
+  const steps = pace.lite
     ? randomBetween(5, 9)
-    : opts?.login
-      ? randomBetween(10, 16)
+    : pace.login
+      ? randomBetween(16, Math.min(28, 12 + Math.floor(dist / 45)))
       : randomBetween(18, 32);
-  const skipX11 = opts?.lite === true || opts?.login === true;
+  const skipX11 = pace.lite || pace.login;
+  const cpSpread = pace.login ? 48 : 80;
   const cp1: Point = {
-    x: start.x + dx * 0.25 + randomBetween(-80, 80),
-    y: start.y + dy * 0.15 + randomBetween(-60, 60),
+    x: start.x + dx * 0.25 + randomBetween(-cpSpread, cpSpread),
+    y: start.y + dy * 0.15 + randomBetween(-cpSpread * 0.75, cpSpread * 0.75),
   };
   const cp2: Point = {
-    x: start.x + dx * 0.75 + randomBetween(-80, 80),
-    y: start.y + dy * 0.85 + randomBetween(-60, 60),
+    x: start.x + dx * 0.75 + randomBetween(-cpSpread, cpSpread),
+    y: start.y + dy * 0.85 + randomBetween(-cpSpread * 0.75, cpSpread * 0.75),
   };
 
   for (let i = 1; i <= steps; i++) {
@@ -107,21 +122,21 @@ export async function humanMouseMove(
     });
     await sleep(
       randomBetween(
-        opts?.lite ? 4 : opts?.login ? 10 : 8,
-        opts?.lite ? 12 : opts?.login ? 26 : 22,
+        pace.lite ? 4 : pace.login ? 16 : 8,
+        pace.lite ? 12 : pace.login ? 38 : 22,
       ),
     );
   }
 
-  if (Math.random() < (opts?.lite ? 0.04 : opts?.login ? 0.06 : 0.12)) {
+  if (Math.random() < (pace.lite ? 0.04 : pace.login ? 0.08 : 0.12)) {
     const ox = x + randomBetween(-10, 10);
     const oy = y + randomBetween(-8, 8);
     await page.mouse.move(ox, oy);
     await showVncAutomationPointer(page, ox, oy, { skipX11Sync: skipX11 });
-    await sleep(randomBetween(opts?.lite ? 8 : opts?.login ? 14 : 18, opts?.lite ? 20 : opts?.login ? 32 : 48));
+    await sleep(randomBetween(pace.lite ? 8 : pace.login ? 18 : 18, pace.lite ? 20 : pace.login ? 40 : 48));
     await page.mouse.move(x, y);
     await showVncAutomationPointer(page, x, y, { skipX11Sync: skipX11 });
-    await sleep(randomBetween(opts?.lite ? 6 : opts?.login ? 10 : 10, opts?.lite ? 14 : opts?.login ? 22 : 24));
+    await sleep(randomBetween(pace.lite ? 6 : pace.login ? 14 : 10, pace.lite ? 14 : pace.login ? 28 : 24));
   }
 
   setMousePosition(page, { x, y });
@@ -139,17 +154,18 @@ export async function humanClickLocator(
 ) {
   if (await skipClickIfNaverAuthChallenge(page)) return;
 
-  const scrollTimeout = opts?.lite || opts?.login ? 2500 : 5000;
-  const visibleTimeout = opts?.lite ? 2000 : opts?.login ? 2500 : 5000;
+  const pace = resolveMousePace(page, opts);
+  const scrollTimeout = pace.lite || pace.login ? 2500 : 5000;
+  const visibleTimeout = pace.lite ? 2000 : pace.login ? 2500 : 5000;
   let lastBox: Awaited<ReturnType<Locator['boundingBox']>> = null;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     await locator.scrollIntoViewIfNeeded({ timeout: scrollTimeout }).catch(() => {});
     await locator
-      .waitFor({ state: 'visible', timeout: attempt === 0 ? visibleTimeout : opts?.lite ? 800 : 1500 })
+      .waitFor({ state: 'visible', timeout: attempt === 0 ? visibleTimeout : pace.lite ? 800 : 1500 })
       .catch(() => {});
     lastBox = await locator.boundingBox();
     if (lastBox) break;
-    await sleep(randomBetween(opts?.lite ? 80 : 200, opts?.lite ? 180 : 450));
+    await sleep(randomBetween(pace.lite ? 80 : 200, pace.lite ? 180 : 450));
   }
   if (!lastBox) {
     throw new Error('HUMAN_CLICK_NO_BBOX');
@@ -158,15 +174,15 @@ export async function humanClickLocator(
   const jitter = jitterPx ?? (await getClickJitterPx());
   const cx = box.x + box.width / 2 + randomBetween(-jitter, jitter);
   const cy = box.y + box.height / 2 + randomBetween(-jitter, jitter);
-  await humanMouseMove(page, cx, cy, { lite: opts?.lite, login: opts?.login });
-  const delay = opts?.lite
+  await humanMouseMove(page, cx, cy, { lite: pace.lite, login: pace.login });
+  const delay = pace.lite
     ? ([40, 120] as [number, number])
-    : opts?.login
-      ? ([120, 280] as [number, number])
+    : pace.login
+      ? ([140, 320] as [number, number])
       : preClickDelayMs;
   await sleep(randomBetween(delay[0], delay[1]));
   await page.mouse.click(cx, cy);
-  await showVncAutomationPointer(page, cx, cy, { click: true, skipX11Sync: opts?.lite || opts?.login });
+  await showVncAutomationPointer(page, cx, cy, { click: true, skipX11Sync: pace.lite || pace.login });
   setMousePosition(page, { x: cx, y: cy });
 }
 
@@ -181,20 +197,21 @@ export async function humanClickAtPoint(
 ): Promise<void> {
   if (await skipClickIfNaverAuthChallenge(page)) return;
 
+  const pace = resolveMousePace(page, opts);
   const jitter = jitterPx ?? (await getClickJitterPx());
   const cx = x + randomBetween(-jitter, jitter);
   const cy = y + randomBetween(-jitter, jitter);
-  await humanMouseMove(page, cx, cy, { lite: opts?.lite, login: opts?.login });
-  const delay = opts?.lite
+  await humanMouseMove(page, cx, cy, { lite: pace.lite, login: pace.login });
+  const delay = pace.lite
     ? ([35, 100] as [number, number])
-    : opts?.login
-      ? ([100, 240] as [number, number])
+    : pace.login
+      ? ([130, 300] as [number, number])
       : preClickDelayMs;
   await sleep(randomBetween(delay[0], delay[1]));
   await page.mouse.click(cx, cy);
   await showVncAutomationPointer(page, cx, cy, {
     click: true,
-    skipX11Sync: opts?.lite || opts?.login,
+    skipX11Sync: pace.lite || pace.login,
   });
   setMousePosition(page, { x: cx, y: cy });
 }
@@ -239,17 +256,18 @@ export async function humanDrag(
 ): Promise<void> {
   if (await skipClickIfNaverAuthChallenge(page)) return;
 
+  const authPace = isNaverLoginOrChallengeUrl(page.url());
   const endY = toY + randomBetween(-4, 4);
-  await humanMouseMove(page, fromX, fromY);
-  await sleep(randomBetween(100, 280));
+  await humanMouseMove(page, fromX, fromY, authPace ? { login: true } : undefined);
+  await sleep(randomBetween(authPace ? 140 : 100, authPace ? 320 : 280));
   await page.mouse.down();
-  await sleep(randomBetween(40, 120));
+  await sleep(randomBetween(authPace ? 60 : 40, authPace ? 160 : 120));
 
   const start: Point = { x: fromX, y: fromY };
   const end: Point = { x: toX, y: endY };
   const dx = end.x - start.x;
   const dy = end.y - start.y;
-  const steps = randomBetween(22, 38);
+  const steps = authPace ? randomBetween(26, 42) : randomBetween(22, 38);
   const cp1: Point = {
     x: start.x + dx * 0.2 + randomBetween(-12, 12),
     y: start.y + dy * 0.1 + randomBetween(-8, 8),
@@ -264,11 +282,11 @@ export async function humanDrag(
     const p = cubicBezier(t, start, cp1, cp2, end);
     const wobble = Math.sin(t * Math.PI) * randomBetween(-2, 2);
     await page.mouse.move(p.x, p.y + wobble);
-    await showVncAutomationPointer(page, p.x, p.y + wobble);
-    await sleep(randomBetween(10, 24));
+    await showVncAutomationPointer(page, p.x, p.y + wobble, { skipX11Sync: authPace });
+    await sleep(randomBetween(authPace ? 14 : 10, authPace ? 32 : 24));
   }
 
-  await sleep(randomBetween(80, 200));
+  await sleep(randomBetween(authPace ? 100 : 80, authPace ? 240 : 200));
   await page.mouse.up();
   setMousePosition(page, { x: toX, y: endY });
 }

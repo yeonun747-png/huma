@@ -12,6 +12,7 @@ import { PLAYWRIGHT_NAV_TIMEOUT_MS } from '../../../lib/playwright-nav-timeout.j
 import { sleep } from '../../../lib/utils.js';
 import { logOperation } from '../../../lib/log-emitter.js';
 import { supabase } from '../../../middleware/auth.js';
+import { ensureBlogWriteEntry } from '../../../lib/naver-blog-portal.js';
 import {
   BLOG_BODY_SELECTORS,
   BLOG_TITLE_SELECTORS,
@@ -45,6 +46,8 @@ const POSTWRITE_URL_RE = /postwrite|PostWriteForm|GoBlogWrite/i;
 
 /** VNC/Xvfb — SmartEditor ONE 초기 로딩·도움말 오버레이 대기 */
 const SMART_EDITOR_WAIT_MS = 180_000;
+/** 깨진 postwrite 탭 — 짧게만 확인 후 워크플로우 탭에서 재진입 */
+const STALE_POSTWRITE_PROBE_MS = 18_000;
 const EDITOR_POLL_MS = 1_200;
 
 const TITLE_EDITOR_SELECTORS = BLOG_TITLE_SELECTORS;
@@ -81,6 +84,84 @@ async function loadBlogIdFromAccount(accountId: string): Promise<string | null> 
   if (fromUrl && !RESERVED_BLOG_PATHS.has(fromUrl)) return fromUrl;
   const nid = (data?.naver_id as string | undefined)?.trim();
   return nid || null;
+}
+
+export async function loadBlogIdForAccount(accountId: string): Promise<string | null> {
+  return loadBlogIdFromAccount(accountId);
+}
+
+export async function navigateToBlogPostwrite(
+  page: Page,
+  blogId: string,
+  timeoutMs = PLAYWRIGHT_NAV_TIMEOUT_MS,
+): Promise<boolean> {
+  const url = `https://blog.naver.com/${blogId}/postwrite`;
+  try {
+    await page.bringToFront().catch(() => {});
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+  } catch {
+    /* domcontentloaded 실패해도 URL만 postwrite면 성공 */
+  }
+  return POSTWRITE_URL_RE.test(page.url());
+}
+
+/**
+ * 홈(잠깐) → 블로그/내 블로그 → 「글쓰기」 마우스 클릭 우선.
+ * UI 경로 실패 시 postwrite URL goto 폴백.
+ * @returns postwrite URL 탭 (동일 탭 또는 팝업)
+ */
+export async function openBlogPostwritePreferUiClick(
+  page: Page,
+  blogId: string,
+): Promise<Page | null> {
+  if (POSTWRITE_URL_RE.test(page.url())) return page;
+
+  await page.bringToFront().catch(() => {});
+
+  if (page.url().includes('www.naver.com') && !page.url().includes('nidlogin')) {
+    await scaledSleep(600, 1400);
+  }
+
+  const personalBlogUrl = `https://blog.naver.com/${blogId}`;
+  const writeEntry = await ensureBlogWriteEntry(page, personalBlogUrl);
+
+  if (writeEntry) {
+    const popupPromise = page.context().waitForEvent('page', { timeout: 10_000 }).catch(() => null);
+    const clicked = await humanClickLocatorFallback(page, writeEntry, [120, 280]);
+    if (clicked) {
+      await sleep(350);
+      const popup = await popupPromise;
+      if (popup && !popup.isClosed()) {
+        await popup.waitForLoadState('domcontentloaded', { timeout: PLAYWRIGHT_NAV_TIMEOUT_MS }).catch(() => {});
+        if (POSTWRITE_URL_RE.test(popup.url())) {
+          await logOperation({
+            level: 'info',
+            message: `[post_blog] 블로그 글쓰기 UI 클릭 진입 (팝업) blogId=${blogId}`,
+          }).catch(() => {});
+          await popup.bringToFront().catch(() => {});
+          return popup;
+        }
+      }
+      await page
+        .waitForURL((u) => POSTWRITE_URL_RE.test(u.href), { timeout: 12_000 })
+        .catch(() => {});
+      if (POSTWRITE_URL_RE.test(page.url())) {
+        await logOperation({
+          level: 'info',
+          message: `[post_blog] 블로그 글쓰기 UI 클릭 진입 blogId=${blogId}`,
+        }).catch(() => {});
+        return page;
+      }
+    }
+  }
+
+  await logOperation({
+    level: 'info',
+    message: `[post_blog] 글쓰기 UI 클릭 실패 — postwrite URL 폴백 blogId=${blogId}`,
+  }).catch(() => {});
+
+  if (await navigateToBlogPostwrite(page, blogId)) return page;
+  return null;
 }
 
 /** 이미 열린 postwrite 탭이 있으면 그 탭에서 에디터 로딩만 대기 (재네비게이션·재로그인 금지) */
@@ -443,15 +524,16 @@ export async function enterBlogEditor(
     expectedContent: options?.expectedContent,
   };
 
-  // ① 이미 postwrite 로딩 중인 탭 — goto 없이 대기만
+  // ① 이미 postwrite 로딩 중인 탭 — 짧게만 확인(깨진 탭 180s 대기 방지)
   const existingPostwrite = findNaverPostwritePage(context);
   if (existingPostwrite) {
-    const ready = await tryEditorOnPage(existingPostwrite, SMART_EDITOR_WAIT_MS, waitOpts);
+    const ready = await tryEditorOnPage(existingPostwrite, STALE_POSTWRITE_PROBE_MS, waitOpts);
     if (ready) return ready;
+    await existingPostwrite.close().catch(() => {});
   }
 
   if (POSTWRITE_URL_RE.test(page.url())) {
-    const ready = await tryEditorOnPage(page, SMART_EDITOR_WAIT_MS, waitOpts);
+    const ready = await tryEditorOnPage(page, STALE_POSTWRITE_PROBE_MS, waitOpts);
     if (ready) return ready;
   }
 
@@ -464,9 +546,33 @@ export async function enterBlogEditor(
     ? [`https://blog.naver.com/${blogId}/postwrite`, 'https://blog.naver.com/GoBlogWrite.naver']
     : ['https://blog.naver.com/GoBlogWrite.naver'];
 
-  const workflowPage = findNaverPostwritePage(context) ?? page;
+  let workflowPage = page;
+  if (!POSTWRITE_URL_RE.test(page.url())) {
+    for (const p of context.pages()) {
+      if (p.isClosed()) continue;
+      const u = p.url();
+      if (u.includes('nidlogin')) continue;
+      if (u.includes('www.naver.com') || (u.includes('blog.naver.com') && !POSTWRITE_URL_RE.test(u))) {
+        workflowPage = p;
+        break;
+      }
+    }
+  }
+  await workflowPage.bringToFront().catch(() => {});
   const startedAt = Date.now();
   const remainingMs = () => Math.max(30_000, SMART_EDITOR_WAIT_MS - (Date.now() - startedAt));
+
+  if (blogId && !POSTWRITE_URL_RE.test(workflowPage.url())) {
+    const opened = await openBlogPostwritePreferUiClick(workflowPage, blogId);
+    if (opened) {
+      workflowPage = opened;
+      await scaledSleep(800, 1500);
+      await dismissSeOneHelpPanel(workflowPage);
+      await waitAndDismissDraftResumePopup(workflowPage, 15_000).catch(() => {});
+      const ready = await tryEditorOnPage(workflowPage, remainingMs(), waitOpts);
+      if (ready) return ready;
+    }
+  }
 
   for (const url of writeUrls) {
     if (POSTWRITE_URL_RE.test(workflowPage.url())) break;

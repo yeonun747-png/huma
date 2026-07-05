@@ -63,7 +63,7 @@ export async function ensureNaverLoginIdPhoneTab(page: Page): Promise<void> {
     if (!(await tab.isVisible({ timeout: 400 }).catch(() => false))) continue;
     const href = (await tab.getAttribute('href').catch(() => null)) ?? '';
     if (/qrcode|otp|onetime|mode=number/i.test(href)) continue;
-    await humanClickLocator(page, tab);
+    await humanClickLocator(page, tab, undefined, [120, 280], { login: true });
     await sleep(450);
     if (await isNaverAuthChallengePage(page)) return;
     if (await isNaverLoginIdTabActive(page)) return;

@@ -232,7 +232,7 @@ async function clickNaverLoginButtonWithMouse(page: Page, btn: Locator): Promise
 
   const box = await btn.boundingBox().catch(() => null);
   if (!box || box.width <= 0 || box.height <= 0) {
-    if (await humanClickLocatorFallback(page, btn, [40, 100], { lite: true })) return;
+    if (await humanClickLocatorFallback(page, btn, [40, 100], { login: true })) return;
     throw new Error('NAVER_LOGIN_BTN_NO_BBOX');
   }
 
@@ -240,7 +240,7 @@ async function clickNaverLoginButtonWithMouse(page: Page, btn: Locator): Promise
   const bandHeight = Math.max(10, Math.min(box.height * 0.38, 32));
   const cx = box.x + box.width / 2 + randomBetween(-4, 4);
   const cy = box.y + bandTop + randomBetween(0, Math.max(0, bandHeight - 1));
-  await humanClickAtPoint(page, cx, cy, 2, [35, 100], { lite: true });
+  await humanClickAtPoint(page, cx, cy, 2, [120, 280], { login: true });
 }
 
 /** IP보안 — 구 UI #ip_on / 신 UI #switch (2025~ nidlogin 리뉴얼). 클릭은 label·switch_btn */
@@ -437,12 +437,13 @@ export async function submitNaverLoginAfterPasswordEnter(
   if (await isNaverAuthChallengePage(page)) return;
   if (!page.url().includes('nidlogin')) return;
 
+  await nudgeNaverLoginFormAfterPassword(page);
   const baseline = await snapshotNaverLoginSubmitState(page);
   await page.locator('#pw').focus().catch(() => {});
-  await sleep(randomBetween(40, 90));
+  await sleep(randomBetween(25, 55));
   await page.locator('#pw').press('Enter').catch(() => {});
 
-  if (await didNaverLoginSubmitStart(page, baseline, 2800)) return;
+  if (await didNaverLoginSubmitStart(page, baseline, 1500)) return;
 
   await clickNaverLoginButton(page, {
     skipIpSecurity: opts?.skipIpSecurity ?? true,

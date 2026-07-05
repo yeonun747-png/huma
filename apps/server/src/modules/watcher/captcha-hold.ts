@@ -684,7 +684,7 @@ export async function completeCaptchaHold(
         }
         return { ok: false, error: 'CAPTCHA_LOGIN_NOT_READY' };
       }
-      await persistPostingSessionBeforeHoldClose(entry.context).catch(() => {});
+      await persistPostingSessionBeforeHoldClose(entry.context, entry.accountId).catch(() => {});
 
       const cont = await continuePostBlogFromCaptchaHold({
         jobId,
@@ -703,7 +703,7 @@ export async function completeCaptchaHold(
       resumeOk = cont.ok;
       resumeError = cont.error;
     } else {
-      await persistPostingSessionBeforeHoldClose(entry.context).catch(() => {});
+      await persistPostingSessionBeforeHoldClose(entry.context, entry.accountId).catch(() => {});
       await closeBrowserContext(entry.context).catch(() => {});
       if (entry.modemSession) await releaseModem(entry.modemSession).catch(() => {});
       entry.releaseAccountLock();
