@@ -132,6 +132,7 @@ export async function planNextPostBlogScheduledAt(accountId: string, date = new 
     minGapMs,
     lastAnchor,
     warmupDay,
+    dailyTarget,
     remainingSlots,
     nightBanStart,
     nightBanEnd,

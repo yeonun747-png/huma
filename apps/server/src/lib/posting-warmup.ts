@@ -49,6 +49,27 @@ export function postingWarmupScheduleSpreadFraction(warmupDay: number): number {
   return 0.08;
 }
 
+/**
+ * 오늘 발행 목표 건수별 시간 분산 — 목표가 적을수록 8시대 군집 없이 활성창 전체에 배치.
+ * 4~5건은 이른 시간(8시대) 밀집, 1~2건은 하루 종일 스프레드.
+ */
+export function postingDailyTargetSpreadFraction(dailyTarget: number): number {
+  const t = Math.max(1, Math.round(dailyTarget));
+  if (t >= 5) return 0.08;
+  if (t >= 4) return 0.12;
+  if (t >= 3) return 0.38;
+  if (t >= 2) return 0.62;
+  return 1;
+}
+
+/** 워밍업·일일 목표 중 더 넓은 분산 적용 — 저발행량 계정은 warmup 완료여도 8시대 고정 방지 */
+export function resolvePostingScheduleSpreadFraction(warmupDay: number, dailyTarget: number): number {
+  return Math.max(
+    postingWarmupScheduleSpreadFraction(warmupDay),
+    postingDailyTargetSpreadFraction(dailyTarget),
+  );
+}
+
 /** UI·설정 — warmup_day 단계 설명 */
 export function describePostingWarmupPhase(warmupDay: number): {
   stage: PostingWarmupStage;

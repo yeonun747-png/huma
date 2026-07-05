@@ -1,6 +1,6 @@
 import {
   ABSOLUTE_MIN_PUBLISH_INTERVAL_HOURS,
-  postingWarmupScheduleSpreadFraction,
+  resolvePostingScheduleSpreadFraction,
 } from './posting-warmup.js';
 import { randomBetween } from './utils.js';
 
@@ -65,6 +65,8 @@ export function computePostingScheduleCandidate(opts: {
   minGapMs: number;
   lastAnchor: Date | null;
   warmupDay?: number;
+  /** 환경설정·워밍업 패널의 오늘 발행 목표 — 저발행량일수록 활성창 전체에 분산 */
+  dailyTarget?: number;
 }): Date {
   const earliest = computeEarliestPostingCandidate({
     now: opts.now,
@@ -73,7 +75,10 @@ export function computePostingScheduleCandidate(opts: {
     lastAnchor: opts.lastAnchor,
   });
 
-  const fraction = postingWarmupScheduleSpreadFraction(opts.warmupDay ?? 0);
+  const fraction = resolvePostingScheduleSpreadFraction(
+    opts.warmupDay ?? 0,
+    opts.dailyTarget ?? 1,
+  );
   if (fraction <= 0.05) return earliest;
 
   const now = opts.now ?? new Date();

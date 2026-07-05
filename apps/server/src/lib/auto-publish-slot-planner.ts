@@ -129,6 +129,7 @@ export async function planNextAutoPublishTriggerAt(
     minGapMs,
     lastAnchor: lastAt,
     warmupDay,
+    dailyTarget: plannedCount,
     remainingSlots: plannedCount - consumedCount,
     nightBanStart,
     nightBanEnd,

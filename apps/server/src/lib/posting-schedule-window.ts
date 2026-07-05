@@ -73,6 +73,8 @@ export function computePostingScheduleCandidateWithPolicy(opts: {
   minGapMs: number;
   lastAnchor: Date | null;
   warmupDay?: number;
+  /** 오늘 발행 목표(환경설정·계정별 today_target) — 스프레드 폭 결정 */
+  dailyTarget?: number;
   remainingSlots?: number;
   nightBanStart?: number;
   nightBanEnd?: number;
@@ -103,6 +105,7 @@ export function computePostingScheduleCandidateWithPolicy(opts: {
         minGapMs: opts.minGapMs,
         lastAnchor: opts.lastAnchor,
         warmupDay: opts.warmupDay,
+        dailyTarget: opts.dailyTarget,
       });
 
   return clampCandidateBeforeNightBan(base, nightBanStart, nightBanEnd);

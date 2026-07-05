@@ -23,6 +23,7 @@ import { isNaverBlogOnlyMode } from '../../../lib/activity-control.js';
 import { resolveFeaturedBlogImageUrl } from '../../../lib/blog-image-placement.js';
 import { PUBLISH_SCHEDULED_AT_KEY } from '../../../lib/post-blog-publish-day.js';
 import { isAutoPublishJob } from '../../../lib/auto-publish-state.js';
+import { planNextPostBlogScheduledAt } from '../../../lib/posting-slot-planner.js';
 import { assertAccountPostingQuota, assertAccountPostingQuotaBeforeGeneration } from '../../../lib/posting-daily-status.js';
 import {
   assertPostingSimilarityPasses,
@@ -214,19 +215,14 @@ function platformTime(
 /** Claude·Imagen 준비 완료 후 post_blog 발행까지 고정 버퍼(분) */
 export const POST_BLOG_PREP_BUFFER_MINUTES = 5;
 
-/** content_full 파이프라인 — 준비 완료 시각 기준 발행 예약 (재랜덤 슬롯 없음) */
-function postBlogScheduledAfterPrep(): string {
-  return new Date(Date.now() + POST_BLOG_PREP_BUFFER_MINUTES * 60_000).toISOString();
-}
-
-function resolveBlogScheduledAt(
+async function resolveBlogScheduledAt(
   autoScheduled: boolean,
   accountId: string | null | undefined,
   schedule: PlatformSchedule | Record<string, unknown> | undefined,
   fallback: string,
-): string {
-  if (isAutoPublishJob(schedule) || (autoScheduled && accountId?.trim())) {
-    return postBlogScheduledAfterPrep();
+): Promise<string> {
+  if (accountId?.trim() && (isAutoPublishJob(schedule) || autoScheduled)) {
+    return planNextPostBlogScheduledAt(accountId.trim());
   }
   return platformTime(autoScheduled, schedule as PlatformSchedule | undefined, 'naver_blog', fallback);
 }
@@ -283,7 +279,7 @@ async function runTypeA(
   if (accountId) {
     await assertAccountPostingQuota(workspace, accountId, { excludeJobId: params.parentJobId });
   }
-  const blogAt = resolveBlogScheduledAt(auto_scheduled, accountId, schedule, scheduled_at);
+  const blogAt = await resolveBlogScheduledAt(auto_scheduled, accountId, schedule, scheduled_at);
   const parentFlags = await loadParentPlatformFlags(params.parentJobId);
   const blogJob = await insertJob({
     workspace,
@@ -356,7 +352,7 @@ async function runTypeB(
   if (accountId) {
     await assertAccountPostingQuota(workspace, accountId, { excludeJobId: params.parentJobId });
   }
-  const blogAt = resolveBlogScheduledAt(auto_scheduled, accountId, schedule, scheduled_at);
+  const blogAt = await resolveBlogScheduledAt(auto_scheduled, accountId, schedule, scheduled_at);
   const threadsAt = platformTime(auto_scheduled, schedule, 'threads', scheduled_at);
   const twitterAt = platformTime(auto_scheduled, schedule, 'x', scheduled_at);
   const videoAt = platformTime(auto_scheduled, schedule, 'tiktok', scheduled_at);

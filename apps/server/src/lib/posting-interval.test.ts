@@ -9,7 +9,7 @@ import {
   computeEarliestPostingCandidate,
   computePostingScheduleCandidate,
 } from './posting-interval.js';
-import { postingWarmupScheduleSpreadFraction } from './posting-warmup.js';
+import { postingWarmupScheduleSpreadFraction, postingDailyTargetSpreadFraction, resolvePostingScheduleSpreadFraction } from './posting-warmup.js';
 
 describe('KST night ban 23~08', () => {
   it('blocks late evening and early morning, allows hour 8 and 22', () => {
@@ -58,8 +58,23 @@ describe('computeEarliestPostingCandidate', () => {
   });
 });
 
+describe('postingDailyTargetSpreadFraction', () => {
+  it('uses narrow spread for 4+ daily posts, wide for 1-2', () => {
+    expect(postingDailyTargetSpreadFraction(5)).toBeLessThanOrEqual(0.12);
+    expect(postingDailyTargetSpreadFraction(4)).toBeLessThanOrEqual(0.15);
+    expect(postingDailyTargetSpreadFraction(2)).toBeGreaterThanOrEqual(0.55);
+    expect(postingDailyTargetSpreadFraction(1)).toBe(1);
+  });
+
+  it('resolvePostingScheduleSpreadFraction widens low-volume mature accounts', () => {
+    expect(resolvePostingScheduleSpreadFraction(20, 1)).toBe(1);
+    expect(resolvePostingScheduleSpreadFraction(20, 2)).toBeGreaterThanOrEqual(0.55);
+    expect(resolvePostingScheduleSpreadFraction(20, 4)).toBeLessThanOrEqual(0.15);
+  });
+});
+
 describe('computePostingScheduleCandidate', () => {
-  it('spreads early warmup across a wide window', () => {
+  it('spreads low daily target mature accounts across a wide window', () => {
     const now = new Date('2026-07-01T08:30:00+09:00');
     const times: number[] = [];
     for (let i = 0; i < 40; i += 1) {
@@ -70,12 +85,13 @@ describe('computePostingScheduleCandidate', () => {
           winEndHour: 22,
           minGapMs: 2 * 3_600_000,
           lastAnchor: null,
-          warmupDay: 0,
+          warmupDay: 20,
+          dailyTarget: 1,
         }).getTime(),
       );
     }
     const span = Math.max(...times) - Math.min(...times);
-    expect(span).toBeGreaterThan(3 * 3_600_000);
+    expect(span).toBeGreaterThan(4 * 3_600_000);
   });
 
   it('keeps mature warmup near earliest slot', () => {
@@ -94,6 +110,7 @@ describe('computePostingScheduleCandidate', () => {
         minGapMs: 2 * 3_600_000,
         lastAnchor: null,
         warmupDay: 20,
+        dailyTarget: 4,
       });
       expect(candidate.getTime()).toBeGreaterThanOrEqual(earliest.getTime());
       expect(candidate.getTime() - earliest.getTime()).toBeLessThanOrEqual(2 * 3_600_000);
