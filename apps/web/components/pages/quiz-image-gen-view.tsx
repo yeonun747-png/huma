@@ -114,6 +114,29 @@ function loadQuizImageDraft(): QuizImageGenDraft | null {
   }
 }
 
+/** useState lazy init — 마운트마다 한 번만 읽기 (SSR/첫 렌더 race 방지) */
+let cachedDraft: QuizImageGenDraft | null | undefined;
+function getCachedQuizImageDraft(): QuizImageGenDraft | null {
+  if (cachedDraft !== undefined) return cachedDraft;
+  cachedDraft = loadQuizImageDraft();
+  return cachedDraft;
+}
+
+function buildInitialParseState(): { parsed: QuizImageParseResult | null; rows: GenRow[] } {
+  const draft = getCachedQuizImageDraft();
+  if (!draft?.prefix.trim() || !draft.raw.trim()) return { parsed: null, rows: [] };
+  const normalized = normalizeQuizImagePrefix(draft.prefix);
+  if (!normalized) return { parsed: null, rows: [] };
+  const parsed = parseQuizImagePrompts(draft.raw, normalized);
+  return { parsed, rows: mergeGenRows(parsed, [], draft.results) };
+}
+
+let initialParseState: { parsed: QuizImageParseResult | null; rows: GenRow[] } | undefined;
+function getInitialParseState() {
+  if (!initialParseState) initialParseState = buildInitialParseState();
+  return initialParseState;
+}
+
 function normalizePersistedStatus(status: GenStatus): GenStatus {
   if (status === 'generating' || status === 'pending') return 'idle';
   return status;
@@ -143,12 +166,14 @@ function mergeGenRows(parsed: QuizImageParseResult, prev: GenRow[], draftResults
 
 export function QuizImageGenView() {
   const draftResultsRef = useRef<Record<string, SavedRowResult> | null>(null);
-  const draftLoadedRef = useRef(false);
-  const [prefix, setPrefix] = useState('');
-  const [raw, setRaw] = useState('');
-  const [parsed, setParsed] = useState<QuizImageParseResult | null>(null);
-  const [rows, setRows] = useState<GenRow[]>([]);
-  const [restoredHint, setRestoredHint] = useState(false);
+  const [prefix, setPrefix] = useState(() => getCachedQuizImageDraft()?.prefix ?? '');
+  const [raw, setRaw] = useState(() => getCachedQuizImageDraft()?.raw ?? '');
+  const [parsed, setParsed] = useState<QuizImageParseResult | null>(() => getInitialParseState().parsed);
+  const [rows, setRows] = useState<GenRow[]>(() => getInitialParseState().rows);
+  const [restoredHint, setRestoredHint] = useState(() => {
+    const draft = getCachedQuizImageDraft();
+    return Boolean(draft?.prefix || draft?.raw);
+  });
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -156,17 +181,6 @@ export function QuizImageGenView() {
   const [batchStopped, setBatchStopped] = useState(false);
   const [preview, setPreview] = useState<{ url: string; filename: string } | null>(null);
   const stoppedRef = useRef(false);
-
-  useEffect(() => {
-    if (draftLoadedRef.current) return;
-    draftLoadedRef.current = true;
-    const draft = loadQuizImageDraft();
-    if (!draft) return;
-    setPrefix(draft.prefix);
-    setRaw(draft.raw);
-    draftResultsRef.current = draft.results;
-    setRestoredHint(Boolean(draft.prefix || draft.raw));
-  }, []);
 
   useEffect(() => {
     api
@@ -218,6 +232,13 @@ export function QuizImageGenView() {
       return;
     }
     const t = setTimeout(() => {
+      if (
+        rows.length === 0 &&
+        draftResultsRef.current &&
+        Object.keys(draftResultsRef.current).length > 0
+      ) {
+        return;
+      }
       const results: Record<string, SavedRowResult> = {};
       for (const row of rows) {
         if (row.status !== 'done' && row.status !== 'error' && !row.imageUrl) continue;
@@ -369,6 +390,8 @@ export function QuizImageGenView() {
     setRaw('');
     setRestoredHint(false);
     draftResultsRef.current = null;
+    cachedDraft = null;
+    initialParseState = undefined;
     localStorage.removeItem(DRAFT_STORAGE_KEY);
   };
 
