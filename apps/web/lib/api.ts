@@ -1295,6 +1295,14 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ url, filename }),
     }),
+  /** EvoLink URL 직접 img 로드 불가 시 i7 프록시 → blob URL */
+  quizImagePreviewObjectUrl: async (url: string) => {
+    const blob = await requestBlob('/api/quiz-images/preview', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    });
+    return URL.createObjectURL(blob);
+  },
   quizImageZip: (items: Array<{ url: string; filename: string }>, zipName?: string) =>
     requestBlob('/api/quiz-images/zip', {
       method: 'POST',

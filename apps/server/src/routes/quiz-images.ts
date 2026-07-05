@@ -119,6 +119,26 @@ export async function registerQuizImageRoutes(app: FastifyInstance) {
     }
   });
 
+  /** 브라우저 썸네일 — EvoLink CDN hotlink/referrer 차단 우회 (i7 Service 프록시) */
+  app.post('/api/quiz-images/preview', routeOpts, async (request, reply) => {
+    if (!assertQuizOasisAccess(request, reply)) return;
+    const body = request.body as { url?: string };
+    const url = String(body.url ?? '').trim();
+    if (!/^https?:\/\//i.test(url)) {
+      return reply.code(400).send({ error: '유효한 url 필요' });
+    }
+    try {
+      const data = await fetchQuizImagePngBytes(url);
+      return reply
+        .header('Content-Type', 'image/png')
+        .header('Content-Disposition', 'inline')
+        .header('Cache-Control', 'private, max-age=3600')
+        .send(data);
+    } catch (err) {
+      return reply.code(502).send({ error: (err as Error).message });
+    }
+  });
+
   app.post('/api/quiz-images/zip', routeOpts, async (request, reply) => {
     if (!assertQuizOasisAccess(request, reply)) return;
     const body = request.body as {

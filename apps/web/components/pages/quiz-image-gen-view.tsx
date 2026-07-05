@@ -31,6 +31,45 @@ function rowKey(item: { questionNumber: number; choiceId: string | null; filenam
   return `${item.questionNumber}-${item.choiceId ?? 'face'}-${item.filename}`;
 }
 
+/** 프로덕션(Vercel)에서 EvoLink CDN 직링크가 referrer 차단될 수 있어 i7 프록시 blob 사용 */
+function useQuizImagePreview(imageUrl: string | undefined) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!imageUrl) {
+      setSrc(null);
+      setLoading(false);
+      return;
+    }
+    let revoked = false;
+    let objectUrl: string | null = null;
+    setLoading(true);
+    setSrc(null);
+    void api
+      .quizImagePreviewObjectUrl(imageUrl)
+      .then((url) => {
+        objectUrl = url;
+        if (!revoked) {
+          setSrc(url);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!revoked) {
+          setSrc(imageUrl);
+          setLoading(false);
+        }
+      });
+    return () => {
+      revoked = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [imageUrl]);
+
+  return { src, loading };
+}
+
 function toGenRows(parsed: QuizImageParseResult): GenRow[] {
   return parsed.items.map((item) => ({
     key: rowKey(item),
@@ -427,17 +466,41 @@ export function QuizImageGenView() {
       </div>
 
       {preview && (
-        <div
-          className="m-screenshot-lightbox"
-          role="dialog"
-          aria-modal="true"
-          aria-label={`${preview.filename} 크게 보기`}
-          onClick={() => setPreview(null)}
-        >
-          <span className="m-screenshot-lightbox-close">ESC 또는 바깥 클릭으로 닫기 · {preview.filename}</span>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={preview.url} alt={preview.filename} onClick={(e) => e.stopPropagation()} />
-        </div>
+        <QuizImageLightbox
+          imageUrl={preview.url}
+          filename={preview.filename}
+          onClose={() => setPreview(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function QuizImageLightbox({
+  imageUrl,
+  filename,
+  onClose,
+}: {
+  imageUrl: string;
+  filename: string;
+  onClose: () => void;
+}) {
+  const { src, loading } = useQuizImagePreview(imageUrl);
+
+  return (
+    <div
+      className="m-screenshot-lightbox"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${filename} 크게 보기`}
+      onClick={onClose}
+    >
+      <span className="m-screenshot-lightbox-close">ESC 또는 바깥 클릭으로 닫기 · {filename}</span>
+      {loading || !src ? (
+        <div className="text-[13px] text-huma-t2">미리보기 불러오는 중…</div>
+      ) : (
+        /* eslint-disable-next-line @next/next/no-img-element */
+        <img src={src} alt={filename} onClick={(e) => e.stopPropagation()} />
       )}
     </div>
   );
@@ -458,6 +521,7 @@ function ImageGenCard({
   onDownload: () => void;
   onPreview?: () => void;
 }) {
+  const { src: previewSrc, loading: previewLoading } = useQuizImagePreview(row.imageUrl);
   const statusTone =
     row.status === 'done' ? 'ok' : row.status === 'error' ? 'err' : row.status === 'generating' ? 'live' : 'idle';
   const statusLabel =
@@ -480,9 +544,16 @@ function ImageGenCard({
             className="block h-full w-full cursor-zoom-in"
             title="클릭하면 크게 보기"
             onClick={onPreview}
+            disabled={previewLoading || !previewSrc}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={row.imageUrl} alt={row.filename} className="h-full w-full object-cover" />
+            {previewLoading || !previewSrc ? (
+              <div className="flex h-full items-center justify-center text-[10px] text-huma-t3">
+                <span className="animate-pulse text-huma-acc">미리보기 로딩…</span>
+              </div>
+            ) : (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img src={previewSrc} alt={row.filename} className="h-full w-full object-cover" />
+            )}
           </button>
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-1 px-2 text-center text-[10px] text-huma-t3">
