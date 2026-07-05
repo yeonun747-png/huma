@@ -130,7 +130,17 @@ async function requestBlob(path: string, options: RequestOptions = {}): Promise<
     const err = (await res.json().catch(() => ({ error: 'JSON 응답' }))) as { error?: string };
     throw new Error(err.error || '다운로드 실패 (서버 JSON 응답)');
   }
-  return res.blob();
+  const blob = await res.blob();
+  if (blob.size < 64) {
+    throw new Error('다운로드 파일이 비어 있습니다');
+  }
+  const head = new Uint8Array(await blob.slice(0, 4).arrayBuffer());
+  const isPng = head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47;
+  const isZip = head[0] === 0x50 && head[1] === 0x4b && head[2] === 0x03 && head[3] === 0x04;
+  if (!isPng && !isZip) {
+    throw new Error('다운로드 응답이 PNG/ZIP이 아닙니다 (프록시·URL 만료 확인)');
+  }
+  return blob;
 }
 
 /** blob 다운로드 — revokeObjectURL 지연으로 손상 파일 방지 */

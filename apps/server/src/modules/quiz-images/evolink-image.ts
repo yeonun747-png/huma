@@ -224,7 +224,9 @@ export async function fetchQuizImagePngBytes(url: string): Promise<Buffer> {
   const raw = await fetchImageBytes(url);
   if (isPng(raw)) return raw;
   try {
-    return await sharp(raw).png().toBuffer();
+    const converted = await sharp(raw).png().toBuffer();
+    if (!isPng(converted)) throw new Error('PNG 변환 결과 검증 실패');
+    return converted;
   } catch {
     throw new Error('이미지를 PNG로 변환하지 못했습니다');
   }
