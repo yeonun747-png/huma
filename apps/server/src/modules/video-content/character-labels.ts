@@ -1,5 +1,6 @@
 import type { VideoConti, VideoContiShot } from './types.js';
 import { asContiCharacters, asContiShots } from './types.js';
+import { resolveCharacterFaceDescription } from './character-appearance.js';
 
 function trimField(text: string | undefined | null): string {
   return (text ?? '').trim();
@@ -125,7 +126,8 @@ export function formatEvoLinkCharacterBlock(conti: VideoConti, nameToLabel: Map<
       const inferredName = labelToName.get(label);
       const name = explicitName || inferredName;
       const head = name ? `${label}(${name})` : label;
-      return `${head}: ${c.age} ${c.gender}, ${c.hair}, ${c.outfit}, ${c.shoes}`;
+      const face = resolveCharacterFaceDescription(c);
+      return `${head}: ${face}, ${c.age} ${c.gender}, ${c.hair}, ${c.outfit}, ${c.shoes}`;
     })
     .join('; ');
 }

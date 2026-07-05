@@ -17,6 +17,7 @@ import {
 } from './punchline-material.js';
 import type { PreGenerationPlan } from './pre-generation-plan.js';
 import { buildHookTypePromptBlock } from './persona-axis.js';
+import { buildVideoCharacterAppearancePromptBlock } from './character-appearance.js';
 
 async function callClaudeJson(params: {
   model: string;
@@ -50,10 +51,10 @@ function buildStage1Prompt(params: {
 
   const charBlock =
     workspace === 'panana' && conditions.characterDescription
-      ? `\n파나나 캐릭터 "${conditions.characterName}" (고정 출연):\n${conditions.characterDescription}\n`
+      ? `\n파나나 캐릭터 "${conditions.characterName}" (고정 출연):\n${conditions.characterDescription}\n${buildVideoCharacterAppearancePromptBlock({ coStarAttractive: true })}`
       : workspace === 'panana'
-        ? ''
-        : '\n등장인물은 매번 새로운 일반인으로 창작.\n';
+        ? buildVideoCharacterAppearancePromptBlock()
+        : buildVideoCharacterAppearancePromptBlock({ banServiceCharacters: true });
 
   const pastBlock =
     pastSummaries.length ?

@@ -2,6 +2,7 @@ import type { VideoConti } from './types.js';
 import { buildHookTypePromptBlock, extractSectionBody } from './persona-axis.js';
 import { buildCharacterNamingRule } from './conti-validation.js';
 import { buildYeonunFortuneDialogueRule } from './screen-text-constraint.js';
+import { VIDEO_CHARACTER_JSON_SCHEMA_SNIPPET } from './character-appearance.js';
 import type { GenerationConditions } from './types.js';
 import type { Workspace } from '@huma/shared';
 
@@ -206,7 +207,7 @@ JSON만 출력:
   "narrativeProse": "자유 서술 (여러 문단 가능, 대사 내용 포함)",
   "locationKeyword": "string",
   "timeOfDay": "string",
-  "characters": [{"label":"A","name":"...","age":"...","gender":"...","hair":"...","outfit":"...","shoes":"..."}],
+  "characters": [${VIDEO_CHARACTER_JSON_SCHEMA_SNIPPET}],
   "location": "구체적 장소",
   "lighting": "조명",
   "timeOfDayVisual": "시각적 시간대",

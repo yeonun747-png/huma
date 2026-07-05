@@ -22,6 +22,7 @@ import {
   normalizeShotForEvoLinkPrompt,
 } from './character-labels.js';
 import { assertEvoLinkPromptLength } from './prompt-length.js';
+import { EVOLINK_ATTRACTIVE_FACE_SCENE_SUFFIX } from './character-appearance.js';
 
 export {
   EVOLINK_PROMPT_MAX_LENGTH,
@@ -99,7 +100,7 @@ function shotDurationSec(shot: VideoContiShot): number {
 export function buildEvoLinkMultiShotPrompt(conti: VideoConti, duration: number): string {
   const totalSec = normalizeVideoDurationSec(duration);
   const nameToLabel = buildCharacterNameToLabelMap(conti);
-  const scene = `세로 9:16, ${conti.location}, ${conti.lighting}, ${conti.timeOfDay}. 등장인물(고정): ${formatEvoLinkCharacterBlock(conti, nameToLabel)}. 한국어 대사·자연스러운 오디오.`;
+  const scene = `세로 9:16, ${conti.location}, ${conti.lighting}, ${conti.timeOfDay}. ${EVOLINK_ATTRACTIVE_FACE_SCENE_SUFFIX}. 등장인물(고정): ${formatEvoLinkCharacterBlock(conti, nameToLabel)}. 한국어 대사·자연스러운 오디오.`;
   const shots = asContiShots(conti.shots).slice(0, EVOLINK_MAX_SHOTS);
   const segmentSecs = snapShotDurationsToTotal(
     shots.map((shot) => shotDurationSec(shot)),
@@ -128,7 +129,7 @@ export function buildEvoLinkSingleShotPrompt(conti: VideoConti, conditions: Gene
     })
     .join(' ');
 
-  const prompt = `Vertical 9:16, ${conditions.duration}s single continuous take, no cuts. Korean dialogue with natural audio. Location: ${conti.location}. Lighting: ${conti.lighting}. Time: ${conti.timeOfDay}. Characters (fixed): ${charDesc}. Timeline: ${beats}. Cinematic realistic mobile framing.`;
+  const prompt = `Vertical 9:16, ${conditions.duration}s single continuous take, no cuts. Korean dialogue with natural audio. ${EVOLINK_ATTRACTIVE_FACE_SCENE_SUFFIX}. Location: ${conti.location}. Lighting: ${conti.lighting}. Time: ${conti.timeOfDay}. Characters (fixed): ${charDesc}. Timeline: ${beats}. Cinematic realistic mobile framing.`;
   return prompt;
 }
 

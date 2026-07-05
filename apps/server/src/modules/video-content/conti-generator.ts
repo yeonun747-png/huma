@@ -70,6 +70,10 @@ import {
   STORY_COMPREHENSION_LIMIT_WARNING,
 } from './story-comprehension.js';
 import {
+  buildVideoCharacterAppearancePromptBlock,
+  VIDEO_CHARACTER_JSON_SCHEMA_SNIPPET,
+} from './character-appearance.js';
+import {
   buildFormatConversionIntro,
   buildStoryDraftPrompt,
   MAX_STORY_REGEN_ON_FORMAT_FAIL,
@@ -175,10 +179,10 @@ function buildSharedContext(ctx: PromptContext): {
   const { conditions, config, feedback, pastSummaries, workspace } = ctx;
   const charBlock =
     workspace === 'panana' && conditions.characterDescription
-      ? `\n파나나 캐릭터 "${conditions.characterName}" 외형/톤/말버릇 (고정):\n${conditions.characterDescription}\n`
+      ? `\n파나나 캐릭터 "${conditions.characterName}" 외형/톤/말버릇 (고정):\n${conditions.characterDescription}\n${buildVideoCharacterAppearancePromptBlock({ coStarAttractive: true })}`
       : workspace === 'panana'
-        ? ''
-        : '\n등장인물은 매번 새로운 일반인으로 창작. 서비스 캐릭터 비등장.\n';
+        ? buildVideoCharacterAppearancePromptBlock()
+        : buildVideoCharacterAppearancePromptBlock({ banServiceCharacters: true });
 
   const pastBlock =
     pastSummaries?.length ?
@@ -255,7 +259,7 @@ JSON 스키마:
 {
   "locationKeyword": "string",
   "timeOfDay": "string",
-  "characters": [{"label":"A","name":"하은","age":"20대","gender":"여","hair":"...","outfit":"...","shoes":"..."},{"label":"B","name":"준형","age":"30대","gender":"남","hair":"...","outfit":"...","shoes":"..."}],
+  "characters": [${VIDEO_CHARACTER_JSON_SCHEMA_SNIPPET},{"label":"B","name":"준형","age":"30대","gender":"남","face":"연예인급 훈남, ...","hair":"...","outfit":"...","shoes":"..."}],
   "location": "구체적 장소 묘사",
   "lighting": "조명",
   "timeOfDayVisual": "시각적 시간대",
@@ -289,7 +293,7 @@ JSON 스키마:
 {
   "locationKeyword": "string",
   "timeOfDay": "string",
-  "characters": [{"label":"A","name":"하은","age":"20대","gender":"여","hair":"...","outfit":"...","shoes":"..."},{"label":"B","name":"준형","age":"30대","gender":"남","hair":"...","outfit":"...","shoes":"..."}],
+  "characters": [${VIDEO_CHARACTER_JSON_SCHEMA_SNIPPET},{"label":"B","name":"준형","age":"30대","gender":"남","face":"연예인급 훈남, ...","hair":"...","outfit":"...","shoes":"..."}],
   "location": "구체적 장소 묘사",
   "lighting": "조명",
   "timeOfDayVisual": "시각적 시간대",

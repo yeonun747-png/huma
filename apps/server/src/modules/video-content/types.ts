@@ -48,6 +48,8 @@ export interface VideoConti {
     name?: string;
     age: string;
     gender: string;
+    /** 연예인급 훈남·훈녀 얼굴 묘사 — 영상 생성 프롬프트용 */
+    face?: string;
     hair: string;
     outfit: string;
     shoes: string;
@@ -152,7 +154,7 @@ export const DEFAULT_VIDEO_PERSONAS: Record<Workspace, VideoPersonaConfig> = {
 - "100%", "반드시", "확실히" 등 과장 확정 표현 금지
 - 서비스 캐릭터(연화/별하/여연/운서) 비주얼·음성 등장 절대 금지
 - 평서문 설명체로만 끝나는 대본 금지 — 펀치라인 필수
-- 캐릭터 비노출: 매번 새로운 일반인만 등장
+- 캐릭터 비노출: 매번 새로 창작한 등장인물(연예인급 훈남·훈녀). 실제 연예인·유명인 모방 금지
 ${VIDEO_SCREEN_TEXT_RENDERING_CONSTRAINT}`,
     cutTypeRule: DEFAULT_CUT_TYPE_RULE,
     shotStructure: DEFAULT_SHOT_STRUCTURE,
@@ -185,7 +187,7 @@ ${VIDEO_SCREEN_TEXT_RENDERING_CONSTRAINT}`,
 - 특정 성격/심리 유형 단정·차별 표현 금지
 - 의학적 진단 표현 금지
 - 백과사전형 설명체 금지
-- 매번 새로운 일반인 등장인물만 사용
+- 매번 새로 창작한 등장인물(연예인급 훈남·훈녀). 실제 연예인·유명인 모방 금지
 ${VIDEO_SCREEN_TEXT_RENDERING_CONSTRAINT}`,
     cutTypeRule: DEFAULT_CUT_TYPE_RULE,
     shotStructure: DEFAULT_SHOT_STRUCTURE,
@@ -225,6 +227,7 @@ ${VIDEO_SCREEN_TEXT_RENDERING_CONSTRAINT}`,
 - 뻔한 위로 멘트만으로 끝나는 대본 금지
 - inactive 캐릭터 등장 금지
 - 실제 파나나 캐릭터가 영상에 직접 등장
+- 함께 등장하는 상대 인물도 연예인급 훈남·훈녀 외형
 ${VIDEO_SCREEN_TEXT_RENDERING_CONSTRAINT}`,
     cutTypeRule: DEFAULT_CUT_TYPE_RULE,
     shotStructure: DEFAULT_SHOT_STRUCTURE,
