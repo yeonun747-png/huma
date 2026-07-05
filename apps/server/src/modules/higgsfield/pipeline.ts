@@ -348,7 +348,7 @@ export async function runVideoPipeline(videoJobId: string) {
             videoPath: outputPath,
             title: String(blogTitle),
             description: blogDescription,
-            hashtags: [...(job.hashtags ?? []), 'Shorts'],
+            hashtags: job.hashtags ?? [],
           }),
       });
     }

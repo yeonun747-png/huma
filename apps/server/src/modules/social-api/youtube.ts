@@ -3,6 +3,11 @@ import { google } from 'googleapis';
 import { supabase } from '../../middleware/auth.js';
 import { getDailyLimit } from '../../lib/limits.js';
 import { logOperation } from '../../lib/log-emitter.js';
+import {
+  filterShortsHashtags,
+  packYoutubeShortsTitle,
+  sanitizeYoutubeShortsTitle,
+} from '../video-content/captions.js';
 
 import { workspaceEnv } from './workspace-credentials.js';
 
@@ -59,22 +64,10 @@ export async function uploadYouTubeShorts(params: {
     return undefined;
   }
 
-  const tagLine = params.hashtags.map((h) => (h.startsWith('#') ? h : `#${h}`)).join(' ');
-  const titleBase = params.title.trim();
-  const titleParts = [titleBase];
-  if (tagLine) {
-    const missingTags = params.hashtags.filter((h) => {
-      const bare = h.replace(/^#/, '');
-      return !titleBase.includes(bare) && !titleBase.includes(`#${bare}`);
-    });
-    if (missingTags.length) {
-      titleParts.push(missingTags.map((h) => (h.startsWith('#') ? h : `#${h}`)).join(' '));
-    }
-  }
-  if (!titleParts.join(' ').includes('#Shorts')) {
-    titleParts.push('#Shorts');
-  }
-  const fullTitle = titleParts.join(' ').trim().slice(0, 100);
+  const hashtags = filterShortsHashtags(params.hashtags);
+  const titleBase = sanitizeYoutubeShortsTitle(params.title.trim());
+  const tagTokens = hashtags.map((h) => (h.startsWith('#') ? h : `#${h}`));
+  const fullTitle = packYoutubeShortsTitle(titleBase, tagTokens);
   const description = params.description.trim().slice(0, 5000);
 
   try {
