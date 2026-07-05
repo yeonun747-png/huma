@@ -13,6 +13,7 @@ export * from './blog-check-search';
 export * from './video-content';
 export * from './video-persona-text';
 export * from './watcher-log-filter';
+export * from './quiz-image-prompt';
 
 export type Workspace = import('./account').Workspace;
 

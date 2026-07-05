@@ -50,7 +50,10 @@ export const NAV_ITEMS = [
 
 export const SPEC_NAV_ITEMS: Record<string, { href: string; label: string; icon: string; badgeKey?: string }[]> = {
   yeonun: [{ href: '/cafe-viral', label: '카페 관리', icon: '🏛' }],
-  quizoasis: [{ href: '/adsense', label: '애드센스 수익', icon: '💰' }],
+  quizoasis: [
+    { href: '/adsense', label: '애드센스 수익', icon: '💰' },
+    { href: '/quiz-image-gen', label: '퀴즈 이미지 생성', icon: '🖼️' },
+  ],
   panana: [],
 };
 

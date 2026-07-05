@@ -48,6 +48,7 @@ export const PAGE_META: Record<string, PageMeta> = {
   '/seo-keywords': { title: 'SEO 키워드', ...NO_ACTION },
   '/blog-check': { title: '블로그 지수 분석', ...NO_ACTION },
   '/adsense': { title: '애드센스 수익', ...NO_ACTION },
+  '/quiz-image-gen': { title: '퀴즈 이미지 생성', contentClass: 'px-[18px] py-4', ...NO_ACTION },
 };
 
 export function getPageMeta(pathname: string): PageMeta {

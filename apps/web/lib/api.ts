@@ -101,6 +101,27 @@ function qs(params: Record<string, string | undefined>) {
   return q ? `?${q}` : '';
 }
 
+async function requestBlob(path: string, options: RequestOptions = {}): Promise<Blob> {
+  const { sameOrigin, timeoutMs, ...fetchOptions } = options;
+  const token = getToken();
+  const headers: Record<string, string> = {
+    ...(fetchOptions.headers as Record<string, string>),
+  };
+  if (token) headers['X-HUMA-KEY'] = token;
+
+  const url = resolveRequestUrl(path, sameOrigin);
+  const signal =
+    fetchOptions.signal ??
+    (timeoutMs != null ? requestTimeoutSignal(timeoutMs) : undefined);
+
+  const res = await fetch(url, { ...fetchOptions, headers, signal });
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({ error: res.statusText }))) as { error?: string };
+    throw new Error(err.error || res.statusText || '다운로드 실패');
+  }
+  return res.blob();
+}
+
 function refreshNavCaches() {
   invalidateApiCache('nav-badges');
   invalidateApiCache('status');
@@ -1222,5 +1243,33 @@ export const api = {
     }>('/api/blog-check/scan/search', {
       method: 'POST',
       body: JSON.stringify({ query }),
+    }),
+  quizImageConfig: () =>
+    request<{ configured: boolean; defaults: Record<string, unknown> }>('/api/quiz-images/config'),
+  quizImageGenerate: (body: {
+    prompt: string;
+    filename: string;
+    questionNumber?: number;
+    choiceId?: string | null;
+  }) =>
+    request<{
+      ok: boolean;
+      taskId: string;
+      imageUrl: string;
+      filename: string;
+    }>('/api/quiz-images/generate', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      timeoutMs: 200_000,
+    }),
+  quizImageDownloadBlob: (url: string, filename: string) =>
+    requestBlob(
+      `/api/quiz-images/download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(filename)}`,
+    ),
+  quizImageZip: (items: Array<{ url: string; filename: string }>, zipName?: string) =>
+    requestBlob('/api/quiz-images/zip', {
+      method: 'POST',
+      body: JSON.stringify({ items, zipName }),
+      timeoutMs: 120_000,
     }),
 };

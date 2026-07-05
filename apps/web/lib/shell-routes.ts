@@ -26,6 +26,8 @@ export const SHELL_VIEW_LOADERS: Record<string, ShellViewLoader> = {
   '/settings': () => import('@/components/pages/settings-view').then((m) => ({ default: m.SettingsView })),
   '/cafe-viral': () => import('@/components/pages/cafe-viral-view').then((m) => ({ default: m.CafeViralView })),
   '/adsense': () => import('@/components/pages/workspace-views').then((m) => ({ default: m.AdsenseView })),
+  '/quiz-image-gen': () =>
+    import('@/components/pages/quiz-image-gen-view').then((m) => ({ default: m.QuizImageGenView })),
   '/bgm-library': () => import('@/components/pages/bgm-view').then((m) => ({ default: m.BgmLibraryView })),
 };
 

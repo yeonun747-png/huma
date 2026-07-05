@@ -53,6 +53,7 @@ import { registerVncRoutes } from './routes/vnc.js';
 import { registerSeoRoutes } from './routes/seo.js';
 import { registerBlogCheckRoutes } from './routes/blog-check.js';
 import { registerVideoContentRoutes } from './routes/video-content.js';
+import { registerQuizImageRoutes } from './routes/quiz-images.js';
 import { startPananaCharacterSyncScheduler } from './lib/panana-character-scheduler.js';
 import { startQuizContentSyncScheduler } from './lib/quiz-content-scheduler.js';
 import { startVideoContentStorageScheduler } from './lib/video-content-storage-scheduler.js';
@@ -143,6 +144,7 @@ async function main() {
   await registerSeoRoutes(app);
   await registerBlogCheckRoutes(app);
   await registerVideoContentRoutes(app);
+  await registerQuizImageRoutes(app);
 
   await app.listen({ port: PORT, host: '0.0.0.0' });
 
