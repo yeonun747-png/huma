@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseQuizImagePrompts, buildQuizImageFilename } from '@huma/shared';
 
-const PREFIX = 'p3_test_solo_drinking_type_';
+const PREFIX = 'p3_test_solo_drinking_type';
 
 describe('parseQuizImagePrompts', () => {
   it('parses 4-choice sample (Q1 only)', () => {
@@ -22,8 +22,8 @@ ________________________________________
     expect(result.choiceType).toBe('4지선다');
     expect(result.questions[0]?.isFaceQuestion).toBe(false);
     expect(result.questions[0]?.choiceCount).toBe(4);
-    expect(result.items[0]?.filename).toBe(`${PREFIX}q1_a.png`);
-    expect(result.items[3]?.filename).toBe(`${PREFIX}q1_d.png`);
+    expect(result.items[0]?.filename).toBe(`${PREFIX}_q1a.png`);
+    expect(result.items[3]?.filename).toBe(`${PREFIX}_q1d.png`);
   });
 
   it('parses 2-choice sample', () => {

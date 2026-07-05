@@ -36,8 +36,7 @@ const PROMPT_FACE_RE = /^[•*·]?\s*이미지\s*:\s*(.+)$/;
 export function normalizeQuizImagePrefix(raw: string): string {
   const trimmed = raw.trim().replace(/\s+/g, '');
   if (!trimmed) return '';
-  const safe = trimmed.replace(/[^a-zA-Z0-9_-]/g, '_');
-  return safe.endsWith('_') ? safe : `${safe}_`;
+  return trimmed.replace(/[^a-zA-Z0-9_-]/g, '_').replace(/_+$/, '');
 }
 
 export function buildQuizImageFilename(
@@ -46,9 +45,9 @@ export function buildQuizImageFilename(
   choiceId: QuizImageChoiceId | null,
 ): string {
   const p = normalizeQuizImagePrefix(prefix);
-  const q = `q${questionNumber}`;
-  if (choiceId) return `${p}${q}_${choiceId.toLowerCase()}.png`;
-  return `${p}${q}.png`;
+  if (!p) return '';
+  if (choiceId) return `${p}_q${questionNumber}${choiceId.toLowerCase()}.png`;
+  return `${p}_q${questionNumber}.png`;
 }
 
 function detectChoiceType(counts: number[]): '2지선다' | '4지선다' | '혼합' {

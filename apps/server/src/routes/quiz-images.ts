@@ -42,7 +42,7 @@ export async function registerQuizImageRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: '붙여넣을 텍스트가 없습니다' });
     }
     if (!prefix) {
-      return reply.code(400).send({ error: '파일명 프리픽스를 입력하세요 (예: p3_test_solo_drinking_type_)' });
+      return reply.code(400).send({ error: '파일명 프리픽스를 입력하세요 (예: p3_test_solo_drinking_type)' });
     }
     return parseQuizImagePrompts(raw, prefix);
   });

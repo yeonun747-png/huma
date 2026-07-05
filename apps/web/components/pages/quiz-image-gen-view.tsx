@@ -188,12 +188,12 @@ export function QuizImageGenView() {
             <input
               type="text"
               className="mb-1 w-full rounded-md border border-huma-bdr bg-huma-bg3 px-2.5 py-2 font-mono text-[12px] text-huma-t outline-none focus:border-huma-acc"
-              placeholder="p3_test_solo_drinking_type_"
+              placeholder="p3_test_solo_drinking_type"
               value={prefix}
               onChange={(e) => setPrefix(e.target.value)}
             />
             <p className="mb-3 font-mono text-[10px] text-huma-t3">
-              예: {normalizedPrefix || 'prefix_'}q1_a.png
+              예: {normalizedPrefix || 'prefix'}_q1a.png · _q1b.png … _q12d.png
             </p>
 
             <div className="mb-3 flex flex-wrap gap-1">
