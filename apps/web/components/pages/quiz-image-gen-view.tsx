@@ -1,12 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   parseQuizImagePrompts,
   normalizeQuizImagePrefix,
   type QuizImageParseResult,
 } from '@huma/shared';
-import { api } from '@/lib/api';
+import { api, triggerFileDownload } from '@/lib/api';
+import { appAlert, appConfirm } from '@/lib/app-dialog';
 import { EmptyPanel } from '@/components/ui/empty-panel';
 import { MPanel, MTag } from '@/components/mockup/primitives';
 import { cn } from '@/lib/constants';
@@ -49,6 +50,7 @@ const SETTINGS_CHIPS = [
   { label: '1K', tone: 'idle' as const },
   { label: 'Low', tone: 'idle' as const },
   { label: '×1', tone: 'idle' as const },
+  { label: '전체 병렬', tone: 'blue' as const },
 ];
 
 export function QuizImageGenView() {
@@ -60,7 +62,9 @@ export function QuizImageGenView() {
   const [configError, setConfigError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [zipLoading, setZipLoading] = useState(false);
-  const [abortGen, setAbortGen] = useState(false);
+  const [batchStopped, setBatchStopped] = useState(false);
+  const [preview, setPreview] = useState<{ url: string; filename: string } | null>(null);
+  const stoppedRef = useRef(false);
 
   useEffect(() => {
     api
@@ -104,13 +108,31 @@ export function QuizImageGenView() {
 
   const doneCount = rows.filter((r) => r.status === 'done').length;
   const errorCount = rows.filter((r) => r.status === 'error').length;
+  const activeCount = rows.filter((r) => r.status === 'generating').length;
   const progressPct = rows.length ? Math.round((doneCount / rows.length) * 100) : 0;
+
+  useEffect(() => {
+    if (batchStopped && activeCount === 0) {
+      setBatchStopped(false);
+      stoppedRef.current = false;
+    }
+  }, [batchStopped, activeCount]);
+
+  useEffect(() => {
+    if (!preview) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPreview(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [preview]);
 
   const updateRow = (key: string, patch: Partial<GenRow>) => {
     setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   };
 
-  const generateOne = async (row: GenRow) => {
+  const generateOne = async (row: GenRow, opts?: { batch?: boolean }) => {
+    if (opts?.batch && stoppedRef.current) return false;
     updateRow(row.key, { status: 'generating', error: undefined });
     try {
       const res = await api.quizImageGenerate({
@@ -122,33 +144,68 @@ export function QuizImageGenView() {
       updateRow(row.key, { status: 'done', imageUrl: res.imageUrl });
       return true;
     } catch (e) {
+      if (opts?.batch && stoppedRef.current) {
+        updateRow(row.key, { status: 'idle', error: undefined });
+        return false;
+      }
       updateRow(row.key, { status: 'error', error: (e as Error).message });
       return false;
     }
   };
 
+  /** 대기(pending)만 취소. 생성 중인 요청은 서버/EvoLink까지 완료되면 UI에 반영 */
+  const stopGeneration = () => {
+    stoppedRef.current = true;
+    setBatchStopped(true);
+    setGenerating(false);
+    setRows((prev) =>
+      prev.map((r) =>
+        r.status === 'pending' ? { ...r, status: 'idle' as GenStatus, error: undefined } : r,
+      ),
+    );
+  };
+
+  const confirmStopGeneration = async () => {
+    const pendingCount = rows.filter((r) => r.status === 'pending').length;
+    const inFlightCount = rows.filter((r) => r.status === 'generating').length;
+    const lines = [
+      '일괄 생성을 중지할까요?',
+      pendingCount > 0 ? `· 대기 ${pendingCount}개 → 취소` : null,
+      inFlightCount > 0
+        ? `· 생성 중 ${inFlightCount}개 → EvoLink에서 계속 진행되며 완료 시 표시 (성공 시 과금)`
+        : null,
+    ]
+      .filter(Boolean)
+      .join('\n');
+    if (!(await appConfirm(lines, { destructive: true }))) return;
+    stopGeneration();
+  };
+
   const generateAll = async () => {
     if (!rows.length || generating) return;
+    stoppedRef.current = false;
+    setBatchStopped(false);
     setGenerating(true);
-    setAbortGen(false);
     const pending = rows.filter((r) => r.status !== 'done');
     for (const row of pending) {
-      if (abortGen) break;
-      if (row.status === 'done') continue;
-      await generateOne(row);
+      updateRow(row.key, { status: 'pending', error: undefined });
     }
-    setGenerating(false);
+    try {
+      await Promise.all(pending.map((row) => generateOne(row, { batch: true })));
+    } finally {
+      setGenerating(false);
+    }
   };
 
   const downloadOne = async (row: GenRow) => {
     if (!row.imageUrl) return;
-    const blob = await api.quizImageDownloadBlob(row.imageUrl, row.filename);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = row.filename;
-    a.click();
-    URL.revokeObjectURL(url);
+    try {
+      const blob = await api.quizImageDownloadBlob(row.imageUrl, row.filename);
+      if (blob.size < 64) throw new Error('다운로드 파일이 비어 있습니다');
+      triggerFileDownload(blob, row.filename);
+    } catch (e) {
+      await appAlert(`다운로드 실패: ${(e as Error).message}`);
+    }
   };
 
   const downloadZip = async () => {
@@ -156,20 +213,26 @@ export function QuizImageGenView() {
     if (!done.length) return;
     setZipLoading(true);
     try {
+      const zipName = `${normalizedPrefix || 'quiz-images'}.zip`.replace(/_+\.zip$/i, '.zip');
       const blob = await api.quizImageZip(
         done.map((r) => ({ url: r.imageUrl!, filename: r.filename })),
-        `${normalizedPrefix || 'quiz-images'}.zip`.replace(/\.zip$/i, '') + '.zip',
+        zipName,
       );
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${normalizedPrefix || 'quiz-images'}.zip`.replace(/_+$/, '') + '.zip';
-      a.click();
-      URL.revokeObjectURL(url);
+      if (blob.size < 64) throw new Error('ZIP 파일이 비어 있습니다');
+      triggerFileDownload(blob, zipName);
+    } catch (e) {
+      await appAlert(`ZIP 다운로드 실패: ${(e as Error).message}`);
     } finally {
       setZipLoading(false);
     }
   };
+
+  const clearInputs = () => {
+    setPrefix('');
+    setRaw('');
+  };
+
+  const hasInput = Boolean(prefix.trim() || raw.trim());
 
   const apiReady = configured === true;
 
@@ -183,7 +246,21 @@ export function QuizImageGenView() {
 
       <div className="grid gap-3 xl:grid-cols-[minmax(280px,340px)_1fr]">
         <div className="space-y-3">
-          <MPanel title="입력">
+          <MPanel
+            title="입력"
+            action={
+              hasInput ? (
+                <button
+                  type="button"
+                  className="btn-ghost px-2 py-0.5 font-mono text-[10px] text-huma-t3 hover:text-huma-err"
+                  disabled={generating}
+                  onClick={clearInputs}
+                >
+                  비우기
+                </button>
+              ) : null
+            }
+          >
             <label className="mb-1 block text-[11px] font-semibold text-huma-t2">파일명 프리픽스</label>
             <input
               type="text"
@@ -237,13 +314,13 @@ export function QuizImageGenView() {
                     disabled={generating || !apiReady}
                     onClick={() => void generateAll()}
                   >
-                    {generating ? `생성 중 ${doneCount}/${rows.length}` : '일괄 생성'}
+                    {generating ? `생성 중 ${doneCount}/${rows.length}${activeCount > 0 ? ` · 동시 ${activeCount}` : ''}` : '일괄 생성'}
                   </button>
                   {generating && (
                     <button
                       type="button"
-                      className="btn-ghost px-2 py-1 text-[10px]"
-                      onClick={() => setAbortGen(true)}
+                      className="btn-ghost px-2 py-1 text-[10px] text-huma-err"
+                      onClick={() => void confirmStopGeneration()}
                     >
                       중지
                     </button>
@@ -276,11 +353,19 @@ export function QuizImageGenView() {
 
             {parsed && parsed.totalImages > 0 && (
               <>
-                {generating || doneCount > 0 ? (
+                {generating || doneCount > 0 || (batchStopped && activeCount > 0) ? (
                   <div className="mb-3">
                     <div className="mb-1 flex justify-between text-[10px] text-huma-t3">
                       <span>
                         완료 {doneCount}/{rows.length}
+                        {generating && activeCount > 0 && (
+                          <span className="ml-2 text-huma-acc">동시 생성 {activeCount}</span>
+                        )}
+                        {batchStopped && activeCount > 0 && (
+                          <span className="ml-2 text-huma-warn">
+                            중지됨 · 진행 중 {activeCount}개는 완료 시 표시
+                          </span>
+                        )}
                         {errorCount > 0 && <span className="ml-2 text-huma-err">실패 {errorCount}</span>}
                       </span>
                       <span>{progressPct}%</span>
@@ -323,6 +408,11 @@ export function QuizImageGenView() {
                               apiReady={apiReady}
                               onGenerate={() => void generateOne(row)}
                               onDownload={() => void downloadOne(row)}
+                              onPreview={
+                                row.imageUrl
+                                  ? () => setPreview({ url: row.imageUrl!, filename: row.filename })
+                                  : undefined
+                              }
                             />
                           );
                         })}
@@ -335,6 +425,20 @@ export function QuizImageGenView() {
           </MPanel>
         </div>
       </div>
+
+      {preview && (
+        <div
+          className="m-screenshot-lightbox"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`${preview.filename} 크게 보기`}
+          onClick={() => setPreview(null)}
+        >
+          <span className="m-screenshot-lightbox-close">ESC 또는 바깥 클릭으로 닫기 · {preview.filename}</span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={preview.url} alt={preview.filename} onClick={(e) => e.stopPropagation()} />
+        </div>
+      )}
     </div>
   );
 }
@@ -345,12 +449,14 @@ function ImageGenCard({
   apiReady,
   onGenerate,
   onDownload,
+  onPreview,
 }: {
   row: GenRow;
   generating: boolean;
   apiReady: boolean;
   onGenerate: () => void;
   onDownload: () => void;
+  onPreview?: () => void;
 }) {
   const statusTone =
     row.status === 'done' ? 'ok' : row.status === 'error' ? 'err' : row.status === 'generating' ? 'live' : 'idle';
@@ -369,8 +475,15 @@ function ImageGenCard({
     <div className="flex flex-col overflow-hidden rounded-md border border-huma-bdr bg-huma-bg3">
       <div className="relative aspect-square bg-huma-bg2">
         {row.imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={row.imageUrl} alt={row.filename} className="h-full w-full object-cover" />
+          <button
+            type="button"
+            className="block h-full w-full cursor-zoom-in"
+            title="클릭하면 크게 보기"
+            onClick={onPreview}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={row.imageUrl} alt={row.filename} className="h-full w-full object-cover" />
+          </button>
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-1 px-2 text-center text-[10px] text-huma-t3">
             {row.choiceId ? (

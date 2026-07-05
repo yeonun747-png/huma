@@ -1,8 +1,12 @@
 import axios from 'axios';
+import sharp from 'sharp';
+import { sleep } from '../../lib/utils.js';
 import { getEvoLinkTask, hasEvoLinkApiKey } from '../video-content/evolink.js';
 
 const API_BASE = process.env.EVOLINK_API_BASE?.trim() || 'https://api.evolink.ai';
 const IMAGE_MODEL = 'gpt-image-2';
+const EVOLINK_RETRY_MAX = 12;
+const EVOLINK_RETRY_BASE_MS = 1500;
 
 export const QUIZ_IMAGE_DEFAULTS = {
   model: IMAGE_MODEL,
@@ -103,6 +107,40 @@ function taskErrorMessage(task: { error?: { message?: string } | string }): stri
   return task.error?.message ?? 'EvoLink 이미지 생성 실패';
 }
 
+/** 429·일시적 과부하 — 실패 task는 과금 없으므로 재시도 */
+export function isRetryableEvoLinkRateLimit(err: unknown): boolean {
+  if (axios.isAxiosError(err)) {
+    const status = err.response?.status;
+    if (status === 429 || status === 503 || status === 502) return true;
+  }
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return (
+    msg.includes('429') ||
+    msg.includes('rate limit') ||
+    msg.includes('too many requests') ||
+    msg.includes('temporarily unavailable')
+  );
+}
+
+async function withEvoLinkRateLimitRetry<T>(fn: () => Promise<T>): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= EVOLINK_RETRY_MAX; attempt += 1) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (!isRetryableEvoLinkRateLimit(err) || attempt >= EVOLINK_RETRY_MAX) {
+        throw err instanceof Error && err.message.startsWith('EvoLink')
+          ? err
+          : new Error(formatEvoLinkAxiosError(err));
+      }
+      const delay = EVOLINK_RETRY_BASE_MS * 1.4 ** attempt + Math.random() * 800;
+      await sleep(delay);
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+}
+
 export { hasEvoLinkApiKey };
 
 export async function createEvoLinkImageTask(prompt: string): Promise<string> {
@@ -115,16 +153,18 @@ export async function createEvoLinkImageTask(prompt: string): Promise<string> {
     n: QUIZ_IMAGE_DEFAULTS.n,
   };
 
-  try {
-    const { data } = await axios.post<Record<string, unknown>>(
-      `${API_BASE}/v1/images/generations`,
-      body,
-      { headers: authHeaders(), timeout: 60_000 },
-    );
-    return extractTaskId(data ?? {});
-  } catch (err) {
-    throw new Error(formatEvoLinkAxiosError(err));
-  }
+  return withEvoLinkRateLimitRetry(async () => {
+    try {
+      const { data } = await axios.post<Record<string, unknown>>(
+        `${API_BASE}/v1/images/generations`,
+        body,
+        { headers: authHeaders(), timeout: 60_000 },
+      );
+      return extractTaskId(data ?? {});
+    } catch (err) {
+      throw new Error(formatEvoLinkAxiosError(err));
+    }
+  });
 }
 
 export async function pollEvoLinkImageUrl(
@@ -136,7 +176,7 @@ export async function pollEvoLinkImageUrl(
   const deadline = Date.now() + maxWaitMs;
 
   while (Date.now() < deadline) {
-    const task = await getEvoLinkTask(taskId);
+    const task = await withEvoLinkRateLimitRetry(() => getEvoLinkTask(taskId));
     const status = task.status;
     if (isTaskCompleted(status)) {
       const url = extractImageUrlFromTask(task);
@@ -158,11 +198,49 @@ export async function generateQuizImage(prompt: string): Promise<{ taskId: strin
 }
 
 export async function fetchImageBytes(url: string): Promise<Buffer> {
-  const { data } = await axios.get<ArrayBuffer>(url, {
+  const { data, headers } = await axios.get<ArrayBuffer>(url, {
     responseType: 'arraybuffer',
     timeout: 60_000,
+    maxRedirects: 5,
+    validateStatus: (s) => s >= 200 && s < 300,
   });
-  return Buffer.from(data);
+  const buf = Buffer.from(data);
+  if (buf.length < 64) {
+    throw new Error('이미지 응답이 비어 있습니다');
+  }
+  const ct = String(headers['content-type'] ?? '').toLowerCase();
+  if (ct.includes('json') || ct.includes('html') || ct.includes('text/')) {
+    throw new Error('EvoLink URL에서 이미지가 아닌 응답을 받았습니다');
+  }
+  return buf;
+}
+
+function isPng(buf: Buffer): boolean {
+  return buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+}
+
+/** 다운로드용 — WebP/JPEG 등도 PNG로 정규화 (.png 파일명과 일치) */
+export async function fetchQuizImagePngBytes(url: string): Promise<Buffer> {
+  const raw = await fetchImageBytes(url);
+  if (isPng(raw)) return raw;
+  try {
+    return await sharp(raw).png().toBuffer();
+  } catch {
+    throw new Error('이미지를 PNG로 변환하지 못했습니다');
+  }
+}
+
+export async function fetchQuizImagesForZip(
+  items: Array<{ url: string; filename: string }>,
+): Promise<{ name: string; data: Buffer }[]> {
+  const results = await Promise.all(
+    items.map(async (item) => {
+      if (!item.url || !item.filename) return null;
+      const data = await fetchQuizImagePngBytes(item.url);
+      return { name: item.filename.replace(/\.(webp|jpe?g)$/i, '.png'), data };
+    }),
+  );
+  return results.filter((f): f is { name: string; data: Buffer } => f != null);
 }
 
 /** 저장(무압축) ZIP — 외부 의존성 없이 일괄 다운로드용 */

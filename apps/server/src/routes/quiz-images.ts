@@ -7,7 +7,8 @@ import {
 import { authMiddleware, getWorkspaceFilter } from '../middleware/auth.js';
 import {
   createStoredZip,
-  fetchImageBytes,
+  fetchQuizImagePngBytes,
+  fetchQuizImagesForZip,
   generateQuizImage,
   hasEvoLinkApiKey,
   QUIZ_IMAGE_DEFAULTS,
@@ -89,7 +90,26 @@ export async function registerQuizImageRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: '유효한 url 필요' });
     }
     try {
-      const data = await fetchImageBytes(url);
+      const data = await fetchQuizImagePngBytes(url);
+      return reply
+        .header('Content-Type', 'image/png')
+        .header('Content-Disposition', `attachment; filename="${filename.replace(/"/g, '')}"`)
+        .send(data);
+    } catch (err) {
+      return reply.code(502).send({ error: (err as Error).message });
+    }
+  });
+
+  app.post('/api/quiz-images/download', routeOpts, async (request, reply) => {
+    if (!assertQuizOasisAccess(request, reply)) return;
+    const body = request.body as { url?: string; filename?: string };
+    const url = String(body.url ?? '').trim();
+    const filename = String(body.filename ?? 'quiz-image.png').trim();
+    if (!/^https?:\/\//i.test(url)) {
+      return reply.code(400).send({ error: '유효한 url 필요' });
+    }
+    try {
+      const data = await fetchQuizImagePngBytes(url);
       return reply
         .header('Content-Type', 'image/png')
         .header('Content-Disposition', `attachment; filename="${filename.replace(/"/g, '')}"`)
@@ -111,11 +131,7 @@ export async function registerQuizImageRoutes(app: FastifyInstance) {
     }
 
     try {
-      const files: { name: string; data: Buffer }[] = [];
-      for (const item of items) {
-        if (!item.url || !item.filename) continue;
-        files.push({ name: item.filename, data: await fetchImageBytes(item.url) });
-      }
+      const files = await fetchQuizImagesForZip(items);
       if (files.length === 0) {
         return reply.code(400).send({ error: '유효한 이미지 URL이 없습니다' });
       }

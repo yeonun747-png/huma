@@ -50,6 +50,9 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     (timeoutMs != null ? requestTimeoutSignal(timeoutMs) : undefined);
 
   const res = await fetch(url, { ...fetchOptions, headers, signal }).catch((err: unknown) => {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw err;
+    }
     const hint = !sameOrigin && (path.includes('adsense') || path.includes('monetization'))
       ? ' 브라우저 광고 차단 확장 프로그램이 API 요청을 막았을 수 있습니다.'
       : '';
@@ -104,9 +107,12 @@ function qs(params: Record<string, string | undefined>) {
 async function requestBlob(path: string, options: RequestOptions = {}): Promise<Blob> {
   const { sameOrigin, timeoutMs, ...fetchOptions } = options;
   const token = getToken();
+  const hasBody =
+    fetchOptions.body !== undefined && fetchOptions.body !== null && fetchOptions.body !== '';
   const headers: Record<string, string> = {
     ...(fetchOptions.headers as Record<string, string>),
   };
+  if (hasBody) headers['Content-Type'] = 'application/json';
   if (token) headers['X-HUMA-KEY'] = token;
 
   const url = resolveRequestUrl(path, sameOrigin);
@@ -119,7 +125,25 @@ async function requestBlob(path: string, options: RequestOptions = {}): Promise<
     const err = (await res.json().catch(() => ({ error: res.statusText }))) as { error?: string };
     throw new Error(err.error || res.statusText || '다운로드 실패');
   }
+  const ct = res.headers.get('content-type') ?? '';
+  if (ct.includes('application/json')) {
+    const err = (await res.json().catch(() => ({ error: 'JSON 응답' }))) as { error?: string };
+    throw new Error(err.error || '다운로드 실패 (서버 JSON 응답)');
+  }
   return res.blob();
+}
+
+/** blob 다운로드 — revokeObjectURL 지연으로 손상 파일 방지 */
+export function triggerFileDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 function refreshNavCaches() {
@@ -1246,12 +1270,15 @@ export const api = {
     }),
   quizImageConfig: () =>
     request<{ configured: boolean; defaults: Record<string, unknown> }>('/api/quiz-images/config'),
-  quizImageGenerate: (body: {
-    prompt: string;
-    filename: string;
-    questionNumber?: number;
-    choiceId?: string | null;
-  }) =>
+  quizImageGenerate: (
+    body: {
+      prompt: string;
+      filename: string;
+      questionNumber?: number;
+      choiceId?: string | null;
+    },
+    opts?: { signal?: AbortSignal },
+  ) =>
     request<{
       ok: boolean;
       taskId: string;
@@ -1261,15 +1288,17 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
       timeoutMs: 200_000,
+      signal: opts?.signal,
     }),
   quizImageDownloadBlob: (url: string, filename: string) =>
-    requestBlob(
-      `/api/quiz-images/download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(filename)}`,
-    ),
+    requestBlob('/api/quiz-images/download', {
+      method: 'POST',
+      body: JSON.stringify({ url, filename }),
+    }),
   quizImageZip: (items: Array<{ url: string; filename: string }>, zipName?: string) =>
     requestBlob('/api/quiz-images/zip', {
       method: 'POST',
       body: JSON.stringify({ items, zipName }),
-      timeoutMs: 120_000,
+      timeoutMs: Math.min(280_000, Math.max(120_000, items.length * 12_000 + 30_000)),
     }),
 };
