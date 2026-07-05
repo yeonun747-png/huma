@@ -70,19 +70,6 @@ function useQuizImagePreview(imageUrl: string | undefined) {
   return { src, loading };
 }
 
-function toGenRows(parsed: QuizImageParseResult): GenRow[] {
-  return parsed.items.map((item) => ({
-    key: rowKey(item),
-    questionNumber: item.questionNumber,
-    choiceId: item.choiceId,
-    prompt: item.prompt,
-    filename: item.filename,
-    isFaceQuestion: item.isFaceQuestion,
-    choiceCount: item.choiceCount,
-    status: 'idle' as GenStatus,
-  }));
-}
-
 const SETTINGS_CHIPS = [
   { label: 'GPT Image 2', tone: 'blue' as const },
   { label: '1:1', tone: 'idle' as const },
@@ -92,11 +79,76 @@ const SETTINGS_CHIPS = [
   { label: '전체 병렬', tone: 'blue' as const },
 ];
 
+const DRAFT_STORAGE_KEY = 'huma_quiz_image_gen_draft';
+
+interface SavedRowResult {
+  status: GenStatus;
+  imageUrl?: string;
+  error?: string;
+}
+
+interface QuizImageGenDraft {
+  v: 1;
+  prefix: string;
+  raw: string;
+  results: Record<string, SavedRowResult>;
+  savedAt: string;
+}
+
+function loadQuizImageDraft(): QuizImageGenDraft | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const text = localStorage.getItem(DRAFT_STORAGE_KEY);
+    if (!text) return null;
+    const data = JSON.parse(text) as QuizImageGenDraft;
+    if (data?.v !== 1) return null;
+    return {
+      v: 1,
+      prefix: String(data.prefix ?? ''),
+      raw: String(data.raw ?? ''),
+      results: data.results && typeof data.results === 'object' ? data.results : {},
+      savedAt: String(data.savedAt ?? ''),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function normalizePersistedStatus(status: GenStatus): GenStatus {
+  if (status === 'generating' || status === 'pending') return 'idle';
+  return status;
+}
+
+function mergeGenRows(parsed: QuizImageParseResult, prev: GenRow[], draftResults: Record<string, SavedRowResult> | null): GenRow[] {
+  const prevByKey = new Map(prev.map((r) => [r.key, r]));
+  return parsed.items.map((item) => {
+    const key = rowKey(item);
+    const prevRow = prevByKey.get(key);
+    const draftRow = draftResults?.[key];
+    const status = normalizePersistedStatus(prevRow?.status ?? draftRow?.status ?? 'idle');
+    return {
+      key,
+      questionNumber: item.questionNumber,
+      choiceId: item.choiceId,
+      prompt: item.prompt,
+      filename: item.filename,
+      isFaceQuestion: item.isFaceQuestion,
+      choiceCount: item.choiceCount,
+      status,
+      imageUrl: prevRow?.imageUrl ?? draftRow?.imageUrl,
+      error: prevRow?.error ?? draftRow?.error,
+    };
+  });
+}
+
 export function QuizImageGenView() {
+  const draftResultsRef = useRef<Record<string, SavedRowResult> | null>(null);
+  const draftLoadedRef = useRef(false);
   const [prefix, setPrefix] = useState('');
   const [raw, setRaw] = useState('');
   const [parsed, setParsed] = useState<QuizImageParseResult | null>(null);
   const [rows, setRows] = useState<GenRow[]>([]);
+  const [restoredHint, setRestoredHint] = useState(false);
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -104,6 +156,17 @@ export function QuizImageGenView() {
   const [batchStopped, setBatchStopped] = useState(false);
   const [preview, setPreview] = useState<{ url: string; filename: string } | null>(null);
   const stoppedRef = useRef(false);
+
+  useEffect(() => {
+    if (draftLoadedRef.current) return;
+    draftLoadedRef.current = true;
+    const draft = loadQuizImageDraft();
+    if (!draft) return;
+    setPrefix(draft.prefix);
+    setRaw(draft.raw);
+    draftResultsRef.current = draft.results;
+    setRestoredHint(Boolean(draft.prefix || draft.raw));
+  }, []);
 
   useEffect(() => {
     api
@@ -137,13 +200,48 @@ export function QuizImageGenView() {
     }
     const result = parseQuizImagePrompts(raw, normalizedPrefix);
     setParsed(result);
-    setRows(toGenRows(result));
+    setRows((prev) => {
+      const merged = mergeGenRows(result, prev, draftResultsRef.current);
+      draftResultsRef.current = null;
+      return merged;
+    });
   }, [raw, normalizedPrefix]);
 
   useEffect(() => {
     const t = setTimeout(runParse, 400);
     return () => clearTimeout(t);
   }, [runParse]);
+
+  useEffect(() => {
+    if (!prefix.trim() && !raw.trim()) {
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
+      return;
+    }
+    const t = setTimeout(() => {
+      const results: Record<string, SavedRowResult> = {};
+      for (const row of rows) {
+        if (row.status !== 'done' && row.status !== 'error' && !row.imageUrl) continue;
+        results[row.key] = {
+          status: normalizePersistedStatus(row.status),
+          imageUrl: row.imageUrl,
+          error: row.error,
+        };
+      }
+      const draft: QuizImageGenDraft = {
+        v: 1,
+        prefix,
+        raw,
+        results,
+        savedAt: new Date().toISOString(),
+      };
+      try {
+        localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+      } catch {
+        /* quota exceeded — 입력만 유지 */
+      }
+    }, 500);
+    return () => clearTimeout(t);
+  }, [prefix, raw, rows]);
 
   const doneCount = rows.filter((r) => r.status === 'done').length;
   const errorCount = rows.filter((r) => r.status === 'error').length;
@@ -269,6 +367,9 @@ export function QuizImageGenView() {
   const clearInputs = () => {
     setPrefix('');
     setRaw('');
+    setRestoredHint(false);
+    draftResultsRef.current = null;
+    localStorage.removeItem(DRAFT_STORAGE_KEY);
   };
 
   const hasInput = Boolean(prefix.trim() || raw.trim());
@@ -280,6 +381,18 @@ export function QuizImageGenView() {
       {configError && (
         <div className="rounded-lg border border-huma-warn/40 bg-[var(--warn-bg)] px-3 py-2 text-[12px] text-huma-warn whitespace-pre-wrap">
           {configError}
+        </div>
+      )}
+      {restoredHint && hasInput && (
+        <div className="rounded-lg border border-huma-bdr bg-huma-bg2/80 px-3 py-2 text-[11px] text-huma-t2">
+          이 브라우저에 마지막 입력·생성 결과가 저장되어 있습니다. 새로고침해도 유지됩니다.
+          <button
+            type="button"
+            className="ml-2 text-huma-t3 underline hover:text-huma-t"
+            onClick={() => setRestoredHint(false)}
+          >
+            닫기
+          </button>
         </div>
       )}
 
