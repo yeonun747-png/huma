@@ -56,9 +56,13 @@ async function snapshotNaverLoginSubmitState(page: Page): Promise<NaverLoginSubm
     captchaImg: await page
       .locator('#captcha img, .captcha_wrap img, .captcha_box img, #cptch img')
       .first()
-      .getAttribute('src')
+      .getAttribute('src', { timeout: 500 })
       .catch(() => null),
-    btnClass: await page.locator('#log\\.login').first().getAttribute('class').catch(() => null),
+    btnClass: await page
+      .locator('#log\\.login')
+      .first()
+      .getAttribute('class', { timeout: 500 })
+      .catch(() => null),
   };
 }
 
@@ -168,8 +172,8 @@ export async function nudgeNaverLoginFormAfterPassword(page: Page): Promise<void
 /** off 잔류 시 — ID/PW가 채워졌으면 nidlogin JS 지연으로 마지막 시도 허용 */
 async function canForceAttemptLoginButton(page: Page, btn: Locator): Promise<boolean> {
   if (!(await btn.isVisible().catch(() => false))) return false;
-  const id = (await page.locator('#id').inputValue().catch(() => '')).trim();
-  const pw = (await page.locator('#pw').inputValue().catch(() => '')).trim();
+  const id = (await page.locator('#id').inputValue({ timeout: 500 }).catch(() => '')).trim();
+  const pw = (await page.locator('#pw').inputValue({ timeout: 500 }).catch(() => '')).trim();
   return Boolean(id && pw);
 }
 
@@ -227,7 +231,7 @@ async function blurNaverCaptchaInputFocus(page: Page): Promise<void> {
 /** nidlogin 로그인 버튼 — Playwright/JS click 금지, humanClick만 (상단 중앙 — 푸터 쪽 오클릭 방지) */
 async function clickNaverLoginButtonWithMouse(page: Page, btn: Locator): Promise<void> {
   await blurNaverCaptchaInputFocus(page);
-  await btn.scrollIntoViewIfNeeded({ timeout: 2500, block: 'center' }).catch(() => {});
+  await btn.scrollIntoViewIfNeeded({ timeout: 2500 }).catch(() => {});
   await sleep(randomBetween(50, 120));
 
   const box = await btn.boundingBox().catch(() => null);
@@ -388,6 +392,18 @@ export async function typeIntoNaverLoginField(
 }
 
 /**
+ * nidlogin — #pw 칸이 비어 있는지 저비용 확인.
+ * 캡차 대기 중 "비밀번호 비어 있음 + 캡차 표시" 상태를 매 폴링마다 감지하기 위한 것.
+ * 반환: 칸이 존재하고 값이 비어 있으면 true, 채워져 있거나 칸이 없으면 false.
+ */
+export async function isNaverLoginPasswordEmpty(page: Page): Promise<boolean> {
+  if (!page.url().includes('nidlogin')) return false;
+  const pw = await page.locator('#pw').inputValue({ timeout: 400 }).catch(() => null);
+  if (pw === null) return false;
+  return pw.trim().length === 0;
+}
+
+/**
  * CAPTCHA 전환·오답 후 네이버가 로그인 폼을 비우는 경우 —
  * ID만 비었으면 ID+PW, PW만 비었으면 PW만 재입력 (최초 로그인과 동일 순서).
  */
@@ -409,8 +425,8 @@ export async function ensureNaverLoginCredentialsForCaptcha(
     .single();
   if (!account) return;
 
-  const idVal = await page.locator('#id').inputValue().catch(() => '');
-  const pwVal = await page.locator('#pw').inputValue().catch(() => '');
+  const idVal = await page.locator('#id').inputValue({ timeout: 500 }).catch(() => '');
+  const pwVal = await page.locator('#pw').inputValue({ timeout: 500 }).catch(() => '');
   const needId = !idVal.trim();
   const needPw = !pwVal.trim();
 

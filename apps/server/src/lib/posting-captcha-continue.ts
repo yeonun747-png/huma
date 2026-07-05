@@ -18,9 +18,12 @@ import { shouldPreserveBrowserPageForVnc } from '../modules/watcher/captcha-hold
 import { recordPublishedPost } from '../modules/blog-check/post-record.js';
 import {
   handleNaverAccountProtection,
+  handleNaverAuthChallenge,
   isNaverAccountProtectionError,
+  isNaverAuthChallengeError,
   NAVER_ACCOUNT_PROTECTED,
   parseNaverAccountProtectionPhase,
+  parseNaverAuthChallengeKind,
 } from './naver-account-protection.js';
 
 async function incrementPostCount(accountId: string): Promise<void> {
@@ -103,6 +106,24 @@ export async function continuePostBlogFromCaptchaHold(params: {
       } catch (postErr) {
         lastErr = postErr as Error;
         const msg = lastErr.message ?? '';
+
+        // 2FA·기기인증 요구 — hold 재진입(사람 대기) 대신 자동발행 OFF·알림 후 종료.
+        // preserveBrowserSession=false 유지 → finally 가 브라우저 종료·동글 반납·계정 락 해제.
+        if (isNaverAuthChallengeError(postErr)) {
+          await handleNaverAuthChallenge({
+            accountId,
+            workspace,
+            humaJobId: jobId,
+            kind: parseNaverAuthChallengeKind(postErr),
+          }).catch((handlerErr) => {
+            console.error('[naver] auth-challenge handler:', (handlerErr as Error).message);
+          });
+          await supabase
+            .from('huma_jobs')
+            .update({ status: 'failed', error_message: msg, started_at: null })
+            .eq('id', jobId);
+          return { ok: false, error: msg };
+        }
 
         if (shouldPreserveBrowserPageForVnc(postErr)) {
           preserveBrowserSession = true;

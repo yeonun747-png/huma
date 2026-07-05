@@ -110,11 +110,30 @@ export async function navigateToBlogPostwrite(
  * UI 경로 실패 시 postwrite URL goto 폴백.
  * @returns postwrite URL 탭 (동일 탭 또는 팝업)
  */
+/** 컨텍스트 내 postwrite 탭을 keep 하나만 남기고 나머지는 close (같은 글쓰기 탭 중복 방지) */
+async function closeDuplicatePostwritePages(context: BrowserContext, keep: Page): Promise<void> {
+  for (const p of context.pages()) {
+    if (p === keep || p.isClosed()) continue;
+    if (POSTWRITE_URL_RE.test(p.url())) {
+      await p.close().catch(() => {});
+    }
+  }
+}
+
 export async function openBlogPostwritePreferUiClick(
   page: Page,
   blogId: string,
 ): Promise<Page | null> {
   if (POSTWRITE_URL_RE.test(page.url())) return page;
+
+  const context = page.context();
+  // 이미 열린 postwrite 탭이 있으면 재사용 — 「글쓰기」 재클릭으로 동일 탭이 중복 생성되는 것 방지.
+  // (URL 직접 이동 시절엔 같은 탭을 재사용해 중복이 없었으나, UI 클릭은 매번 팝업을 띄운다.)
+  const existing = findNaverPostwritePage(context);
+  if (existing && !existing.isClosed()) {
+    await existing.bringToFront().catch(() => {});
+    return existing;
+  }
 
   await page.bringToFront().catch(() => {});
 
@@ -134,6 +153,7 @@ export async function openBlogPostwritePreferUiClick(
       if (popup && !popup.isClosed()) {
         await popup.waitForLoadState('domcontentloaded', { timeout: PLAYWRIGHT_NAV_TIMEOUT_MS }).catch(() => {});
         if (POSTWRITE_URL_RE.test(popup.url())) {
+          await closeDuplicatePostwritePages(context, popup);
           await logOperation({
             level: 'info',
             message: `[post_blog] 블로그 글쓰기 UI 클릭 진입 (팝업) blogId=${blogId}`,

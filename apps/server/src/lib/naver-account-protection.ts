@@ -186,3 +186,90 @@ export async function handleNaverAccountProtection(params: {
   }
   await notifyLayer4Telegram(telegramText, workspace);
 }
+
+export type NaverAuthChallengeKind = '2fa' | 'device';
+
+/** 2FA·기기(새 환경) 인증 요구 — VNC 사람 대기 없이 자동 중단할 대상 */
+export function isNaverAuthChallengeError(err: unknown): boolean {
+  const msg = (err as Error)?.message ?? '';
+  return msg.includes('NAVER_LOGIN_2FA') || msg.includes('NAVER_LOGIN_DEVICE_VERIFY');
+}
+
+export function parseNaverAuthChallengeKind(err: unknown): NaverAuthChallengeKind {
+  const msg = (err as Error)?.message ?? '';
+  return msg.includes('NAVER_LOGIN_DEVICE_VERIFY') ? 'device' : '2fa';
+}
+
+/**
+ * 2FA·기기인증 요구 감지 — 보호조치와 동일 수준으로 정리한다:
+ * 큐 삭제 · 동글·계정 락 해제 · 자동발행 OFF · 계정 사용중지(is_active) · Operation 로그(ERROR=우상단 알림) · Slack/Telegram.
+ * 브라우저 종료는 호출부(worker finally / continue finally / cancelCaptchaHold)가 담당한다.
+ */
+export async function handleNaverAuthChallenge(params: {
+  accountId: string;
+  workspace?: string | null;
+  humaJobId?: string;
+  kind: NaverAuthChallengeKind;
+}): Promise<void> {
+  const { accountId, humaJobId, kind } = params;
+
+  const { data: acc } = await supabase
+    .from('huma_accounts')
+    .select('workspace, account_type, naver_id, slot_label, name, is_active, auto_publish_enabled')
+    .eq('id', accountId)
+    .maybeSingle();
+  if (!acc) return;
+
+  const workspace = params.workspace ?? (acc.workspace as string | null) ?? null;
+  const label = (acc.slot_label as string | null) ?? (acc.name as string | null) ?? accountId;
+  const naverId = (acc.naver_id as string | null) ?? '?';
+  const wasActive = acc.is_active !== false;
+
+  if (acc.account_type === 'posting' && workspace) {
+    await disableAutoPublish(workspace, accountId).catch((err) => {
+      console.error('[naver] disableAutoPublish on auth-challenge:', (err as Error).message);
+    });
+  } else {
+    if (acc.auto_publish_enabled) {
+      await supabase.from('huma_accounts').update({ auto_publish_enabled: false }).eq('id', accountId);
+    }
+    await resetPostingQuotaReservation(accountId).catch(() => {});
+  }
+
+  const purgedJobs = await purgeAccountPostingQueue(accountId);
+
+  await forceReleaseModemForAccount(accountId).catch((err) => {
+    console.error('[naver] forceReleaseModem on auth-challenge:', (err as Error).message);
+  });
+  await forceReleaseAccount(accountId).catch(() => {});
+
+  await supabase.from('huma_accounts').update({ is_active: false }).eq('id', accountId);
+
+  const kindKo = kind === 'device' ? '기기(새 환경) 인증' : '2단계 인증(2FA)';
+  const logMessage =
+    `[naver] ${kindKo} 요구 감지 — 큐 ${purgedJobs}건 삭제 · 동글·계정 락 해제 · ` +
+    `자동발행 OFF · 계정 사용중지 (${label}/${naverId}). VNC에서 인증 완료 후 계정관리에서 재투입`;
+
+  await logOperation({
+    level: 'ERROR',
+    message: logMessage,
+    account_id: accountId,
+    job_id: humaJobId,
+    workspace: workspace ?? undefined,
+  });
+
+  if (!wasActive) return;
+
+  const notifyText = [
+    kind === 'device' ? '🔐 네이버 기기(새 환경) 인증 요구' : '🔐 네이버 2단계 인증(2FA) 요구',
+    `계정: ${label} (${naverId})`,
+    `조치: 큐 ${purgedJobs}건 삭제 · 동글·계정 락 해제 · 자동발행 OFF · is_active OFF`,
+    'VNC에서 인증 완료 후 계정관리에서 수동 재투입',
+  ].join('\n');
+
+  if (await shouldNotifySlack()) {
+    const webhook = process.env.SLACK_WEBHOOK_URL?.trim();
+    if (webhook) await axios.post(webhook, { text: notifyText }).catch(() => {});
+  }
+  await notifyLayer4Telegram(notifyText, workspace);
+}

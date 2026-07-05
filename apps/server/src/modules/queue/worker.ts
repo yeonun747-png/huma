@@ -49,8 +49,11 @@ import { checkCrossPostingStagger } from '../../lib/posting-cross-stagger.js';
 import { logOperation } from '../../lib/log-emitter.js';
 import {
   handleNaverAccountProtection,
+  handleNaverAuthChallenge,
   isNaverAccountProtectionError,
+  isNaverAuthChallengeError,
   parseNaverAccountProtectionPhase,
+  parseNaverAuthChallengeKind,
   throwIfNaverAccountProtectionInContext,
 } from '../../lib/naver-account-protection.js';
 import { executePostBlog } from './jobs/post-blog.js';
@@ -631,6 +634,19 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
             if (accountId && !heldForCaptcha) await incrementAccountCount(accountId, dailyCountField(type));
           } catch (err) {
             if (accountId && isNaverAccountProtectionError(err)) {
+              throw err;
+            }
+            // 2FA·기기인증 요구 — 사람 대기(hold) 대신 자동발행 OFF·알림 후 종료.
+            // throw 하면 inner finally 가 브라우저 종료·동글 반납, outer catch 가 잡 실패·ERROR 로그 처리.
+            if (accountId && isNaverAuthChallengeError(err)) {
+              await handleNaverAuthChallenge({
+                accountId,
+                workspace: jobWorkspace,
+                humaJobId,
+                kind: parseNaverAuthChallengeKind(err),
+              }).catch((handlerErr) => {
+                console.error('[naver] auth-challenge handler:', (handlerErr as Error).message);
+              });
               throw err;
             }
             if (

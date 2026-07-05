@@ -20,8 +20,12 @@ import {
   isNaverCaptchaVisible,
   isNaverLoginPendingAfterCaptcha,
   pickNaverCaptchaPage,
+  tryAutoSolveNaverCaptcha,
 } from '../../lib/naver-captcha-vision.js';
-import { ensureNaverLoginCredentialsForCaptcha } from '../../lib/naver-login-fields.js';
+import {
+  ensureNaverLoginCredentialsForCaptcha,
+  isNaverLoginPasswordEmpty,
+} from '../../lib/naver-login-fields.js';
 import { isNaverAuthChallengePage } from '../../lib/naver-auth-challenge.js';
 import { vncSlotLabelKo } from '../../lib/vnc-window-layout.js';
 import { enforceVncWindowBounds } from '../../lib/vnc-window-guard.js';
@@ -38,6 +42,10 @@ const MAX_REMINDS = 3;
 const CAPTCHA_AUTO_RESUME_MS = 1_500;
 /** hold 중 CAPTCHA 재출제(2중) 감지 폴링 */
 const CAPTCHA_HOLD_POLL_MS = 2_000;
+/** hold 중 Vision 자동 해결 최대 호출 수 (각 호출 = 내부 3회 시도) — 무한 재시도·비용 방지 */
+const MAX_HOLD_AUTO_SOLVE_CALLS = 4;
+/** hold 중 Vision 자동 해결 재시도 최소 간격 */
+const HOLD_AUTO_SOLVE_COOLDOWN_MS = 15_000;
 /** 2중 CAPTCHA 텔레그램 재알림 최소 간격 */
 const SECOND_CAPTCHA_TELEGRAM_COOLDOWN_MS = 90_000;
 
@@ -82,6 +90,9 @@ interface CaptchaHoldEntry extends CaptchaHoldInput {
   /** 텔레그램 CAPTCHA 알림 message_id (pm2 재시작 후 답장 매칭 복구) */
   lastTelegramChatId?: string;
   lastTelegramMessageId?: number;
+  /** hold 중 Vision 자동 해결 재시도 횟수 (무한 재시도·비용 방지) */
+  holdAutoSolveCalls: number;
+  lastHoldAutoSolveAt?: number;
 }
 
 const holds = new Map<string, CaptchaHoldEntry>();
@@ -158,10 +169,18 @@ export async function syncCaptchaHoldState(
   const isSecondRound = entry.captchaClearedOnce && !entry.captchaCurrentlyVisible;
   entry.captchaCurrentlyVisible = true;
 
-  const shouldRefill =
+  let shouldRefill =
     isSecondRound ||
     options?.treatAsSecondRound === true ||
     options?.refillPassword === true;
+
+  // 라운드와 무관하게 — 캡차 표시 중 비밀번호칸이 비어 있으면(오클릭·네이버 폼 초기화 등)
+  // 즉시 재입력해 상태를 항상 준비한다. 사람이 캡차만 풀면 바로 로그인되도록.
+  // 채워져 있으면 no-op(입력 없음 → VNC 깜빡임 없음).
+  if (!shouldRefill && shotPage.url().includes('nidlogin')) {
+    if (await isNaverLoginPasswordEmpty(shotPage)) shouldRefill = true;
+  }
+
   if (shouldRefill && shotPage.url().includes('nidlogin')) {
     if (!(await isNaverAuthChallengePage(shotPage))) {
       await ensureNaverLoginCredentialsForCaptcha(shotPage, entry.accountId, { fast: true }).catch(
@@ -328,20 +347,134 @@ function scheduleReminders(entry: CaptchaHoldEntry): void {
   entry.timers.push(captchaPoll);
 }
 
+/**
+ * hold 중 — 사람 개입 없이 프로그램이 CAPTCHA를 직접 푼다(Vision 자동 해결 + PW 재입력 + 로그인 클릭).
+ * 자동 해결 설정 ON일 때만 동작하며, 호출 수 상한·쿨다운으로 무한 재시도·비용을 막는다.
+ * 실패·비활성이면 아무 것도 하지 않고 사람(VNC) 대기로 폴백한다.
+ */
+async function tryHoldVisionAutoSolve(entry: CaptchaHoldEntry, page: Page): Promise<void> {
+  if (entry.resumingInProgress || entry.autoResumeFiring) return;
+  if (entry.holdAutoSolveCalls >= MAX_HOLD_AUTO_SOLVE_CALLS) return;
+  const now = Date.now();
+  if (entry.lastHoldAutoSolveAt && now - entry.lastHoldAutoSolveAt < HOLD_AUTO_SOLVE_COOLDOWN_MS) {
+    return;
+  }
+  // 2FA·기기 인증 챌린지는 Vision 대상 아님 — 사람 필요
+  if (await isNaverAuthChallengePage(page)) return;
+
+  entry.autoResumeFiring = true;
+  entry.lastHoldAutoSolveAt = now;
+  entry.holdAutoSolveCalls += 1;
+  try {
+    const result = await tryAutoSolveNaverCaptcha(page, {
+      humaJobId: entry.jobId,
+      accountId: entry.accountId,
+      workspace: entry.workspace,
+      jobType: entry.jobType,
+    });
+    if (result === 'solved') {
+      await logOperation({
+        level: 'info',
+        message: '[CAPTCHA] hold 중 Vision 자동 해결 성공 — 로그인·발행 자동 재개 대기',
+        job_id: entry.jobId,
+        account_id: entry.accountId,
+      });
+      entry.captchaClearedOnce = true;
+      entry.captchaCurrentlyVisible = false;
+    }
+  } catch {
+    /* 실패 — 다음 쿨다운에 재시도, 상한 초과 시 사람(VNC) 대기 */
+  } finally {
+    const live = holds.get(entry.jobId);
+    if (live) live.autoResumeFiring = false;
+  }
+}
+
+/**
+ * hold 중 2FA·기기인증·보호조치 화면 감지 → 사람 무한 대기 대신
+ * 자동발행 OFF·Operation 로그(ERROR=우상단 알림)·Slack/Telegram 알림 후
+ * 브라우저 종료·동글 반납·계정 락 해제(hold 종료).
+ */
+async function abortHoldForNaverChallenge(
+  entry: CaptchaHoldEntry,
+  page: Page,
+  isProtection: boolean,
+): Promise<void> {
+  if (entry.resumingInProgress) return;
+  entry.resumingInProgress = true;
+
+  const urlLower = page.url().toLowerCase();
+  const kind: '2fa' | 'device' =
+    urlLower.includes('device') || urlLower.includes('new_env') ? 'device' : '2fa';
+
+  try {
+    // 동적 import — naver-account-protection 이 cancelCaptchaHold 를 정적 import 하므로 순환 방지
+    const mod = await import('../../lib/naver-account-protection.js');
+    if (isProtection) {
+      await markJobFailed(entry.jobId, `${mod.NAVER_ACCOUNT_PROTECTED}:captcha`);
+      await mod
+        .handleNaverAccountProtection({
+          accountId: entry.accountId,
+          workspace: entry.workspace,
+          phase: 'captcha',
+          humaJobId: entry.jobId,
+        })
+        .catch(() => {});
+    } else {
+      await markJobFailed(
+        entry.jobId,
+        kind === 'device' ? 'NAVER_LOGIN_DEVICE_VERIFY' : 'NAVER_LOGIN_2FA',
+      );
+      await mod
+        .handleNaverAuthChallenge({
+          accountId: entry.accountId,
+          workspace: entry.workspace,
+          humaJobId: entry.jobId,
+          kind,
+        })
+        .catch(() => {});
+    }
+  } catch (err) {
+    console.error('[CAPTCHA] abortHoldForNaverChallenge:', (err as Error).message);
+  } finally {
+    // 브라우저 종료·동글 반납·계정 락 해제·타이머 정리
+    await cancelCaptchaHold(entry.jobId).catch(() => {});
+  }
+}
+
+/** 진행이 막힌 원인이 2FA·기기인증·보호조치면 정리, 그 외(로그인 대기 등)는 계속 대기 */
+async function handleHoldChallengeIfPresent(entry: CaptchaHoldEntry, page: Page): Promise<void> {
+  const authChallenge = await isNaverAuthChallengePage(page).catch(() => false);
+  let protection = false;
+  if (!authChallenge) {
+    const { isNaverAccountProtectionPage } = await import('../../lib/naver-account-protection.js');
+    protection = await isNaverAccountProtectionPage(page).catch(() => false);
+  }
+  if (!authChallenge && !protection) return;
+  await abortHoldForNaverChallenge(entry, page, protection);
+}
+
 async function tryAutoResumePostingCaptcha(entry: CaptchaHoldEntry): Promise<void> {
   if (!holds.has(entry.jobId) || entry.resumingInProgress || entry.autoResumeFiring) return;
 
   const page = pickPostingWorkflowPage(entry.context) ?? (await pickNaverCaptchaPage(entry.context));
   if (!page || page.isClosed()) return;
   if (await isNaverCaptchaVisible(page)) {
+    // ① 비밀번호칸이 비어 있으면(오클릭·폼 초기화) 재입력해 상태를 준비
     await syncCaptchaHoldState(entry, page);
+    // ② 사람 개입 없이 프로그램이 캡차를 직접 푼다 (자동해결 ON·상한·쿨다운 내)
+    await tryHoldVisionAutoSolve(entry, page);
     return;
   }
 
   const url = page.url();
   if (url === 'about:blank' || url === '') return;
 
-  if (await isPostingAutoResumeBlocked(page)) return;
+  if (await isPostingAutoResumeBlocked(page)) {
+    // 진행이 막힌 이유가 2FA·기기인증·보호조치면 사람 대기 대신 정리·종료
+    await handleHoldChallengeIfPresent(entry, page);
+    return;
+  }
 
   entry.autoResumeFiring = true;
   try {
@@ -489,6 +622,7 @@ export async function enterCaptchaHold(
     captchaRound: 1,
     captchaCurrentlyVisible: true,
     captchaClearedOnce: false,
+    holdAutoSolveCalls: 0,
   };
   holds.set(input.jobId, entry);
   scheduleReminders(entry);
