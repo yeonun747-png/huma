@@ -23,6 +23,31 @@ export function filterOutPipelineShells<T extends PipelineJobRow>(jobs: T[]): T[
   return jobs.filter((j) => !isContentFullPipelineShell(j));
 }
 
+/** 포스팅 큐 UI — content_full shell·social_crank 제외 */
+export function isPostingQueueJob(job: PipelineJobRow): boolean {
+  if (job.job_type === 'social_crank') return false;
+  return !isContentFullPipelineShell(job);
+}
+
+export function filterPostingQueueJobs<T extends PipelineJobRow>(jobs: T[]): T[] {
+  return jobs.filter((j) => isPostingQueueJob(j));
+}
+
+export async function countSocialCrankJobs(workspace: string | string[]): Promise<number> {
+  let query = supabase
+    .from('huma_jobs')
+    .select('*', { count: 'exact', head: true })
+    .eq('job_type', 'social_crank');
+  if (Array.isArray(workspace)) {
+    query = query.in('workspace', workspace);
+  } else {
+    query = query.eq('workspace', workspace);
+  }
+  const { count, error } = await query;
+  if (error) return 0;
+  return count ?? 0;
+}
+
 export async function fetchVisibleCompletedJobs(
   workspace: string,
 ): Promise<PipelineJobRow[]> {
@@ -30,7 +55,8 @@ export async function fetchVisibleCompletedJobs(
     .from('huma_jobs')
     .select('job_type, status, result_url, platform_schedule, completed_at, scheduled_at, account_id')
     .eq('workspace', workspace)
-    .eq('status', 'completed');
+    .eq('status', 'completed')
+    .neq('job_type', 'social_crank');
 
   if (error) return [];
   return filterOutPipelineShells(data ?? []);

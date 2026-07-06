@@ -47,7 +47,11 @@ import {
   getCaptchaHoldPublicInfo,
 } from '../modules/watcher/captcha-hold.js';
 import { resolveVncUrl, buildJobWebUrl } from '../modules/watcher/telegram.js';
-import { computeVisibleQueueStats, filterOutPipelineShells } from '../lib/job-pipeline-shell.js';
+import {
+  computeVisibleQueueStats,
+  countSocialCrankJobs,
+  filterPostingQueueJobs,
+} from '../lib/job-pipeline-shell.js';
 import {
   readWorkspaceQueueStatsForApi,
   scheduleWorkspaceQueueStatsRefresh,
@@ -132,12 +136,14 @@ export async function registerJobRoutes(app: FastifyInstance) {
         .from('huma_jobs')
         .select(JOB_ACCOUNT_SELECT)
         .eq('workspace', workspace)
+        .neq('job_type', 'social_crank')
         .in('status', ['running', 'awaiting_captcha'])
         .order('started_at', { ascending: false }),
       supabase
         .from('huma_jobs')
         .select(JOB_ACCOUNT_SELECT)
         .eq('workspace', workspace)
+        .neq('job_type', 'social_crank')
         .order('created_at', { ascending: false })
         .range(from, to),
       readWorkspaceQueueStatsForApi(workspace),
@@ -150,7 +156,7 @@ export async function registerJobRoutes(app: FastifyInstance) {
     const live = liveJobs ?? [];
     const liveIds = new Set(live.map((j) => j.id));
     const pageRows = (data ?? []).filter((j) => !liveIds.has(j.id));
-    const items = attachPostingAccountLabels(filterOutPipelineShells([...live, ...pageRows]));
+    const items = attachPostingAccountLabels(filterPostingQueueJobs([...live, ...pageRows]));
     return {
       items,
       total: pageMeta.queueVisibleTotal,
@@ -171,8 +177,8 @@ export async function registerJobRoutes(app: FastifyInstance) {
       { count: video },
       { data: watcherErrorRows },
     ] = await Promise.all([
-      supabase.from('huma_jobs').select('*', { count: 'exact', head: true }).in('workspace', workspaces).eq('status', 'pending'),
-      supabase.from('huma_jobs').select('*', { count: 'exact', head: true }).in('workspace', workspaces).eq('status', 'scheduled'),
+      supabase.from('huma_jobs').select('*', { count: 'exact', head: true }).in('workspace', workspaces).eq('status', 'pending').neq('job_type', 'social_crank'),
+      supabase.from('huma_jobs').select('*', { count: 'exact', head: true }).in('workspace', workspaces).eq('status', 'scheduled').neq('job_type', 'social_crank'),
       supabase.from('huma_video_queue').select('*', { count: 'exact', head: true }).in('workspace', workspaces).in('status', ['pending', 'image_generating', 'video_generating', 'tts_generating', 'lipsync_generating', 'finalizing', 'uploading']),
       supabase.from('huma_logs').select('message').in('workspace', workspaces).eq('level', 'ERROR').gte('created_at', dayAgo),
     ]);
@@ -789,7 +795,7 @@ export async function registerJobRoutes(app: FastifyInstance) {
     }
 
     const { data } = await query;
-    return filterOutPipelineShells(data ?? []);
+    return filterPostingQueueJobs(data ?? []);
   });
 
   app.get('/api/jobs/:id/captcha-hold', { preHandler: authMiddleware }, async (request, reply) => {

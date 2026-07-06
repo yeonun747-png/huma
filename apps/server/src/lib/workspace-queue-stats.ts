@@ -4,6 +4,7 @@ import { kstTodayStartIso } from './posting-daily-status.js';
 import {
   computeVisibleQueueStats,
   countContentFullPipelineShells,
+  countSocialCrankJobs,
 } from './job-pipeline-shell.js';
 
 export type WorkspaceQueueStatsRow = {
@@ -61,8 +62,11 @@ async function countQueueVisibleTotal(workspace: string): Promise<number> {
     .select('*', { count: 'exact', head: true })
     .eq('workspace', workspace);
   if (error) return 0;
-  const shellTotal = await countContentFullPipelineShells(workspace);
-  return Math.max(0, (allCount ?? 0) - shellTotal);
+  const [shellTotal, crankTotal] = await Promise.all([
+    countContentFullPipelineShells(workspace),
+    countSocialCrankJobs(workspace),
+  ]);
+  return Math.max(0, (allCount ?? 0) - shellTotal - crankTotal);
 }
 
 /** done_all·done_today·pagination total — completed 전체 스캔 (mutation/backfill 전용) */
@@ -98,7 +102,11 @@ export async function recomputeAndPersistWorkspaceQueueStats(
 
 async function fetchLivePendingRunning(workspace: string): Promise<{ pending: number; running: number }> {
   const base = () =>
-    supabase.from('huma_jobs').select('*', { count: 'exact', head: true }).eq('workspace', workspace);
+    supabase
+      .from('huma_jobs')
+      .select('*', { count: 'exact', head: true })
+      .eq('workspace', workspace)
+      .neq('job_type', 'social_crank');
   const [pendingRes, runningRes, captchaRes] = await Promise.all([
     base().in('status', ['pending', 'scheduled']),
     base().eq('status', 'running'),

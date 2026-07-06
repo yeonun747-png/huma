@@ -217,7 +217,8 @@ export function QueueManager() {
         },
         { force: opts?.force },
       );
-      setJobs(result.items);
+      const items = result.items.filter((j) => j.job_type !== 'social_crank');
+      setJobs(items);
       setTotal(result.total);
       setStats(result.stats);
       setLoadError(null);
