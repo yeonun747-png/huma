@@ -255,9 +255,16 @@ export function CrankQueuePanel({ serviceFilter }: { serviceFilter: ServiceFilte
                           .advanceJob(job.id)
                           .then(() => {
                             void load();
-                            void appAlert('앞당김 — 큐에 등록했습니다.');
+                            void appAlert(
+                              '앞당김 — 우선 실행 대기열에 등록했습니다. 슬롯 6·7 동글이 idle이면 곧 LIVE로 전환됩니다.',
+                            );
                           })
-                          .catch((e) => void appAlert((e as Error).message))
+                          .catch((e) =>
+                            void appAlert(
+                              (e as Error).message ||
+                                '앞당기기 실패 — C-Rank 동글(SOCKS) 상태를 확인하세요',
+                            ),
+                          )
                     : undefined
                 }
                 onDelete={deletable ? () => void handleDeleteJob(job) : undefined}

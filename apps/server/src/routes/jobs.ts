@@ -23,6 +23,11 @@ import { promoteDryRunToPublish } from '../modules/queue/jobs/content-orchestrat
 import { kstTodayStartIso } from '../lib/posting-daily-status.js';
 import { assertCafeNewPostAccount, assertCafeReplyAccount } from '../lib/cafe-accounts.js';
 import { assertHumaJobAdvanceAllowed, assertHumaJobRunnable } from '../lib/account-guards.js';
+import { listSchedulableCrankModems } from '../lib/crank-modems.js';
+import {
+  hasIdleCrankModem,
+  reconcileStaleCrankModemLocks,
+} from '../modules/modem/allocation.js';
 import { assertManualSocialCrankAllowed } from '../lib/crank-guard.js';
 import { getCrankJobSessionDetail } from '../lib/crank-job-session.js';
 import { deleteJobById, deleteJobsByIds } from '../lib/delete-job.js';
@@ -619,6 +624,22 @@ export async function registerJobRoutes(app: FastifyInstance) {
       await assertHumaJobAdvanceAllowed(job);
     } catch (err) {
       return reply.code(400).send({ error: (err as Error).message });
+    }
+
+    if (job.job_type === 'social_crank') {
+      await reconcileStaleCrankModemLocks();
+      const schedulable = await listSchedulableCrankModems();
+      if (schedulable.length === 0) {
+        return reply.code(409).send({
+          error:
+            'C-Rank 동글(SOCKS) 가용 없음 — 프록시 관리에서 슬롯 6·7 offline/error 복구 후 재시도',
+        });
+      }
+      if (!(await hasIdleCrankModem())) {
+        return reply.code(409).send({
+          error: 'C-Rank 동글 사용 중 — 슬롯 6·7 세션 종료 후 앞당기기',
+        });
+      }
     }
 
     const now = new Date().toISOString();

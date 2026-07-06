@@ -41,24 +41,13 @@ function pickCrankScheduleBand(): (typeof CRANK_SCHEDULE_BANDS)[number] {
   return CRANK_SCHEDULE_BANDS[0]!;
 }
 
-function minuteInCrankBand(
-  band: (typeof CRANK_SCHEDULE_BANDS)[number],
-  indexInBand: number,
-  countInBand: number,
-): number {
-  const span = Math.max(20, band.endMin - band.startMin - 10);
-  const jitter = (Math.random() * 2 - 1) * START_JITTER_MINUTES;
-  const base = band.startMin + (span * (indexInBand + 0.5)) / Math.max(1, countInBand);
-  return Math.round(Math.min(band.endMin - 5, Math.max(band.startMin, base + jitter)));
-}
-
 export interface CrankScheduleSlot {
   at: Date;
   /** 0=슬롯6(:10006), 1=슬롯7(:10007) */
   track: number;
 }
 
-/** track>0 일 때 wave마다 2~5분씩 누적 시차 (동일 분 표시 방지) */
+/** track>0 일 때 wave마다 2~5분 시차 (동일 분 표시 방지) */
 function parallelTrackStaggerMinutes(track: number, wave: number): number {
   if (track <= 0) return 0;
   const span = PARALLEL_TRACK_STAGGER_MINUTES_MAX - PARALLEL_TRACK_STAGGER_MINUTES_MIN + 1;
@@ -66,6 +55,102 @@ function parallelTrackStaggerMinutes(track: number, wave: number): number {
     PARALLEL_TRACK_STAGGER_MINUTES_MIN +
     ((wave * 17 + track * 7) % span);
   return track * step;
+}
+
+function pickDayBatchStartMin(totalWaves: number, excludeDeadZone: boolean): number {
+  const needed =
+    Math.max(0, totalWaves - 1) * SESSION_SLOT_MINUTES +
+    PARALLEL_TRACK_STAGGER_MINUTES_MAX +
+    5;
+
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const band = pickCrankScheduleBand();
+    const slack = band.endMin - band.startMin - needed;
+    if (slack < 0) continue;
+    const start = band.startMin + Math.floor(Math.random() * (slack + 1));
+    const end = start + needed;
+    if (
+      excludeDeadZone &&
+      start < CRANK_DEAD_ZONE_END * 60 &&
+      end > CRANK_DEAD_ZONE_START * 60
+    ) {
+      continue;
+    }
+    return start;
+  }
+
+  return 8 * 60 + Math.floor(Math.random() * 30);
+}
+
+function skipCrankDeadZoneMinute(totalMin: number, wave: number): number {
+  if (totalMin >= CRANK_DEAD_ZONE_START * 60 && totalMin < CRANK_DEAD_ZONE_END * 60) {
+    return CRANK_DEAD_ZONE_END * 60 + (wave % 4) * 3;
+  }
+  return totalMin;
+}
+
+/**
+ * v3.76 — KST 시간대 가중 분산
+ * - 동글 track별 wave마다 SESSION_SLOT_MINUTES(25) 간격 — 동일 트랙 동시각 방지
+ * - 2트랙 병렬 시 track1은 +2~5분 시차
+ * - 당일 보정(anchorFromNow): 현재+3분부터 wave 간격으로 배치
+ */
+export function distributeCrankScheduleSlotsKst(
+  count: number,
+  dayOffset = 0,
+  _window?: { start: number; end: number },
+  modemCount = 1,
+  options?: { notBefore?: Date; excludeDeadZone?: boolean },
+): CrankScheduleSlot[] {
+  if (count <= 0) return [];
+
+  const excludeDeadZone = options?.excludeDeadZone !== false;
+  const tracks = Math.max(1, Math.floor(modemCount));
+  const totalWaves = Math.ceil(count / tracks);
+  const anchored = Boolean(options?.notBefore && dayOffset === 0);
+
+  let anchorMin = excludeDeadZone ? CRANK_DEAD_ZONE_END * 60 : 0;
+  if (anchored && options?.notBefore) {
+    const { hour, minute } = getKstClock(options.notBefore);
+    let nowMin = hour * 60 + minute + 3;
+    if (excludeDeadZone && hour >= CRANK_DEAD_ZONE_START && hour < CRANK_DEAD_ZONE_END) {
+      nowMin = CRANK_DEAD_ZONE_END * 60;
+    }
+    anchorMin = Math.max(anchorMin, nowMin);
+  }
+
+  const batchStartMin = anchored ? anchorMin : pickDayBatchStartMin(totalWaves, excludeDeadZone);
+
+  return Array.from({ length: count }, (_, i) => {
+    const track = i % tracks;
+    const wave = Math.floor(i / tracks);
+
+    let totalMin =
+      batchStartMin + wave * SESSION_SLOT_MINUTES + parallelTrackStaggerMinutes(track, wave);
+
+    if (excludeDeadZone) {
+      totalMin = skipCrankDeadZoneMinute(totalMin, wave);
+    }
+
+    const hour = Math.floor(totalMin / 60) % 24;
+    const minute = totalMin % 60;
+    const second = (track * 17 + wave * 11) % 50;
+
+    return {
+      track,
+      at: kstWallClockToUtcDate(hour, minute, dayOffset, second),
+    };
+  });
+}
+
+/** @deprecated distributeCrankScheduleSlotsKst 사용 */
+export function distributeCrankStartTimesKst(
+  count: number,
+  dayOffset = 0,
+  window?: { start: number; end: number },
+  modemCount = 1,
+): Date[] {
+  return distributeCrankScheduleSlotsKst(count, dayOffset, window, modemCount).map((s) => s.at);
 }
 
 export interface CrankSchedulePolicy {
@@ -112,101 +197,18 @@ export function computeCrankSchedulePolicy(
   };
 }
 
-function clampScheduleMinute(
-  totalMin: number,
-  windowStartMin: number,
-  windowEndMin: number,
-): number {
-  return Math.round(Math.min(windowEndMin - 10, Math.max(windowStartMin, totalMin)));
-}
-
-/**
- * v3.76 — KST 시간대 가중 분산
- * - 75% 08~22 · 15% 22~24 · 10% 04~08 (01~04 금지)
- * - 계정 i → track i%N · 반환 순서 = accounts[i] (sort 금지)
- */
-export function distributeCrankScheduleSlotsKst(
-  count: number,
-  dayOffset = 0,
-  _window?: { start: number; end: number },
-  modemCount = 1,
-  options?: { notBefore?: Date; excludeDeadZone?: boolean },
-): CrankScheduleSlot[] {
-  if (count <= 0) return [];
-
-  const excludeDeadZone = options?.excludeDeadZone !== false;
-  const tracks = Math.max(1, Math.floor(modemCount));
-  let minMinute = excludeDeadZone ? CRANK_DEAD_ZONE_END * 60 : 0;
-
-  if (options?.notBefore && dayOffset === 0) {
-    const { hour, minute } = getKstClock(options.notBefore);
-    let nowMin = hour * 60 + minute + 3;
-    if (excludeDeadZone && hour >= CRANK_DEAD_ZONE_START && hour < CRANK_DEAD_ZONE_END) {
-      nowMin = CRANK_DEAD_ZONE_END * 60;
-    }
-    minMinute = Math.max(minMinute, nowMin);
-  }
-
-  const bandPicks = Array.from({ length: count }, () => pickCrankScheduleBand());
-  const bandCounts = new Map<number, number>();
-  for (const band of bandPicks) {
-    bandCounts.set(band.startMin, (bandCounts.get(band.startMin) ?? 0) + 1);
-  }
-  const bandIndices = new Map<number, number>();
-
-  return Array.from({ length: count }, (_, i) => {
-    const track = i % tracks;
-    const wave = Math.floor(i / tracks);
-    const band = bandPicks[i]!;
-    const idxInBand = bandIndices.get(band.startMin) ?? 0;
-    bandIndices.set(band.startMin, idxInBand + 1);
-    const countInBand = bandCounts.get(band.startMin) ?? 1;
-
-    let totalMin = minuteInCrankBand(band, idxInBand, countInBand);
-    totalMin += parallelTrackStaggerMinutes(track, wave);
-
-    if (totalMin < minMinute) {
-      totalMin = minMinute + parallelTrackStaggerMinutes(track, wave);
-    }
-    if (
-      excludeDeadZone &&
-      totalMin >= CRANK_DEAD_ZONE_START * 60 &&
-      totalMin < CRANK_DEAD_ZONE_END * 60
-    ) {
-      totalMin = CRANK_DEAD_ZONE_END * 60 + (totalMin % SESSION_SLOT_MINUTES);
-    }
-
-    const hour = Math.floor(totalMin / 60) % 24;
-    const minute = totalMin % 60;
-
-    return {
-      track,
-      at: kstWallClockToUtcDate(hour, minute, dayOffset),
-    };
-  });
-}
-
-/** @deprecated distributeCrankScheduleSlotsKst 사용 */
-export function distributeCrankStartTimesKst(
-  count: number,
-  dayOffset = 0,
-  window?: { start: number; end: number },
-  modemCount = 1,
-): Date[] {
-  return distributeCrankScheduleSlotsKst(count, dayOffset, window, modemCount).map((s) => s.at);
-}
-
 /** KST 달력 시각 → UTC Date (한국은 DST 없음) */
 export function kstWallClockToUtcDate(
   hour: number,
   minute: number,
   dayOffset = 0,
+  second = 0,
 ): Date {
   const parts = getKstYmd(new Date());
   const y = parts.year;
   const m = parts.month;
   const d = parts.day + dayOffset;
-  const utcMs = Date.UTC(y, m - 1, d, hour - 9, minute, 0, 0);
+  const utcMs = Date.UTC(y, m - 1, d, hour - 9, minute, second, 0);
   return new Date(utcMs);
 }
 

@@ -20,9 +20,9 @@ function postingLockKey(port: number) {
 /** Redis 기준 유휴 C-Rank SOCKS 슬롯 수 (세션 시작 전 선확인용) */
 export async function countIdleCrankModemSlots(): Promise<number> {
   const crankPorts = await getSchedulableCrankProxyPorts();
-  const portPool = crankPorts.length > 0 ? crankPorts : [...CRANK_PROXY_PORTS];
+  if (crankPorts.length === 0) return 0;
   let idle = 0;
-  for (const port of portPool) {
+  for (const port of crankPorts) {
     const crankLock = await redisConnection.get(crankLockKey(port));
     const postingLock = await redisConnection.get(postingLockKey(port));
     if (!crankLock && !postingLock) idle++;
@@ -80,8 +80,10 @@ export async function getModemProxyPort(
 
   const crankTtl = opts?.lockTtlSec ?? CRANK_ADHOC_LOCK_TTL_SEC;
   const crankPorts = await getSchedulableCrankProxyPorts();
-  const portPool =
-    crankPorts.length > 0 ? crankPorts : [...CRANK_PROXY_PORTS];
+  if (crankPorts.length === 0) {
+    throw new Error(`[getModemProxyPort] 유휴 C-Rank 동글 없음. accountId=${accountId}`);
+  }
+  const portPool = crankPorts;
 
   const tryAcquirePort = async (port: number): Promise<number | null> => {
     if (!portPool.includes(port)) return null;
