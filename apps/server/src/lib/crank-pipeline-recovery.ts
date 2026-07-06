@@ -11,6 +11,7 @@ import {
   type JobRecord,
 } from './job-scheduler.js';
 import { isRetryableCrankError } from './crank-worker-defer.js';
+import { releaseCrankModemLockForJob } from './crank-modem-lock-release.js';
 
 const DAILY_CRANK_TITLE = 'C-Rank 스케줄';
 /**
@@ -41,6 +42,10 @@ export async function recoverStaleRunningJobs(): Promise<number> {
       .lt('started_at', cutoff);
 
     for (const job of jobs ?? []) {
+      await releaseCrankModemLockForJob({
+        humaJobId: job.id as string,
+        accountId: job.account_id as string | null,
+      }).catch(() => {});
       await supabase
         .from('huma_jobs')
         .update({

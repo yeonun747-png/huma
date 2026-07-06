@@ -64,6 +64,11 @@ export async function acquireModem(
   return { proxyPort, modemId, leased: lockKind === 'crank', lockKind };
 }
 
+/** 프로세스 내 동시 점유 해제 (Redis 락과 별도 — crash·재예약 시) */
+export function clearInProcessModemBusy(proxyPort: number): void {
+  busyModems.delete(String(proxyPort));
+}
+
 export async function releaseModem(session: ModemSession | number): Promise<void> {
   const normalized: ModemSession =
     typeof session === 'number'

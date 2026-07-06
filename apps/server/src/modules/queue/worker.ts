@@ -94,6 +94,7 @@ import {
   isRetryableCrankError,
   isScheduledCrankPayload,
 } from '../../lib/crank-worker-defer.js';
+import { releaseCrankModemLockForJob } from '../../lib/crank-modem-lock-release.js';
 import { purgePostBlogStorageMedia } from '../../lib/cleanup-post-blog-storage.js';
 import { finalizePostBlogJob } from '../../lib/post-blog-job-complete.js';
 import { isPostingConnectionError } from '../../lib/posting-connection-error.js';
@@ -910,6 +911,9 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
             .update({ status: 'failed', error_message: (err as Error).message, started_at: null })
             .eq('id', humaJobId)
             .neq('status', 'completed');
+          if (type === 'social_crank') {
+            await releaseCrankModemLockForJob({ humaJobId, accountId }).catch(() => {});
+          }
         }
         if (!isVideoContentJob) {
           await logOperation({

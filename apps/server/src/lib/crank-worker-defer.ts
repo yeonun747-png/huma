@@ -1,5 +1,6 @@
 import { supabase } from '../middleware/auth.js';
 import { logOperation } from './log-emitter.js';
+import { releaseCrankModemLockForJob } from './crank-modem-lock-release.js';
 
 export const CRANK_MODEM_DEFER_MS = 15 * 60 * 1000;
 export const CRANK_PAUSE_DEFER_MS = 5 * 60 * 1000;
@@ -40,6 +41,20 @@ export async function syncHumaJobDeferred(
         error_message: reason,
       })
       .eq('id', humaJobId);
+
+    if (reason) {
+      const { data: jobRow } = await supabase
+        .from('huma_jobs')
+        .select('job_type, account_id')
+        .eq('id', humaJobId)
+        .maybeSingle();
+      if (jobRow?.job_type === 'social_crank') {
+        await releaseCrankModemLockForJob({
+          humaJobId,
+          accountId: jobRow.account_id as string | null,
+        }).catch(() => {});
+      }
+    }
   }
   return nextAt;
 }
