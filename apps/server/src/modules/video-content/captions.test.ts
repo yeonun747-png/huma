@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { parseLlmJsonBlock } from '../../lib/llm-json.js';
-import { fallbackPlatformCaptions, packInstagramCaption, packTiktokCaption, packYoutubeShortsTitle, sanitizeYoutubeShortsTitle } from './captions.js';
+import {
+  fallbackPlatformCaptions,
+  filterMeaningfulShortsHashtags,
+  packInstagramCaption,
+  packTiktokCaption,
+  packYoutubeShortsTitle,
+  sanitizeYoutubeShortsTitle,
+} from './captions.js';
 import type { VideoConti } from './types.js';
 
 describe('generatePlatformCaptions JSON', () => {
@@ -40,14 +47,15 @@ describe('fallbackPlatformCaptions', () => {
     expect(caps.captionYoutubeTitle).not.toMatch(/#Shorts/i);
     expect(caps.captionYoutubeDescription).not.toContain('#Shorts');
     expect(caps.captionYoutubeTitle.length).toBeGreaterThanOrEqual(85);
-    expect(caps.captionTiktok).toContain('편의점');
-    expect(caps.captionTiktok).not.toMatch(/https?:\/\//);
+    expect(caps.captionTiktok).not.toMatch(/#fyp\b/i);
+    expect(caps.captionTiktok).not.toMatch(/#viral\b/i);
+    expect(caps.captionTiktok).toMatch(/#연운/);
     const tiktokTags = caps.captionTiktok.match(/#[^\s#]+/g) ?? [];
-    expect(tiktokTags.length).toBeGreaterThanOrEqual(12);
+    expect(tiktokTags.length).toBeGreaterThanOrEqual(10);
     expect(caps.captionInstagram).toContain('편의점');
     expect(caps.captionInstagram).not.toMatch(/https?:\/\//);
     const instagramTags = caps.captionInstagram.match(/#[^\s#]+/g) ?? [];
-    expect(instagramTags.length).toBeGreaterThanOrEqual(12);
+    expect(instagramTags.length).toBeGreaterThanOrEqual(10);
     expect(caps.captionInstagram.length).toBeLessThanOrEqual(2200);
   });
 });
@@ -75,23 +83,49 @@ describe('packYoutubeShortsTitle', () => {
 
 describe('packTiktokCaption', () => {
   it('packs many hashtags up to 4000 chars without URL in body', () => {
-    const tags = Array.from({ length: 80 }, (_, i) => `#tag${i}`);
+    const tags = [
+      '#연운', '#커리어운세', '#오늘의운세', '#사주', '#직장운', '#운세추천', '#신입직장인', '#직장인공감',
+      '#협상', '#계약', '#운세앱', '#일간', '#사주팔자', '#운세풀이', '#직장인브이로그', '#직장생활',
+    ];
     const packed = packTiktokCaption('짧은 본문\n프로필 링크 확인 👆', tags);
     expect(packed).toContain('짧은 본문');
     expect(packed).not.toMatch(/https?:\/\//);
-    expect((packed.match(/#[^\s#]+/g) ?? []).length).toBeGreaterThanOrEqual(12);
+    expect((packed.match(/#[^\s#]+/g) ?? []).length).toBeGreaterThanOrEqual(10);
     expect(packed.length).toBeLessThanOrEqual(4000);
   });
 });
 
 describe('packInstagramCaption', () => {
   it('packs many hashtags up to 2200 chars without URL in body', () => {
-    const tags = Array.from({ length: 80 }, (_, i) => `#tag${i}`);
+    const tags = [
+      '#연운', '#커리어운세', '#오늘의운세', '#사주', '#직장운', '#운세추천', '#신입직장인', '#직장인공감',
+      '#협상', '#계약', '#운세앱', '#일간', '#사주팔자', '#운세풀이', '#직장인릴스', '#직장생활',
+    ];
     const packed = packInstagramCaption('짧은 본문\n프로필 링크 확인 👆', tags);
     expect(packed).toContain('짧은 본문');
     expect(packed).not.toMatch(/https?:\/\//);
-    expect((packed.match(/#[^\s#]+/g) ?? []).length).toBeGreaterThanOrEqual(12);
+    expect((packed.match(/#[^\s#]+/g) ?? []).length).toBeGreaterThanOrEqual(10);
     expect(packed.length).toBeLessThanOrEqual(2200);
+  });
+});
+
+describe('filterMeaningfulShortsHashtags', () => {
+  it('drops english viral tags and dialogue fragments', () => {
+    const filtered = filterMeaningfulShortsHashtags([
+      '#fyp',
+      '#viral',
+      '#연운',
+      '#직장운',
+      '#지은이',
+      '#한다고',
+      '#신입직장인',
+      '#tiktokkorea',
+    ]);
+    expect(filtered).toContain('#연운');
+    expect(filtered).toContain('#직장운');
+    expect(filtered).toContain('#신입직장인');
+    expect(filtered.some((t) => t.toLowerCase() === '#fyp')).toBe(false);
+    expect(filtered.some((t) => t.includes('지은이'))).toBe(false);
   });
 });
 

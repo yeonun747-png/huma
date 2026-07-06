@@ -64,7 +64,11 @@ function QueueDatetimeLabel({ iso, suffix }: { iso: string; suffix?: string }) {
   );
 }
 
-function queueDatetimeTag(iso: string, tone: 'warn' | 'err' | 'ok', suffix?: string) {
+function queueDatetimeTag(
+  iso: string,
+  tone: 'warn' | 'err' | 'ok' | 'live' | 'blue',
+  suffix?: string,
+) {
   const parsed = parseQueueKstParts(iso);
   const title = parsed ? `${parsed.full}${suffix ? ` · ${suffix}` : ''}` : '—';
   return (
@@ -84,7 +88,19 @@ function queueTagSlot(job: HumaJob): ReactNode {
     const pastPending =
       isSchedulePast(job.scheduled_at) && ['scheduled', 'pending', 'paused'].includes(job.status);
     if (job.status === 'failed') return queueDatetimeTag(job.scheduled_at, 'err', '실패');
-    if (pastPending) return queueDatetimeTag(job.scheduled_at, 'err', '지연');
+    if (pastPending) {
+      if (job.error_message?.trim()) {
+        return queueDatetimeTag(job.scheduled_at, 'warn', '재예약');
+      }
+      return queueDatetimeTag(job.scheduled_at, 'blue', '시작 대기');
+    }
+    if (
+      ['scheduled', 'pending'].includes(job.status) &&
+      job.error_message?.trim() &&
+      !isSchedulePast(job.scheduled_at)
+    ) {
+      return queueDatetimeTag(job.scheduled_at, 'warn', '재예약');
+    }
     return queueDatetimeTag(job.scheduled_at, 'warn');
   }
 
@@ -135,14 +151,29 @@ function jobSub(job: HumaJob): string {
   parts.push(queueScopeLabel(job));
 
   if (job.scheduled_at) {
+    const past = isSchedulePast(job.scheduled_at);
+    const warmupPhase =
+      job.status === 'running' &&
+      job.job_type === 'post_blog' &&
+      (!job.content || job.content.length < 20);
     const scheduleHint =
       job.job_type === 'content_full' && (job.auto_scheduled ?? true)
         ? '생성 시작'
         : job.job_type === 'social_crank'
-          ? isSchedulePast(job.scheduled_at)
-            ? '미실행·지연'
+          ? past
+            ? job.error_message
+              ? '재예약 대기'
+              : '미실행·시작 대기'
             : '세션 시작'
-          : '발행 예약';
+          : job.status === 'running'
+            ? warmupPhase
+              ? '워밍업·로그인 중'
+              : '발행 진행 중'
+            : past
+              ? job.error_message
+                ? '재예약 대기'
+                : '발행 시작 대기'
+              : '발행 예약';
     parts.push(scheduleHint);
   }
 
@@ -166,8 +197,11 @@ function jobSub(job: HumaJob): string {
     parts.push(`재예약 · ${formatJobErrorLabel(job.error_message)}`);
   }
 
-  if (job.status === 'running' && job.job_type === 'post_blog' && job.content) {
-    parts.push(`${job.content.length}자 타이핑`);
+  if (job.status === 'running' && job.job_type === 'post_blog') {
+    const warmupPhase = !job.content || job.content.length < 20;
+    if (!warmupPhase) {
+      parts.push(`${job.content.length}자 타이핑`);
+    }
   } else if (job.status === 'running' && job.job_type === 'content_full' && job.content) {
     parts.push(`본문 ${job.content.length}자`);
   }

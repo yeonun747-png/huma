@@ -437,8 +437,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         }
 
         if (PLAYWRIGHT_JOBS.includes(type)) {
-          const deferMarkRunning = type === 'post_blog';
-          if (!deferMarkRunning) await markRunning();
+          if (type !== 'post_blog') await markRunning();
           let modemSession: ModemSession | undefined;
           if (accountId) modemSession = await acquireModem(accountId);
 
@@ -480,6 +479,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
 
           if (type === 'post_blog') {
             await applyPostingResourceBlocking(context).catch(() => {});
+            await markRunning();
           }
 
           let heldForCaptcha = false;
@@ -561,8 +561,6 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
                   }
                 }
               }
-
-              await markRunning();
 
               const captchaCtx = {
                 humaJobId,
