@@ -79,7 +79,7 @@ export function groupYeonunByDongle<T extends { proxy_port?: number | null; acco
     .filter((g) => g.items.length > 0);
 }
 
-/** 퀴즈오아시스·파나나 등 — 동글 슬롯별 계정 그룹 (연운은 전용 정렬·라벨) */
+/** 퀴즈오아시스·파나나 — 동글 슬롯별 계정 그룹 (연운은 전용 정렬·라벨) */
 export function groupPostingAccountsByDongle<T extends { proxy_port?: number | null; account_label?: string }>(
   workspace: Workspace,
   rows: T[],
@@ -91,23 +91,53 @@ export function groupPostingAccountsByDongle<T extends { proxy_port?: number | n
     return rows.length ? [{ dongleLabel: workspace, proxyPort: 0, items: rows }] : [];
   }
 
+  const sortRows = (items: T[]) =>
+    [...items].sort((a, b) =>
+      compareWorkspaceAccountLabels(workspace, a.account_label ?? '', b.account_label ?? ''),
+    );
+
+  if (slots.length === 1) {
+    const slot = slots[0]!;
+    return rows.length
+      ? [
+          {
+            dongleLabel: slot.label,
+            proxyPort: slot.proxyPort,
+            items: sortRows(rows),
+          },
+        ]
+      : [];
+  }
+
   return slots
     .map((slot) => ({
       dongleLabel: slot.label,
       proxyPort: slot.proxyPort,
-      items: rows
-        .filter((row) => {
+      items: sortRows(
+        rows.filter((row) => {
           if (row.proxy_port != null) return row.proxy_port === slot.proxyPort;
           const label = row.account_label ?? '';
-          if (slots.length === 1) return true;
           return label === slot.label || label.startsWith(`${slot.label}-`);
-        })
-        .sort((a, b) => (a.account_label ?? '').localeCompare(b.account_label ?? '', 'ko')),
+        }),
+      ),
     }))
     .filter((g) => g.items.length > 0);
 }
 
-/** 계정 칩 라벨 — 연운은 기존 포맷, 그 외 slot_label 그대로 */
+function compareWorkspaceAccountLabels(workspace: Workspace, a: string, b: string): number {
+  if (workspace === 'yeonun') return compareYeonunAccountLabels(a, b);
+  const parse = (raw: string) => {
+    const m = raw.trim().match(/^퀴즈오아시스(?:-(\d+))?$/);
+    if (!m) return null;
+    return Number(m[1] ?? '1');
+  };
+  const pa = parse(a);
+  const pb = parse(b);
+  if (pa != null && pb != null) return pa - pb;
+  return a.localeCompare(b, 'ko');
+}
+
+/** 계정 칩 라벨 — 연운·퀴즈오아시스는 동글 번호 포맷, 그 외 slot_label 그대로 */
 export function formatPostingAccountDisplayLabel(
   workspace: Workspace,
   raw: string | undefined | null,
@@ -117,7 +147,12 @@ export function formatPostingAccountDisplayLabel(
     return formatYeonunAccountDisplayLabel(raw, opts);
   }
   const label = (raw ?? '').trim();
+  const quiz = label.match(/^퀴즈오아시스(?:-(\d+))?$/);
+  if (quiz) {
+    const seq = quiz[1] ?? '1';
+    return `퀴즈오아시스 ${seq}`;
+  }
   if (label) return label;
   if (opts?.indexInGroup != null) return `계정 ${opts.indexInGroup + 1}`;
-  return '계정';
+  return workspace === 'quizoasis' ? '퀴즈오아시스' : '계정';
 }

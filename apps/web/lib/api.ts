@@ -271,7 +271,9 @@ export const api = {
       auto_publish_enabled?: boolean;
       auto_publish_planned_count?: number | null;
       auto_publish_next_slot_at?: string | null;
+      next_queued_at?: string | null;
       proxy_port?: number | null;
+      is_active?: boolean;
       weekday_base: number;
       remaining: number;
       hard_cap: number;

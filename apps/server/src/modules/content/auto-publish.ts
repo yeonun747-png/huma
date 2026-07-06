@@ -3,7 +3,7 @@ import {
   getAutoPublishStatusForAllAccounts,
   type AutoPublishStatus,
 } from '../../lib/posting-daily-status.js';
-import { listPostingAccounts } from '../../lib/posting-accounts.js';
+import { listAllPostingAccountsForWorkspace, listPostingAccounts } from '../../lib/posting-accounts.js';
 import {
   disableAutoPublish,
   enableAutoPublish,
@@ -30,7 +30,7 @@ export async function toggleAutoPublish(
     : await disableAutoPublish(workspace, accountId);
 
   const status = await getAutoPublishStatus(workspace, accountId);
-  const accountRows = await listPostingAccounts(workspace);
+  const accountRows = await listAllPostingAccountsForWorkspace(workspace);
   const accounts_status =
     accountRows.length > 1 ? await getAutoPublishStatusForAllAccounts(workspace) : undefined;
 

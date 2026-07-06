@@ -27,6 +27,8 @@ export type AutoPublishStatus = {
   auto_publish_planned_count?: number | null;
   auto_publish_next_slot_at?: string | null;
   proxy_port?: number | null;
+  next_queued_at?: string | null;
+  is_active?: boolean;
   next_publish_account_id?: string | null;
 };
 
@@ -78,7 +80,14 @@ export function formatAutoPublishScheduleLine(status: AutoPublishStatus): string
   const skipped = status.today_skipped ?? 0;
   const parts: string[] = [];
 
-  if (status.auto_publish_next_slot_at) {
+  const queuedAt = status.next_queued_at ? new Date(status.next_queued_at).getTime() : null;
+  const slotAt = status.auto_publish_next_slot_at
+    ? new Date(status.auto_publish_next_slot_at).getTime()
+    : null;
+
+  if (queuedAt != null && (slotAt == null || queuedAt <= slotAt)) {
+    parts.push(`큐 예약 ${formatNextSlotTime(status.next_queued_at!)}`);
+  } else if (status.auto_publish_next_slot_at) {
     parts.push(`다음 큐 등록 ${formatNextSlotTime(status.auto_publish_next_slot_at)}`);
   } else if (planned != null && done >= planned) {
     parts.push('오늘 계획 등록 완료 · 실행 대기');
@@ -213,6 +222,42 @@ export function buildYeonunPlaceholderAccounts(): AutoPublishStatus[] {
     is_weekend: false,
     auto_publish_enabled: false,
   }));
+}
+
+function buildSingleDonglePlaceholderAccounts(
+  workspace: Workspace,
+  labels: readonly string[],
+): AutoPublishStatus[] {
+  return labels.map((account_label) => ({
+    workspace,
+    account_label,
+    today_completed: 0,
+    today_skipped: 0,
+    daily_target: 0,
+    weekday_base: 2,
+    remaining: 0,
+    hard_cap: 99,
+    can_publish: false,
+    auto_pick_ready: true,
+    is_weekend: false,
+    auto_publish_enabled: false,
+  }));
+}
+
+export function buildWorkspacePlaceholderAccounts(workspace: Workspace): AutoPublishStatus[] {
+  if (workspace === 'yeonun') return buildYeonunPlaceholderAccounts();
+  if (workspace === 'quizoasis') {
+    return buildSingleDonglePlaceholderAccounts(workspace, ['퀴즈오아시스-1', '퀴즈오아시스-2']);
+  }
+  if (workspace === 'panana') {
+    return buildSingleDonglePlaceholderAccounts(workspace, ['파나나-1', '파나나-2']);
+  }
+  return [];
+}
+
+export function getInitialWorkspaceAccounts(workspace: Workspace): AutoPublishStatus[] {
+  if (workspace === 'yeonun') return getInitialYeonunAccounts();
+  return buildWorkspacePlaceholderAccounts(workspace);
 }
 
 export function getInitialYeonunAccounts(): AutoPublishStatus[] {

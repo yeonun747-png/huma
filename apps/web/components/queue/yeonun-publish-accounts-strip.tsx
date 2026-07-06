@@ -11,7 +11,9 @@ import {
 } from '@/lib/yeonun-dongle-groups';
 import {
   AutoPublishChip,
+  buildWorkspacePlaceholderAccounts,
   getInitialYeonunAccounts,
+  getInitialWorkspaceAccounts,
   setYeonunAccountsCache,
   type AutoPublishStatus,
 } from './auto-publish-button';
@@ -40,13 +42,15 @@ export function WorkspacePublishAccountsStrip({
   refreshToken = 0,
   onDone,
 }: WorkspacePublishAccountsStripProps) {
-  const initialRows = workspace === 'yeonun' ? getInitialYeonunAccounts() : [];
+  const initialRows = getInitialWorkspaceAccounts(workspace);
   const [accounts, setAccounts] = useState<AutoPublishStatus[]>(initialRows);
   const [nextPublishAccountId, setNextPublishAccountId] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(() =>
-    workspace === 'yeonun' ? getInitialYeonunAccounts().some((a) => Boolean(a.account_id)) : false,
+    workspace === 'yeonun'
+      ? getInitialYeonunAccounts().some((a) => Boolean(a.account_id))
+      : false,
   );
 
   const dongleGroups = useMemo(
@@ -83,6 +87,23 @@ export function WorkspacePublishAccountsStrip({
       workspace === 'yeonun' && getInitialYeonunAccounts().some((a) => Boolean(a.account_id));
     void load({ silent });
   }, [load, refreshToken, workspace]);
+
+  const resolvedNextPublishAccountId = useMemo(() => {
+    if (nextPublishAccountId) return nextPublishAccountId;
+    const now = Date.now();
+    let best: { id: string; at: number } | null = null;
+    for (const row of accounts) {
+      if (!row.account_id) continue;
+      const candidates = [row.next_queued_at, row.auto_publish_next_slot_at].filter(Boolean) as string[];
+      for (const iso of candidates) {
+        const at = new Date(iso).getTime();
+        if (Number.isNaN(at)) continue;
+        if (at < now - 60_000) continue;
+        if (!best || at < best.at) best = { id: row.account_id, at };
+      }
+    }
+    return best?.id ?? null;
+  }, [accounts, nextPublishAccountId]);
 
   const handleToggle = async (row: AutoPublishStatus) => {
     const accountId = row.account_id;
@@ -159,14 +180,14 @@ export function WorkspacePublishAccountsStrip({
                     key={row.account_id ?? label}
                     status={row}
                     enabled={enabled}
-                    busy={busy}
+                    busy={busy || !row.account_id}
                     label={label}
                     syncing={syncing}
                     showNextPublishBadge={
                       Boolean(
                         row.account_id &&
-                          nextPublishAccountId &&
-                          row.account_id === nextPublishAccountId,
+                          resolvedNextPublishAccountId &&
+                          row.account_id === resolvedNextPublishAccountId,
                       )
                     }
                     onToggle={() => void handleToggle(row)}

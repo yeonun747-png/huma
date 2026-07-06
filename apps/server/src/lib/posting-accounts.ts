@@ -205,6 +205,34 @@ export async function listPostingAccounts(workspace: string): Promise<PostingAcc
   return rows.map(rowToPick);
 }
 
+/** 자동발행 칩 UI — 활성 여부 무관, workspace 포스팅 계정 전체 */
+export async function listAllPostingAccountsForWorkspace(workspace: string): Promise<PostingAccountPick[]> {
+  if (!postingSlotByWorkspace(workspace)) return [];
+
+  let query = supabase
+    .from('huma_accounts')
+    .select('id, persona, proxy_port, name, slot_label, is_active')
+    .eq('workspace', workspace)
+    .eq('account_type', 'posting')
+    .order('proxy_port', { ascending: true })
+    .order('slot_label', { ascending: true });
+
+  if (workspace === 'yeonun') {
+    query = query.in('proxy_port', [...YEONUN_POSTING_PORTS]);
+  }
+
+  const { data: rows } = await query;
+  return (rows ?? []).map((row) =>
+    rowToPick({
+      id: row.id as string,
+      persona: row.persona,
+      proxy_port: row.proxy_port,
+      name: row.name,
+      slot_label: row.slot_label,
+    }),
+  );
+}
+
 /** 수동 지정 account_id 또는 순환 pick */
 export async function resolvePostingAccount(
   workspace: string,
@@ -263,8 +291,11 @@ export async function pickPostingAccount(
     return pickAccountOnPort(accounts, targetPort, advance);
   }
 
-  const slot = postingSlotByWorkspace(workspace)!;
-  return pickAccountOnPort(accounts, slot.proxyPort, advance);
+  // 퀴즈오아시스·파나나 — 단일 동글, proxy_port null·레거시 포트도 동일 풀 RR
+  const seq = advance
+    ? await redisConnection.incr(postingDongleRoundRobinKey(workspace))
+    : Number((await redisConnection.get(postingDongleRoundRobinKey(workspace))) ?? '0');
+  return rowToPick(pickFromPool(accounts, seq, advance));
 }
 
 /** 동글 그룹 UI — 슬롯별 계정 목록 */
@@ -292,8 +323,14 @@ export async function listPostingAccountsByDongle(workspace: string) {
     label: dongle.label,
     proxy_port: dongle.proxyPort,
     workspace: dongle.workspace,
-    account_count: accounts.filter((a) => a.proxy_port === dongle.proxyPort).length,
+    account_count:
+      workspace === 'yeonun'
+        ? accounts.filter((a) => a.proxy_port === dongle.proxyPort).length
+        : accounts.length,
     max_accounts: 5,
-    accounts: accounts.filter((a) => a.proxy_port === dongle.proxyPort),
+    accounts:
+      workspace === 'yeonun'
+        ? accounts.filter((a) => a.proxy_port === dongle.proxyPort)
+        : accounts,
   }));
 }

@@ -8,7 +8,13 @@ import { isWeekendKst } from './posting-schedule.js';
 
 import { formatKstDateKey, getDailyPostingTarget } from './posting-daily-target.js';
 
-import { listPostingAccounts, loadPostingAccountById, pickPostingAccount } from './posting-accounts.js';
+import {
+  listAllPostingAccountsForWorkspace,
+  listPostingAccounts,
+  loadPostingAccountById,
+  pickPostingAccount,
+} from './posting-accounts.js';
+import { postingSlotByWorkspace } from './dongle-slots.js';
 
 import { listActiveQuizContent } from '../modules/video-content/quiz-content-cache.js';
 
@@ -38,7 +44,9 @@ export type AutoPublishBlockReason =
 
   | 'NO_ACCOUNT'
 
-  | 'IN_FLIGHT';
+  | 'IN_FLIGHT'
+
+  | 'INACTIVE';
 
 
 
@@ -90,6 +98,11 @@ export interface AutoPublishStatus {
 
   /** 포스팅 동글 proxy_port (10001~10005) */
   proxy_port?: number | null;
+
+  /** 이 계정 큐에 예약된 다음 content_full/post_blog 시각 */
+  next_queued_at?: string | null;
+
+  is_active?: boolean;
 
 }
 
@@ -226,11 +239,60 @@ async function resolvePostingAccountForStatus(workspace: string, accountId?: str
 
 
 
+async function fetchNextQueuedAtByAccountIds(
+  accountIds: string[],
+): Promise<Map<string, string>> {
+  if (!accountIds.length) return new Map();
+
+  const nowIso = new Date().toISOString();
+  const map = new Map<string, string>();
+
+  const { data: scheduledRows } = await supabase
+    .from('huma_jobs')
+    .select('account_id, scheduled_at')
+    .in('account_id', accountIds)
+    .in('job_type', ['content_full', 'post_blog'])
+    .in('status', ['pending', 'scheduled'])
+    .not('scheduled_at', 'is', null)
+    .gt('scheduled_at', nowIso)
+    .order('scheduled_at', { ascending: true });
+
+  for (const row of scheduledRows ?? []) {
+    const id = row.account_id as string | null;
+    if (!id || map.has(id)) continue;
+    map.set(id, String(row.scheduled_at));
+  }
+
+  const { data: immediateRows } = await supabase
+    .from('huma_jobs')
+    .select('account_id, created_at')
+    .in('account_id', accountIds)
+    .in('job_type', ['content_full', 'post_blog'])
+    .in('status', ['pending', 'scheduled', 'running', 'awaiting_captcha'])
+    .or(`scheduled_at.is.null,scheduled_at.lte.${nowIso}`);
+
+  for (const row of immediateRows ?? []) {
+    const id = row.account_id as string | null;
+    if (!id || map.has(id)) continue;
+    map.set(id, String(row.created_at ?? nowIso));
+  }
+
+  return map;
+}
+
+
+
 async function buildAccountPublishStatus(
 
   workspace: string,
 
-  account: { id: string; label?: string; proxy_port?: number | null },
+  account: {
+    id: string;
+    label?: string;
+    proxy_port?: number | null;
+    next_queued_at?: string | null;
+    is_active?: boolean;
+  },
 
 ): Promise<AutoPublishStatus> {
 
@@ -246,7 +308,7 @@ async function buildAccountPublishStatus(
 
     .from('huma_accounts')
 
-    .select('warmup_day, auto_publish_enabled, auto_publish_kst_date, auto_publish_planned_count, auto_publish_next_slot_at, proxy_port')
+    .select('warmup_day, auto_publish_enabled, auto_publish_kst_date, auto_publish_planned_count, auto_publish_next_slot_at, proxy_port, is_active')
 
     .eq('id', account.id)
 
@@ -348,9 +410,31 @@ async function buildAccountPublishStatus(
 
     proxy_port:
       account.proxy_port ??
-      (typeof accRow?.proxy_port === 'number' ? (accRow.proxy_port as number) : null),
+      (typeof accRow?.proxy_port === 'number' ? (accRow.proxy_port as number) : null) ??
+      postingSlotByWorkspace(workspace)?.proxyPort ??
+      null,
+
+    next_queued_at: account.next_queued_at ?? null,
+
+    is_active: account.is_active ?? Boolean(accRow?.is_active),
 
   };
+
+
+
+  if (base.is_active === false) {
+
+    return {
+
+      ...base,
+
+      block_reason: 'INACTIVE',
+
+      block_message: '계정 비활성 — 계정 관리에서 활성화하세요',
+
+    };
+
+  }
 
 
 
@@ -562,14 +646,21 @@ export async function getAutoPublishStatusForAllAccounts(
 
 ): Promise<AutoPublishStatus[]> {
 
-  const accounts = await listPostingAccounts(workspace);
+  const accounts = await listAllPostingAccountsForWorkspace(workspace);
 
   if (!accounts.length) return [];
+
+  const nextQueuedByAccount = await fetchNextQueuedAtByAccountIds(accounts.map((a) => a.id));
 
   const rows = await Promise.all(
 
     accounts.map((a) =>
-      buildAccountPublishStatus(workspace, { id: a.id, label: a.label, proxy_port: a.proxy_port }),
+      buildAccountPublishStatus(workspace, {
+        id: a.id,
+        label: a.label,
+        proxy_port: a.proxy_port,
+        next_queued_at: nextQueuedByAccount.get(a.id) ?? null,
+      }),
     ),
 
   );
