@@ -198,9 +198,9 @@ function jobSub(job: HumaJob): string {
   }
 
   if (job.status === 'running' && job.job_type === 'post_blog') {
-    const warmupPhase = !job.content || job.content.length < 20;
-    if (!warmupPhase) {
-      parts.push(`${job.content.length}자 타이핑`);
+    const contentLen = job.content?.length ?? 0;
+    if (contentLen >= 20) {
+      parts.push(`${contentLen}자 타이핑`);
     }
   } else if (job.status === 'running' && job.job_type === 'content_full' && job.content) {
     parts.push(`본문 ${job.content.length}자`);
