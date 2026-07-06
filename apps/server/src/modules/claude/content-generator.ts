@@ -30,7 +30,7 @@ import {
   buildPostingBodySimilarityFeedback,
   buildPostingTitleSimilarityFeedback,
   checkPostingSimilarity,
-  isPostingSimilarityTooHigh,
+  isPostingTitleSimilarityTooHigh,
   loadPostingSimilarityCorpus,
   maxPostingTitleSimilarity,
   MAX_POSTING_BODY_SIMILARITY_RETRIES,
@@ -39,6 +39,7 @@ import {
   PostingSimilarityCorpusLoadError,
   PostingSimilaritySkipError,
   POSTING_SIMILARITY_THRESHOLD,
+  POSTING_TITLE_SIMILARITY_THRESHOLD,
 } from '../../lib/posting-content-similarity.js';
 import { postingSlotByWorkspace } from '../../lib/dongle-slots.js';
 import { withPostingSimilarityLock } from '../../lib/posting-similarity-lock.js';
@@ -714,13 +715,13 @@ async function generateAllContentWithSimilarity(
   let result = await generateAllContentOnce(input, { mainExtraPrompt });
 
   while (true) {
-    while (isPostingSimilarityTooHigh(maxPostingTitleSimilarity(result.seo_title, corpus.allTitleEmbeddings))) {
+    while (isPostingTitleSimilarityTooHigh(maxPostingTitleSimilarity(result.seo_title, corpus.allTitleEmbeddings))) {
       titleRegenerations++;
       if (titleRegenerations > MAX_POSTING_TITLE_SIMILARITY_ATTEMPTS) {
         const titleSimilarity = maxPostingTitleSimilarity(result.seo_title, corpus.allTitleEmbeddings);
         const titleCheck = checkPostingSimilarity(result.seo_title, result.blog_post, corpus);
         throw new PostingSimilaritySkipError(
-          `SEO 제목 유사도 ${titleSimilarity.toFixed(3)} > ${POSTING_SIMILARITY_THRESHOLD} — 제목 재생성 ${MAX_POSTING_TITLE_SIMILARITY_ATTEMPTS}회 후 발행 스킵`,
+          `SEO 제목 유사도 ${titleSimilarity.toFixed(3)} > ${POSTING_TITLE_SIMILARITY_THRESHOLD} — 제목 재생성 ${MAX_POSTING_TITLE_SIMILARITY_ATTEMPTS}회 후 발행 스킵`,
           titleCheck,
           titleRegenerations,
           'title',

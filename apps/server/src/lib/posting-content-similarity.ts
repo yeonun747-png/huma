@@ -8,6 +8,9 @@ import {
 
 export { POSTING_SIMILARITY_THRESHOLD };
 
+/** SEO 제목 유사도 재생성 기준 (본문은 POSTING_SIMILARITY_THRESHOLD) */
+export const POSTING_TITLE_SIMILARITY_THRESHOLD = 0.65;
+
 /** 본문 유사도 비교 — 직전 N건 */
 export const POSTING_BODY_COMPARE_LIMIT = 10;
 
@@ -17,7 +20,7 @@ export const POSTING_TITLE_COMPARE_LIMIT = 300;
 /** 본문 — 최초 생성 후 재생성 상한 1회 */
 export const MAX_POSTING_BODY_SIMILARITY_RETRIES = 1;
 
-/** 제목 — 0.85 이하까지 LLM 재생성 (과거 50회는 8분+ 지연 유발) */
+/** 제목 — 0.65 이하까지 LLM 재생성 (과거 50회는 8분+ 지연 유발) */
 export const MAX_POSTING_TITLE_SIMILARITY_ATTEMPTS = 8;
 
 /** 이 횟수 이후 LLM 대신 휴리스틱 제목 변형 시도 */
@@ -26,7 +29,11 @@ export const POSTING_TITLE_HEURISTIC_FALLBACK_AFTER = 4;
 /** @deprecated MAX_POSTING_BODY_SIMILARITY_RETRIES 사용 */
 export const MAX_POSTING_SIMILARITY_RETRIES = MAX_POSTING_BODY_SIMILARITY_RETRIES;
 
-/** 요구: 0.85 초과 시 재생성 → 0.85 이하(이내) 통과 */
+/** 요구: 기준 초과 시 재생성 → 기준 이하(이내) 통과 */
+export function isPostingTitleSimilarityTooHigh(score: number): boolean {
+  return score > POSTING_TITLE_SIMILARITY_THRESHOLD;
+}
+
 export function isPostingSimilarityTooHigh(score: number): boolean {
   return score > POSTING_SIMILARITY_THRESHOLD;
 }
@@ -65,7 +72,7 @@ export function checkPostingSimilarity(
 ): PostingSimilarityCheck {
   const titleSimilarity = maxPostingTitleSimilarity(seoTitle, corpus.allTitleEmbeddings);
   const bodySimilarity = maxPostingBodySimilarity(blogPost, corpus.recentBodyEmbeddings);
-  const titleTooSimilar = isPostingSimilarityTooHigh(titleSimilarity);
+  const titleTooSimilar = isPostingTitleSimilarityTooHigh(titleSimilarity);
   const bodyTooSimilar = isPostingSimilarityTooHigh(bodySimilarity);
   return {
     ok: !titleTooSimilar && !bodyTooSimilar,
@@ -77,7 +84,7 @@ export function checkPostingSimilarity(
 }
 
 export function buildPostingTitleSimilarityFeedback(check: PostingSimilarityCheck): string {
-  return `seo_title 유사도 ${check.titleSimilarity.toFixed(3)} (기준 ${POSTING_SIMILARITY_THRESHOLD} 초과) — 과거 발행 제목과 구분되도록 키워드 배치·표현을 바꿔 32자 이내 새 제목으로 다시 작성하세요.`;
+  return `seo_title 유사도 ${check.titleSimilarity.toFixed(3)} (기준 ${POSTING_TITLE_SIMILARITY_THRESHOLD} 초과) — 과거 발행 제목과 구분되도록 키워드 배치·표현을 바꿔 32자 이내 새 제목으로 다시 작성하세요.`;
 }
 
 export function buildPostingBodySimilarityFeedback(check: PostingSimilarityCheck): string {
@@ -180,7 +187,7 @@ export function assertPostingSimilarityPasses(
   if (!check.ok) {
     const parts: string[] = [];
     if (check.titleTooSimilar) {
-      parts.push(`SEO 제목 유사도 ${check.titleSimilarity.toFixed(3)} > ${POSTING_SIMILARITY_THRESHOLD}`);
+      parts.push(`SEO 제목 유사도 ${check.titleSimilarity.toFixed(3)} > ${POSTING_TITLE_SIMILARITY_THRESHOLD}`);
     }
     if (check.bodyTooSimilar) {
       parts.push(`본문 유사도 ${check.bodySimilarity.toFixed(3)} > ${POSTING_SIMILARITY_THRESHOLD}`);

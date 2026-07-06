@@ -5,21 +5,26 @@ import {
   checkPostingSimilarity,
   isPostingSimilaritySkipError,
   isPostingSimilarityTooHigh,
+  isPostingTitleSimilarityTooHigh,
   MAX_POSTING_BODY_SIMILARITY_RETRIES,
   POSTING_BODY_COMPARE_LIMIT,
   POSTING_SIMILARITY_THRESHOLD,
+  POSTING_TITLE_SIMILARITY_THRESHOLD,
   PostingSimilaritySkipError,
 } from './posting-content-similarity.js';
 import { embedText } from '../modules/video-content/embedding.js';
 
 describe('checkPostingSimilarity', () => {
   it('uses posting threshold constant', () => {
+    expect(POSTING_TITLE_SIMILARITY_THRESHOLD).toBe(0.65);
     expect(POSTING_SIMILARITY_THRESHOLD).toBe(0.85);
     expect(POSTING_BODY_COMPARE_LIMIT).toBe(10);
     expect(MAX_POSTING_BODY_SIMILARITY_RETRIES).toBe(1);
   });
 
   it('passes at exactly threshold (초과만 실패)', () => {
+    expect(isPostingTitleSimilarityTooHigh(0.65)).toBe(false);
+    expect(isPostingTitleSimilarityTooHigh(0.650001)).toBe(true);
     expect(isPostingSimilarityTooHigh(0.85)).toBe(false);
     expect(isPostingSimilarityTooHigh(0.850001)).toBe(true);
   });

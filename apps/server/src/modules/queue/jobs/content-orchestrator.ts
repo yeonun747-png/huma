@@ -30,6 +30,7 @@ import {
   isPostingSimilaritySkipError,
   loadPostingSimilarityCorpus,
   POSTING_SIMILARITY_THRESHOLD,
+  POSTING_TITLE_SIMILARITY_THRESHOLD,
   type PostingSimilaritySkipKind,
 } from '../../../lib/posting-content-similarity.js';
 import { postingSlotByWorkspace } from '../../../lib/dongle-slots.js';
@@ -90,7 +91,7 @@ async function notifyPostingSimilaritySkip(params: {
   const kindLabel = skipKindLabel(params.skipKind);
   const scoreLine =
     params.skipKind === 'title'
-      ? `제목 유사도: ${params.titleSimilarity.toFixed(3)} > ${POSTING_SIMILARITY_THRESHOLD}`
+      ? `제목 유사도: ${params.titleSimilarity.toFixed(3)} > ${POSTING_TITLE_SIMILARITY_THRESHOLD}`
       : params.skipKind === 'body'
         ? `본문 유사도: ${params.bodySimilarity.toFixed(3)} > ${POSTING_SIMILARITY_THRESHOLD}`
         : '과거 발행 이력을 불러오지 못했습니다';
