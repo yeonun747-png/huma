@@ -818,7 +818,6 @@ export async function completeCaptchaHold(
         }
         return { ok: false, error: 'CAPTCHA_LOGIN_NOT_READY' };
       }
-      await persistPostingSessionBeforeHoldClose(entry.context, entry.accountId).catch(() => {});
 
       const cont = await continuePostBlogFromCaptchaHold({
         jobId,

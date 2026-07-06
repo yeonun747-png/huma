@@ -12,7 +12,7 @@ import { PLAYWRIGHT_NAV_TIMEOUT_MS } from '../../../lib/playwright-nav-timeout.j
 import { sleep } from '../../../lib/utils.js';
 import { logOperation } from '../../../lib/log-emitter.js';
 import { supabase } from '../../../middleware/auth.js';
-import { ensureBlogWriteEntry } from '../../../lib/naver-blog-portal.js';
+import { ensureBlogWriteEntry, isBlogHomeFeedUrl } from '../../../lib/naver-blog-portal.js';
 import {
   BLOG_BODY_SELECTORS,
   BLOG_TITLE_SELECTORS,
@@ -110,14 +110,36 @@ export async function navigateToBlogPostwrite(
  * UI 경로 실패 시 postwrite URL goto 폴백.
  * @returns postwrite URL 탭 (동일 탭 또는 팝업)
  */
-/** 컨텍스트 내 postwrite 탭을 keep 하나만 남기고 나머지는 close (같은 글쓰기 탭 중복 방지) */
-async function closeDuplicatePostwritePages(context: BrowserContext, keep: Page): Promise<void> {
+/** postwrite 확정 후 BlogHome·중복 글쓰기·개인블로그 홈 탭 정리 */
+export async function consolidateNaverBlogWorkflowTabs(
+  context: BrowserContext,
+  keep: Page,
+): Promise<void> {
+  const keepIsPostwrite = POSTWRITE_URL_RE.test(keep.url());
+
   for (const p of context.pages()) {
     if (p === keep || p.isClosed()) continue;
-    if (POSTWRITE_URL_RE.test(p.url())) {
+    const url = p.url();
+
+    if (keepIsPostwrite) {
+      if (isBlogHomeFeedUrl(url) || POSTWRITE_URL_RE.test(url) || isPersonalBlogHomeUrl(url)) {
+        await p.close().catch(() => {});
+      }
+      continue;
+    }
+
+    if (POSTWRITE_URL_RE.test(url)) {
       await p.close().catch(() => {});
     }
   }
+
+  await keep.bringToFront().catch(() => {});
+}
+
+function isPersonalBlogHomeUrl(url: string): boolean {
+  if (!url.includes('blog.naver.com')) return false;
+  if (POSTWRITE_URL_RE.test(url) || isBlogHomeFeedUrl(url)) return false;
+  return blogIdFromUrl(url) != null;
 }
 
 export async function openBlogPostwritePreferUiClick(
@@ -128,17 +150,31 @@ export async function openBlogPostwritePreferUiClick(
 
   const context = page.context();
   // 이미 열린 postwrite 탭이 있으면 재사용 — 「글쓰기」 재클릭으로 동일 탭이 중복 생성되는 것 방지.
-  // (URL 직접 이동 시절엔 같은 탭을 재사용해 중복이 없었으나, UI 클릭은 매번 팝업을 띄운다.)
   const existing = findNaverPostwritePage(context);
   if (existing && !existing.isClosed()) {
-    await existing.bringToFront().catch(() => {});
+    await consolidateNaverBlogWorkflowTabs(context, existing);
     return existing;
+  }
+
+  if (POSTWRITE_URL_RE.test(page.url())) {
+    await consolidateNaverBlogWorkflowTabs(context, page);
+    return page;
   }
 
   await page.bringToFront().catch(() => {});
 
   if (page.url().includes('www.naver.com') && !page.url().includes('nidlogin')) {
     await scaledSleep(600, 1400);
+  }
+
+  // 동일 탭 postwrite 직접 이동 우선 — BlogHome 「글쓰기」 UI 클릭은 팝업+홈 탭 잔류를 유발할 수 있음
+  if (await navigateToBlogPostwrite(page, blogId)) {
+    await consolidateNaverBlogWorkflowTabs(context, page);
+    await logOperation({
+      level: 'info',
+      message: `[post_blog] 블로그 글쓰기 URL 직접 진입 blogId=${blogId}`,
+    }).catch(() => {});
+    return page;
   }
 
   const personalBlogUrl = `https://blog.naver.com/${blogId}`;
@@ -152,20 +188,24 @@ export async function openBlogPostwritePreferUiClick(
       const popup = await popupPromise;
       if (popup && !popup.isClosed()) {
         await popup.waitForLoadState('domcontentloaded', { timeout: PLAYWRIGHT_NAV_TIMEOUT_MS }).catch(() => {});
+        await popup
+          .waitForURL((u) => POSTWRITE_URL_RE.test(u.href), { timeout: 12_000 })
+          .catch(() => {});
         if (POSTWRITE_URL_RE.test(popup.url())) {
-          await closeDuplicatePostwritePages(context, popup);
+          await consolidateNaverBlogWorkflowTabs(context, popup);
           await logOperation({
             level: 'info',
             message: `[post_blog] 블로그 글쓰기 UI 클릭 진입 (팝업) blogId=${blogId}`,
           }).catch(() => {});
-          await popup.bringToFront().catch(() => {});
           return popup;
         }
+        await popup.close().catch(() => {});
       }
       await page
         .waitForURL((u) => POSTWRITE_URL_RE.test(u.href), { timeout: 12_000 })
         .catch(() => {});
       if (POSTWRITE_URL_RE.test(page.url())) {
+        await consolidateNaverBlogWorkflowTabs(context, page);
         await logOperation({
           level: 'info',
           message: `[post_blog] 블로그 글쓰기 UI 클릭 진입 blogId=${blogId}`,
@@ -180,7 +220,10 @@ export async function openBlogPostwritePreferUiClick(
     message: `[post_blog] 글쓰기 UI 클릭 실패 — postwrite URL 폴백 blogId=${blogId}`,
   }).catch(() => {});
 
-  if (await navigateToBlogPostwrite(page, blogId)) return page;
+  if (await navigateToBlogPostwrite(page, blogId)) {
+    await consolidateNaverBlogWorkflowTabs(context, page);
+    return page;
+  }
   return null;
 }
 
@@ -548,13 +591,19 @@ export async function enterBlogEditor(
   const existingPostwrite = findNaverPostwritePage(context);
   if (existingPostwrite) {
     const ready = await tryEditorOnPage(existingPostwrite, STALE_POSTWRITE_PROBE_MS, waitOpts);
-    if (ready) return ready;
+    if (ready) {
+      await consolidateNaverBlogWorkflowTabs(context, ready);
+      return ready;
+    }
     await existingPostwrite.close().catch(() => {});
   }
 
   if (POSTWRITE_URL_RE.test(page.url())) {
     const ready = await tryEditorOnPage(page, STALE_POSTWRITE_PROBE_MS, waitOpts);
-    if (ready) return ready;
+    if (ready) {
+      await consolidateNaverBlogWorkflowTabs(context, ready);
+      return ready;
+    }
   }
 
   // ② 계정 DB에서 blogId 확보 (blog.naver.com 재이동으로 세션 꼬임 방지)
@@ -590,7 +639,10 @@ export async function enterBlogEditor(
       await dismissSeOneHelpPanel(workflowPage);
       await waitAndDismissDraftResumePopup(workflowPage, 15_000).catch(() => {});
       const ready = await tryEditorOnPage(workflowPage, remainingMs(), waitOpts);
-      if (ready) return ready;
+      if (ready) {
+        await consolidateNaverBlogWorkflowTabs(context, ready);
+        return ready;
+      }
     }
   }
 
@@ -615,14 +667,20 @@ export async function enterBlogEditor(
     await waitAndDismissDraftResumePopup(workflowPage, 15_000).catch(() => {});
 
     const ready = await tryEditorOnPage(workflowPage, remainingMs());
-    if (ready) return ready;
+    if (ready) {
+      await consolidateNaverBlogWorkflowTabs(context, ready);
+      return ready;
+    }
 
     const popup = context.pages().find(
       (p) => p !== workflowPage && !p.isClosed() && POSTWRITE_URL_RE.test(p.url()),
     );
     if (popup) {
       const popupReady = await tryEditorOnPage(popup, remainingMs());
-      if (popupReady) return popupReady;
+      if (popupReady) {
+        await consolidateNaverBlogWorkflowTabs(context, popupReady);
+        return popupReady;
+      }
     }
   }
 
@@ -630,7 +688,10 @@ export async function enterBlogEditor(
   for (const p of context.pages()) {
     if (p.isClosed() || !POSTWRITE_URL_RE.test(p.url())) continue;
     const ready = await tryEditorOnPage(p, remainingMs());
-    if (ready) return ready;
+    if (ready) {
+      await consolidateNaverBlogWorkflowTabs(context, ready);
+      return ready;
+    }
   }
 
   const failPage = existingPostwrite ?? page;

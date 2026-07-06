@@ -7,6 +7,7 @@ import { throwIfNaverAccountProtection } from './naver-account-protection.js';
 import { isNaverCaptchaVisible, pickNaverCaptchaPage } from './naver-captcha-vision.js';
 import { gotoBlogPortal, waitForBlogPortalReady } from './naver-blog-portal.js';
 import {
+  consolidateNaverBlogWorkflowTabs,
   findNaverPostwritePage,
   loadBlogIdForAccount,
   openBlogPostwritePreferUiClick,
@@ -159,7 +160,11 @@ export async function persistPostingSessionBeforeHoldClose(
   context: BrowserContext,
   accountId?: string,
 ): Promise<void> {
-  if (findNaverPostwritePage(context)) return;
+  const existing = findNaverPostwritePage(context);
+  if (existing && !existing.isClosed()) {
+    await consolidateNaverBlogWorkflowTabs(context, existing);
+    return;
+  }
 
   const page = pickPostingWorkflowPage(context) ?? (await pickNaverCaptchaPage(context));
   if (!page) return;
@@ -177,9 +182,13 @@ export async function persistPostingSessionBeforeHoldClose(
 
   if (accountId) {
     const blogId = await loadBlogIdForAccount(accountId);
-    if (blogId && (await openBlogPostwritePreferUiClick(page, blogId))) {
-      await humanSleep(...scaleMs(400, 900));
-      return;
+    if (blogId) {
+      const opened = await openBlogPostwritePreferUiClick(page, blogId);
+      if (opened) {
+        await consolidateNaverBlogWorkflowTabs(context, opened);
+        await humanSleep(...scaleMs(400, 900));
+        return;
+      }
     }
   }
 
@@ -266,11 +275,12 @@ export async function ensurePostingSessionAfterCaptcha(
 
   if (accountId) {
     const blogId = await loadBlogIdForAccount(accountId);
-    if (blogId && (await openBlogPostwritePreferUiClick(probe, blogId))) {
-      await humanSleep(...scaleMs(400, 900));
-      if (await isBlogWriteReady(probe)) {
-        await persistPostingSessionBeforeHoldClose(context, accountId);
-        return true;
+    if (blogId) {
+      const opened = await openBlogPostwritePreferUiClick(probe, blogId);
+      if (opened) {
+        await consolidateNaverBlogWorkflowTabs(context, opened);
+        await humanSleep(...scaleMs(400, 900));
+        if (await isBlogWriteReady(opened)) return true;
       }
     }
   }
@@ -295,13 +305,17 @@ export async function probeBlogSessionAfterCaptcha(
   try {
     if (accountId) {
       const blogId = await loadBlogIdForAccount(accountId);
-      if (blogId && (await openBlogPostwritePreferUiClick(page, blogId))) {
-        await humanSleep(...scaleMs(400, 900));
-        const ready = await isBlogWriteReady(page);
-        if (ready) {
-          await persistPostingSessionBeforeHoldClose(context, accountId);
+      if (blogId) {
+        const opened = await openBlogPostwritePreferUiClick(page, blogId);
+        if (opened) {
+          await consolidateNaverBlogWorkflowTabs(context, opened);
+          await humanSleep(...scaleMs(400, 900));
+          const ready = await isBlogWriteReady(opened);
+          if (ready) {
+            await persistPostingSessionBeforeHoldClose(context, accountId);
+          }
+          return ready;
         }
-        return ready;
       }
     }
     await gotoBlogPortal(page);
