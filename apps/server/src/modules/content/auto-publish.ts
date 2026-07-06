@@ -3,6 +3,7 @@ import {
   getAutoPublishStatusForAllAccounts,
   type AutoPublishStatus,
 } from '../../lib/posting-daily-status.js';
+import { listPostingAccounts } from '../../lib/posting-accounts.js';
 import {
   disableAutoPublish,
   enableAutoPublish,
@@ -29,8 +30,9 @@ export async function toggleAutoPublish(
     : await disableAutoPublish(workspace, accountId);
 
   const status = await getAutoPublishStatus(workspace, accountId);
+  const accountRows = await listPostingAccounts(workspace);
   const accounts_status =
-    workspace === 'yeonun' ? await getAutoPublishStatusForAllAccounts(workspace) : undefined;
+    accountRows.length > 1 ? await getAutoPublishStatusForAllAccounts(workspace) : undefined;
 
   return {
     enabled: state.enabled,

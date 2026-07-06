@@ -1,4 +1,4 @@
-import { POSTING_DONGLE_SLOTS } from '@huma/shared';
+import { POSTING_DONGLE_SLOTS, type Workspace } from '@huma/shared';
 
 export type YeonunDongleGroup<T> = {
   dongleLabel: string;
@@ -77,4 +77,47 @@ export function groupYeonunByDongle<T extends { proxy_port?: number | null; acco
         ),
     }))
     .filter((g) => g.items.length > 0);
+}
+
+/** 퀴즈오아시스·파나나 등 — 동글 슬롯별 계정 그룹 (연운은 전용 정렬·라벨) */
+export function groupPostingAccountsByDongle<T extends { proxy_port?: number | null; account_label?: string }>(
+  workspace: Workspace,
+  rows: T[],
+): YeonunDongleGroup<T>[] {
+  if (workspace === 'yeonun') return groupYeonunByDongle(rows);
+
+  const slots = POSTING_DONGLE_SLOTS.filter((s) => s.workspace === workspace);
+  if (!slots.length) {
+    return rows.length ? [{ dongleLabel: workspace, proxyPort: 0, items: rows }] : [];
+  }
+
+  return slots
+    .map((slot) => ({
+      dongleLabel: slot.label,
+      proxyPort: slot.proxyPort,
+      items: rows
+        .filter((row) => {
+          if (row.proxy_port != null) return row.proxy_port === slot.proxyPort;
+          const label = row.account_label ?? '';
+          if (slots.length === 1) return true;
+          return label === slot.label || label.startsWith(`${slot.label}-`);
+        })
+        .sort((a, b) => (a.account_label ?? '').localeCompare(b.account_label ?? '', 'ko')),
+    }))
+    .filter((g) => g.items.length > 0);
+}
+
+/** 계정 칩 라벨 — 연운은 기존 포맷, 그 외 slot_label 그대로 */
+export function formatPostingAccountDisplayLabel(
+  workspace: Workspace,
+  raw: string | undefined | null,
+  opts?: { proxyPort?: number; indexInGroup?: number },
+): string {
+  if (workspace === 'yeonun') {
+    return formatYeonunAccountDisplayLabel(raw, opts);
+  }
+  const label = (raw ?? '').trim();
+  if (label) return label;
+  if (opts?.indexInGroup != null) return `계정 ${opts.indexInGroup + 1}`;
+  return '계정';
 }

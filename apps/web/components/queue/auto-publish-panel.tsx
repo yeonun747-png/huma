@@ -2,8 +2,10 @@
 
 import { useState } from 'react';
 import type { Workspace } from '@huma/shared';
-import { AutoPublishButton } from './auto-publish-button';
-import { YeonunPublishAccountsStrip } from './yeonun-publish-accounts-strip';
+import {
+  isPostingStripWorkspace,
+  WorkspacePublishAccountsStrip,
+} from './yeonun-publish-accounts-strip';
 
 interface AutoPublishPanelProps {
   workspace: Workspace;
@@ -21,13 +23,17 @@ export function AutoPublishPanel({ workspace, onDone, accountsRefresh = 0 }: Aut
 
   const stripRefresh = refreshToken + accountsRefresh;
 
-  if (workspace === 'yeonun') {
+  if (isPostingStripWorkspace(workspace)) {
     return (
       <div className="flex min-w-0 flex-1 items-stretch justify-end">
-        <YeonunPublishAccountsStrip refreshToken={stripRefresh} onDone={handleDone} />
+        <WorkspacePublishAccountsStrip
+          workspace={workspace}
+          refreshToken={stripRefresh}
+          onDone={handleDone}
+        />
       </div>
     );
   }
 
-  return <AutoPublishButton workspace={workspace} onDone={handleDone} refreshToken={stripRefresh} />;
+  return null;
 }
