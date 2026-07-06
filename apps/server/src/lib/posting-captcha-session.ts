@@ -331,3 +331,30 @@ export async function probeBlogSessionAfterCaptcha(
     await page.close().catch(() => {});
   }
 }
+
+/** CAPTCHA hold 후 C-Rank — 로그인 상태만 확인 (에디터 진입 불필요) */
+export async function ensureCrankSessionAfterCaptcha(
+  context: BrowserContext,
+  accountId: string,
+  options?: { loginWaitMs?: number },
+): Promise<boolean> {
+  const loginWaitMs = options?.loginWaitMs ?? 12_000;
+  const loginDeadline = Date.now() + loginWaitMs;
+
+  while (Date.now() < loginDeadline) {
+    const loggedIn = await findLoggedInPostingPage(context);
+    if (loggedIn) return true;
+    await sleep(350);
+  }
+
+  const page = pickPostingWorkflowPage(context) ?? (await pickNaverCaptchaPage(context));
+  if (!page || page.isClosed()) return false;
+
+  const url = page.url();
+  if (url === 'about:blank' || url === '') return false;
+  if (await isNaverCaptchaVisible(page)) return false;
+  if (await isNaverAuthChallengePage(page)) return false;
+  if (await isNaverLoginPagePendingSubmit(page)) return false;
+
+  return isNaverLoggedInOnPage(page);
+}

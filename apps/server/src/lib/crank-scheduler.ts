@@ -24,6 +24,7 @@ import { enqueueHumaJob, type JobRecord } from './job-scheduler.js';
 import { recoverCrankPipeline } from './crank-pipeline-recovery.js';
 import { logOperation } from './log-emitter.js';
 import { getCrankScheduleWindow } from './human-engine-policy.js';
+import { getCrankDeadZoneEnabled } from './activity-control.js';
 import { layer4RestSupabaseOr } from './account-guards.js';
 import { getSystemPaused } from './system-pause.js';
 import { getCrankEnabled } from './activity-control.js';
@@ -161,7 +162,10 @@ export async function runDailyCrankScheduler(options?: { anchorFromNow?: boolean
     0,
     scheduleWindow,
     policy.activeModemCount,
-    options?.anchorFromNow ? { notBefore: new Date() } : undefined,
+    {
+      ...(options?.anchorFromNow ? { notBefore: new Date() } : {}),
+      excludeDeadZone: getCrankDeadZoneEnabled(),
+    },
   );
 
   const serviceCounts = { yeonun: 0, panana: 0, quizoasis: 0 };

@@ -28,6 +28,7 @@ import {
 import { formatJobErrorLabel } from '@/lib/job-error-label';
 import { useRegisterPageAction } from '@/components/dashboard/page-action-context';
 import { useShellViewActive } from '@/components/dashboard/shell-view-active';
+import { CrankQueuePanel } from '@/components/queue/crank-queue-panel';
 
 type SchedulerStatus = {
   date_key: string;
@@ -659,6 +660,8 @@ export function CrankView() {
 
       {tab === 'ops' && (
         <>
+      <CrankQueuePanel serviceFilter={serviceFilter} />
+
       <MPanel title="C-Rank 스케줄러 · social_crank">
         {scheduler ? (
           <MGrid cols={4}>
@@ -710,7 +713,7 @@ export function CrankView() {
           </div>
         )}
         <p className="mt-2 font-mono text-[10.5px] text-huma-t3">
-          매일 00:01 KST 큐 생성 · 08:00~22:00 분산(±15분) · 세션 45분 · 실폰당 일 6세션 ·
+          매일 00:01 KST 큐 생성 · 08~22(75%)·22~24(15%)·04~08(10%) 분산 · 세션 25분 · 실폰당 일 6세션 ·
           예비 슬롯(8~10)은 스케줄 제외 · 슬롯 6·7은 프록시 관리와 동일 SOCKS probe
           {syncingProxy ? ' (검사 중…)' : ''}
           {restoringNetwork ? ' (네트워크 복구 중…)' : ''}

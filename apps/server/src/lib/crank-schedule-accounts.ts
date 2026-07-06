@@ -1,11 +1,11 @@
 import type { Workspace } from '@huma/shared';
 import { compareCrankLabels } from '@huma/shared';
 
-/** v3.28 서비스별 풀 크기 — 일일 선정 비율 기준 */
+/** v3.75 서비스별 풀 크기 — 일일 선정 비율 기준 */
 export const CRANK_SERVICE_POOL: Record<Workspace, number> = {
-  yeonun: 25,
-  panana: 15,
-  quizoasis: 10,
+  yeonun: 30,
+  panana: 0,
+  quizoasis: 20,
 };
 
 export const CRANK_SERVICE_ORDER: Workspace[] = ['yeonun', 'panana', 'quizoasis'];
@@ -46,7 +46,7 @@ function isEligibleForCycle(lastCrankAt: string | null, cycleDays: number): bool
   return new Date(lastCrankAt) < cutoff;
 }
 
-/** 서비스별 일일 할당량 (연운25·파나나15·퀴즈10 비율) */
+/** 서비스별 일일 할당량 (연운30·퀴즈20 비율 · 파나나 0) */
 export function computeServiceDailyTargets(dailyTotal: number): Map<Workspace, number> {
   const targets = new Map<Workspace, number>();
   let assigned = 0;

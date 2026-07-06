@@ -255,11 +255,7 @@ export async function checkMinPublishInterval(accountId: string, jobType: string
 export { deriveActiveHourWindow } from './posting-interval.js';
 
 export async function getCrankScheduleWindow(): Promise<{ start: number; end: number }> {
-  const human = await getHumanEngineScheduleConfig();
-  if (human.active_hours?.length === 24) {
-    return deriveActiveHourWindow(human.active_hours);
-  }
-  return { start: 8, end: 22 };
+  return { start: 4, end: 24 };
 }
 
 export function resolve429CooldownMs(watcher: WatcherSettings): number {

@@ -1,27 +1,27 @@
 import type { Workspace } from './account';
 import { crankLabelSortKey, crankLetterLabel } from './crank-label';
 
-/** v3.28 — C-Rank 50계정 서비스별 배정 (CRANK-A~AX) */
+/** v3.75 — C-Rank 50계정 서비스별 배정 (CRANK-A~AX) */
 export const CRANK_SERVICE_ASSIGNMENTS = {
   yeonun: {
     startIndex: 0,
-    count: 25,
+    count: 30,
     labelKo: '연운',
     rangeStart: 'CRANK-A',
-    rangeEnd: 'CRANK-Y',
+    rangeEnd: 'CRANK-AD',
   },
   panana: {
-    startIndex: 25,
-    count: 15,
+    startIndex: 30,
+    count: 0,
     labelKo: '파나나',
-    rangeStart: 'CRANK-Z',
-    rangeEnd: 'CRANK-AN',
+    rangeStart: '-',
+    rangeEnd: '-',
   },
   quizoasis: {
-    startIndex: 40,
-    count: 10,
+    startIndex: 30,
+    count: 20,
     labelKo: '퀴즈오아시스',
-    rangeStart: 'CRANK-AO',
+    rangeStart: 'CRANK-AE',
     rangeEnd: 'CRANK-AX',
   },
 } as const satisfies Record<
@@ -93,7 +93,7 @@ export function crankWorkspaceForIndex(index: number): Workspace {
   return 'quizoasis';
 }
 
-/** CRANK-A=0 … CRANK-Y=24 / Z~AN / AO~AX */
+/** CRANK-A=0 … CRANK-AD=29(연운) / CRANK-AE~AX=30~49(퀴즈) · 파나나 0 */
 export function crankWorkspaceFromLabel(label: string | null | undefined): Workspace | null {
   const key = crankLabelSortKey(label);
   if (key < 0 || key >= 50) return null;

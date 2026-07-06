@@ -8,9 +8,11 @@ import { releaseModem } from '../proxy/manager.js';
 import { resumeSocialCrankAfterCaptcha } from '../../lib/crank-captcha-resume.js';
 import { resumePostingAfterCaptcha } from '../../lib/posting-captcha-resume.js';
 import { continuePostBlogFromCaptchaHold } from '../../lib/posting-captcha-continue.js';
+import { continueSocialCrankFromCaptchaHold } from '../../lib/crank-captcha-continue.js';
 import { recordPublishedPost } from '../blog-check/post-record.js';
 import {
   buildPostBlogPayloadFromJob,
+  ensureCrankSessionAfterCaptcha,
   ensurePostingSessionAfterCaptcha,
   isPostingAutoResumeBlocked,
   persistPostingSessionBeforeHoldClose,
@@ -324,14 +326,24 @@ function scheduleReminders(entry: CaptchaHoldEntry): void {
 
   if (
     !entry.isDrill &&
-    (entry.jobType === 'post_blog' || entry.jobType === 'cafe_new_post')
+    (entry.jobType === 'post_blog' ||
+      entry.jobType === 'cafe_new_post' ||
+      entry.jobType === 'social_crank')
   ) {
     const autoResume = setInterval(() => {
-      void tryAutoResumePostingCaptcha(entry);
+      if (entry.jobType === 'social_crank') {
+        void tryAutoResumeCrankCaptcha(entry);
+      } else {
+        void tryAutoResumePostingCaptcha(entry);
+      }
     }, CAPTCHA_AUTO_RESUME_MS);
     entry.timers.push(autoResume);
     const firstResume = setTimeout(() => {
-      void tryAutoResumePostingCaptcha(entry);
+      if (entry.jobType === 'social_crank') {
+        void tryAutoResumeCrankCaptcha(entry);
+      } else {
+        void tryAutoResumePostingCaptcha(entry);
+      }
     }, 600);
     entry.timers.push(firstResume);
   }
@@ -452,6 +464,45 @@ async function handleHoldChallengeIfPresent(entry: CaptchaHoldEntry, page: Page)
   }
   if (!authChallenge && !protection) return;
   await abortHoldForNaverChallenge(entry, page, protection);
+}
+
+async function tryAutoResumeCrankCaptcha(entry: CaptchaHoldEntry): Promise<void> {
+  if (!holds.has(entry.jobId) || entry.resumingInProgress || entry.autoResumeFiring) return;
+
+  const page = pickPostingWorkflowPage(entry.context) ?? (await pickNaverCaptchaPage(entry.context));
+  if (!page || page.isClosed()) return;
+  if (await isNaverCaptchaVisible(page)) {
+    await syncCaptchaHoldState(entry, page);
+    await tryHoldVisionAutoSolve(entry, page);
+    return;
+  }
+
+  const url = page.url();
+  if (url === 'about:blank' || url === '') return;
+
+  if (await isPostingAutoResumeBlocked(page)) {
+    await handleHoldChallengeIfPresent(entry, page);
+    return;
+  }
+
+  entry.autoResumeFiring = true;
+  try {
+    const sessionReady = await ensureCrankSessionAfterCaptcha(entry.context, entry.accountId, {
+      loginWaitMs: 12_000,
+    });
+    if (!sessionReady) return;
+
+    await logOperation({
+      level: 'info',
+      message: '[social_crank] CAPTCHA 해결·로그인 확인 — 활동 자동 재개',
+      job_id: entry.jobId,
+      account_id: entry.accountId,
+    });
+    await completeCaptchaHold(entry.jobId);
+  } finally {
+    const live = holds.get(entry.jobId);
+    if (live) live.autoResumeFiring = false;
+  }
 }
 
 async function tryAutoResumePostingCaptcha(entry: CaptchaHoldEntry): Promise<void> {
@@ -750,7 +801,6 @@ export async function completeCaptchaHold(
   }
 
   const isCrank = entry.jobType === 'social_crank';
-  const preferredProxyPort = entry.modemSession?.proxyPort;
   const accountId = entry.accountId;
   const holdMeta = {
     workspace: entry.workspace,
@@ -778,10 +828,46 @@ export async function completeCaptchaHold(
     entry.releaseAccountLock();
     await completeJobRecord(jobId, resultUrl);
   } else if (isCrank) {
-    await closeBrowserContext(entry.context).catch(() => {});
-    if (entry.modemSession) await releaseModem(entry.modemSession).catch(() => {});
-    entry.releaseAccountLock();
-    await resumeSocialCrankAfterCaptcha(jobId, accountId, preferredProxyPort);
+    const wfPage = pickPostingWorkflowPage(entry.context) ?? (await pickNaverCaptchaPage(entry.context));
+    if (wfPage && !wfPage.isClosed() && (await isNaverCaptchaVisible(wfPage))) {
+      entry.resumingInProgress = false;
+      holds.set(jobId, entry);
+      scheduleReminders(entry);
+      return { ok: false, error: 'CAPTCHA_STILL_VISIBLE' };
+    }
+
+    const sessionOk = await ensureCrankSessionAfterCaptcha(entry.context, entry.accountId, {
+      loginWaitMs: 30_000,
+    }).catch(() => false);
+    if (!sessionOk) {
+      entry.resumingInProgress = false;
+      holds.set(jobId, entry);
+      scheduleReminders(entry);
+      const nidPage = await pickNaverCaptchaPage(entry.context);
+      if (nidPage && (await isNaverAuthChallengePage(nidPage))) {
+        return { ok: false, error: 'NAVER_LOGIN_2FA' };
+      }
+      if (nidPage?.url().includes('nidlogin') && (await isNaverLoginPendingAfterCaptcha(nidPage))) {
+        return { ok: false, error: 'CAPTCHA_PENDING_LOGIN' };
+      }
+      return { ok: false, error: 'CAPTCHA_LOGIN_NOT_READY' };
+    }
+
+    const cont = await continueSocialCrankFromCaptchaHold({
+      jobId,
+      accountId,
+      context: entry.context,
+      modemSession: entry.modemSession,
+      releaseAccountLock: entry.releaseAccountLock,
+      workspace: entry.workspace,
+      accountLabel: entry.accountLabel,
+      jobTitle: entry.jobTitle,
+    });
+    if (cont.reHeld) {
+      return { ok: true };
+    }
+    resumeOk = cont.ok;
+    resumeError = cont.error;
   } else if (entry.jobType === 'post_blog') {
     const postPayload =
       entry.payload ??
@@ -884,7 +970,7 @@ export async function completeCaptchaHold(
   await logOperation({
     level: 'info',
     message: isCrank
-      ? 'CAPTCHA 해결 — C-Rank 블로그 방문·공감·댓글 재개 예약'
+      ? 'CAPTCHA 해결 — C-Rank 동일 세션 활동 재개'
       : entry.jobType === 'post_blog'
         ? resultUrl?.trim()
           ? 'CAPTCHA 수동 발행 완료 (URL 기록)'

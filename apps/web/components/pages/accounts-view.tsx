@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { AccountType, HumaAccount, Workspace } from '@huma/shared';
+import type { AccountType, HumaAccount } from '@huma/shared';
 import {
   CRANK_POOL_WORKSPACE,
   CRANK_SERVICE_ORDER,
@@ -15,7 +15,6 @@ import {
 } from '@huma/shared';
 import { api } from '@/lib/api';
 import { appAlert, appConfirm } from '@/lib/app-dialog';
-import { WORKSPACES } from '@/lib/constants';
 import { MAccountCard, MGrid, MStat } from '@/components/mockup/primitives';
 import { useRegisterPageAction } from '@/components/dashboard/page-action-context';
 import { useWorkspace } from '@/components/dashboard/workspace-context';
@@ -33,69 +32,12 @@ import {
   type BusinessUnit,
 } from '@/lib/admin-scope';
 
-const WS_LABEL: Record<Workspace, string> = {
-  yeonun: '연운',
-  quizoasis: '퀴즈오아시스',
-  panana: '파나나',
-};
-
-type AccountCategory = 'posting' | 'crank' | 'social';
+type AccountCategory = 'posting' | 'crank';
 
 const CATEGORY_OPTIONS: { value: AccountCategory; label: string; sub: string }[] = [
   { value: 'posting', label: '포스팅', sub: '네이버 블로그 발행 (지수5)' },
   { value: 'crank', label: 'C-Rank+Cafe', sub: '초기 10~최대 150 · 소통·카페·바이럴' },
-  { value: 'social', label: '소셜미디어', sub: 'YouTube Shorts·TikTok·IG·Threads·X·Pinterest API' },
 ];
-
-const SOCIAL_PLATFORMS_BASE = [
-  { value: 'youtube', label: 'YouTube Shorts' },
-  { value: 'tiktok', label: 'TikTok' },
-  { value: 'threads', label: 'Threads' },
-  { value: 'twitter', label: 'X (Twitter)' },
-];
-
-/** 연운·파나나 — 채널 1개씩 */
-const SOCIAL_PLATFORMS_STANDARD = [
-  ...SOCIAL_PLATFORMS_BASE,
-  { value: 'instagram', label: 'Instagram' },
-];
-
-const SOCIAL_PLATFORMS_YEONUN = SOCIAL_PLATFORMS_STANDARD;
-
-/** 퀴즈오아시스 — Pinterest 추가 (릴스·핀) */
-const SOCIAL_PLATFORMS_QUIZOASIS = [
-  ...SOCIAL_PLATFORMS_STANDARD,
-  { value: 'pinterest', label: 'Pinterest' },
-];
-
-const SOCIAL_PLATFORMS_PANANA = SOCIAL_PLATFORMS_STANDARD;
-
-const ALL_SOCIAL_PLATFORMS = [
-  ...SOCIAL_PLATFORMS_QUIZOASIS,
-  ...SOCIAL_PLATFORMS_PANANA.filter(
-    (p) => !SOCIAL_PLATFORMS_QUIZOASIS.some((q) => q.value === p.value),
-  ),
-];
-
-function socialPlatformLabel(platform: string): string {
-  return ALL_SOCIAL_PLATFORMS.find((p) => p.value === platform)?.label ?? platform;
-}
-
-/** 모든 소셜 — 서버 .env(워크스페이스별) 인증. UI는 채널명(@handle)만 등록 */
-function isEnvManagedSocialPlatform(_platform: string): boolean {
-  return true;
-}
-
-function socialEnvHint(platform: string): string {
-  const ws = 'YEONUN|QUIZOASIS|PANANA';
-  if (platform === 'youtube') return `서버 .env — YOUTUBE_CLIENT_ID/SECRET/REFRESH_TOKEN_{${ws}}`;
-  if (platform === 'tiktok') return `서버 .env — TIKTOK_CLIENT_KEY/SECRET/ACCESS_TOKEN_{${ws}}`;
-  if (platform === 'threads') return `서버 .env — META_ACCESS_TOKEN + META_THREADS_USER_ID_{${ws}}`;
-  if (platform.startsWith('instagram')) return `서버 .env — META_ACCESS_TOKEN + META_IG_USER_ID_{${ws}}`;
-  if (platform.startsWith('twitter')) return `서버 .env — TWITTER_API_KEY/SECRET/ACCESS_TOKEN/ACCESS_SECRET_{${ws}}`;
-  if (platform === 'pinterest') return '서버 .env — PINTEREST_ACCESS_TOKEN, PINTEREST_BOARD_ID';
-  return `서버 .env — 워크스페이스별 API 키`;
-}
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -136,9 +78,6 @@ function emptyForm(registerUnit: BusinessUnit) {
     naver_id: '',
     naver_pw: '',
     blog_url: '',
-    platform: 'tiktok',
-    username: '',
-    access_token: '',
   };
 }
 
@@ -165,7 +104,6 @@ export function AccountsView() {
   const registerUnits = useMemo(() => getAccessibleBusinessUnits(admin), [admin]);
 
   const [accounts, setAccounts] = useState<HumaAccount[]>([]);
-  const [platforms, setPlatforms] = useState<Array<Record<string, unknown>>>([]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(() => emptyForm(defaultUnit));
   const [saving, setSaving] = useState(false);
@@ -176,10 +114,6 @@ export function AccountsView() {
   const [editNaverId, setEditNaverId] = useState('');
   const [editNaverPw, setEditNaverPw] = useState('');
   const [editSaving, setEditSaving] = useState(false);
-  const [editingPlatform, setEditingPlatform] = useState<Record<string, unknown> | null>(null);
-  const [editPlatformUsername, setEditPlatformUsername] = useState('');
-  const [editPlatformUserId, setEditPlatformUserId] = useState('');
-  const [editPlatformSaving, setEditPlatformSaving] = useState(false);
   const [personaAccount, setPersonaAccount] = useState<HumaAccount | null>(null);
   const [videoPersonaAccount, setVideoPersonaAccount] = useState<HumaAccount | null>(null);
   const [personaSaving, setPersonaSaving] = useState(false);
@@ -193,12 +127,7 @@ export function AccountsView() {
   );
 
   const load = useCallback((opts?: { force?: boolean }) => {
-    Promise.all([api.accounts(opts), api.platformAccounts()])
-      .then(([a, p]) => {
-        setAccounts(a);
-        setPlatforms(p);
-      })
-      .catch(() => {});
+    api.accounts(opts).then(setAccounts).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -237,14 +166,6 @@ export function AccountsView() {
     [crankPoolAccounts],
   );
 
-  const visiblePlatforms = useMemo(
-    () =>
-      platforms.filter((p) =>
-        accessibleUnits.includes(String(p.workspace) as BusinessUnit),
-      ),
-    [platforms, accessibleUnits],
-  );
-
   const posting = useMemo(
     () =>
       accounts.filter(
@@ -253,13 +174,6 @@ export function AccountsView() {
     [accounts, accessibleUnits],
   );
   const crankCafe = crankPoolAccounts.length;
-  const isSocial = form.category === 'social';
-  const socialPlatforms =
-    form.registerUnit === 'quizoasis'
-      ? SOCIAL_PLATFORMS_QUIZOASIS
-      : form.registerUnit === 'panana'
-        ? SOCIAL_PLATFORMS_PANANA
-        : SOCIAL_PLATFORMS_YEONUN;
 
   const registerUnitLabel =
     BUSINESS_UNITS.find((u) => u.id === form.registerUnit)?.label ?? form.registerUnit;
@@ -278,90 +192,61 @@ export function AccountsView() {
     setError('');
     setSaving(true);
     try {
-      if (isSocial) {
-        if (!form.username.trim()) {
-          setError('소셜 계정은 채널명 / @handle이 필요합니다.');
+      if (form.category === 'posting') {
+        if (!form.naver_id.trim()) {
+          setError('네이버 ID는 필수입니다.');
           return;
         }
-        if (!isEnvManagedSocialPlatform(form.platform) && !form.access_token.trim()) {
-          setError('API Access Token을 입력하세요.');
+        if (!form.blog_url.trim()) {
+          setError('포스팅 계정은 블로그 URL이 필수입니다.');
           return;
         }
-        await api.createPlatformAccount({
+        await api.createAccount({
           workspace: form.registerUnit,
-          platform: form.platform,
-          username: form.username.trim(),
-          access_token: isEnvManagedSocialPlatform(form.platform)
-            ? 'env-managed'
-            : form.access_token.trim(),
+          proxy_port: form.proxy_port,
+          name: form.name.trim() || undefined,
+          naver_id: form.naver_id.trim(),
+          naver_pw: form.naver_pw,
+          account_type: 'posting',
+          blog_url: form.blog_url.trim(),
           is_active: true,
+          health_score: 100,
+          blog_index: 5,
+          wpm: 55,
         });
       } else {
-        if (form.category === 'posting') {
-          if (!form.naver_id.trim()) {
-            setError('네이버 ID는 필수입니다.');
-            return;
-          }
-          if (!form.blog_url.trim()) {
-            setError('포스팅 계정은 블로그 URL이 필수입니다.');
-            return;
-          }
-          await api.createAccount({
-            workspace: form.registerUnit,
-            proxy_port: form.proxy_port,
-            name: form.name.trim() || undefined,
-            naver_id: form.naver_id.trim(),
-            naver_pw: form.naver_pw,
-            account_type: 'posting',
-            blog_url: form.blog_url.trim(),
-            is_active: true,
-            health_score: 100,
-            blog_index: 5,
-            wpm: 55,
-          });
-        } else {
-          if (!form.name.trim() || !form.naver_id.trim()) {
-            setError('표시 이름과 네이버 ID는 필수입니다.');
-            return;
-          }
-          await api.createAccount({
-            workspace: form.category === 'crank' ? CRANK_POOL_WORKSPACE : form.registerUnit,
-            name: form.name.trim(),
-            naver_id: form.naver_id.trim(),
-            naver_pw: form.naver_pw,
-            account_type: form.category,
-            blog_url: form.blog_url.trim() || undefined,
-            is_active: true,
-            health_score: 100,
-            blog_index: 0,
-            wpm: 55,
-          });
+        if (!form.name.trim() || !form.naver_id.trim()) {
+          setError('표시 이름과 네이버 ID는 필수입니다.');
+          return;
         }
+        await api.createAccount({
+          workspace: form.category === 'crank' ? CRANK_POOL_WORKSPACE : form.registerUnit,
+          name: form.name.trim(),
+          naver_id: form.naver_id.trim(),
+          naver_pw: form.naver_pw,
+          account_type: form.category,
+          blog_url: form.blog_url.trim() || undefined,
+          is_active: true,
+          health_score: 100,
+          blog_index: 0,
+          wpm: 55,
+        });
       }
       setShowForm(false);
       load({ force: true });
     } catch (e) {
-      alertAccountError(e, { naverId: form.naver_id, platform: form.platform });
+      alertAccountError(e, { naverId: form.naver_id });
     } finally {
       setSaving(false);
     }
   };
 
   const handleStartEditPosting = (ac: HumaAccount) => {
-    setEditingPlatform(null);
     setEditingAccount(ac);
     setEditName(ac.name ?? '');
     setEditBlogUrl(ac.blog_url ?? '');
     setEditNaverId(ac.naver_id ?? '');
     setEditNaverPw('');
-    setError('');
-  };
-
-  const handleStartEditPlatform = (p: Record<string, unknown>) => {
-    setEditingAccount(null);
-    setEditingPlatform(p);
-    setEditPlatformUsername(String(p.username ?? ''));
-    setEditPlatformUserId(String(p.platform_user_id ?? ''));
     setError('');
   };
 
@@ -371,12 +256,6 @@ export function AccountsView() {
     setEditBlogUrl('');
     setEditNaverId('');
     setEditNaverPw('');
-  };
-
-  const handleCancelPlatformEdit = () => {
-    setEditingPlatform(null);
-    setEditPlatformUsername('');
-    setEditPlatformUserId('');
   };
 
   const handleSaveEdit = async () => {
@@ -407,33 +286,6 @@ export function AccountsView() {
       setError(e instanceof Error ? e.message : '수정 실패');
     } finally {
       setEditSaving(false);
-    }
-  };
-
-  const handleSavePlatformEdit = async () => {
-    if (!editingPlatform) return;
-    if (!editPlatformUsername.trim()) {
-      setError('채널명 / @handle은 필수입니다.');
-      return;
-    }
-    const platform = String(editingPlatform.platform ?? '');
-    const needsUserId = platform === 'instagram' || platform === 'threads' || platform.startsWith('instagram_');
-    setEditPlatformSaving(true);
-    setError('');
-    try {
-      const body: Record<string, unknown> = {
-        username: editPlatformUsername.trim(),
-      };
-      if (needsUserId) {
-        body.platform_user_id = editPlatformUserId.trim() || null;
-      }
-      await api.updatePlatformAccount(String(editingPlatform.id), body);
-      handleCancelPlatformEdit();
-      load({ force: true });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '수정 실패');
-    } finally {
-      setEditPlatformSaving(false);
     }
   };
 
@@ -510,28 +362,6 @@ export function AccountsView() {
     }
   };
 
-  const handleDeletePlatform = async (p: Record<string, unknown>) => {
-    const label = String(p.username ?? p.platform ?? '소셜');
-    if (!(await confirmDelete(label))) return;
-    try {
-      await api.deletePlatformAccount(String(p.id));
-      if (editingPlatform?.id === p.id) handleCancelPlatformEdit();
-      load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '삭제 실패');
-    }
-  };
-
-  const platformIcon = (platform: string) => {
-    if (platform === 'tiktok') return 'T';
-    if (platform === 'instagram' || platform.startsWith('instagram_')) return 'I';
-    if (platform === 'threads') return '@';
-    if (platform === 'twitter' || platform.startsWith('twitter_')) return 'X';
-    if (platform === 'pinterest') return 'P';
-    if (platform === 'youtube') return 'Y';
-    return 'S';
-  };
-
   const renderPostingCard = (ac: HumaAccount) => (
     <MAccountCard
       key={ac.id}
@@ -585,7 +415,7 @@ export function AccountsView() {
         </button>
       </div>
 
-      <MGrid cols={3} className="accounts-stats-row">
+      <MGrid cols={2} className="accounts-stats-row">
         <MStat
           label="포스팅 계정 (지수5)"
           value={<>{posting}<span className="text-[12.5px] text-huma-t3">개</span></>}
@@ -595,11 +425,6 @@ export function AccountsView() {
           label="C-Rank 소통 계정"
           value={<>{crankCafe}<span className="text-[12.5px] text-huma-t3">개</span></>}
           sub="CRANK 풀 · 최대 150"
-        />
-        <MStat
-          label="소셜미디어 계정"
-          value={<>{visiblePlatforms.length}<span className="text-[12.5px] text-huma-t3">개</span></>}
-          sub="TikTok·IG·Threads·X·YT쇼츠"
         />
       </MGrid>
 
@@ -634,7 +459,7 @@ export function AccountsView() {
             )}
           </div>
 
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {CATEGORY_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
@@ -657,82 +482,52 @@ export function AccountsView() {
           </div>
 
           <div className="accounts-form-row">
-            {isSocial ? (
-              <>
-                <select
-                  value={form.platform}
-                  onChange={(e) => setForm((f) => ({ ...f, platform: e.target.value }))}
-                  className="m-model-select w-full"
-                >
-                  {socialPlatforms.map((p) => (
-                    <option key={p.value} value={p.value}>{p.label}</option>
-                  ))}
-                </select>
-                <input
-                  placeholder="계정명 / @handle"
-                  value={form.username}
-                  onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
-                  className="m-model-select w-full"
-                />
-                <input
-                  type="password"
-                  placeholder={socialEnvHint(form.platform)}
-                  value={form.access_token}
-                  onChange={(e) => setForm((f) => ({ ...f, access_token: e.target.value }))}
-                  disabled={isEnvManagedSocialPlatform(form.platform)}
-                  className="m-model-select w-full disabled:opacity-50"
-                />
-              </>
-            ) : (
-              <>
-                {form.category === 'posting' && (
-                  <select
-                    value={form.proxy_port}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, proxy_port: Number(e.target.value) }))
-                    }
-                    className="m-model-select w-full"
-                  >
-                    {postingDongleOptionsForUnit(form.registerUnit).map((d) => (
-                      <option key={d.proxyPort} value={d.proxyPort}>
-                        {d.label} · :{d.proxyPort}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                <input
-                  placeholder={form.category === 'posting' ? '표시 이름 (비우면 자동)' : '표시 이름'}
-                  value={form.name}
-                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                  className="m-model-select w-full"
-                />
-                <input
-                  placeholder="네이버 ID"
-                  value={form.naver_id}
-                  onChange={(e) => setForm((f) => ({ ...f, naver_id: e.target.value }))}
-                  className="m-model-select w-full"
-                />
-                <input
-                  type="password"
-                  placeholder="비밀번호"
-                  value={form.naver_pw}
-                  onChange={(e) => setForm((f) => ({ ...f, naver_pw: e.target.value }))}
-                  className="m-model-select w-full"
-                />
-                {(form.category === 'posting' || form.category === 'crank') && (
-                  <input
-                    placeholder={
-                      form.category === 'posting'
-                        ? '블로그 URL (필수) https://blog.naver.com/...'
-                        : '블로그 URL (선택)'
-                    }
-                    value={form.blog_url}
-                    onChange={(e) => setForm((f) => ({ ...f, blog_url: e.target.value }))}
-                    className="m-model-select w-full"
-                    required={form.category === 'posting'}
-                  />
-                )}
-              </>
+            {form.category === 'posting' && (
+              <select
+                value={form.proxy_port}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, proxy_port: Number(e.target.value) }))
+                }
+                className="m-model-select w-full"
+              >
+                {postingDongleOptionsForUnit(form.registerUnit).map((d) => (
+                  <option key={d.proxyPort} value={d.proxyPort}>
+                    {d.label} · :{d.proxyPort}
+                  </option>
+                ))}
+              </select>
+            )}
+            <input
+              placeholder={form.category === 'posting' ? '표시 이름 (비우면 자동)' : '표시 이름'}
+              value={form.name}
+              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              className="m-model-select w-full"
+            />
+            <input
+              placeholder="네이버 ID"
+              value={form.naver_id}
+              onChange={(e) => setForm((f) => ({ ...f, naver_id: e.target.value }))}
+              className="m-model-select w-full"
+            />
+            <input
+              type="password"
+              placeholder="비밀번호"
+              value={form.naver_pw}
+              onChange={(e) => setForm((f) => ({ ...f, naver_pw: e.target.value }))}
+              className="m-model-select w-full"
+            />
+            {(form.category === 'posting' || form.category === 'crank') && (
+              <input
+                placeholder={
+                  form.category === 'posting'
+                    ? '블로그 URL (필수) https://blog.naver.com/...'
+                    : '블로그 URL (선택)'
+                }
+                value={form.blog_url}
+                onChange={(e) => setForm((f) => ({ ...f, blog_url: e.target.value }))}
+                className="m-model-select w-full"
+                required={form.category === 'posting'}
+              />
             )}
 
             <button type="button" className="btn-primary" onClick={handleCreate} disabled={saving}>
@@ -752,12 +547,6 @@ export function AccountsView() {
           {form.category === 'crank' && (
             <p className="font-mono text-[10.5px] text-huma-t3">
               C-Rank+Cafe는 연운·퀴즈+파나나 공용 풀입니다. 모든 담당자가 동일 계정을 관리합니다.
-            </p>
-          )}
-
-          {form.registerUnit !== 'yeonun' && isSocial && (
-            <p className="font-mono text-[10.5px] text-huma-t3">
-              소셜 API는 선택한 사업 단위({registerUnitLabel})에 등록됩니다.
             </p>
           )}
 
@@ -848,98 +637,59 @@ export function AccountsView() {
         </div>
       )}
 
-      {editingPlatform && (
-        <div className="m-panel mb-3 space-y-2">
-          <div className="text-[12px] font-semibold text-huma-t">
-            소셜미디어 계정 수정 · {socialPlatformLabel(String(editingPlatform.platform ?? ''))}
-          </div>
-          <div className="accounts-form-row">
-            <input
-              placeholder="채널명 / @handle"
-              value={editPlatformUsername}
-              onChange={(e) => setEditPlatformUsername(e.target.value)}
-              className="m-model-select w-full"
-            />
-            {(String(editingPlatform.platform ?? '') === 'instagram' ||
-              String(editingPlatform.platform ?? '') === 'threads' ||
-              String(editingPlatform.platform ?? '').startsWith('instagram_')) && (
-              <input
-                placeholder="Meta platform_user_id (IG·Threads 숫자 ID, 선택)"
-                value={editPlatformUserId}
-                onChange={(e) => setEditPlatformUserId(e.target.value)}
-                className="m-model-select w-full sm:col-span-2"
-              />
-            )}
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={handleSavePlatformEdit}
-              disabled={editPlatformSaving}
-            >
-              {editPlatformSaving ? '저장 중…' : '저장'}
-            </button>
-            <button type="button" className="btn-ghost" onClick={handleCancelPlatformEdit}>
-              취소
-            </button>
-          </div>
-          <p className="font-mono text-[10.5px] text-huma-t3">
-            API 토큰·앱 키는 서버 .env에서 관리합니다. ({socialEnvHint(String(editingPlatform.platform ?? ''))})
-          </p>
-          {error && editingPlatform && <p className="text-xs text-huma-err">{error}</p>}
-        </div>
-      )}
-
-      {postingDongles.length > 0 && (
-        <div className="mb-4">
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
+        <div className="min-w-0">
           <div className="m-ws-col-title mb-2">포스팅 계정 — 동글별 (최대 {MAX_ACCOUNTS_PER_DONGLE}계정/동글)</div>
-          <div className="flex flex-col gap-3">
-            {postingDongles.map((dongle) => {
-              const dongleAccounts = accounts
-                .filter((a) => isPostingAccount(a) && a.proxy_port === dongle.proxyPort)
-                .sort((a, b) =>
-                  (a.slot_label ?? a.name).localeCompare(b.slot_label ?? b.name, 'ko'),
-                );
-              return (
-                <div
-                  key={dongle.proxyPort}
-                  className="rounded-lg border border-huma-bdr bg-huma-bg2/40 p-2"
-                >
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <div className="font-mono text-[11px] font-semibold text-huma-acc">
-                      {dongle.label} · :{dongle.proxyPort}
-                      <span className="ml-2 text-[10px] font-normal text-huma-t3">
-                        {dongleAccounts.length}/{MAX_ACCOUNTS_PER_DONGLE}
-                      </span>
+          {postingDongles.length > 0 ? (
+            <div className="flex flex-col gap-3">
+              {postingDongles.map((dongle) => {
+                const dongleAccounts = accounts
+                  .filter((a) => isPostingAccount(a) && a.proxy_port === dongle.proxyPort)
+                  .sort((a, b) =>
+                    (a.slot_label ?? a.name).localeCompare(b.slot_label ?? b.name, 'ko'),
+                  );
+                return (
+                  <div
+                    key={dongle.proxyPort}
+                    className="rounded-lg border border-huma-bdr bg-huma-bg2/40 p-2"
+                  >
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <div className="font-mono text-[11px] font-semibold text-huma-acc">
+                        {dongle.label} · :{dongle.proxyPort}
+                        <span className="ml-2 text-[10px] font-normal text-huma-t3">
+                          {dongleAccounts.length}/{MAX_ACCOUNTS_PER_DONGLE}
+                        </span>
+                      </div>
+                      {dongleAccounts.length < MAX_ACCOUNTS_PER_DONGLE && (
+                        <button
+                          type="button"
+                          className="btn-ghost btn-sm text-[10px]"
+                          onClick={() =>
+                            openPostingFormForDongle(
+                              dongle.proxyPort,
+                              dongle.workspace as BusinessUnit,
+                            )
+                          }
+                        >
+                          + 추가
+                        </button>
+                      )}
                     </div>
-                    {dongleAccounts.length < MAX_ACCOUNTS_PER_DONGLE && (
-                      <button
-                        type="button"
-                        className="btn-ghost btn-sm text-[10px]"
-                        onClick={() =>
-                          openPostingFormForDongle(
-                            dongle.proxyPort,
-                            dongle.workspace as BusinessUnit,
-                          )
-                        }
-                      >
-                        + 추가
-                      </button>
+                    {dongleAccounts.length ? (
+                      dongleAccounts.map((ac) => renderPostingCard(ac))
+                    ) : (
+                      <div className="m-ac text-center text-[11px] text-huma-t3">계정 없음</div>
                     )}
                   </div>
-                  {dongleAccounts.length ? (
-                    dongleAccounts.map((ac) => renderPostingCard(ac))
-                  ) : (
-                    <div className="m-ac text-center text-[11px] text-huma-t3">계정 없음</div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="m-ac text-center text-[11px] text-huma-t3">포스팅 동글 없음</div>
+          )}
         </div>
-      )}
 
-      <MGrid cols={2} className="accounts-posting-cols">
-        <div>
+        <div className="min-w-0">
           <div className="mb-2 flex items-center justify-between">
             <div className="m-ws-col-title mb-0">C-Rank 소통 계정 ({crankCafe}개)</div>
             <button type="button" className="btn-ghost btn-sm text-[10px]" onClick={openAccountForm}>
@@ -1020,44 +770,7 @@ export function AccountsView() {
             <div className="m-ac text-center text-[11px] text-huma-t3">C-Rank 계정 없음</div>
           ) : null}
         </div>
-
-        <div>
-          {accessibleUnits.map((ws) => {
-            const colPlatforms = platforms.filter((p) => String(p.workspace) === ws);
-            if (!colPlatforms.length) return null;
-            return (
-              <div key={`social-${ws}`}>
-                <div className="m-ws-col-title">소셜미디어 계정 — {WS_LABEL[ws]}</div>
-                {colPlatforms.map((p) => {
-                  const platform = String(p.platform ?? '');
-                  const active = p.is_active !== false;
-                  return (
-                    <MAccountCard
-                      key={String(p.id)}
-                      icon={platformIcon(platform)}
-                      iconBg={platform === 'tiktok' ? 'rgba(255,0,80,.1)' : 'var(--blue-bg)'}
-                      name={String(p.username ?? platform)}
-                      url={`${socialPlatformLabel(platform)} · ${WS_LABEL[ws]}`}
-                      status={active ? '활성' : '세션오류'}
-                      statusTone={active ? 'ok' : 'err'}
-                      stats={[
-                        { label: '팔로워', value: String(p.follower_count ?? '—') },
-                        { label: '도달', value: String(p.reach_count ?? '—') },
-                        { label: 'API', value: active ? '✓' : '✗', tone: active ? 'text-huma-ok' : 'text-huma-err' },
-                      ]}
-                      actions={[
-                        { label: '편집', primary: true, onClick: () => handleStartEditPlatform(p) },
-                        { label: active ? '정지' : '재연결', onClick: () => api.updatePlatformAccount(String(p.id), { is_active: !active }).then(() => load({ force: true })) },
-                        { label: '삭제', danger: true, onClick: () => handleDeletePlatform(p) },
-                      ]}
-                    />
-                  );
-                })}
-              </div>
-            );
-          })}
-        </div>
-      </MGrid>
+      </div>
     </div>
   );
 }

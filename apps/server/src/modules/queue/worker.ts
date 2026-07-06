@@ -80,7 +80,9 @@ import {
   getCrankEnabled,
   getPostingEnabled,
   isCrankActivityJobType,
+  isCrankDeadZoneActive,
   isPostingActivityJobType,
+  msUntilCrankDeadZoneEnd,
 } from '../../lib/activity-control.js';
 import { isCrankCaptchaHoldSignal } from '../../lib/crank-captcha-hold.js';
 import {
@@ -245,11 +247,24 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         throw new DelayedError();
       }
 
+      if (isCrankActivityJobType(type) && !advanceRequested && isCrankDeadZoneActive()) {
+        const waitMs = msUntilCrankDeadZoneEnd() || CRANK_NIGHT_DEFER_MS;
+        await deferHumaJob(job, humaJobId, waitMs, {
+          reason: 'CRANK_DEAD_ZONE',
+          accountId,
+          token,
+          logMessage: '[crank] 01~04시 활동 금지 — 재예약',
+          level: 'info',
+        });
+        throw new DelayedError();
+      }
+
       if (
         PLAYWRIGHT_AND_CRANK.includes(type) &&
         !scheduledCrank &&
         !advanceRequested &&
-        !honorDueScheduledPublish
+        !honorDueScheduledPublish &&
+        !isCrankActivityJobType(type)
       ) {
         if (await isNightBanActive()) {
           await deferHumaJob(job, humaJobId, CRANK_NIGHT_DEFER_MS, {
@@ -270,16 +285,6 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
           });
           throw new DelayedError();
         }
-      }
-
-      if (scheduledCrank && (await isNightBanActive())) {
-        await deferHumaJob(job, humaJobId, CRANK_NIGHT_DEFER_MS, {
-          reason: 'NIGHT_BAN',
-          accountId,
-          token,
-          logMessage: '[crank] 야간 금지 — 1시간 후 재예약',
-        });
-        throw new DelayedError();
       }
 
       if (

@@ -30,6 +30,11 @@ import {
   isCrankHumanHoldError,
   tryEnterCrankCaptchaHold,
 } from '../../../lib/crank-captcha-hold.js';
+import {
+  handleNaverAuthChallenge,
+  isNaverAuthChallengeError,
+  parseNaverAuthChallengeKind,
+} from '../../../lib/naver-account-protection.js';
 import { generateCrankComment } from './crank-comment.js';
 import { preSessionWarmup } from './pre-session-warmup.js';
 import { selectCrankKeywordsForWorkspace } from './crank-keywords.js';
@@ -64,7 +69,7 @@ interface BlogTarget {
  * 세션 절대 상한(분). 스케줄 락 TTL(CRANK_SCHEDULED_LOCK_TTL_SEC=120분)보다 충분히 짧게 유지해
  * 세션 도중 Redis 락이 만료되어 같은 동글을 다른 작업이 점유하는 사태(규칙⑬ 위반)를 막는다.
  */
-const SESSION_HARD_CAP_MS = 45 * 60 * 1000;
+const SESSION_HARD_CAP_MS = 25 * 60 * 1000;
 const CRANK_BLOG_DWELL_MS: [number, number] = [10_000, 20_000];
 const CRANK_BLOG_GAP_MS: [number, number] = [3000, 8000];
 
@@ -171,6 +176,10 @@ export interface RunSocialCrankOptions {
   /** 큐 job — CAPTCHA·인증 시 VNC hold (포스팅과 동일) */
   humaJobId?: string;
   releaseAccountLock?: () => void;
+  /** CAPTCHA hold 재개 — 동일 브라우저 세션 */
+  existingContext?: BrowserContext;
+  /** true면 브라우저·동글 종료는 호출부(continue)가 담당 */
+  preserveContext?: boolean;
 }
 
 export async function runSocialCrank(
@@ -193,10 +202,13 @@ export async function runSocialCrank(
     if (!modemSession) throw new Error('NO_MODEM');
 
     await setCrankSessionProgress(jobId, '준비', `:${modemSession.proxyPort}`);
+    const useExistingContext = Boolean(options?.existingContext);
     // v3.33 — 계정 전환 시 reconnect 1회 → preSessionWarmup이 자연 간격(규칙⑦)
-    await setCrankSessionProgress(jobId, 'IP 교체');
-    await reconnectModemIfAccountSwitched(modemSession.proxyPort, accountId);
-    await ensurePhoneCrankTether(modemSession.proxyPort);
+    if (!useExistingContext) {
+      await setCrankSessionProgress(jobId, 'IP 교체');
+      await reconnectModemIfAccountSwitched(modemSession.proxyPort, accountId);
+      await ensurePhoneCrankTether(modemSession.proxyPort);
+    }
     const accountCtx = await loadAccountForBrowser(accountId, modemSession.proxyPort);
     if (accountCtx.account_type !== 'crank') {
       throw new Error('ACCOUNT_NOT_CRANK');
@@ -242,13 +254,19 @@ export async function runSocialCrank(
     const resumeAfterCaptcha = Boolean(payload.resumeAfterCaptcha);
 
     await setCrankSessionProgress(jobId, '브라우저 기동');
-    context = (await createBrowserForAccount(accountCtx)).context;
-    await applyCrankResourceBlocking(context);
+    if (useExistingContext && options?.existingContext) {
+      context = options.existingContext;
+    } else {
+      context = (await createBrowserForAccount(accountCtx)).context;
+      await applyCrankResourceBlocking(context);
+    }
 
     try {
-      if (resumeAfterCaptcha) {
+      if (resumeAfterCaptcha || useExistingContext) {
         await setCrankSessionProgress(jobId, '세션 확인', 'CAPTCHA 후 재개');
-        await ensurePhoneCrankTether(modemSession.proxyPort);
+        if (!useExistingContext) {
+          await ensurePhoneCrankTether(modemSession.proxyPort);
+        }
         await ensureNaverLoggedIn(context, accountId, { profilePath: accountCtx.profile_path });
       } else {
         const warmupPage = await acquireWorkflowPage(context);
@@ -364,6 +382,17 @@ export async function runSocialCrank(
       await updateCrankCount(accountId, visitedUrls.length);
       await clearCrankSessionProgress(jobId);
     } catch (innerErr) {
+      if (options?.humaJobId && isNaverAuthChallengeError(innerErr)) {
+        await handleNaverAuthChallenge({
+          accountId,
+          workspace: crankWorkspace,
+          humaJobId: options.humaJobId,
+          kind: parseNaverAuthChallengeKind(innerErr),
+        }).catch((handlerErr) => {
+          console.error('[naver] auth-challenge handler:', (handlerErr as Error).message);
+        });
+        throw innerErr;
+      }
       if (
         context &&
         (await tryEnterCrankCaptchaHold({
@@ -382,7 +411,7 @@ export async function runSocialCrank(
       }
       throw innerErr;
     } finally {
-      if (!heldForCaptcha && context) await closeBrowserContext(context);
+      if (!heldForCaptcha && context && !options?.preserveContext) await closeBrowserContext(context);
     }
   } catch (err) {
     if (isCrankCaptchaHoldSignal(err)) throw err;
@@ -392,7 +421,9 @@ export async function runSocialCrank(
     }
     throw err;
   } finally {
-    if (!heldForCaptcha && ownsModem && modemSession) await releaseModem(modemSession);
+    if (!heldForCaptcha && ownsModem && modemSession && !options?.preserveContext) {
+      await releaseModem(modemSession);
+    }
   }
 }
 

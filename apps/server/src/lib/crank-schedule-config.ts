@@ -2,7 +2,7 @@ import { CRANK_PROXY_PORTS } from './modem-ports.js';
 
 /** 레거시 기본값 — 실제 풀 크기는 DB 활성 crank 계정 수 */
 export const CRANK_POOL_SIZE_DEFAULT = 50;
-export const SESSION_DURATION_MINUTES = 45;
+export const SESSION_DURATION_MINUTES = 25;
 export const SESSION_DATA_MB = 7.5;
 export const MODEM_MONTHLY_DATA_CAP_MB = 2500;
 export const MAX_CRANK_SESSIONS_PER_MODEM_PER_DAY = 6;
@@ -11,7 +11,7 @@ export const SCHEDULE_WINDOW_END_HOUR = 22;
 export const START_JITTER_MINUTES = 15;
 
 /**
- * v3.33 — 동글 1트랙 연속 scheduled_at 간격 = 세션 최대 45분.
+ * v3.76 — 동글 1트랙 연속 scheduled_at 간격 = 세션 최대 25분.
  * 동글 busy면 worker가 defer — 간격은 목표 시각이며 실제 시작은 큐·모뎀 lock에 따름.
  * 계정 전환 시 reconnect+워밍업(2~5분)은 job 시작 시 자연 소요(규칙 ⑦).
  */
@@ -20,6 +20,37 @@ export const SESSION_SLOT_MINUTES = SESSION_DURATION_MINUTES;
 /** 병렬 트랙(슬롯6·7) 시작 시차 — 규칙⑦ 자연 간격 2~5분 */
 export const PARALLEL_TRACK_STAGGER_MINUTES_MIN = 2;
 export const PARALLEL_TRACK_STAGGER_MINUTES_MAX = 5;
+
+export const CRANK_DEAD_ZONE_START = 1;
+export const CRANK_DEAD_ZONE_END = 4;
+
+/** C-Rank 스케줄 시간대 (KST 분) — 주간·저녁 중심 + 일부 심야·새벽 */
+export const CRANK_SCHEDULE_BANDS = [
+  { startMin: 8 * 60, endMin: 22 * 60, weight: 0.75 },
+  { startMin: 22 * 60, endMin: 24 * 60, weight: 0.15 },
+  { startMin: 4 * 60, endMin: 8 * 60, weight: 0.1 },
+] as const;
+
+function pickCrankScheduleBand(): (typeof CRANK_SCHEDULE_BANDS)[number] {
+  const r = Math.random();
+  let acc = 0;
+  for (const band of CRANK_SCHEDULE_BANDS) {
+    acc += band.weight;
+    if (r < acc) return band;
+  }
+  return CRANK_SCHEDULE_BANDS[0]!;
+}
+
+function minuteInCrankBand(
+  band: (typeof CRANK_SCHEDULE_BANDS)[number],
+  indexInBand: number,
+  countInBand: number,
+): number {
+  const span = Math.max(20, band.endMin - band.startMin - 10);
+  const jitter = (Math.random() * 2 - 1) * START_JITTER_MINUTES;
+  const base = band.startMin + (span * (indexInBand + 0.5)) / Math.max(1, countInBand);
+  return Math.round(Math.min(band.endMin - 5, Math.max(band.startMin, base + jitter)));
+}
 
 export interface CrankScheduleSlot {
   at: Date;
@@ -90,66 +121,62 @@ function clampScheduleMinute(
 }
 
 /**
- * v3.33 — 08:00~22:00 KST
- * - 계정 i → track i%N, wave floor(i/N)
- * - 같은 트랙 wave 간격: 45분 (SESSION_DURATION_MINUTES)
- * - 병렬 트랙: track1 = track0 + 2~5분 (UI·큐에서 동일 시각 방지)
- * - 반환 순서 = accounts[i] 매핑 순서 (sort 금지)
+ * v3.76 — KST 시간대 가중 분산
+ * - 75% 08~22 · 15% 22~24 · 10% 04~08 (01~04 금지)
+ * - 계정 i → track i%N · 반환 순서 = accounts[i] (sort 금지)
  */
 export function distributeCrankScheduleSlotsKst(
   count: number,
   dayOffset = 0,
-  window?: { start: number; end: number },
+  _window?: { start: number; end: number },
   modemCount = 1,
-  options?: { notBefore?: Date },
+  options?: { notBefore?: Date; excludeDeadZone?: boolean },
 ): CrankScheduleSlot[] {
   if (count <= 0) return [];
 
-  const startHour = window?.start ?? SCHEDULE_WINDOW_START_HOUR;
-  const endHour = window?.end ?? SCHEDULE_WINDOW_END_HOUR;
-  let windowStartMin = startHour * 60;
-  const windowEndMin = endHour * 60;
+  const excludeDeadZone = options?.excludeDeadZone !== false;
+  const tracks = Math.max(1, Math.floor(modemCount));
+  let minMinute = excludeDeadZone ? CRANK_DEAD_ZONE_END * 60 : 0;
 
   if (options?.notBefore && dayOffset === 0) {
     const { hour, minute } = getKstClock(options.notBefore);
-    const nowMin = hour * 60 + minute + 3;
-    windowStartMin = Math.max(windowStartMin, nowMin);
-  }
-  const slotMinutes = SESSION_SLOT_MINUTES;
-  const tracks = Math.max(1, Math.floor(modemCount));
-  const waveCount = Math.ceil(count / tracks);
-
-  const waveStartMinByWave: number[] = [];
-
-  for (let wave = 0; wave < waveCount; wave++) {
-    const jitter0 = (Math.random() * 2 - 1) * START_JITTER_MINUTES;
-    const maxStagger = (tracks - 1) * PARALLEL_TRACK_STAGGER_MINUTES_MAX;
-    waveStartMinByWave[wave] = clampScheduleMinute(
-      windowStartMin + wave * slotMinutes + jitter0,
-      windowStartMin,
-      windowEndMin - 10 - maxStagger,
-    );
+    let nowMin = hour * 60 + minute + 3;
+    if (excludeDeadZone && hour >= CRANK_DEAD_ZONE_START && hour < CRANK_DEAD_ZONE_END) {
+      nowMin = CRANK_DEAD_ZONE_END * 60;
+    }
+    minMinute = Math.max(minMinute, nowMin);
   }
 
-  const useFallbackSpread = waveStartMinByWave.some((m) => m > windowEndMin - 20);
+  const bandPicks = Array.from({ length: count }, () => pickCrankScheduleBand());
+  const bandCounts = new Map<number, number>();
+  for (const band of bandPicks) {
+    bandCounts.set(band.startMin, (bandCounts.get(band.startMin) ?? 0) + 1);
+  }
+  const bandIndices = new Map<number, number>();
 
   return Array.from({ length: count }, (_, i) => {
     const track = i % tracks;
     const wave = Math.floor(i / tracks);
-    let totalMin: number;
+    const band = bandPicks[i]!;
+    const idxInBand = bandIndices.get(band.startMin) ?? 0;
+    bandIndices.set(band.startMin, idxInBand + 1);
+    const countInBand = bandCounts.get(band.startMin) ?? 1;
 
-    if (useFallbackSpread) {
-      const span = windowEndMin - windowStartMin;
-      totalMin =
-        windowStartMin +
-        (span * (i + 1)) / (count + 1) +
-        parallelTrackStaggerMinutes(track, wave);
-    } else {
-      totalMin = waveStartMinByWave[wave]! + parallelTrackStaggerMinutes(track, wave);
+    let totalMin = minuteInCrankBand(band, idxInBand, countInBand);
+    totalMin += parallelTrackStaggerMinutes(track, wave);
+
+    if (totalMin < minMinute) {
+      totalMin = minMinute + parallelTrackStaggerMinutes(track, wave);
+    }
+    if (
+      excludeDeadZone &&
+      totalMin >= CRANK_DEAD_ZONE_START * 60 &&
+      totalMin < CRANK_DEAD_ZONE_END * 60
+    ) {
+      totalMin = CRANK_DEAD_ZONE_END * 60 + (totalMin % SESSION_SLOT_MINUTES);
     }
 
-    totalMin = clampScheduleMinute(totalMin, windowStartMin, windowEndMin);
-    const hour = Math.floor(totalMin / 60);
+    const hour = Math.floor(totalMin / 60) % 24;
     const minute = totalMin % 60;
 
     return {

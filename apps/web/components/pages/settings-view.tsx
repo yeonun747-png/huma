@@ -212,9 +212,14 @@ export function SettingsView() {
 
   const [app, setApp] = useState<Record<string, unknown>>({});
 
-  const [activity, setActivity] = useState<{ crank_enabled: boolean; posting_enabled: boolean }>({
+  const [activity, setActivity] = useState<{
+    crank_enabled: boolean;
+    posting_enabled: boolean;
+    crank_dead_zone?: boolean;
+  }>({
     crank_enabled: true,
     posting_enabled: true,
+    crank_dead_zone: true,
   });
   const [postingWarmup, setPostingWarmup] = useState<PostingWarmupSettings>(DEFAULT_POSTING_WARMUP);
   const [postingWarmupStatus, setPostingWarmupStatus] = useState<PostingWarmupStatusRow[]>([]);
@@ -234,10 +239,11 @@ export function SettingsView() {
       setApp(appSettings);
       setPostingWarmup(normalizePostingWarmup(appSettings.posting_warmup));
 
-      const actRow = act as { crank_enabled?: boolean; posting_enabled?: boolean };
+      const actRow = act as { crank_enabled?: boolean; posting_enabled?: boolean; crank_dead_zone?: boolean };
       setActivity({
         crank_enabled: actRow.crank_enabled !== false,
         posting_enabled: actRow.posting_enabled !== false,
+        crank_dead_zone: actRow.crank_dead_zone !== false,
       });
       setPostingWarmupStatus(warmupRes.accounts ?? []);
     }).finally(() => {
@@ -268,7 +274,10 @@ export function SettingsView() {
 
 
 
-  const patchActivity = async (key: 'crank_enabled' | 'posting_enabled', val: boolean) => {
+  const patchActivity = async (
+    key: 'crank_enabled' | 'posting_enabled' | 'crank_dead_zone',
+    val: boolean,
+  ) => {
     const next = { ...activity, [key]: val };
     setActivity(next);
     await api.updateSetting('activity_control', next);
@@ -300,6 +309,12 @@ export function SettingsView() {
             value={activity.crank_enabled}
             onChange={(v) => patchActivity('crank_enabled', v)}
           />
+          <SettingsToggle
+            label="C-Rank 활동 금지 (01~04시)"
+            sub="ON — 새벽 1~4시 실행·스케줄 배치 제외 · 포스팅 야간금지(23~08)와 별도"
+            value={activity.crank_dead_zone !== false}
+            onChange={(v) => patchActivity('crank_dead_zone', v)}
+          />
           <div className="mb-3 rounded border border-huma-bdr/40 bg-huma-bg2/30 px-3 py-2.5 text-[11px] leading-relaxed text-huma-t3">
             <p className="mb-2 font-mono text-[10px] uppercase tracking-[0.12em] text-huma-t2">
               C-Rank 동작 요약
@@ -307,12 +322,15 @@ export function SettingsView() {
             <p className="mb-1.5 font-medium text-huma-t2">활동 금지·시간</p>
             <ul className="mb-2 list-disc space-y-0.5 pl-4">
               <li>
-                아래 「야간 발행 금지(23~08시)」가 C-Rank에도 적용됩니다 — 해당 시간 job은 1시간 뒤 재예약.
+                C-Rank는 포스팅 「야간 발행 금지(23~08)」와 <strong className="font-medium text-huma-t2">별도</strong>로
+                동작합니다 — 22시~1시·4~8시 일부 세션 가능.
               </li>
               <li>
-                Human Engine 24시간 활성도 — 수동·일반 큐만 검사(확률). 스케줄 자동 큐는 야간 금지만 적용.
+                「C-Rank 활동 금지 (01~04시)」ON — 새벽 1~4시만 실행·스케줄에서 제외 (네이버 유저 거의 없는 구간).
               </li>
-              <li>스케줄 배치 창: KST 08:00~22:00 (세션 scheduled_at 상한).</li>
+              <li>
+                스케줄 배치: 주간·저녁 08~22시 약 75% · 22~24시 15% · 04~08시 10% · 세션 최대 25분.
+              </li>
             </ul>
             <p className="mb-1.5 font-medium text-huma-t2">CAPTCHA</p>
             <ul className="mb-2 list-disc space-y-0.5 pl-4">

@@ -12,7 +12,6 @@ import { MGrid, MPanel, MQueueItem, MStat, MTag } from '@/components/mockup/prim
 import { useRegisterPageAction } from '@/components/dashboard/page-action-context';
 import { useShellViewActive } from '@/components/dashboard/shell-view-active';
 import { PostViewerModal } from '@/components/viewer/post-viewer-modal';
-import { CrankJobDetailModal } from './crank-job-detail-modal';
 import { parseSocialCrankJobContent } from '@/lib/crank-job-payload';
 import { parseQueueKstParts, isSchedulePast, isSameKstDay, weekdayColorClass } from '@/lib/format-kst';
 import { QueueAutoContentModal, type AutoContentFormValues, type AutoContentSubmitContext } from './queue-auto-content-modal';
@@ -191,7 +190,6 @@ export function QueueManager() {
   const [prefill, setPrefill] = useState<QueuePrefill | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
-  const [crankJob, setCrankJob] = useState<HumaJob | null>(null);
   const [captchaJob, setCaptchaJob] = useState<HumaJob | null>(null);
   const [viewer, setViewer] = useState<{
     title: string;
@@ -237,7 +235,9 @@ export function QueueManager() {
       const sorted = [...all].sort((a, b) =>
         String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')),
       );
-      const visible = sorted.filter((j) => !isContentFullPipelineShell(j));
+      const visible = sorted.filter(
+        (j) => !isContentFullPipelineShell(j) && j.job_type !== 'social_crank',
+      );
       const completed = visible.filter((j) => j.status === 'completed');
       setStats({
         pending: visible.filter((j) => j.status === 'pending' || j.status === 'scheduled').length,
@@ -388,7 +388,6 @@ export function QueueManager() {
           next.delete(job.id);
           return next;
         });
-        setCrankJob((current) => (current?.id === job.id ? null : current));
         setCaptchaJob((current) => (current?.id === job.id ? null : current));
         load();
       })
@@ -508,20 +507,16 @@ export function QueueManager() {
   return (
     <div className="animate-fadeIn">
       <p className="mb-3 text-[12px] leading-relaxed text-huma-t3">
-        Claude 글 작성 · Imagen 대표 이미지 생성 · 네이버 블로그 자동 발행 큐입니다. 숏폼 영상 생성·업로드는{' '}
+        Claude 글 작성 · Imagen 대표 이미지 생성 · 네이버 블로그 자동 발행 큐입니다. C-Rank 소통 세션은{' '}
+        <Link href="/crank" className="text-huma-acc hover:underline">
+          C-Rank 소통 관리 → 운영
+        </Link>
+        의 전용 큐에서 확인하세요. 숏폼 영상은{' '}
         <Link href="/video-content" className="text-huma-acc hover:underline">
           숏폼 영상 관리
         </Link>
         를 사용하세요.
       </p>
-
-      <CrankJobDetailModal
-        job={crankJob}
-        onClose={() => setCrankJob(null)}
-        onDelete={
-          crankJob && isDeletableQueueJob(crankJob) ? () => handleDeleteJob(crankJob) : undefined
-        }
-      />
 
       <PostViewerModal
         open={Boolean(viewer)}
@@ -678,10 +673,6 @@ export function QueueManager() {
                 onClick={() => {
                   if (job.status === 'awaiting_captcha') {
                     setCaptchaJob(job);
-                    return;
-                  }
-                  if (job.job_type === 'social_crank') {
-                    setCrankJob(job);
                     return;
                   }
                   setViewer({

@@ -1,6 +1,7 @@
 import type { BrowserContext } from 'playwright';
 
 import { enterCaptchaHold } from '../modules/watcher/captcha-hold.js';
+import { isNaverAuthChallengeError } from './naver-account-protection.js';
 import {
   handleLayer4Detection,
   isCaptchaError,
@@ -39,6 +40,7 @@ export type CrankCaptchaHoldParams = {
  */
 export async function tryEnterCrankCaptchaHold(params: CrankCaptchaHoldParams): Promise<boolean> {
   if (!params.humaJobId || !isCrankHumanHoldError(params.err)) return false;
+  if (isNaverAuthChallengeError(params.err)) return false;
 
   const errMsg = (params.err as Error)?.message ?? '';
   let visionAutoFailed = false;
