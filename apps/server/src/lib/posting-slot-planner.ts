@@ -12,6 +12,7 @@ import {
 } from './posting-interval.js';
 import {
   computePostingScheduleCandidateWithPolicy,
+  clampCandidateBeforeNightBan,
   resolvePostingDayWindow,
 } from './posting-schedule-window.js';
 import {
@@ -160,6 +161,8 @@ export async function planNextPostBlogScheduledAt(accountId: string, date = new 
       },
     );
   }
+
+  candidate = clampCandidateBeforeNightBan(candidate, nightBanStart, nightBanEnd, new Date(now));
 
   return candidate.toISOString();
 }

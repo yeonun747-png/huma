@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_NIGHT_BAN_END,
   DEFAULT_NIGHT_BAN_START,
+  isKstNightBan,
   msUntilNightBanStart,
 } from './crank-schedule-config.js';
 import {
+  clampCandidateBeforeNightBan,
   resolvePostingDayWindow,
   shouldPackPostingBeforeNightBan,
 } from './posting-schedule-window.js';
@@ -56,5 +58,29 @@ describe('shouldPackPostingBeforeNightBan', () => {
       from: new Date('2026-07-01T14:00:00+09:00'),
     });
     expect(urgent).toBe(false);
+  });
+});
+
+describe('clampCandidateBeforeNightBan', () => {
+  it('keeps evening slots before 23:00', () => {
+    const at = new Date('2026-07-01T22:30:00+09:00');
+    expect(clampCandidateBeforeNightBan(at).getTime()).toBe(at.getTime());
+  });
+
+  it('pulls 23:52 back to same evening before ban', () => {
+    const at = new Date('2026-07-01T23:52:00+09:00');
+    const now = new Date('2026-07-01T22:00:00+09:00');
+    const out = clampCandidateBeforeNightBan(at, DEFAULT_NIGHT_BAN_START, DEFAULT_NIGHT_BAN_END, now);
+    expect(isKstNightBan(DEFAULT_NIGHT_BAN_START, DEFAULT_NIGHT_BAN_END, out)).toBe(false);
+    expect(out.getTime()).toBeGreaterThanOrEqual(new Date('2026-07-01T22:48:00+09:00').getTime());
+    expect(out.getTime()).toBeLessThan(new Date('2026-07-01T23:00:00+09:00').getTime());
+  });
+
+  it('moves early-morning ban slots to same-day 08:00', () => {
+    const at = new Date('2026-07-02T02:30:00+09:00');
+    const out = clampCandidateBeforeNightBan(at);
+    expect(isKstNightBan(DEFAULT_NIGHT_BAN_START, DEFAULT_NIGHT_BAN_END, out)).toBe(false);
+    expect(out.getTime()).toBeGreaterThanOrEqual(new Date('2026-07-02T08:01:00+09:00').getTime());
+    expect(out.getTime()).toBeLessThan(new Date('2026-07-02T08:15:00+09:00').getTime());
   });
 });

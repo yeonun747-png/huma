@@ -19,6 +19,7 @@ import {
   getActivePostingWindowHours,
 } from './posting-interval.js';
 import {
+  clampCandidateBeforeNightBan,
   computePostingScheduleCandidateWithPolicy,
   resolvePostingDayWindow,
 } from './posting-schedule-window.js';
@@ -158,6 +159,8 @@ export async function planNextAutoPublishTriggerAt(
       },
     );
   }
+
+  candidate = clampCandidateBeforeNightBan(candidate, nightBanStart, nightBanEnd, new Date(now));
 
   return candidate.toISOString();
 }
