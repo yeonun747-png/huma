@@ -2,32 +2,42 @@ import { supabase } from '../../middleware/auth.js';
 import { logOperation } from '../../lib/log-emitter.js';
 
 export const NARRATION_PROGRESS_STAGES = {
-  queue_start: { percent: 5, label: '큐 등록 · 생성 대기' },
-  worker_start: { percent: 10, label: '워커 처리 시작' },
-  plan_pick: { percent: 15, label: '주제·축 조합 확인' },
-  llm_write: { percent: 40, label: 'Sonnet 대본 작성 중…' },
-  llm_retry: { percent: 55, label: '대본 재작성 중…' },
-  validate: { percent: 75, label: '길이·형식 검증' },
-  cta_append: { percent: 90, label: 'CTA 문구 추가' },
-  saving: { percent: 95, label: '저장 중' },
+  queue_start: { percent: 2, label: '큐 등록 · 생성 대기' },
+  worker_start: { percent: 5, label: '워커 처리 시작' },
+  plan_pick: { percent: 8, label: '주제·축 조합 확인' },
+  llm_write: { percent: 10, label: 'Sonnet 대본 작성 중…' },
+  llm_retry: { percent: 72, label: '대본 재작성 중…' },
+  validate: { percent: 88, label: '길이·형식 검증' },
+  cta_append: { percent: 93, label: 'CTA 문구 추가' },
+  saving: { percent: 97, label: '저장 중' },
 } as const;
 
 export type NarrationProgressStage = keyof typeof NARRATION_PROGRESS_STAGES;
 
-/** LLM 90초×2 + 여유 — 초과 시 stuck 으로 간주 */
-export const NARRATION_GENERATION_STALE_MS = 6 * 60 * 1000;
+/** Sonnet 1회 호출 타임아웃 — env NARRATION_LLM_TIMEOUT_MS (기본 5분) */
+export const NARRATION_LLM_TIMEOUT_MS = (() => {
+  const raw = Number(process.env.NARRATION_LLM_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw >= 60_000 ? raw : 300_000;
+})();
 
-export const NARRATION_GENERATION_TIMEOUT_MS = 5 * 60 * 1000;
+/** LLM 구간 시간 기반 진행률 (전체 0~100% 기준) */
+export const NARRATION_LLM_PROGRESS_BAND = {
+  write: { start: 10, end: 78 },
+  retry: { start: 72, end: 88 },
+} as const;
 
-export async function reportNarrationProgress(
+/** LLM 5분×2 + 검증·저장 여유 — 초과 시 stuck 으로 간주 */
+export const NARRATION_GENERATION_STALE_MS = 15 * 60 * 1000;
+
+export const NARRATION_GENERATION_TIMEOUT_MS = 12 * 60 * 1000;
+
+async function writeNarrationProgressMeta(
   historyId: string,
-  workspace: string,
   stage: NarrationProgressStage,
-  labelOverride?: string,
-): Promise<void> {
-  const def = NARRATION_PROGRESS_STAGES[stage];
-  const label = labelOverride ?? def.label;
-  const percent = def.percent;
+  label: string,
+  percent: number,
+): Promise<Record<string, unknown>> {
+  const clamped = Math.min(100, Math.max(0, Math.round(percent)));
 
   const { data: row } = await supabase
     .from('huma_narration_script_history')
@@ -45,7 +55,7 @@ export async function reportNarrationProgress(
     ...meta,
     progress_stage: stage,
     progress_label: label,
-    progress_percent: percent,
+    progress_percent: clamped,
     progress_since_at: since,
     progress_updated_at: new Date().toISOString(),
   };
@@ -54,6 +64,21 @@ export async function reportNarrationProgress(
     .from('huma_narration_script_history')
     .update({ source_meta: nextMeta, updated_at: new Date().toISOString() })
     .eq('id', historyId);
+
+  return nextMeta;
+}
+
+export async function reportNarrationProgress(
+  historyId: string,
+  workspace: string,
+  stage: NarrationProgressStage,
+  labelOverride?: string,
+): Promise<void> {
+  const def = NARRATION_PROGRESS_STAGES[stage];
+  const label = labelOverride ?? def.label;
+  const percent = def.percent;
+
+  await writeNarrationProgressMeta(historyId, stage, label, percent);
 
   await logOperation({
     level: 'info',
@@ -66,6 +91,33 @@ export async function reportNarrationProgress(
       progress_label: label,
     },
   });
+}
+
+/** LLM 대기 중 시간 기반 진행률 — DB만 갱신(heartbeat), emitLog 시 소켓·로그 */
+export async function reportNarrationProgressPercent(
+  historyId: string,
+  workspace: string,
+  stage: NarrationProgressStage,
+  percent: number,
+  label: string,
+  opts?: { emitLog?: boolean },
+): Promise<void> {
+  const clamped = Math.min(100, Math.max(0, Math.round(percent)));
+  await writeNarrationProgressMeta(historyId, stage, label, clamped);
+
+  if (opts?.emitLog) {
+    await logOperation({
+      level: 'info',
+      message: `[narration-script] ${label} (${clamped}%)`,
+      workspace,
+      metadata: {
+        narration_script_history_id: historyId,
+        progress_stage: stage,
+        progress_percent: clamped,
+        progress_label: label,
+      },
+    });
+  }
 }
 
 export function initialNarrationProgressMeta(
@@ -117,7 +169,7 @@ export async function recoverStaleNarrationScripts(
   if (!data?.length) return 0;
 
   const staleMessage =
-    '생성 시간 초과(6분) — 큐 미처리 또는 LLM 지연. 다시 시도해 주세요.';
+    '생성 시간 초과(15분) — 큐 미처리 또는 LLM 지연. 다시 시도해 주세요.';
 
   for (const row of data) {
     await markNarrationScriptFailed(String(row.id), staleMessage);

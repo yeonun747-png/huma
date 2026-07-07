@@ -22,6 +22,26 @@ function useElapsedSec(sinceIso: string | null | undefined, active: boolean): nu
   return elapsed;
 }
 
+const LLM_PROGRESS_STAGES = new Set(['llm_write', 'llm_retry']);
+
+/** 서버 폴링 사이에도 LLM 구간에서 막대가 서서히 채워지도록 보간 */
+function useDisplayPercent(progress: NarrationScriptProgress): number {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const base = progress.percent;
+  if (!LLM_PROGRESS_STAGES.has(progress.stage ?? '')) return base;
+
+  const updatedAt = progress.updatedAt ? new Date(progress.updatedAt).getTime() : now;
+  const sinceUpdateSec = Math.max(0, (now - updatedAt) / 1000);
+  const creep = Math.min(5, sinceUpdateSec * 0.6);
+  return Math.min(95, Math.round(base + creep));
+}
+
 export function NarrationGeneratingPanel({
   topicLabel,
   progress,
@@ -34,9 +54,9 @@ export function NarrationGeneratingPanel({
   onCancel?: () => void;
 }) {
   const elapsedSec = useElapsedSec(progress.sinceAt, true);
-  const percent = progress.percent;
+  const percent = useDisplayPercent(progress);
   const queueStuck =
-    (progress.stage === 'queue_start' || percent <= 5) && elapsedSec >= 120;
+    (progress.stage === 'queue_start' || progress.percent <= 5) && elapsedSec >= 120;
 
   return (
     <div className="flex min-h-[320px] flex-col items-center justify-center py-8 text-center">
@@ -67,7 +87,7 @@ export function NarrationGeneratingPanel({
 
       {queueStuck ? (
         <p className="mt-3 max-w-sm rounded border border-huma-warn/40 bg-huma-warn/10 px-3 py-2 text-[10px] leading-relaxed text-huma-warn">
-          큐 대기가 2분 이상 지속됩니다. i7 서버 워커·Redis 상태를 확인한 뒤, 6분 경과 시 자동으로
+          큐 대기가 2분 이상 지속됩니다. i7 서버 워커·Redis 상태를 확인한 뒤, 15분 경과 시 자동으로
           실패 처리됩니다. 「실패」 탭에서 재시도하세요.
         </p>
       ) : null}

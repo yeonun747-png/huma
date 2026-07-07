@@ -10,10 +10,16 @@ import {
   type GeneratedNarrationDraft,
 } from './validation.js';
 import { NARRATION_WORKSPACE_LABEL, type NarrationScriptWorkspace } from '@huma/shared';
-import { reportNarrationProgress } from './progress.js';
+import {
+  NARRATION_LLM_PROGRESS_BAND,
+  NARRATION_LLM_TIMEOUT_MS,
+  reportNarrationProgress,
+  reportNarrationProgressPercent,
+} from './progress.js';
 import { assertNarrationScriptNotCancelled } from './cancel.js';
 
 const MAX_ATTEMPTS = 2;
+const LLM_PROGRESS_HEARTBEAT_MS = 2_500;
 
 export interface NarrationGenerateProgressCtx {
   historyId: string;
@@ -31,7 +37,7 @@ async function callNarrationLlm(prompt: string, feedback?: string): Promise<Gene
     model,
     max_tokens: 2048,
     prompt: userPrompt,
-    timeout_ms: 90_000,
+    timeout_ms: NARRATION_LLM_TIMEOUT_MS,
   });
   if (!raw?.trim()) {
     throw new Error(
@@ -44,6 +50,65 @@ async function callNarrationLlm(prompt: string, feedback?: string): Promise<Gene
   const body = String(parsed.body ?? parsed.script ?? parsed.narration ?? '').trim();
   if (!body) throw new Error('LLM JSON에 body가 없습니다');
   return { title, body };
+}
+
+async function callNarrationLlmWithProgress(
+  prompt: string,
+  feedback: string | undefined,
+  progress: NarrationGenerateProgressCtx,
+  attempt: number,
+  formatLabel: string,
+): Promise<GeneratedNarrationDraft> {
+  const band = attempt === 0 ? NARRATION_LLM_PROGRESS_BAND.write : NARRATION_LLM_PROGRESS_BAND.retry;
+  const stage = attempt === 0 ? 'llm_write' : 'llm_retry';
+  const baseLabel =
+    attempt === 0
+      ? `Sonnet 대본 작성 중… (${formatLabel})`
+      : `대본 재작성 중… (${attempt + 1}/${MAX_ATTEMPTS}회 · ${formatLabel})`;
+
+  await reportNarrationProgressPercent(
+    progress.historyId,
+    progress.workspace,
+    stage,
+    band.start,
+    baseLabel,
+    { emitLog: true },
+  );
+
+  const started = Date.now();
+  const heartbeat = setInterval(() => {
+    void (async () => {
+      try {
+        await assertNarrationScriptNotCancelled(progress.historyId);
+        const elapsed = Date.now() - started;
+        const ratio = Math.min(0.94, elapsed / NARRATION_LLM_TIMEOUT_MS);
+        const pct = Math.round(band.start + ratio * (band.end - band.start));
+        await reportNarrationProgressPercent(
+          progress.historyId,
+          progress.workspace,
+          stage,
+          pct,
+          baseLabel,
+        );
+      } catch {
+        /* cancelled or transient — heartbeat stops on throw from outer flow */
+      }
+    })();
+  }, LLM_PROGRESS_HEARTBEAT_MS);
+
+  try {
+    return await callNarrationLlm(prompt, feedback);
+  } finally {
+    clearInterval(heartbeat);
+    await reportNarrationProgressPercent(
+      progress.historyId,
+      progress.workspace,
+      stage,
+      band.end,
+      baseLabel,
+      { emitLog: true },
+    );
+  }
 }
 
 export async function generateNarrationScript(
@@ -70,23 +135,19 @@ export async function generateNarrationScript(
           workspaceLabel: workspaceLabel(plan.workspace),
         });
 
+  const formatLabel = plan.formatType === 'ranked' ? '순위특집' : '전체커버';
+
   let feedback: string | undefined;
   let draft: GeneratedNarrationDraft | null = null;
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     if (progress) {
       await assertNarrationScriptNotCancelled(progress.historyId);
-      await reportNarrationProgress(
-        progress.historyId,
-        progress.workspace,
-        attempt === 0 ? 'llm_write' : 'llm_retry',
-        attempt === 0
-          ? `Sonnet 대본 작성 중… (${plan.formatType === 'ranked' ? '순위특집' : '전체커버'})`
-          : `대본 재작성 중… (${attempt + 1}/${MAX_ATTEMPTS}회)`,
-      );
     }
 
-    draft = await callNarrationLlm(basePrompt, feedback);
+    draft = progress
+      ? await callNarrationLlmWithProgress(basePrompt, feedback, progress, attempt, formatLabel)
+      : await callNarrationLlm(basePrompt, feedback);
 
     if (progress) {
       await reportNarrationProgress(progress.historyId, progress.workspace, 'validate');
