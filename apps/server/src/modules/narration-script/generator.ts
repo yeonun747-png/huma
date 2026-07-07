@@ -11,6 +11,7 @@ import {
 } from './validation.js';
 import { NARRATION_WORKSPACE_LABEL, type NarrationScriptWorkspace } from '@huma/shared';
 import { reportNarrationProgress } from './progress.js';
+import { assertNarrationScriptNotCancelled } from './cancel.js';
 
 const MAX_ATTEMPTS = 2;
 
@@ -32,7 +33,11 @@ async function callNarrationLlm(prompt: string, feedback?: string): Promise<Gene
     prompt: userPrompt,
     timeout_ms: 90_000,
   });
-  if (!raw?.trim()) throw new Error('LLM 응답이 비어 있습니다');
+  if (!raw?.trim()) {
+    throw new Error(
+      'LLM 응답이 비어 있습니다 — ANTHROPIC_API_KEY·API 상태를 확인하세요',
+    );
+  }
 
   const parsed = parseLlmJsonBlock(raw) as { title?: unknown; body?: unknown; script?: unknown; narration?: unknown };
   const title = String(parsed.title ?? '').trim();
@@ -70,6 +75,7 @@ export async function generateNarrationScript(
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     if (progress) {
+      await assertNarrationScriptNotCancelled(progress.historyId);
       await reportNarrationProgress(
         progress.historyId,
         progress.workspace,

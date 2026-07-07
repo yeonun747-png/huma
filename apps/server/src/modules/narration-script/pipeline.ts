@@ -2,7 +2,20 @@ import { supabase } from '../../middleware/auth.js';
 import type { NarrationScriptWorkspace } from '@huma/shared';
 import { generateNarrationScript } from './generator.js';
 import { planNarrationPick, type PlanNarrationPickInput } from './pick-plan.js';
-import { initialNarrationProgressMeta, reportNarrationProgress } from './progress.js';
+import {
+  initialNarrationProgressMeta,
+  markNarrationScriptFailed,
+  NARRATION_GENERATION_TIMEOUT_MS,
+  recoverStaleNarrationScripts,
+  reportNarrationProgress,
+} from './progress.js';
+import {
+  assertNarrationScriptNotCancelled,
+  isNarrationScriptCancelledError,
+  NARRATION_SCRIPT_CANCEL_MESSAGE,
+} from './cancel.js';
+
+export { recoverStaleNarrationScripts };
 
 export async function createNarrationScriptJob(
   input: PlanNarrationPickInput,
@@ -29,7 +42,42 @@ export async function createNarrationScriptJob(
   return data.id as string;
 }
 
+function withGenerationTimeout<T>(promise: Promise<T>, historyId: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(
+        new Error(
+          `나레이션 대본 생성 시간 초과(${Math.round(NARRATION_GENERATION_TIMEOUT_MS / 60_000)}분)`,
+        ),
+      );
+    }, NARRATION_GENERATION_TIMEOUT_MS);
+
+    promise
+      .then(resolve)
+      .catch(reject)
+      .finally(() => clearTimeout(timer));
+  });
+}
+
 export async function runNarrationScriptGeneration(historyId: string): Promise<void> {
+  const id = historyId?.trim();
+  if (!id) {
+    throw new Error('나레이션 historyId 없음 — 큐 payload 오류');
+  }
+
+  try {
+    await withGenerationTimeout(runNarrationScriptGenerationInner(id), id);
+  } catch (err) {
+    if (isNarrationScriptCancelledError(err)) return;
+    const msg = (err as Error).message;
+    if (msg !== NARRATION_SCRIPT_CANCEL_MESSAGE) {
+      await markNarrationScriptFailed(id, msg);
+    }
+    throw err;
+  }
+}
+
+async function runNarrationScriptGenerationInner(historyId: string): Promise<void> {
   const { data: row, error } = await supabase
     .from('huma_narration_script_history')
     .select('*')
@@ -41,6 +89,8 @@ export async function runNarrationScriptGeneration(historyId: string): Promise<v
 
   const workspace = row.workspace as NarrationScriptWorkspace;
 
+  await reportNarrationProgress(historyId, workspace, 'worker_start');
+  await assertNarrationScriptNotCancelled(historyId);
   await reportNarrationProgress(historyId, workspace, 'plan_pick');
 
   const plan = await planNarrationPick({
@@ -49,6 +99,8 @@ export async function runNarrationScriptGeneration(historyId: string): Promise<v
     axisType: row.axis_type as PlanNarrationPickInput['axisType'],
     topicKey: row.topic_key as string,
   });
+
+  await assertNarrationScriptNotCancelled(historyId);
 
   try {
     const generated = await generateNarrationScript(plan, {
@@ -67,17 +119,14 @@ export async function runNarrationScriptGeneration(historyId: string): Promise<v
         source_meta: { ...meta, model: generated.model, generated_at: new Date().toISOString() },
         updated_at: new Date().toISOString(),
       })
-      .eq('id', historyId);
+      .eq('id', historyId)
+      .eq('status', 'script_generating');
   } catch (err) {
+    if (isNarrationScriptCancelledError(err)) return;
     const msg = (err as Error).message;
-    await supabase
-      .from('huma_narration_script_history')
-      .update({
-        status: 'failed',
-        error_message: msg.slice(0, 500),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', historyId);
+    if (msg !== NARRATION_SCRIPT_CANCEL_MESSAGE) {
+      await markNarrationScriptFailed(historyId, msg);
+    }
     throw err;
   }
 }

@@ -54,6 +54,7 @@ export function NarrationScriptView({ service }: Props) {
   const [editTitle, setEditTitle] = useState('');
   const [editBody, setEditBody] = useState('');
   const [saving, setSaving] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [liveProgressById, setLiveProgressById] = useState<
     Record<string, { label: string; percent: number }>
   >({});
@@ -200,6 +201,31 @@ export function NarrationScriptView({ service }: Props) {
       await load();
     } catch (e) {
       appAlert((e as Error).message);
+    }
+  };
+
+  const handleCancel = async () => {
+    if (!selected || selected.status !== 'script_generating') return;
+    const ok = await appConfirm(
+      `「${selected.topic_label}」\n\n진행 중인 대본 생성을 중지할까요?\n「실패」 탭으로 이동합니다.`,
+      { title: '대본 생성 중지', destructive: true, confirmLabel: '중지' },
+    );
+    if (!ok) return;
+    setStopping(true);
+    try {
+      await api.narrationScriptCancel(selected.id);
+      appToast('대본 생성을 중지했습니다');
+      setActiveTab('failed');
+      setLiveProgressById((prev) => {
+        const next = { ...prev };
+        delete next[selected.id];
+        return next;
+      });
+      await load();
+    } catch (e) {
+      appAlert((e as Error).message);
+    } finally {
+      setStopping(false);
     }
   };
 
@@ -358,7 +384,12 @@ export function NarrationScriptView({ service }: Props) {
         <MPanel title="📋 브루 붙여넣기용 대본" className="m-panel-fill min-h-0">
           {selected ? (
             selected.status === 'script_generating' && selectedProgress ? (
-              <NarrationGeneratingPanel topicLabel={selected.topic_label} progress={selectedProgress} />
+              <NarrationGeneratingPanel
+                topicLabel={selected.topic_label}
+                progress={selectedProgress}
+                stopping={stopping}
+                onCancel={() => void handleCancel()}
+              />
             ) : (
               <div className="flex min-h-0 flex-1 flex-col gap-3">
                 <div className="flex flex-wrap gap-2 text-[10px] text-huma-t4">

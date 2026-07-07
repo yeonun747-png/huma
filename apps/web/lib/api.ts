@@ -1375,6 +1375,10 @@ export const api = {
     }),
   narrationScriptRegenerate: (id: string) =>
     request<{ id: string; jobId?: string }>(`/api/narration-scripts/${id}/regenerate`, { method: 'POST' }),
+  narrationScriptCancel: (id: string) =>
+    request<{ ok: boolean; previousStatus?: string }>(`/api/narration-scripts/${id}/cancel`, {
+      method: 'POST',
+    }),
   narrationScriptDelete: (id: string) =>
     request<{ ok: boolean }>(`/api/narration-scripts/${id}`, { method: 'DELETE' }),
   fortune82ProductsSync: () =>

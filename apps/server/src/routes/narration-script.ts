@@ -9,6 +9,7 @@ import type {
 } from '@huma/shared';
 import {
   createNarrationScriptJob,
+  recoverStaleNarrationScripts,
   runNarrationScriptGeneration,
 } from '../modules/narration-script/pipeline.js';
 import { previewNextNarrationPick, planNarrationPick } from '../modules/narration-script/pick-plan.js';
@@ -19,6 +20,7 @@ import {
 } from '../modules/narration-script/fortune82-product-cache.js';
 import { NARRATION_ROTATION_COOLDOWN_DAYS } from '../modules/narration-script/rotation.js';
 import { initialNarrationProgressMeta } from '../modules/narration-script/progress.js';
+import { cancelNarrationScriptJob, narrationScriptQueueJobId } from '../modules/narration-script/cancel.js';
 
 const NARRATION_WORKSPACES: NarrationScriptWorkspace[] = ['yeonun', 'fortune82'];
 
@@ -50,6 +52,14 @@ export function registerNarrationScriptRoutes(app: FastifyInstance) {
     }
 
     if (status?.trim()) query = query.eq('status', status.trim());
+
+    if (workspace?.trim() && assertNarrationWorkspace(workspace.trim(), allowed)) {
+      await recoverStaleNarrationScripts(workspace.trim());
+    } else {
+      for (const ws of NARRATION_WORKSPACES.filter((w) => allowed.includes(w))) {
+        await recoverStaleNarrationScripts(ws);
+      }
+    }
 
     const { data, error } = await query;
     if (error) throw new Error(error.message);
@@ -117,17 +127,20 @@ export function registerNarrationScriptRoutes(app: FastifyInstance) {
     }
 
     try {
-      const { id } = await createNarrationScriptJob({
+      const id = await createNarrationScriptJob({
         workspace: ws,
         formatType,
         axisType: body.axis_type ?? 'auto',
         topicKey: body.topic_key ?? null,
       });
 
-      await enqueueJob({
-        type: 'narration_script_generate',
-        payload: { historyId: id },
-      });
+      await enqueueJob(
+        {
+          type: 'narration_script_generate',
+          payload: { historyId: id },
+        },
+        { jobId: narrationScriptQueueJobId(id) },
+      );
 
       return { ok: true, id, message: '나레이션 대본 생성이 큐에 등록되었습니다' };
     } catch (err) {
@@ -209,12 +222,34 @@ export function registerNarrationScriptRoutes(app: FastifyInstance) {
       })
       .eq('id', id);
 
-    await enqueueJob({
-      type: 'narration_script_generate',
-      payload: { historyId: id },
-    });
+    await enqueueJob(
+      {
+        type: 'narration_script_generate',
+        payload: { historyId: id },
+      },
+      { jobId: narrationScriptQueueJobId(id) },
+    );
 
     return { ok: true, message: '재생성 큐 등록됨' };
+  });
+
+  app.post('/api/narration-scripts/:id/cancel', { preHandler: authMiddleware }, async (request, reply) => {
+    const allowed = getWorkspaceFilter(request);
+    const { id } = request.params as { id: string };
+
+    const { data: existing } = await supabase
+      .from('huma_narration_script_history')
+      .select('workspace')
+      .eq('id', id)
+      .maybeSingle();
+    if (!existing) return reply.code(404).send({ error: '없음' });
+    if (!allowed.includes(existing.workspace as string)) {
+      return reply.code(403).send({ error: '권한 없음' });
+    }
+
+    const result = await cancelNarrationScriptJob(id);
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
+    return { ok: true, previousStatus: result.previousStatus };
   });
 
   app.delete('/api/narration-scripts/:id', { preHandler: authMiddleware }, async (request, reply) => {

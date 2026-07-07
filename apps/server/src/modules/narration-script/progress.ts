@@ -3,6 +3,7 @@ import { logOperation } from '../../lib/log-emitter.js';
 
 export const NARRATION_PROGRESS_STAGES = {
   queue_start: { percent: 5, label: '큐 등록 · 생성 대기' },
+  worker_start: { percent: 10, label: '워커 처리 시작' },
   plan_pick: { percent: 15, label: '주제·축 조합 확인' },
   llm_write: { percent: 40, label: 'Sonnet 대본 작성 중…' },
   llm_retry: { percent: 55, label: '대본 재작성 중…' },
@@ -12,6 +13,11 @@ export const NARRATION_PROGRESS_STAGES = {
 } as const;
 
 export type NarrationProgressStage = keyof typeof NARRATION_PROGRESS_STAGES;
+
+/** LLM 90초×2 + 여유 — 초과 시 stuck 으로 간주 */
+export const NARRATION_GENERATION_STALE_MS = 6 * 60 * 1000;
+
+export const NARRATION_GENERATION_TIMEOUT_MS = 5 * 60 * 1000;
 
 export async function reportNarrationProgress(
   historyId: string,
@@ -74,4 +80,54 @@ export function initialNarrationProgressMeta(
     progress_since_at: now,
     progress_updated_at: now,
   };
+}
+
+export async function markNarrationScriptFailed(
+  historyId: string,
+  message: string,
+): Promise<void> {
+  if (!historyId.trim()) return;
+  await supabase
+    .from('huma_narration_script_history')
+    .update({
+      status: 'failed',
+      error_message: message.slice(0, 500),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', historyId)
+    .eq('status', 'script_generating');
+}
+
+export async function recoverStaleNarrationScripts(
+  workspace?: string,
+): Promise<number> {
+  const cutoff = new Date(Date.now() - NARRATION_GENERATION_STALE_MS).toISOString();
+  let query = supabase
+    .from('huma_narration_script_history')
+    .select('id, workspace')
+    .eq('status', 'script_generating')
+    .lt('updated_at', cutoff);
+
+  if (workspace?.trim()) {
+    query = query.eq('workspace', workspace.trim());
+  }
+
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  if (!data?.length) return 0;
+
+  const staleMessage =
+    '생성 시간 초과(6분) — 큐 미처리 또는 LLM 지연. 다시 시도해 주세요.';
+
+  for (const row of data) {
+    await markNarrationScriptFailed(String(row.id), staleMessage);
+    await logOperation({
+      level: 'warn',
+      message: `[narration-script] stuck 정리 — history=${row.id}`,
+      workspace: String(row.workspace ?? ''),
+      metadata: { narration_script_history_id: row.id },
+    });
+  }
+
+  return data.length;
 }

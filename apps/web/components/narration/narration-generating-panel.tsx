@@ -25,12 +25,18 @@ function useElapsedSec(sinceIso: string | null | undefined, active: boolean): nu
 export function NarrationGeneratingPanel({
   topicLabel,
   progress,
+  stopping,
+  onCancel,
 }: {
   topicLabel: string;
   progress: NarrationScriptProgress;
+  stopping?: boolean;
+  onCancel?: () => void;
 }) {
   const elapsedSec = useElapsedSec(progress.sinceAt, true);
   const percent = progress.percent;
+  const queueStuck =
+    (progress.stage === 'queue_start' || percent <= 5) && elapsedSec >= 120;
 
   return (
     <div className="flex min-h-[320px] flex-col items-center justify-center py-8 text-center">
@@ -59,9 +65,26 @@ export function NarrationGeneratingPanel({
         </p>
       ) : null}
 
+      {queueStuck ? (
+        <p className="mt-3 max-w-sm rounded border border-huma-warn/40 bg-huma-warn/10 px-3 py-2 text-[10px] leading-relaxed text-huma-warn">
+          큐 대기가 2분 이상 지속됩니다. i7 서버 워커·Redis 상태를 확인한 뒤, 6분 경과 시 자동으로
+          실패 처리됩니다. 「실패」 탭에서 재시도하세요.
+        </p>
+      ) : null}
+
       <p className="mt-4 max-w-sm px-6 text-[10px] leading-relaxed text-huma-t4">
         Sonnet이 나레이션 대본을 작성합니다. 완료되면 「검토 대기」 탭으로 이동합니다.
       </p>
+      {onCancel ? (
+        <button
+          type="button"
+          className="btn-ghost btn-sm mt-5 border border-huma-warn/40 text-huma-warn hover:bg-huma-warn/10"
+          disabled={stopping}
+          onClick={onCancel}
+        >
+          {stopping ? '중지 중…' : '대본 생성 중지'}
+        </button>
+      ) : null}
     </div>
   );
 }
