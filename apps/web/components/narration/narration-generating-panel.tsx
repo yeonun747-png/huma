@@ -51,16 +51,20 @@ export function NarrationGeneratingPanel({
     (progress.stage === 'queue_start' || progress.percent <= 5) && elapsedSec >= 120;
 
   return (
-    <div className="flex min-h-[320px] flex-col items-center justify-center py-8 text-center">
+    <div className="flex min-h-[480px] flex-col items-center justify-center py-8 text-center">
       <div className="mb-4 w-full max-w-[320px]">
         <div className="mb-1.5 flex justify-between font-mono text-[10px] text-huma-t4">
           <span>진행률</span>
-          <span className="font-semibold text-huma-accent">{percent}%</span>
+          <span className="font-semibold text-huma-acc">{percent}%</span>
         </div>
         <div className="h-2 overflow-hidden rounded-full bg-huma-bg3">
           <div
-            className="h-full rounded-full bg-huma-accent transition-[width] duration-500 ease-out"
-            style={{ width: `${percent}%` }}
+            className="h-full rounded-full bg-huma-acc transition-[width] duration-500 ease-out"
+            style={{ width: `${percent}%`, minWidth: percent > 0 ? 6 : 0 }}
+            role="progressbar"
+            aria-valuenow={percent}
+            aria-valuemin={0}
+            aria-valuemax={100}
           />
         </div>
       </div>
@@ -72,7 +76,7 @@ export function NarrationGeneratingPanel({
       <p className="mt-2 text-[10px] text-huma-t4">「{topicLabel}」</p>
 
       {progress.sinceAt ? (
-        <p className="mt-4 font-mono text-[12px] font-semibold text-huma-accent">
+        <p className="mt-4 font-mono text-[12px] font-semibold text-huma-acc">
           경과 {formatElapsedDurationSec(elapsedSec)}
         </p>
       ) : null}

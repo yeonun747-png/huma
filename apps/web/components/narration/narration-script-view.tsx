@@ -347,7 +347,7 @@ export function NarrationScriptView({ service }: Props) {
         </div>
       </MPanel>
 
-      <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[280px_1fr]">
+      <div className="grid min-h-[720px] flex-1 gap-3 lg:grid-cols-[280px_1fr]">
         <MPanel title="목록" className="m-panel-fill min-h-0">
           <div className="mb-2 flex gap-1">
             {(
@@ -360,14 +360,14 @@ export function NarrationScriptView({ service }: Props) {
               <button
                 key={key}
                 type="button"
-                className={`rounded px-2 py-1 text-[10px] ${activeTab === key ? 'bg-huma-accent/20 text-huma-accent' : 'text-huma-t3'}`}
+                className={`rounded px-2 py-1 text-[10px] ${activeTab === key ? 'bg-huma-acc/20 text-huma-acc' : 'text-huma-t3'}`}
                 onClick={() => setActiveTab(key)}
               >
                 {label} ({tabCounts[key]})
               </button>
             ))}
           </div>
-          <ul className="max-h-[480px] space-y-1 overflow-y-auto">
+          <ul className="max-h-[720px] min-h-[720px] space-y-1 overflow-y-auto">
             {loading ? (
               <li className="py-6 text-center text-[11px] text-huma-t3">불러오는 중…</li>
             ) : filtered.length ? (
@@ -379,7 +379,7 @@ export function NarrationScriptView({ service }: Props) {
                   <li key={item.id}>
                     <button
                       type="button"
-                      className={`w-full rounded border px-2 py-2 text-left ${selected?.id === item.id ? 'border-huma-accent bg-huma-accent/10' : 'border-huma-bdr'}`}
+                      className={`w-full rounded border px-2 py-2 text-left ${selected?.id === item.id ? 'border-huma-acc bg-huma-acc/10' : 'border-huma-bdr'}`}
                       onClick={() => setSelectedId(item.id)}
                     >
                       <div className="truncate text-[11px] font-medium">{item.title || item.topic_label}</div>
@@ -391,12 +391,12 @@ export function NarrationScriptView({ service }: Props) {
                         <div className="mt-1.5">
                           <div className="mb-0.5 flex justify-between font-mono text-[8px] text-huma-t4">
                             <span className="truncate pr-1">{prog.label}</span>
-                            <span className="shrink-0 text-huma-accent">{displayPct}%</span>
+                            <span className="shrink-0 text-huma-acc">{displayPct}%</span>
                           </div>
                           <div className="h-1 overflow-hidden rounded-full bg-huma-bg3">
                             <div
-                              className="h-full rounded-full bg-huma-accent transition-[width] duration-500"
-                              style={{ width: `${displayPct}%` }}
+                              className="h-full rounded-full bg-huma-acc transition-[width] duration-500"
+                              style={{ width: `${displayPct}%`, minWidth: (displayPct ?? 0) > 0 ? 4 : 0 }}
                             />
                           </div>
                         </div>
@@ -421,7 +421,7 @@ export function NarrationScriptView({ service }: Props) {
                 onCancel={() => void handleCancel()}
               />
             ) : (
-              <div className="flex min-h-0 flex-1 flex-col gap-3">
+              <div className="flex flex-col gap-3">
                 <div className="flex flex-wrap gap-2 text-[10px] text-huma-t4">
                   <MTag tone={selected.status === 'script_ready' ? 'ok' : selected.status === 'failed' ? 'err' : 'warn'}>
                     {NARRATION_SCRIPT_STATUS_LABEL[selected.status]}
@@ -440,10 +440,10 @@ export function NarrationScriptView({ service }: Props) {
                     onChange={(e) => setEditTitle(e.target.value)}
                   />
                 </label>
-                <label className="min-h-0 flex flex-1 flex-col text-[11px] text-huma-t3">
+                <label className="block text-[11px] text-huma-t3">
                   나레이션 대본
                   <textarea
-                    className="mt-1 min-h-[280px] flex-1 resize-y rounded border border-huma-bdr bg-huma-bg2 px-2 py-2 font-mono text-[12px] leading-relaxed"
+                    className="mt-1 h-[420px] min-h-[200px] w-full resize-y rounded border border-huma-bdr bg-huma-bg2 px-2 py-2 font-mono text-[12px] leading-relaxed"
                     value={editBody}
                     disabled={selected.status === 'script_generating'}
                     onChange={(e) => setEditBody(e.target.value)}
@@ -469,7 +469,9 @@ export function NarrationScriptView({ service }: Props) {
               </div>
             )
           ) : (
-            <p className="py-12 text-center text-[12px] text-huma-t3">목록에서 대본을 선택하세요</p>
+            <p className="flex min-h-[480px] items-center justify-center text-center text-[12px] text-huma-t3">
+              목록에서 대본을 선택하세요
+            </p>
           )}
         </MPanel>
       </div>
