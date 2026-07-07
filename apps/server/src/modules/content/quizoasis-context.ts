@@ -50,11 +50,15 @@ export type WorkspaceSourceContext = {
   text: string;
   /** 계정관리 캐시 매칭 성공 — SPA URL fetch 생략 */
   cacheHit: boolean;
+  /** fallback 본문용 — 프롬프트 메타 블록 제외 */
+  fallbackExcerpt?: string;
 };
 
 /** 관련 URL → 퀴즈 캐시 컨텍스트 (포스팅 Claude용) */
 export async function buildQuizOasisContextWithPrompt(sourceUrl: string): Promise<WorkspaceSourceContext> {
   const row = await resolveQuizFromUrl(sourceUrl);
   if (!row) return { text: '', cacheHit: false };
-  return { text: formatQuizContextForPosting(row), cacheHit: true };
+  const desc = row.description?.trim();
+  const fallbackExcerpt = desc ? `${row.title.trim()}. ${desc}` : row.title.trim();
+  return { text: formatQuizContextForPosting(row), cacheHit: true, fallbackExcerpt };
 }

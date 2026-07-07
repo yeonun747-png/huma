@@ -1,4 +1,4 @@
-import { generateAllContent, type ContentGenerationInput } from './content-generator.js';
+import { generateAllContent, type ContentGenerationInput, isContentGenerationSkipError } from './content-generator.js';
 import { isPostingSimilaritySkipError } from '../../lib/posting-content-similarity.js';
 import { generateImage } from '../higgsfield/image.js';
 import { selectImageModel } from '../claude/auto-decide.js';
@@ -105,11 +105,16 @@ export async function runContentPreview(input: ContentPreviewInput): Promise<Con
     };
   } catch (err) {
     const skip = isPostingSimilaritySkipError(err);
+    const genSkip = isContentGenerationSkipError(err);
     steps[0] = {
       ...steps[0]!,
       status: 'err',
       ms: Date.now() - claudeStart,
-      detail: skip ? `${err.message} (발행 스킵)` : (err as Error).message,
+      detail: skip
+        ? `${err.message} (발행 스킵)`
+        : genSkip
+          ? `${err.message} (${err.attempts}회 재시도 후 발행 스킵)`
+          : (err as Error).message,
     };
     return { steps, dry_run: true, total_ms: Date.now() - started };
   }

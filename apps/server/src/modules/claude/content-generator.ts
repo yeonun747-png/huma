@@ -6,6 +6,10 @@ import {
   withLongformWritingMandate,
 } from '../../lib/ai-human-writing.js';
 import { formatKstWritingContext, buildKstDaypartWritingGuide } from '../../lib/dashboard-period.js';
+import {
+  stripInternalPostingMarkers,
+  workspaceSeoTitleExtraGuide,
+} from '../../lib/blog-post-sanitize.js';
 import { buildYeonunContextWithPrompt } from '../content/yeonun-context.js';
 import { buildQuizOasisContextWithPrompt } from '../content/quizoasis-context.js';
 import { buildPananaContextWithPrompt } from '../content/panana-context.js';
@@ -22,7 +26,6 @@ import {
 } from '../../lib/blog-post-length.js';
 import {
   normalizeServiceMentionsInPost,
-  resolveWorkspaceServiceMention,
   workspaceServiceMentionPromptGuide,
   workspaceServiceMentionRuleLine,
 } from '../../lib/workspace-service-mention.js';
@@ -44,6 +47,7 @@ import {
 import { postingSlotByWorkspace } from '../../lib/dongle-slots.js';
 import { withPostingSimilarityLock } from '../../lib/posting-similarity-lock.js';
 import { logOperation } from '../../lib/log-emitter.js';
+import { supabase } from '../../middleware/auth.js';
 import {
   isPureKoreanSeoTitle,
   sanitizeKoreanSeoTitle,
@@ -83,6 +87,45 @@ export interface ContentGenerationOutput {
   similarity_regenerations?: number;
 }
 
+/** Claude 제목·본문 생성 재시도 상한 */
+export const MAX_CONTENT_GENERATION_ATTEMPTS = 3;
+
+/** Claude가 제목·본문을 생성하지 못함 — 이번 턴 스킵(워커 정상 완료) */
+export class ContentGenerationSkipError extends Error {
+  readonly code = 'CONTENT_GENERATION_SKIP' as const;
+
+  constructor(
+    message: string,
+    public readonly attempts: number,
+    public readonly reasons: string[],
+  ) {
+    super(message);
+    this.name = 'ContentGenerationSkipError';
+  }
+}
+
+export function isContentGenerationSkipError(err: unknown): err is ContentGenerationSkipError {
+  return err instanceof ContentGenerationSkipError;
+}
+
+/** KST 오늘 Claude 생성 실패로 스킵된 content_full 건수 */
+export async function countTodayGenerationSkipped(accountId: string, sinceIso: string): Promise<number> {
+  const key = accountId.trim();
+  if (!key) return 0;
+
+  const { count, error } = await supabase
+    .from('huma_jobs')
+    .select('*', { count: 'exact', head: true })
+    .eq('account_id', key)
+    .eq('job_type', 'content_full')
+    .eq('status', 'completed')
+    .gte('completed_at', sinceIso)
+    .filter('platform_schedule->>_generation_skipped', 'eq', 'true');
+
+  if (error) throw new Error(`생성 스킵 집계 실패: ${error.message}`);
+  return count ?? 0;
+}
+
 export interface GenerateAllContentOptions {
   /** 포스팅 계정 — 설정 시 과거 발행 대비 유사도 가드 */
   accountId?: string;
@@ -101,7 +144,8 @@ const SYSTEM_PROMPTS: Record<string, string> = {
 ${workspaceServiceMentionRuleLine('yeonun')}`,
   quizoasis: `당신은 퀴즈오아시스 글로벌 심리테스트 플랫폼의 콘텐츠 마케터입니다.
 톤: 재미있고 공유 욕구를 자극하는 가벼운 문체.
-필수: 입력에 [퀴즈오아시스 테스트] 블록(계정관리 퀴즈 캐시)이 있으면 제목·소개·slug를 글 주제로 반영.
+필수: 입력에 [퀴즈오아시스 테스트] 블록(계정관리 퀴즈 캐시)이 있으면 제목·소개·slug를 글 주제로 반영하되, 그 블록·slug·[참조 URL]·[캐시 컨텍스트] 문구를 blog_post에 그대로 복사하지 말 것.
+SEO 제목(seo_title)에는 「퀴즈오아시스」를 32자 이내에서 자연스럽게 1회 포함.
 ${workspaceServiceMentionRuleLine('quizoasis')}`,
   panana: `당신은 파나나(PANANA) AI 캐릭터 콘텐츠 플랫폼의 콘텐츠 마케터입니다.
 톤: 시네마틱하고 감성적인 짧은 문체.
@@ -110,7 +154,7 @@ ${workspaceServiceMentionRuleLine('panana')}`,
 };
 
 function finalizeBlogPost(text: string, workspace: string): string {
-  return normalizeServiceMentionsInPost(text.trim(), workspace);
+  return stripInternalPostingMarkers(normalizeServiceMentionsInPost(text.trim(), workspace));
 }
 
 const SEO_TITLE_MAX = 32;
@@ -202,12 +246,22 @@ function pickSeoTitleHeuristicFallback(
   return finalizeSeoTitleCandidate(picked);
 }
 
+function ensureQuizoasisBrandInSeoTitle(title: string, workspace: string): string {
+  if (workspace !== 'quizoasis') return title;
+  const t = title.trim();
+  if (/퀴즈오아/.test(t)) return t;
+  const prefixed = truncateSeoTitle(`퀴즈오아시스 ${t}`);
+  if (prefixed.length <= SEO_TITLE_MAX) return prefixed;
+  return truncateSeoTitle(`${t.slice(0, 18)} 퀴즈오아시스`);
+}
+
 async function generateSeoTitleOnly(params: {
   operatorTitle: string;
   synopsis?: string;
   urlSummary: string;
   blogExcerpt?: string;
   extraPrompt?: string;
+  workspace: string;
 }): Promise<string | undefined> {
   const synopsisBlock = params.synopsis?.trim()
     ? `[운영자 시놉시스 — 반드시 반영]\n${params.synopsis.trim()}`
@@ -236,6 +290,7 @@ ${similarityBlock}
 - 운영자 제목과 동일·거의 동일하게 쓰지 말 것
 - 과장·특수문자·영문 금지
 - 클릭 유도 자연스러운 한국어
+${workspaceSeoTitleExtraGuide(params.workspace)}
 
 {"seo_title":"..."}`,
   });
@@ -251,31 +306,45 @@ ${similarityBlock}
 }
 
 /** SEO 제목 강제 — 운영자 제목 그대로 사용 금지 */
-export async function ensureSeoTitle(params: {
-  operatorTitle: string;
-  synopsis?: string;
-  urlSummary: string;
-  blogExcerpt?: string;
-  candidate?: string;
-  extraPrompt?: string;
-}): Promise<string> {
+export async function ensureSeoTitle(
+  params: {
+    operatorTitle: string;
+    synopsis?: string;
+    urlSummary: string;
+    blogExcerpt?: string;
+    candidate?: string;
+    extraPrompt?: string;
+    workspace: string;
+  },
+  opts?: { strict?: boolean },
+): Promise<string> {
   const operatorTitle = params.operatorTitle.trim();
+  const finalize = (raw: string) =>
+    finalizeSeoTitleCandidate(ensureQuizoasisBrandInSeoTitle(raw, params.workspace));
+
   if (isAcceptableSeoTitle(params.candidate, operatorTitle)) {
-    return finalizeSeoTitleCandidate(params.candidate!.trim());
+    return finalize(params.candidate!.trim());
   }
 
   if (process.env.ANTHROPIC_API_KEY) {
-    try {
-      const generated = await generateSeoTitleOnly(params);
-      if (isAcceptableSeoTitle(generated, operatorTitle)) {
-        return finalizeSeoTitleCandidate(generated!.trim());
+    const maxAttempts = opts?.strict ? MAX_CONTENT_GENERATION_ATTEMPTS : 1;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const generated = await generateSeoTitleOnly(params);
+        if (isAcceptableSeoTitle(generated, operatorTitle)) {
+          return finalize(generated!.trim());
+        }
+      } catch (err) {
+        console.warn('[content-generator] seo_title 전용 생성 실패:', (err as Error).message);
       }
-    } catch (err) {
-      console.warn('[content-generator] seo_title 전용 생성 실패:', (err as Error).message);
     }
   }
 
-  return finalizeSeoTitleCandidate(forceDistinctSeoTitle(operatorTitle, params.synopsis, params.blogExcerpt));
+  if (opts?.strict) {
+    throw new Error('SEO 제목 생성 실패');
+  }
+
+  return finalize(forceDistinctSeoTitle(operatorTitle, params.synopsis, params.blogExcerpt));
 }
 
 /** 유사도 루프 전용 — forceDistinct 폴백 없이 LLM 재시도만 */
@@ -285,6 +354,7 @@ async function regenerateSeoTitleForSimilarity(params: {
   urlSummary: string;
   blogExcerpt: string;
   extraPrompt: string;
+  workspace: string;
 }): Promise<string> {
   for (let attempt = 1; attempt <= 3; attempt++) {
     const candidate = await generateSeoTitleOnly({
@@ -293,9 +363,12 @@ async function regenerateSeoTitleForSimilarity(params: {
       urlSummary: params.urlSummary,
       blogExcerpt: params.blogExcerpt,
       extraPrompt: params.extraPrompt,
+      workspace: params.workspace,
     });
     if (candidate?.trim() && isAcceptableSeoTitle(candidate, params.operatorTitle)) {
-      return finalizeSeoTitleCandidate(candidate.trim());
+      return finalizeSeoTitleCandidate(
+        ensureQuizoasisBrandInSeoTitle(candidate.trim(), params.workspace),
+      );
     }
   }
   throw new Error('SEO 제목 유사도 재생성 실패');
@@ -338,39 +411,20 @@ export async function fetchAndSummarizeUrl(url: string): Promise<string> {
   return summary ?? rawText.slice(0, 500);
 }
 
-function fallbackContent(
-  input: ContentGenerationInput,
-  urlSummary: string,
+function assertMainContentValid(
+  main: Omit<ContentGenerationOutput, 'hashtags'>,
   lengthRange: BlogPostLengthRange,
-): ContentGenerationOutput {
-  const intro = input.synopsis?.trim() || input.title.trim();
-  const summaryLen = lengthRange.max <= 700 ? 220 : lengthRange.max <= 800 ? 320 : 400;
-  const body = finalizeBlogPost(
-    [
-      intro,
-      '',
-      urlSummary.slice(0, summaryLen),
-      '',
-      `${resolveWorkspaceServiceMention(input.workspace).nameOnly}에서 확인`,
-    ].join('\n'),
-    input.workspace,
-  );
-  const short = `${input.title}. ${(input.synopsis ?? urlSummary).slice(0, 80).trim()}`;
-  const wsTag = input.workspace === 'quizoasis' ? '#심리테스트' : input.workspace === 'panana' ? '#AI캐릭터' : '#사주';
-  return {
-    blog_post: body,
-    seo_title: finalizeSeoTitleCandidate(forceDistinctSeoTitle(input.title, input.synopsis, body)),
-    blog_post_target_chars: lengthRange.tier,
-    blog_post_target_min_chars: lengthRange.min,
-    blog_post_target_max_chars: lengthRange.max,
-    tiktok_caption: short.slice(0, 150),
-    instagram_caption: short.slice(0, 300),
-    threads_text: `${short}\n\n${input.sourceUrl}`,
-    x_text: `${short.slice(0, 220)} ${input.sourceUrl}`.slice(0, 280),
-    image_prompt: `Cinematic vertical 9:16 image about ${input.title}, moody lighting, high detail`,
-    video_prompt: `Cinematic 9:16 vertical video about ${input.title}, smooth camera motion`,
-    hashtags: sanitizeHashtags([wsTag.replace(/^#/, ''), 'AI', '콘텐츠'], input.workspace),
-  };
+): void {
+  const body = main.blog_post?.trim() ?? '';
+  if (!body) throw new Error('블로그 본문 생성 실패');
+  const { min, max } = lengthRange;
+  const len = body.length;
+  if (len < min * 0.85 || len > max * 1.25) {
+    throw new Error(`블로그 본문 분량 부적합 (${len}자, 목표 ${min}~${max}자)`);
+  }
+  if (stripInternalPostingMarkers(body) !== body) {
+    throw new Error('블로그 본문에 내부 메타 문구 포함');
+  }
 }
 
 async function generateMainContent(
@@ -406,6 +460,10 @@ ${daypartGuide}
 
   const serviceMentionGuide = workspaceServiceMentionPromptGuide(input.workspace);
 
+  const seoTitleGuide = workspaceSeoTitleExtraGuide(input.workspace);
+  const antiLeakGuide =
+    '\n[출력 금지] blog_post에 [참조 URL], [퀴즈오아시스 테스트], slug:, [캐시 컨텍스트], [URL fetch] 등 입력 메타·지시문을 그대로 복사하지 말 것. 독자용 자연스러운 글만.';
+
   const userParts: Array<Record<string, unknown>> = [
     {
       type: 'text',
@@ -413,12 +471,14 @@ ${daypartGuide}
 
 ${urlSummary}
 ${datetimeGuide}
+${antiLeakGuide}
 
 제목: ${input.title}${synopsisGuide}${personaGuide}${typeGuide}
 ${lengthGuide}
 
 [서비스 언급 규칙]
 ${serviceMentionGuide}
+${seoTitleGuide ? `\n[SEO 제목]\n${seoTitleGuide}` : ''}
 
 순수 JSON만 (코드블록 없이):
 {
@@ -528,6 +588,7 @@ ${params.blogExcerpt.slice(0, 700)}${urlBlock}
 
 async function resolveSourceContext(input: ContentGenerationInput): Promise<string> {
   const url = input.sourceUrl?.trim();
+
   if (!url) {
     return '[참조 URL 없음] 제목만으로는 부족 — 운영자 source_url 확인 필요';
   }
@@ -581,84 +642,64 @@ async function generateAllContentOnce(
   input: ContentGenerationInput,
   options?: Pick<GenerateAllContentOptions, 'mainExtraPrompt'>,
 ): Promise<ContentGenerationOutput> {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    throw new ContentGenerationSkipError('ANTHROPIC_API_KEY 없음 — Claude 생성 불가', 0, ['ANTHROPIC_API_KEY 없음']);
+  }
+
   const urlSummary = await resolveSourceContext(input);
   const lengthRange = pickBlogPostLengthRange();
+  const reasons: string[] = [];
 
   const finalize = async (
     partial: Omit<ContentGenerationOutput, 'hashtags' | 'seo_title'> & { seo_title?: string },
     hashtags: string[],
   ): Promise<ContentGenerationOutput> => {
-    const seo_title = await ensureSeoTitle({
-      operatorTitle: input.title,
-      synopsis: input.synopsis,
-      urlSummary,
-      blogExcerpt: partial.blog_post,
-      candidate: partial.seo_title,
-    });
+    const seo_title = await ensureSeoTitle(
+      {
+        operatorTitle: input.title,
+        synopsis: input.synopsis,
+        urlSummary,
+        blogExcerpt: partial.blog_post,
+        candidate: partial.seo_title,
+        workspace: input.workspace,
+      },
+      { strict: true },
+    );
     return { ...partial, seo_title, hashtags };
   };
 
-  try {
-    const mainContent = await generateMainContent(
-      input,
-      urlSummary,
-      lengthRange,
-      options?.mainExtraPrompt,
-    );
-    const subContent = await generateSubContent({
-      title: input.title,
-      synopsis: input.synopsis,
-      blogExcerpt: mainContent.blog_post,
-      workspace: input.workspace,
-      urlSummary,
-    });
-    return finalize(mainContent, subContent.hashtags);
-  } catch (mainErr) {
-    if (!process.env.ANTHROPIC_API_KEY) {
-      return fallbackContent(input, urlSummary, lengthRange);
-    }
+  for (let attempt = 1; attempt <= MAX_CONTENT_GENERATION_ATTEMPTS; attempt++) {
     try {
-      const retryRaw = await askClaudeWithModel({
-        model: (await getSubClaudeModel()) || HAIKU_MODEL_FALLBACK,
-        max_tokens: 2000,
-        system: withHumanWritingSystem(SYSTEM_PROMPTS[input.workspace] ?? SYSTEM_PROMPTS.yeonun),
-        prompt: withLongformWritingMandate(
-          `${options?.mainExtraPrompt ? `${options.mainExtraPrompt}\n\n` : ''}제목: ${input.title}
-${input.synopsis?.trim() ? `[운영자 시놉시스 - 반드시 참고]\n"${input.synopsis.trim()}"` : '[시놉시스 없음 — URL 요약 반영]'}
-URL 요약: ${urlSummary.slice(0, 500)}
-${blogPostLengthPromptGuide(lengthRange)}
-
-[서비스 언급 규칙]
-${workspaceServiceMentionPromptGuide(input.workspace)}
-
-네이버 블로그용 ${lengthRange.min}~${lengthRange.max}자 완결 본문과 SEO 제목·SNS 캡션을 JSON으로 (tts_script 생략, Kling 내장 오디오):
-{"seo_title":"한글·숫자·공백만 32자 이내. 핵심 키워드 앞배치, 운영자 제목과 다르게","blog_post":"...","tiktok_caption":"...","instagram_caption":"...","threads_text":"...","x_text":"...","image_prompt":"...","video_prompt":"..."}`,
-        ),
+      const mainContent = await generateMainContent(
+        input,
+        urlSummary,
+        lengthRange,
+        options?.mainExtraPrompt,
+      );
+      assertMainContentValid(mainContent, lengthRange);
+      const subContent = await generateSubContent({
+        title: input.title,
+        synopsis: input.synopsis,
+        blogExcerpt: mainContent.blog_post,
+        workspace: input.workspace,
+        urlSummary,
       });
-      const jsonMatch = retryRaw?.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]) as Omit<ContentGenerationOutput, 'hashtags'>;
-        const sub = await generateSubContent({
-          title: input.title,
-          synopsis: input.synopsis,
-          blogExcerpt: parsed.blog_post,
-          workspace: input.workspace,
-          urlSummary,
-        });
-        if (parsed.blog_post) {
-          parsed.blog_post = finalizeBlogPost(parsed.blog_post, input.workspace);
-          parsed.blog_post_target_chars = lengthRange.tier;
-          parsed.blog_post_target_min_chars = lengthRange.min;
-          parsed.blog_post_target_max_chars = lengthRange.max;
-          return finalize(parsed, sub.hashtags);
-        }
-      }
-    } catch {
-      /* fall through */
+      return await finalize(mainContent, subContent.hashtags);
+    } catch (err) {
+      const msg = (err as Error).message;
+      reasons.push(`시도 ${attempt}: ${msg}`);
+      console.warn(
+        `[content-generator] 제목·본문 생성 실패 (${attempt}/${MAX_CONTENT_GENERATION_ATTEMPTS}):`,
+        msg,
+      );
     }
-    console.warn('[content-generator] Sonnet failed, using fallback:', (mainErr as Error).message);
-    return fallbackContent(input, urlSummary, lengthRange);
   }
+
+  throw new ContentGenerationSkipError(
+    `Claude 제목·본문 생성 ${MAX_CONTENT_GENERATION_ATTEMPTS}회 실패 — 이번 턴 스킵`,
+    MAX_CONTENT_GENERATION_ATTEMPTS,
+    reasons,
+  );
 }
 
 /** 기획서 7-0 generateAllContent */
@@ -741,20 +782,24 @@ async function generateAllContentWithSimilarity(
 
       result = {
         ...result,
-        seo_title: useHeuristic
-          ? pickSeoTitleHeuristicFallback(
-              input.title,
-              input.synopsis,
-              result.blog_post,
-              titleRegenerations,
-            )
-          : await regenerateSeoTitleForSimilarity({
-              operatorTitle: input.title,
-              synopsis: input.synopsis,
-              urlSummary,
-              blogExcerpt: result.blog_post,
-              extraPrompt: buildPostingTitleSimilarityFeedback(titleCheck),
-            }),
+        seo_title: ensureQuizoasisBrandInSeoTitle(
+          useHeuristic
+            ? pickSeoTitleHeuristicFallback(
+                input.title,
+                input.synopsis,
+                result.blog_post,
+                titleRegenerations,
+              )
+            : await regenerateSeoTitleForSimilarity({
+                operatorTitle: input.title,
+                synopsis: input.synopsis,
+                urlSummary,
+                blogExcerpt: result.blog_post,
+                extraPrompt: buildPostingTitleSimilarityFeedback(titleCheck),
+                workspace: input.workspace,
+              }),
+          input.workspace,
+        ),
       };
     }
 

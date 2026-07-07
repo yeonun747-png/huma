@@ -11,6 +11,7 @@ import {
   kstTodayStartIso,
 } from './posting-daily-status.js';
 import { countTodaySimilaritySkipped } from './posting-content-similarity.js';
+import { countTodayGenerationSkipped } from '../modules/claude/content-generator.js';
 import { formatKstDateKey, getDailyPostingTarget } from './posting-daily-target.js';
 import {
   computeDynamicPublishIntervalHours,
@@ -71,12 +72,13 @@ async function ensureActivePostingWindow(candidate: Date, activeHours: number[])
 /** 당일 자동발행 소비량 — 완료·스킵·파이프라인 */
 export async function countAutoPublishConsumedToday(accountId: string): Promise<number> {
   const since = kstTodayStartIso();
-  const [completed, skipped, inFlight] = await Promise.all([
+  const [completed, skipped, generationSkipped, inFlight] = await Promise.all([
     countTodayPostBlogCompleted(accountId),
     countTodaySimilaritySkipped(accountId, since),
+    countTodayGenerationSkipped(accountId, since),
     countInFlightPostingPipeline(accountId),
   ]);
-  return completed + skipped + inFlight;
+  return completed + skipped + generationSkipped + inFlight;
 }
 
 export interface PlanAutoPublishTriggerInput {

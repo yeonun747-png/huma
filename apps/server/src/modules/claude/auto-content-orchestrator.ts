@@ -223,6 +223,35 @@ export async function executeContentFull(humaJobId: string) {
     };
   }
 
+  if (result.generationSkipped) {
+    const prevPs = (job.platform_schedule as Record<string, unknown> | null) ?? {};
+    await supabase
+      .from('huma_jobs')
+      .update({
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+        error_message: result.skipReason ?? 'Claude 생성 실패 — 발행 스킵',
+        platform_schedule: {
+          ...prevPs,
+          _generation_skipped: true,
+          _generation_attempts: result.generationAttempts ?? 3,
+          _generation_skipped_at: new Date().toISOString(),
+        },
+      })
+      .eq('id', humaJobId);
+
+    if (isAutoPublishJob(job.platform_schedule) && job.account_id) {
+      await replanAutoPublishSlot(job.account_id as string, job.workspace as string).catch(() => undefined);
+    }
+
+    scheduleWorkspaceQueueStatsRefresh(job.workspace as string);
+    return {
+      jobs_created: 0,
+      generation_skipped: true,
+      skip_reason: result.skipReason,
+    };
+  }
+
   const { data: refreshed } = await supabase.from('huma_jobs').select('*').eq('id', humaJobId).single();
 
   await supabase

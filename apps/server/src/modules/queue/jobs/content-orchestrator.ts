@@ -3,7 +3,7 @@ import { normalizeBlogLinkUrl } from '../../../lib/blog-link.js';
 import { type PostingAccountPick, resolvePostingAccountForOrchestrator } from '../../../lib/posting-accounts.js';
 import { supabase } from '../../../middleware/auth.js';
 import { enqueueJob } from '../producer.js';
-import { generateAllContent, ensureSeoTitle, resolvePostingTitle, type ContentGenerationOutput } from '../../claude/content-generator.js';
+import { generateAllContent, ensureSeoTitle, resolvePostingTitle, type ContentGenerationOutput, isContentGenerationSkipError } from '../../claude/content-generator.js';
 import { fetchAndSummarizeUrl } from '../../claude/content-generator.js';
 import {
   autoDecideWithCredits,
@@ -68,14 +68,38 @@ export interface ContentOrchestratorResult {
   generated?: ContentGenerationOutput;
   image_url?: string;
   similaritySkipped?: true;
+  generationSkipped?: true;
   skipReason?: string;
   skipKind?: PostingSimilaritySkipKind;
+  generationAttempts?: number;
 }
 
 function skipKindLabel(kind: PostingSimilaritySkipKind): string {
   if (kind === 'title') return 'SEO 제목 유사도';
   if (kind === 'corpus_load') return '유사도 코퍼스 로드 실패';
   return '본문 유사도';
+}
+
+async function notifyContentGenerationSkip(params: {
+  workspace: string;
+  accountLabel?: string | null;
+  operatorTitle: string;
+  attempts: number;
+  reasons: string[];
+}): Promise<void> {
+  const accountLine = params.accountLabel?.trim() ? `계정: ${params.accountLabel.trim()}\n` : '';
+  const detail = params.reasons.slice(-2).join('\n') || '원인 미상';
+
+  await notifyTelegram(
+    `⏭️ 포스팅 발행 스킵 (Claude 생성 실패)\n` +
+      `워크스페이스: ${params.workspace}\n` +
+      accountLine +
+      `주제: ${params.operatorTitle.trim()}\n` +
+      `재시도 ${params.attempts}회 후 중단\n` +
+      `${detail}\n` +
+      `다음 스케줄 대기`,
+    params.workspace,
+  );
 }
 
 async function notifyPostingSimilaritySkip(params: {
@@ -589,6 +613,41 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput): P
       { accountId: postingAccount?.id ?? undefined },
     );
   } catch (err) {
+    if (isContentGenerationSkipError(err)) {
+      previewSteps[0] = {
+        ...previewSteps[0]!,
+        status: 'err',
+        ms: Date.now() - claudeStart,
+        detail: `Claude 생성 실패 — ${err.attempts}회 재시도 후 발행 스킵`,
+      };
+      if (input.parentJobId) {
+        const patch = dryRun ? patchJobPreviewProgress : patchJobGenerationProgress;
+        await patch(input.parentJobId, previewSteps, {
+          generation_skipped: true,
+          generation_attempts: err.attempts,
+          generation_skip_reasons: err.reasons,
+        });
+      }
+
+      if (!dryRun) {
+        await notifyContentGenerationSkip({
+          workspace: input.workspace,
+          accountLabel: postingAccount?.label,
+          operatorTitle: input.title,
+          attempts: err.attempts,
+          reasons: err.reasons,
+        });
+      }
+
+      return {
+        jobsCreated: 0,
+        primaryJobId: null,
+        generationSkipped: true,
+        skipReason: err.message,
+        generationAttempts: err.attempts,
+      };
+    }
+
     if (!isPostingSimilaritySkipError(err)) throw err;
 
     const kindLabel = skipKindLabel(err.skipKind);
