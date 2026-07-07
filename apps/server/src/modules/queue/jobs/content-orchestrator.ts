@@ -37,6 +37,7 @@ import {
 import { postingSlotByWorkspace } from '../../../lib/dongle-slots.js';
 import { notifyTelegram } from '../../watcher/telegram.js';
 import { scheduleWorkspaceQueueStatsRefresh } from '../../../lib/workspace-queue-stats.js';
+import { logOperation } from '../../../lib/log-emitter.js';
 
 export type ContentType = 'A' | 'B';
 
@@ -765,24 +766,45 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput): P
     const imagenStart = Date.now();
     const pipelineModels = await getPipelineModelSettings(input.workspace);
     imageModel = pipelineModels.imageModel ?? 'auto';
-    imagenUrl = await generateImage({
-      prompt: generated.image_prompt,
-      model: imageModel as ImageModel,
-    });
-    blogImageUrls = [imagenUrl];
-
-    previewSteps[1] = {
-      ...previewSteps[1]!,
-      status: 'ok',
-      ms: Date.now() - imagenStart,
-      detail: imagenUrl,
-    };
-
-    if (input.parentJobId && !dryRun) {
-      await patchJobGenerationProgress(input.parentJobId, previewSteps, {
-        image_model: imageModel,
-        image_url: imagenUrl,
+    try {
+      imagenUrl = await generateImage({
+        prompt: generated.image_prompt,
+        model: imageModel as ImageModel,
       });
+      blogImageUrls = [imagenUrl];
+      previewSteps[1] = {
+        ...previewSteps[1]!,
+        status: 'ok',
+        ms: Date.now() - imagenStart,
+        detail: imagenUrl,
+      };
+      if (input.parentJobId && !dryRun) {
+        await patchJobGenerationProgress(input.parentJobId, previewSteps, {
+          image_model: imageModel,
+          image_url: imagenUrl,
+        });
+      }
+    } catch (err) {
+      const imagenErr = (err as Error).message;
+      blogImageUrls = [];
+      previewSteps[1] = {
+        ...previewSteps[1]!,
+        status: 'err',
+        ms: Date.now() - imagenStart,
+        detail: `${imagenErr} — 이미지 없이 발행 진행`,
+      };
+      await logOperation({
+        level: 'warn',
+        message: `[content-orchestrator] Imagen 생성 실패 — 이미지 없이 발행: ${imagenErr.slice(0, 240)}`,
+        workspace: input.workspace,
+      });
+      if (input.parentJobId && !dryRun) {
+        await patchJobGenerationProgress(input.parentJobId, previewSteps, {
+          image_model: imageModel,
+          imagen_skipped: true,
+          imagen_skip_reason: imagenErr,
+        });
+      }
     }
   }
 
@@ -918,8 +940,8 @@ export async function promoteDryRunToPublish(parentJobId: string) {
     : [];
   const previewUrl = preview?.image_url as string | undefined;
   const blogImageUrls = uploaded.length ? uploaded : previewUrl ? [previewUrl] : [];
-  if (!job.content || blogImageUrls.length === 0) {
-    throw new Error('본문 또는 이미지가 없습니다');
+  if (!job.content) {
+    throw new Error('본문이 없습니다');
   }
 
   const generated = resolvePreviewGenerated(job, preview);
