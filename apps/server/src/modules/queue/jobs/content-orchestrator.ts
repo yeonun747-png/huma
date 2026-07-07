@@ -1,3 +1,4 @@
+import { rollQuizoasisBrandInSeoTitle } from '../../../lib/blog-post-sanitize.js';
 import { enqueueHumaJob, getScheduleDelay, type JobRecord } from '../../../lib/job-scheduler.js';
 import { normalizeBlogLinkUrl } from '../../../lib/blog-link.js';
 import { type PostingAccountPick, resolvePostingAccountForOrchestrator } from '../../../lib/posting-accounts.js';
@@ -599,6 +600,8 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput): P
   const hasUploadedImages = uploadedImages.length > 0;
 
   const claudeStart = Date.now();
+  const quizoasisBrandInSeoTitle =
+    input.workspace === 'quizoasis' ? rollQuizoasisBrandInSeoTitle() : false;
   let generated: ContentGenerationOutput;
   try {
     generated = await generateAllContent(
@@ -610,7 +613,7 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput): P
         content_type: resolvedType,
         blogWritingPersona,
       },
-      { accountId: postingAccount?.id ?? undefined },
+      { accountId: postingAccount?.id ?? undefined, quizoasisBrandInSeoTitle },
     );
   } catch (err) {
     if (isContentGenerationSkipError(err)) {
@@ -727,6 +730,7 @@ export async function runContentOrchestrator(input: ContentOrchestratorInput): P
       blog_post_length: generated.blog_post.length,
       similarity_score: generated.similarity_score,
       similarity_regenerations: generated.similarity_regenerations,
+      ...(input.workspace === 'quizoasis' && { quizoasis_brand_in_seo_title: quizoasisBrandInSeoTitle }),
     });
   }
   if (dryRun && input.parentJobId) {
@@ -928,6 +932,11 @@ export async function promoteDryRunToPublish(parentJobId: string) {
     urlSummary,
     blogExcerpt: generated.blog_post,
     candidate: generated.seo_title,
+    workspace: String(job.workspace ?? ''),
+    quizoasisBrandInSeoTitle:
+      job.workspace === 'quizoasis'
+        ? ((preview?.quizoasis_brand_in_seo_title as boolean | undefined) ?? rollQuizoasisBrandInSeoTitle())
+        : false,
   });
   const generatedWithSeo = { ...generated, seo_title };
   if (postingAccount?.id) {

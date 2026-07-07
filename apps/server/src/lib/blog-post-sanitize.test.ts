@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { stripInternalPostingMarkers } from './blog-post-sanitize.js';
+import {
+  QUIZOASIS_SEO_BRAND_PROBABILITY,
+  rollQuizoasisBrandInSeoTitle,
+  stripInternalPostingMarkers,
+  workspaceSeoTitleExtraGuide,
+} from './blog-post-sanitize.js';
 
 describe('stripInternalPostingMarkers', () => {
   it('removes quiz cache prompt blocks from blog body', () => {
@@ -18,5 +23,22 @@ slug: love-language-test
     expect(stripInternalPostingMarkers(raw)).toBe(
       '요즘 사랑의 언어 테스트 궁금해서 퀴즈오아시스에서 해봤어요.',
     );
+  });
+});
+
+describe('rollQuizoasisBrandInSeoTitle', () => {
+  it('includes brand at configured probability threshold', () => {
+    expect(rollQuizoasisBrandInSeoTitle(() => 0)).toBe(true);
+    expect(rollQuizoasisBrandInSeoTitle(() => QUIZOASIS_SEO_BRAND_PROBABILITY - 0.001)).toBe(true);
+    expect(rollQuizoasisBrandInSeoTitle(() => QUIZOASIS_SEO_BRAND_PROBABILITY)).toBe(false);
+    expect(rollQuizoasisBrandInSeoTitle(() => 0.99)).toBe(false);
+  });
+});
+
+describe('workspaceSeoTitleExtraGuide', () => {
+  it('guides brand inclusion only when rolled true', () => {
+    expect(workspaceSeoTitleExtraGuide('quizoasis', true)).toContain('퀴즈오아시스');
+    expect(workspaceSeoTitleExtraGuide('quizoasis', false)).toContain('넣지 말 것');
+    expect(workspaceSeoTitleExtraGuide('yeonun', true)).toBe('');
   });
 });

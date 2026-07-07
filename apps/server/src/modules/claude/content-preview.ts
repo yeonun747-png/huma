@@ -1,3 +1,4 @@
+import { rollQuizoasisBrandInSeoTitle } from '../../lib/blog-post-sanitize.js';
 import { generateAllContent, type ContentGenerationInput, isContentGenerationSkipError } from './content-generator.js';
 import { isPostingSimilaritySkipError } from '../../lib/posting-content-similarity.js';
 import { generateImage } from '../higgsfield/image.js';
@@ -93,8 +94,10 @@ export async function runContentPreview(input: ContentPreviewInput): Promise<Con
   let generated: Awaited<ReturnType<typeof generateAllContent>> | undefined;
   const claudeStart = Date.now();
   steps[0]!.status = 'running';
+  const quizoasisBrandInSeoTitle =
+    input.workspace === 'quizoasis' ? rollQuizoasisBrandInSeoTitle() : false;
   try {
-    generated = await generateAllContent(genInput, { accountId });
+    generated = await generateAllContent(genInput, { accountId, quizoasisBrandInSeoTitle });
     steps[0] = {
       ...steps[0]!,
       status: 'ok',

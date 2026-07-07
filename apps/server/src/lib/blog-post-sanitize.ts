@@ -44,9 +44,18 @@ export function stripInternalPostingMarkers(text: string): string {
     .trim();
 }
 
-export function workspaceSeoTitleExtraGuide(workspace: string): string {
-  if (workspace === 'quizoasis') {
+/** 퀴즈오아시스 SEO 제목에 브랜드 키워드 포함 확률 */
+export const QUIZOASIS_SEO_BRAND_PROBABILITY = 0.8;
+
+/** 퀴즈오아시스 SEO 제목에 「퀴즈오아시스」 포함 여부 — 생성 1회당 1번만 결정 */
+export function rollQuizoasisBrandInSeoTitle(rng: () => number = Math.random): boolean {
+  return rng() < QUIZOASIS_SEO_BRAND_PROBABILITY;
+}
+
+export function workspaceSeoTitleExtraGuide(workspace: string, includeQuizoasisBrand?: boolean): string {
+  if (workspace !== 'quizoasis') return '';
+  if (includeQuizoasisBrand) {
     return '- SEO 제목에 「퀴즈오아시스」(또는 공간 부족 시 「퀴즈오아」)를 자연스럽게 1회 포함. 예: "사랑의 언어 테스트 퀴즈오아시스", "퀴즈오아시스 연애유형 진단"';
   }
-  return '';
+  return '- SEO 제목에 「퀴즈오아시스」「퀴즈오아」 브랜드명은 넣지 말 것 — 테스트·주제 키워드 중심으로 작성';
 }

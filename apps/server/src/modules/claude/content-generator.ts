@@ -7,6 +7,7 @@ import {
 } from '../../lib/ai-human-writing.js';
 import { formatKstWritingContext, buildKstDaypartWritingGuide } from '../../lib/dashboard-period.js';
 import {
+  rollQuizoasisBrandInSeoTitle,
   stripInternalPostingMarkers,
   workspaceSeoTitleExtraGuide,
 } from '../../lib/blog-post-sanitize.js';
@@ -131,6 +132,8 @@ export interface GenerateAllContentOptions {
   accountId?: string;
   /** Claude main 재생성 시 추가 지시 */
   mainExtraPrompt?: string;
+  /** 퀴즈오아시스 SEO 제목에 브랜드 포함 — 미설정 시 80% 확률로 결정 */
+  quizoasisBrandInSeoTitle?: boolean;
 }
 
 const SONNET_MODEL_FALLBACK = 'claude-sonnet-4-6';
@@ -145,7 +148,7 @@ ${workspaceServiceMentionRuleLine('yeonun')}`,
   quizoasis: `당신은 퀴즈오아시스 글로벌 심리테스트 플랫폼의 콘텐츠 마케터입니다.
 톤: 재미있고 공유 욕구를 자극하는 가벼운 문체.
 필수: 입력에 [퀴즈오아시스 테스트] 블록(계정관리 퀴즈 캐시)이 있으면 제목·소개·slug를 글 주제로 반영하되, 그 블록·slug·[참조 URL]·[캐시 컨텍스트] 문구를 blog_post에 그대로 복사하지 말 것.
-SEO 제목(seo_title)에는 「퀴즈오아시스」를 32자 이내에서 자연스럽게 1회 포함.
+SEO 제목(seo_title)은 [SEO 제목] 지침을 따를 것.
 ${workspaceServiceMentionRuleLine('quizoasis')}`,
   panana: `당신은 파나나(PANANA) AI 캐릭터 콘텐츠 플랫폼의 콘텐츠 마케터입니다.
 톤: 시네마틱하고 감성적인 짧은 문체.
@@ -246,8 +249,12 @@ function pickSeoTitleHeuristicFallback(
   return finalizeSeoTitleCandidate(picked);
 }
 
-function ensureQuizoasisBrandInSeoTitle(title: string, workspace: string): string {
-  if (workspace !== 'quizoasis') return title;
+function applyQuizoasisBrandInSeoTitle(
+  title: string,
+  workspace: string,
+  includeBrand?: boolean,
+): string {
+  if (workspace !== 'quizoasis' || !includeBrand) return title;
   const t = title.trim();
   if (/퀴즈오아/.test(t)) return t;
   const prefixed = truncateSeoTitle(`퀴즈오아시스 ${t}`);
@@ -262,6 +269,7 @@ async function generateSeoTitleOnly(params: {
   blogExcerpt?: string;
   extraPrompt?: string;
   workspace: string;
+  quizoasisBrandInSeoTitle?: boolean;
 }): Promise<string | undefined> {
   const synopsisBlock = params.synopsis?.trim()
     ? `[운영자 시놉시스 — 반드시 반영]\n${params.synopsis.trim()}`
@@ -290,7 +298,7 @@ ${similarityBlock}
 - 운영자 제목과 동일·거의 동일하게 쓰지 말 것
 - 과장·특수문자·영문 금지
 - 클릭 유도 자연스러운 한국어
-${workspaceSeoTitleExtraGuide(params.workspace)}
+${workspaceSeoTitleExtraGuide(params.workspace, params.quizoasisBrandInSeoTitle)}
 
 {"seo_title":"..."}`,
   });
@@ -315,12 +323,15 @@ export async function ensureSeoTitle(
     candidate?: string;
     extraPrompt?: string;
     workspace: string;
+    quizoasisBrandInSeoTitle?: boolean;
   },
   opts?: { strict?: boolean },
 ): Promise<string> {
   const operatorTitle = params.operatorTitle.trim();
   const finalize = (raw: string) =>
-    finalizeSeoTitleCandidate(ensureQuizoasisBrandInSeoTitle(raw, params.workspace));
+    finalizeSeoTitleCandidate(
+      applyQuizoasisBrandInSeoTitle(raw, params.workspace, params.quizoasisBrandInSeoTitle),
+    );
 
   if (isAcceptableSeoTitle(params.candidate, operatorTitle)) {
     return finalize(params.candidate!.trim());
@@ -355,6 +366,7 @@ async function regenerateSeoTitleForSimilarity(params: {
   blogExcerpt: string;
   extraPrompt: string;
   workspace: string;
+  quizoasisBrandInSeoTitle?: boolean;
 }): Promise<string> {
   for (let attempt = 1; attempt <= 3; attempt++) {
     const candidate = await generateSeoTitleOnly({
@@ -364,10 +376,11 @@ async function regenerateSeoTitleForSimilarity(params: {
       blogExcerpt: params.blogExcerpt,
       extraPrompt: params.extraPrompt,
       workspace: params.workspace,
+      quizoasisBrandInSeoTitle: params.quizoasisBrandInSeoTitle,
     });
     if (candidate?.trim() && isAcceptableSeoTitle(candidate, params.operatorTitle)) {
       return finalizeSeoTitleCandidate(
-        ensureQuizoasisBrandInSeoTitle(candidate.trim(), params.workspace),
+        applyQuizoasisBrandInSeoTitle(candidate.trim(), params.workspace, params.quizoasisBrandInSeoTitle),
       );
     }
   }
@@ -432,6 +445,7 @@ async function generateMainContent(
   urlSummary: string,
   lengthRange: BlogPostLengthRange,
   mainExtraPrompt?: string,
+  quizoasisBrandInSeoTitle?: boolean,
 ): Promise<Omit<ContentGenerationOutput, 'hashtags'>> {
   const lengthGuide = blogPostLengthPromptGuide(lengthRange);
   const { min, max } = lengthRange;
@@ -460,7 +474,7 @@ ${daypartGuide}
 
   const serviceMentionGuide = workspaceServiceMentionPromptGuide(input.workspace);
 
-  const seoTitleGuide = workspaceSeoTitleExtraGuide(input.workspace);
+  const seoTitleGuide = workspaceSeoTitleExtraGuide(input.workspace, quizoasisBrandInSeoTitle);
   const antiLeakGuide =
     '\n[출력 금지] blog_post에 [참조 URL], [퀴즈오아시스 테스트], slug:, [캐시 컨텍스트], [URL fetch] 등 입력 메타·지시문을 그대로 복사하지 말 것. 독자용 자연스러운 글만.';
 
@@ -640,7 +654,7 @@ async function resolveSourceContext(input: ContentGenerationInput): Promise<stri
 
 async function generateAllContentOnce(
   input: ContentGenerationInput,
-  options?: Pick<GenerateAllContentOptions, 'mainExtraPrompt'>,
+  options?: GenerateAllContentOptions,
 ): Promise<ContentGenerationOutput> {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new ContentGenerationSkipError('ANTHROPIC_API_KEY 없음 — Claude 생성 불가', 0, ['ANTHROPIC_API_KEY 없음']);
@@ -662,6 +676,7 @@ async function generateAllContentOnce(
         blogExcerpt: partial.blog_post,
         candidate: partial.seo_title,
         workspace: input.workspace,
+        quizoasisBrandInSeoTitle: options?.quizoasisBrandInSeoTitle,
       },
       { strict: true },
     );
@@ -675,6 +690,7 @@ async function generateAllContentOnce(
         urlSummary,
         lengthRange,
         options?.mainExtraPrompt,
+        options?.quizoasisBrandInSeoTitle,
       );
       assertMainContentValid(mainContent, lengthRange);
       const subContent = await generateSubContent({
@@ -707,19 +723,27 @@ export async function generateAllContent(
   input: ContentGenerationInput,
   options?: GenerateAllContentOptions,
 ): Promise<ContentGenerationOutput> {
+  const genOptions: GenerateAllContentOptions = {
+    ...options,
+    quizoasisBrandInSeoTitle:
+      input.workspace !== 'quizoasis'
+        ? false
+        : (options?.quizoasisBrandInSeoTitle ?? rollQuizoasisBrandInSeoTitle()),
+  };
+
   const requiresSimilarity = Boolean(postingSlotByWorkspace(input.workspace));
-  const accountId = options?.accountId?.trim();
+  const accountId = genOptions.accountId?.trim();
 
   if (requiresSimilarity && !accountId) {
     throw new Error('포스팅 계정 ID가 없어 유사도 검사를 진행할 수 없습니다');
   }
 
   if (!accountId) {
-    return generateAllContentOnce(input, options);
+    return generateAllContentOnce(input, genOptions);
   }
 
   return withPostingSimilarityLock(accountId, () =>
-    generateAllContentWithSimilarity(input, options, accountId),
+    generateAllContentWithSimilarity(input, genOptions, accountId),
   );
 }
 
@@ -753,7 +777,7 @@ async function generateAllContentWithSimilarity(
   let mainExtraPrompt = options?.mainExtraPrompt;
   let bodyRegenerations = 0;
   let titleRegenerations = 0;
-  let result = await generateAllContentOnce(input, { mainExtraPrompt });
+  let result = await generateAllContentOnce(input, options);
 
   while (true) {
     while (isPostingTitleSimilarityTooHigh(maxPostingTitleSimilarity(result.seo_title, corpus.allTitleEmbeddings))) {
@@ -782,7 +806,7 @@ async function generateAllContentWithSimilarity(
 
       result = {
         ...result,
-        seo_title: ensureQuizoasisBrandInSeoTitle(
+        seo_title: applyQuizoasisBrandInSeoTitle(
           useHeuristic
             ? pickSeoTitleHeuristicFallback(
                 input.title,
@@ -797,8 +821,10 @@ async function generateAllContentWithSimilarity(
                 blogExcerpt: result.blog_post,
                 extraPrompt: buildPostingTitleSimilarityFeedback(titleCheck),
                 workspace: input.workspace,
+                quizoasisBrandInSeoTitle: options?.quizoasisBrandInSeoTitle,
               }),
           input.workspace,
+          options?.quizoasisBrandInSeoTitle,
         ),
       };
     }
