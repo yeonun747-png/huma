@@ -3,6 +3,8 @@ export type NarrationScriptWorkspace = 'yeonun' | 'fortune82';
 
 export type NarrationFormatType = 'full_cover' | 'ranked';
 
+export type NarrationPeriodType = 'daily' | 'weekly' | 'monthly';
+
 export type NarrationAxisType = 'zodiac' | 'constellation' | 'generation';
 
 export type NarrationScriptStatus = 'script_generating' | 'script_ready' | 'failed';
@@ -11,6 +13,7 @@ export interface HumaNarrationScriptHistory {
   id: string;
   workspace: NarrationScriptWorkspace;
   format_type: NarrationFormatType;
+  period_type?: NarrationPeriodType;
   axis_type: NarrationAxisType;
   topic_key: string;
   topic_label: string;
@@ -26,6 +29,33 @@ export interface HumaNarrationScriptHistory {
 export const NARRATION_FORMAT_LABEL: Record<NarrationFormatType, string> = {
   full_cover: '전체커버형',
   ranked: '순위특집형',
+};
+
+export const NARRATION_PERIOD_LABEL: Record<NarrationPeriodType, string> = {
+  daily: '데일리',
+  weekly: '주간',
+  monthly: '월간',
+};
+
+export const NARRATION_PERIOD_HINT: Record<NarrationPeriodType, string> = {
+  daily: '오늘',
+  weekly: '이번 주',
+  monthly: '이달',
+};
+
+/** 전체커버형-데일리 등 6종 표시 */
+export function resolveNarrationVariantLabel(
+  formatType: NarrationFormatType,
+  periodType: NarrationPeriodType,
+): string {
+  const period = periodType === 'weekly' || periodType === 'monthly' ? periodType : 'daily';
+  return `${NARRATION_FORMAT_LABEL[formatType]}-${NARRATION_PERIOD_LABEL[period]}`;
+}
+
+export const NARRATION_PERIOD_TITLE_PREFIX: Record<NarrationPeriodType, string> = {
+  daily: '오늘',
+  weekly: '이번 주',
+  monthly: '이번 달',
 };
 
 export const NARRATION_AXIS_LABEL: Record<NarrationAxisType, string> = {

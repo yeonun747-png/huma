@@ -5,14 +5,15 @@ import { enqueueJob } from '../modules/queue/producer.js';
 import type {
   NarrationAxisType,
   NarrationFormatType,
+  NarrationPeriodType,
   NarrationScriptWorkspace,
 } from '@huma/shared';
+import { previewNextNarrationPick } from '../modules/narration-script/pick-plan.js';
 import {
   createNarrationScriptJob,
   recoverStaleNarrationScripts,
   runNarrationScriptGeneration,
 } from '../modules/narration-script/pipeline.js';
-import { previewNextNarrationPick, planNarrationPick } from '../modules/narration-script/pick-plan.js';
 import { listNarrationTopics } from '../modules/narration-script/topic-pool.js';
 import {
   getFortune82LastSyncTime,
@@ -75,22 +76,31 @@ export function registerNarrationScriptRoutes(app: FastifyInstance) {
     }
     const topics = await listNarrationTopics(ws);
     const lastSync = ws === 'fortune82' ? await getFortune82LastSyncTime() : null;
-    return { workspace: ws, topics, lastSync, rotationDays: NARRATION_ROTATION_COOLDOWN_DAYS };
+    return { workspace: ws, topics, lastSync, rotationCooldownDays: NARRATION_ROTATION_COOLDOWN_DAYS };
   });
 
   app.get('/api/narration-scripts/next-pick', { preHandler: authMiddleware }, async (request, reply) => {
     const allowed = getWorkspaceFilter(request);
-    const { workspace, format_type } = request.query as { workspace?: string; format_type?: string };
+    const { workspace, format_type, period_type } = request.query as {
+      workspace?: string;
+      format_type?: string;
+      period_type?: string;
+    };
     const ws = (workspace ?? 'yeonun').trim();
     if (!assertNarrationWorkspace(ws, allowed)) {
       return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
     }
     const formatType = (format_type === 'ranked' ? 'ranked' : 'full_cover') as NarrationFormatType;
+    const periodType =
+      period_type === 'weekly' || period_type === 'monthly'
+        ? period_type
+        : ('daily' as NarrationPeriodType);
     try {
-      const plan = await previewNextNarrationPick(ws, formatType);
+      const plan = await previewNextNarrationPick(ws, formatType, periodType);
       return {
         workspace: plan.workspace,
         format_type: plan.formatType,
+        period_type: plan.periodType,
         axis_type: plan.axisType,
         topic_key: plan.topic.key,
         topic_label: plan.topic.label,
@@ -105,6 +115,7 @@ export function registerNarrationScriptRoutes(app: FastifyInstance) {
     const body = request.body as {
       workspace?: string;
       format_type?: NarrationFormatType;
+      period_type?: NarrationPeriodType;
       axis_type?: NarrationAxisType | 'auto';
       topic_key?: string | null;
     };
@@ -115,6 +126,10 @@ export function registerNarrationScriptRoutes(app: FastifyInstance) {
     }
 
     const formatType = body.format_type === 'ranked' ? 'ranked' : 'full_cover';
+    const periodType =
+      body.period_type === 'weekly' || body.period_type === 'monthly'
+        ? body.period_type
+        : ('daily' as NarrationPeriodType);
 
     const { data: busy } = await supabase
       .from('huma_narration_script_history')
@@ -130,6 +145,7 @@ export function registerNarrationScriptRoutes(app: FastifyInstance) {
       const id = await createNarrationScriptJob({
         workspace: ws,
         formatType,
+        periodType,
         axisType: body.axis_type ?? 'auto',
         topicKey: body.topic_key ?? null,
       });

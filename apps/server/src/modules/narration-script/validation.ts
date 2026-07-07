@@ -1,5 +1,7 @@
-import type { NarrationAxisType, NarrationFormatType } from '@huma/shared';
+import type { NarrationAxisType, NarrationFormatType, NarrationPeriodType } from '@huma/shared';
 import { axisInstanceLabels, axisInstances } from './axis-instances.js';
+import type { NarrationDateContext } from './date-context.js';
+import { hasAmbiguousAbsoluteMonthPhrase } from './date-context.js';
 import {
   buildTitlePromptBlock,
   normalizeNarrationBody,
@@ -18,21 +20,46 @@ export function sanitizeNarrationDraft(draft: GeneratedNarrationDraft): Generate
   };
 }
 
+function fullCoverLengthBounds(axisType: NarrationAxisType): { min: number; max: number } {
+  if (axisType === 'generation') return { min: 280, max: 720 };
+  return { min: 250, max: 650 };
+}
+
+function rankedLengthBounds(): { min: number; max: number } {
+  return { min: 420, max: 850 };
+}
+
 export function validateNarrationDraft(
   draft: GeneratedNarrationDraft,
   formatType: NarrationFormatType,
   axisType: NarrationAxisType,
+  periodType: NarrationPeriodType = 'daily',
 ): { ok: true } | { ok: false; message: string } {
   const title = draft.title.trim();
   const body = draft.body.trim();
   if (!title) return { ok: false, message: '제목이 비어 있습니다' };
-  if (body.length < 120) return { ok: false, message: '대본이 너무 짧습니다' };
 
-  const titleCheck = validateNarrationTitle(title, axisType);
+  const titleCheck = validateNarrationTitle(title, axisType, periodType);
   if (!titleCheck.ok) return titleCheck;
 
   if (/\n{2,}/.test(body)) {
     return { ok: false, message: '본문에 빈 줄이 있습니다 — 문장·항목 사이 빈 줄 없이 단일 줄바꿈만' };
+  }
+
+  if (hasAmbiguousAbsoluteMonthPhrase(body)) {
+    return {
+      ok: false,
+      message: '본문에 "9월 초" 같은 절대 월 표현이 있습니다 — 오늘/이번 주/이번 달 등 상대 표현만',
+    };
+  }
+
+  const lengthBounds =
+    formatType === 'full_cover' ? fullCoverLengthBounds(axisType) : rankedLengthBounds();
+  if (body.length < lengthBounds.min) {
+    return { ok: false, message: `대본이 너무 짧습니다 (최소 ${lengthBounds.min}자)` };
+  }
+  if (body.length > lengthBounds.max) {
+    return { ok: false, message: `대본이 너무 깁니다 (최대 ${lengthBounds.max}자)` };
   }
 
   const labels = axisInstanceLabels(axisType);
@@ -65,23 +92,40 @@ export function validateNarrationDraft(
   return { ok: true };
 }
 
-export function buildFullCoverPrompt(params: {
+type PromptBase = {
   topicLabel: string;
   topicContext: string;
   axisType: NarrationAxisType;
   workspaceLabel: string;
-}): string {
+  periodType: NarrationPeriodType;
+  dateContext: NarrationDateContext;
+};
+
+function instanceSentenceRule(axisType: NarrationAxisType): string {
+  if (axisType === 'generation') {
+    return '각 연령대 4~5문장 — 자연스러운 호흡, 억지로 늘리지 말 것';
+  }
+  return '각 띠/별자리 2~3문장 — 자연스러운 호흡, 억지로 늘리지 말 것';
+}
+
+export function buildFullCoverPrompt(params: PromptBase): string {
   const labels = axisInstances(params.axisType);
   const axisName =
     params.axisType === 'zodiac' ? '띠' : params.axisType === 'constellation' ? '별자리' : '연령대';
   const instanceLines = labels.map((i) => `- ${i.label}`).join('\n');
-  const titleBlock = buildTitlePromptBlock(params.axisType, params.topicLabel);
+  const titleBlock = buildTitlePromptBlock(
+    params.axisType,
+    params.topicLabel,
+    params.periodType,
+    params.dateContext,
+  );
+  const { min, max } = fullCoverLengthBounds(params.axisType);
 
-  return `한국어 숏폼 나레이션 대본(전체커버형)을 작성하라. 브루(Vrew) TTS용.
+  return `한국어 숏폼 나레이션 대본(전체커버형·${params.periodType})을 작성하라. 브루(Vrew) TTS용.
 
 서비스: ${params.workspaceLabel}
 주제(상품): ${params.topicLabel}
-축: ${axisName} — 아래 ${labels.length}개 **전부** 1~2문장씩 다룰 것.
+축: ${axisName} — 아래 ${labels.length}개 **전부** 다룰 것.
 
 ${params.topicContext}
 
@@ -92,27 +136,30 @@ ${titleBlock}
 
 규칙:
 - JSON: {"title":"...","body":"..."} 만 출력
-- 본문: 오프닝 1~2문장 후 각 인스턴스를 "쥐띠:" 또는 "양자리:" 형식으로 짧게
-- 각 인스턴스 1~2문장, 전체 1분30초 내외(한국어 350~480자)
-- **본문 빈 줄 금지** — 문장·항목 사이 빈 줄 없이 줄바꿈 1번만
-- 숫자는 아라비아 숫자(7, 12, 3개월) 그대로 — TTS가 처리함
-- CTA·가입·크레딧·결제 유도 문구 **쓰지 말 것** (시스템이 붙임)
+- 오프닝 1~2문장: 시청자가 5초 안에 "지금 내 얘기"라고 느끼게 (날짜·주기·축)
+- 본문: 각 인스턴스를 "쥐띠:" 또는 "양자리:" 형식
+- ${instanceSentenceRule(params.axisType)}
+- 전체 1분~1분30초 (${min}~${max}자)
+- **본문 빈 줄 금지**
+- 숫자는 아라비아 숫자 그대로
+- CTA·면피 **금지** (시스템 append)
 - 따옴표로 전체를 감싸지 말 것`;
 }
 
-export function buildRankedPrompt(params: {
-  topicLabel: string;
-  topicContext: string;
-  axisType: NarrationAxisType;
-  workspaceLabel: string;
-}): string {
+export function buildRankedPrompt(params: PromptBase): string {
   const labels = axisInstances(params.axisType);
   const axisName =
     params.axisType === 'zodiac' ? '띠' : params.axisType === 'constellation' ? '별자리' : '연령대';
   const pool = labels.map((i) => i.label).join(', ');
-  const titleBlock = buildTitlePromptBlock(params.axisType, params.topicLabel);
+  const titleBlock = buildTitlePromptBlock(
+    params.axisType,
+    params.topicLabel,
+    params.periodType,
+    params.dateContext,
+  );
+  const { min, max } = rankedLengthBounds();
 
-  return `한국어 숏폼 나레이션 대본(순위특집형 TOP5)을 작성하라. 브루 TTS용.
+  return `한국어 숏폼 나레이션 대본(순위특집형 TOP5·${params.periodType})을 작성하라. 브루 TTS용.
 
 서비스: ${params.workspaceLabel}
 주제(상품): ${params.topicLabel}
@@ -125,14 +172,13 @@ ${params.topicContext}
 ${titleBlock}
 
 규칙:
-- 제목: TOP5 + 축(띠/별자리/연령대) + 후킹 (예: "별자리로 알아보는 ○○ TOP5, 1위는?")
-- 오프닝은 **강한 후킹** (궁금증)
-- 5위→4위→3위→2위→1위 순서, 각 1~2문장
-- 1위는 "그리고 1위는..." 같은 서스펜스 후 공개
-- ${axisName} 5개만 선택 (LLM 자유 선정)
-- **본문 빈 줄 금지** — 항목 사이 빈 줄 없이 줄바꿈 1번만
-- 전체 1분30초~2분(400~520자)
-- 숫자는 아라비아 숫자 그대로
-- CTA **금지** (시스템 append)
+- 제목: 주기 + TOP5 + 축 + 후킹
+- 오프닝 **강한 후킹** + 시점(${params.dateContext.absoluteLabel})
+- 5위→1위 순, 각 3~4문장
+- 1위는 "그리고 1위는..." 서스펜스 후 공개
+- ${axisName} 5개만 선택
+- **본문 빈 줄 금지**
+- 전체 1분30초 이상 (${min}~${max}자)
+- CTA·면피 **금지**
 - JSON만: {"title":"...","body":"..."}`;
 }

@@ -27,6 +27,7 @@ export async function createNarrationScriptJob(
     .insert({
       workspace: plan.workspace,
       format_type: plan.formatType,
+      period_type: plan.periodType,
       axis_type: plan.axisType,
       topic_key: plan.topic.key,
       topic_label: plan.topic.label,
@@ -96,6 +97,7 @@ async function runNarrationScriptGenerationInner(historyId: string): Promise<voi
   const plan = await planFromNarrationHistoryRow({
     workspace,
     format_type: row.format_type as PlanNarrationPickInput['formatType'],
+    period_type: row.period_type as PlanNarrationPickInput['periodType'],
     axis_type: row.axis_type as PlanNarrationPickInput['axisType'],
     topic_key: String(row.topic_key),
     topic_label: String(row.topic_label),

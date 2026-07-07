@@ -7,6 +7,7 @@ import type {
   HumaNarrationScriptHistory,
   NarrationAxisType,
   NarrationFormatType,
+  NarrationPeriodType,
   NarrationScriptWorkspace,
 } from '@huma/shared';
 import { cachedFetch, invalidateApiCache } from '@/lib/api-cache';
@@ -1348,19 +1349,25 @@ export const api = {
       lastSync: string | null;
       rotationDays: number;
     }>(`/api/narration-scripts/topics?workspace=${encodeURIComponent(workspace)}`),
-  narrationScriptNextPick: (workspace: NarrationScriptWorkspace, formatType: NarrationFormatType) =>
+  narrationScriptNextPick: (
+    workspace: NarrationScriptWorkspace,
+    formatType: NarrationFormatType,
+    periodType: NarrationPeriodType = 'daily',
+  ) =>
     request<{
       workspace: NarrationScriptWorkspace;
       format_type: NarrationFormatType;
+      period_type: NarrationPeriodType;
       axis_type: NarrationAxisType;
       topic_key: string;
       topic_label: string;
     }>(
-      `/api/narration-scripts/next-pick?workspace=${encodeURIComponent(workspace)}&format_type=${encodeURIComponent(formatType)}`,
+      `/api/narration-scripts/next-pick?workspace=${encodeURIComponent(workspace)}&format_type=${encodeURIComponent(formatType)}&period_type=${encodeURIComponent(periodType)}`,
     ),
   narrationScriptGenerate: (body: {
     workspace: NarrationScriptWorkspace;
     format_type: NarrationFormatType;
+    period_type?: NarrationPeriodType;
     axis_type?: NarrationAxisType | 'auto';
     topic_key?: string | null;
   }) =>

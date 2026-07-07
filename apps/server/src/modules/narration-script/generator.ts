@@ -2,7 +2,7 @@ import { askClaudeWithModel } from '../../lib/anthropic-client.js';
 import { getMainClaudeModel } from '../../lib/ai-engine.js';
 import { parseLlmJsonBlock } from '../../lib/llm-json.js';
 import type { NarrationPickPlan } from './pick-plan.js';
-import { appendNarrationCta } from './cta-templates.js';
+import { appendNarrationScriptFooter } from './cta-templates.js';
 import {
   buildFullCoverPrompt,
   buildRankedPrompt,
@@ -129,15 +129,19 @@ export async function generateNarrationScript(
           topicContext: plan.topic.contextText,
           axisType: plan.axisType,
           workspaceLabel: workspaceLabel(plan.workspace),
+          periodType: plan.periodType,
+          dateContext: plan.dateContext,
         })
       : buildRankedPrompt({
           topicLabel: plan.topic.label,
           topicContext: plan.topic.contextText,
           axisType: plan.axisType,
           workspaceLabel: workspaceLabel(plan.workspace),
+          periodType: plan.periodType,
+          dateContext: plan.dateContext,
         });
 
-  const formatLabel = plan.formatType === 'ranked' ? '순위특집' : '전체커버';
+  const formatLabel = `${plan.formatType === 'ranked' ? '순위특집' : '전체커버'}·${plan.periodType}`;
 
   let feedback: string | undefined;
   let draft: GeneratedNarrationDraft | null = null;
@@ -155,7 +159,7 @@ export async function generateNarrationScript(
       await reportNarrationProgress(progress.historyId, progress.workspace, 'validate');
     }
 
-    const check = validateNarrationDraft(draft, plan.formatType, plan.axisType);
+    const check = validateNarrationDraft(draft, plan.formatType, plan.axisType, plan.periodType);
     if (check.ok) break;
     feedback = check.message;
     if (attempt === MAX_ATTEMPTS - 1) {
@@ -167,10 +171,14 @@ export async function generateNarrationScript(
     await reportNarrationProgress(progress.historyId, progress.workspace, 'cta_append');
   }
 
-  const bodyWithCta = appendNarrationCta(draft!.body, plan.workspace, plan.topic.label);
+  const bodyWithCta = appendNarrationScriptFooter(draft!.body, {
+    workspace: plan.workspace,
+    productTitle: plan.topic.label,
+    axisType: plan.axisType,
+  });
   const title =
     draft!.title ||
-    buildFallbackNarrationTitle(plan.topic.label, plan.axisType, plan.formatType);
+    buildFallbackNarrationTitle(plan.topic.label, plan.axisType, plan.formatType, plan.periodType);
 
   return { title, scriptBody: bodyWithCta, model };
 }

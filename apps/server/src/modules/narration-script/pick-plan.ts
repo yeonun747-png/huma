@@ -1,14 +1,17 @@
 import type {
   NarrationAxisType,
   NarrationFormatType,
+  NarrationPeriodType,
   NarrationScriptWorkspace,
 } from '@huma/shared';
 import { ALL_AXIS_TYPES } from './axis-instances.js';
+import { buildNarrationDateContext, type NarrationDateContext } from './date-context.js';
 import {
   getAxisUsageCounts,
   isComboBlocked,
   listRecentBlockedCombos,
   pickLeastUsedAxis,
+  rotationCooldownDays,
   type NarrationComboKey,
 } from './rotation.js';
 import {
@@ -21,19 +24,29 @@ import {
 export interface NarrationPickPlan {
   workspace: NarrationScriptWorkspace;
   formatType: NarrationFormatType;
+  periodType: NarrationPeriodType;
   axisType: NarrationAxisType;
   topic: NarrationTopic;
   combo: NarrationComboKey;
+  dateContext: NarrationDateContext;
 }
 
 export interface PlanNarrationPickInput {
   workspace: NarrationScriptWorkspace;
   formatType: NarrationFormatType;
+  periodType?: NarrationPeriodType;
   axisType?: NarrationAxisType | 'auto';
   topicKey?: string | null;
 }
 
+function normalizePeriodType(periodType?: NarrationPeriodType): NarrationPeriodType {
+  if (periodType === 'weekly' || periodType === 'monthly') return periodType;
+  return 'daily';
+}
+
 export async function planNarrationPick(input: PlanNarrationPickInput): Promise<NarrationPickPlan> {
+  const periodType = normalizePeriodType(input.periodType);
+  const cooldownDays = rotationCooldownDays(periodType);
   const topics = await listNarrationTopics(input.workspace);
   if (!topics.length) {
     throw new Error(
@@ -43,7 +56,7 @@ export async function planNarrationPick(input: PlanNarrationPickInput): Promise<
     );
   }
 
-  const blocked = await listRecentBlockedCombos(input.workspace);
+  const blocked = await listRecentBlockedCombos(input.workspace, periodType);
   const topicUsage = await getNarrationTopicUsageCounts(input.workspace);
   const axisUsage = await getAxisUsageCounts(input.workspace);
 
@@ -63,73 +76,67 @@ export async function planNarrationPick(input: PlanNarrationPickInput): Promise<
   let topic: NarrationTopic;
   let resolvedAxis = axisType;
 
+  const makeCombo = (axis: NarrationAxisType, topicKey: string): NarrationComboKey => ({
+    workspace: input.workspace,
+    formatType: input.formatType,
+    periodType,
+    axisType: axis,
+    topicKey,
+  });
+
   if (input.topicKey?.trim()) {
     topic = topicCandidates[0]!;
     if (input.axisType === 'auto' || !input.axisType) {
-      const openAxes = ALL_AXIS_TYPES.filter((axis) => {
-        const combo: NarrationComboKey = {
-          workspace: input.workspace,
-          formatType: input.formatType,
-          axisType: axis,
-          topicKey: topic.key,
-        };
-        return !isComboBlocked(combo, blocked);
-      });
+      const openAxes = ALL_AXIS_TYPES.filter(
+        (axis) => !isComboBlocked(makeCombo(axis, topic.key), blocked),
+      );
       if (!openAxes.length) {
         throw new Error(
-          `최근 ${14}일 이내 「${topic.label}」 조합이 모두 사용되었습니다. 다른 주제를 선택하세요.`,
+          `최근 ${cooldownDays}일 이내 「${topic.label}」 조합이 모두 사용되었습니다. 다른 주제·포맷을 선택하세요.`,
         );
       }
       resolvedAxis = pickLeastUsedAxis(openAxes, axisUsage);
     }
   } else {
-    const allowed = topics.filter((t) => {
-      const combo: NarrationComboKey = {
-        workspace: input.workspace,
-        formatType: input.formatType,
-        axisType: resolvedAxis,
-        topicKey: t.key,
-      };
-      return !isComboBlocked(combo, blocked);
-    });
+    const allowed = topics.filter(
+      (t) => !isComboBlocked(makeCombo(resolvedAxis, t.key), blocked),
+    );
     if (!allowed.length) {
       throw new Error(
-        `최근 ${14}일 이내 사용 가능한 주제·조합이 없습니다. 축 또는 포맷을 바꿔 보세요.`,
+        `최근 ${cooldownDays}일 이내 사용 가능한 주제·조합이 없습니다. 축·포맷·주기를 바꿔 보세요.`,
       );
     }
     topic = pickWeightedTopic(allowed, topicUsage);
   }
 
-  const combo: NarrationComboKey = {
-    workspace: input.workspace,
-    formatType: input.formatType,
-    axisType: resolvedAxis,
-    topicKey: topic.key,
-  };
+  const combo = makeCombo(resolvedAxis, topic.key);
 
   if (isComboBlocked(combo, blocked)) {
     throw new Error(
-      `최근 ${14}일 이내 동일 조합(포맷×축×주제)이 사용되었습니다. 다른 주제·축을 선택하세요.`,
+      `최근 ${cooldownDays}일 이내 동일 조합(포맷×주기×축×주제)이 사용되었습니다. 다른 조합을 선택하세요.`,
     );
   }
 
   return {
     workspace: input.workspace,
     formatType: input.formatType,
+    periodType,
     axisType: resolvedAxis,
     topic,
     combo,
+    dateContext: buildNarrationDateContext(periodType),
   };
 }
 
-/** 워커 — 이미 DB에 확정된 조합으로 plan 구성 (14일 순환 재검사 없음) */
 export async function planFromNarrationHistoryRow(row: {
   workspace: NarrationScriptWorkspace;
   format_type: NarrationFormatType;
+  period_type?: NarrationPeriodType | string | null;
   axis_type: NarrationAxisType;
   topic_key: string;
   topic_label: string;
 }): Promise<NarrationPickPlan> {
+  const periodType = normalizePeriodType(row.period_type as NarrationPeriodType | undefined);
   const topics = await listNarrationTopics(row.workspace);
   let topic = topics.find((t) => t.key === row.topic_key);
   if (!topic) {
@@ -144,20 +151,24 @@ export async function planFromNarrationHistoryRow(row: {
   return {
     workspace: row.workspace,
     formatType: row.format_type,
+    periodType,
     axisType: row.axis_type,
     topic,
     combo: {
       workspace: row.workspace,
       formatType: row.format_type,
+      periodType,
       axisType: row.axis_type,
       topicKey: row.topic_key,
     },
+    dateContext: buildNarrationDateContext(periodType),
   };
 }
 
 export async function previewNextNarrationPick(
   workspace: NarrationScriptWorkspace,
   formatType: NarrationFormatType = 'full_cover',
+  periodType: NarrationPeriodType = 'daily',
 ): Promise<NarrationPickPlan> {
-  return planNarrationPick({ workspace, formatType, axisType: 'auto' });
+  return planNarrationPick({ workspace, formatType, periodType, axisType: 'auto' });
 }

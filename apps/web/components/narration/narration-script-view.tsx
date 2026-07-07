@@ -5,14 +5,18 @@ import type {
   HumaNarrationScriptHistory,
   NarrationAxisType,
   NarrationFormatType,
+  NarrationPeriodType,
   NarrationScriptProgress,
   NarrationScriptWorkspace,
 } from '@huma/shared';
 import {
   NARRATION_AXIS_LABEL,
   NARRATION_FORMAT_LABEL,
+  NARRATION_PERIOD_HINT,
+  NARRATION_PERIOD_LABEL,
   NARRATION_SCRIPT_STATUS_LABEL,
   NARRATION_WORKSPACE_LABEL,
+  resolveNarrationVariantLabel,
 } from '@huma/shared';
 import { api } from '@/lib/api';
 import { appAlert, appConfirm, appToast } from '@/lib/app-dialog';
@@ -29,6 +33,41 @@ import { NarrationGeneratingPanel } from '@/components/narration/narration-gener
 
 type Tab = 'ready' | 'generating' | 'failed';
 
+/** @huma/shared dist 미빌드 시 fallback */
+const PERIOD_LABEL: Record<NarrationPeriodType, string> = {
+  daily: '데일리',
+  weekly: '주간',
+  monthly: '월간',
+};
+
+const PERIOD_HINT: Record<NarrationPeriodType, string> = {
+  daily: '오늘',
+  weekly: '이번 주',
+  monthly: '이달',
+};
+
+function resolvePeriodLabel(period?: NarrationPeriodType | null): string {
+  const key = period === 'weekly' || period === 'monthly' ? period : 'daily';
+  return NARRATION_PERIOD_LABEL?.[key] ?? PERIOD_LABEL[key];
+}
+
+function resolvePeriodHint(period?: NarrationPeriodType | null): string {
+  const key = period === 'weekly' || period === 'monthly' ? period : 'daily';
+  return NARRATION_PERIOD_HINT?.[key] ?? PERIOD_HINT[key];
+}
+
+function resolveVariantLabel(
+  formatType: NarrationFormatType,
+  periodType?: NarrationPeriodType | null,
+): string {
+  const period = periodType === 'weekly' || periodType === 'monthly' ? periodType : 'daily';
+  if (typeof resolveNarrationVariantLabel === 'function') {
+    return resolveNarrationVariantLabel(formatType, period);
+  }
+  const fmt = NARRATION_FORMAT_LABEL?.[formatType] ?? formatType;
+  return `${fmt}-${resolvePeriodLabel(period)}`;
+}
+
 interface Props {
   service: NarrationScriptWorkspace;
 }
@@ -43,11 +82,13 @@ export function NarrationScriptView({ service }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('ready');
   const [formatType, setFormatType] = useState<NarrationFormatType>('full_cover');
+  const [periodType, setPeriodType] = useState<NarrationPeriodType>('daily');
   const [axisType, setAxisType] = useState<NarrationAxisType | 'auto'>('auto');
   const [topicKey, setTopicKey] = useState<string>('');
   const [topics, setTopics] = useState<Array<{ key: string; label: string }>>([]);
   const [nextPick, setNextPick] = useState<{
     format_type: NarrationFormatType;
+    period_type: NarrationPeriodType;
     axis_type: NarrationAxisType;
     topic_label: string;
   } | null>(null);
@@ -90,11 +131,11 @@ export function NarrationScriptView({ service }: Props) {
   const loadMeta = useCallback(async () => {
     const [topicRes, pickRes] = await Promise.all([
       api.narrationScriptTopics(service),
-      api.narrationScriptNextPick(service, formatType).catch(() => null),
+      api.narrationScriptNextPick(service, formatType, periodType).catch(() => null),
     ]);
     setTopics((topicRes.topics ?? []).map((t) => ({ key: t.key, label: t.label })));
     if (pickRes) setNextPick(pickRes);
-  }, [service, formatType]);
+  }, [service, formatType, periodType]);
 
   const hasGenerating = useMemo(
     () => items.some((i) => i.status === 'script_generating'),
@@ -185,6 +226,7 @@ export function NarrationScriptView({ service }: Props) {
       await api.narrationScriptGenerate({
         workspace: service,
         format_type: formatType,
+        period_type: periodType,
         axis_type: axisType,
         topic_key: topicKey.trim() || null,
       });
@@ -284,9 +326,9 @@ export function NarrationScriptView({ service }: Props) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       <MPanel title={`🎙 새 나레이션 대본 · ${NARRATION_WORKSPACE_LABEL[service]}`}>
-        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-5">
           <label className="text-[11px] text-huma-t3">
-            포맷
+            형식
             <select
               className="mt-1 w-full rounded border border-huma-bdr bg-huma-bg2 px-2 py-1.5 text-[12px]"
               value={formatType}
@@ -294,6 +336,18 @@ export function NarrationScriptView({ service }: Props) {
             >
               <option value="full_cover">{NARRATION_FORMAT_LABEL.full_cover}</option>
               <option value="ranked">{NARRATION_FORMAT_LABEL.ranked}</option>
+            </select>
+          </label>
+          <label className="text-[11px] text-huma-t3">
+            주기
+            <select
+              className="mt-1 w-full rounded border border-huma-bdr bg-huma-bg2 px-2 py-1.5 text-[12px]"
+              value={periodType}
+              onChange={(e) => setPeriodType(e.target.value as NarrationPeriodType)}
+            >
+              <option value="daily">{resolvePeriodLabel('daily')} ({resolvePeriodHint('daily')})</option>
+              <option value="weekly">{resolvePeriodLabel('weekly')} ({resolvePeriodHint('weekly')})</option>
+              <option value="monthly">{resolvePeriodLabel('monthly')} ({resolvePeriodHint('monthly')})</option>
             </select>
           </label>
           <label className="text-[11px] text-huma-t3">
@@ -327,8 +381,8 @@ export function NarrationScriptView({ service }: Props) {
         </div>
         {nextPick ? (
           <p className="mt-2 text-[10px] text-huma-t4">
-            다음 자동 pick 예시: {NARRATION_FORMAT_LABEL[nextPick.format_type]} ×{' '}
-            {NARRATION_AXIS_LABEL[nextPick.axis_type]} × 「{nextPick.topic_label}」 (14일 순환)
+            선택 포맷: {resolveVariantLabel(formatType, periodType)} · 다음 자동 pick:{' '}
+            {NARRATION_AXIS_LABEL[nextPick.axis_type]} × 「{nextPick.topic_label}」 (순환)
           </p>
         ) : null}
         <div className="mt-3 flex flex-wrap gap-2">
@@ -384,7 +438,7 @@ export function NarrationScriptView({ service }: Props) {
                     >
                       <div className="truncate text-[11px] font-medium">{item.title || item.topic_label}</div>
                       <div className="mt-0.5 flex flex-wrap gap-1 text-[9px] text-huma-t4">
-                        <MTag tone="idle">{NARRATION_FORMAT_LABEL[item.format_type]}</MTag>
+                        <MTag tone="idle">{resolveVariantLabel(item.format_type, item.period_type)}</MTag>
                         <span>{NARRATION_AXIS_LABEL[item.axis_type]}</span>
                       </div>
                       {prog ? (
