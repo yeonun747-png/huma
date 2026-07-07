@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { NarrationScriptProgress } from '@huma/shared';
+import { resolveNarrationDisplayPercent } from '@/lib/narration-script-progress';
 import { formatElapsedDurationSec } from '@/lib/video-content-status';
 
 function useElapsedSec(sinceIso: string | null | undefined, active: boolean): number {
@@ -22,9 +23,6 @@ function useElapsedSec(sinceIso: string | null | undefined, active: boolean): nu
   return elapsed;
 }
 
-const LLM_PROGRESS_STAGES = new Set(['llm_write', 'llm_retry']);
-
-/** 서버 폴링 사이에도 LLM 구간에서 막대가 서서히 채워지도록 보간 */
 function useDisplayPercent(progress: NarrationScriptProgress): number {
   const [now, setNow] = useState(() => Date.now());
 
@@ -33,13 +31,7 @@ function useDisplayPercent(progress: NarrationScriptProgress): number {
     return () => clearInterval(id);
   }, []);
 
-  const base = progress.percent;
-  if (!LLM_PROGRESS_STAGES.has(progress.stage ?? '')) return base;
-
-  const updatedAt = progress.updatedAt ? new Date(progress.updatedAt).getTime() : now;
-  const sinceUpdateSec = Math.max(0, (now - updatedAt) / 1000);
-  const creep = Math.min(5, sinceUpdateSec * 0.6);
-  return Math.min(95, Math.round(base + creep));
+  return resolveNarrationDisplayPercent(progress, now);
 }
 
 export function NarrationGeneratingPanel({

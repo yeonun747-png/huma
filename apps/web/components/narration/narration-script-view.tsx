@@ -21,6 +21,7 @@ import {
   mergeNarrationProgress,
   narrationProgressFromItem,
   parseNarrationScriptProgressLog,
+  resolveNarrationDisplayPercent,
 } from '@/lib/narration-script-progress';
 import { MPanel, MTag } from '@/components/mockup/primitives';
 import { VIDEO_PRIMARY_BTN } from '@/components/video/video-content-ui';
@@ -64,7 +65,23 @@ export function NarrationScriptView({ service }: Props) {
     if (!opts?.silent) setLoading(true);
     try {
       const res = await api.narrationScriptsList(service);
-      setItems(res.items ?? []);
+      const nextItems = res.items ?? [];
+      setItems(nextItems);
+      setLiveProgressById((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        for (const item of nextItems) {
+          if (item.status !== 'script_generating') continue;
+          const prog = narrationProgressFromItem(item);
+          if (!prog) continue;
+          const existing = next[item.id];
+          if (!existing || prog.percent >= existing.percent) {
+            next[item.id] = { label: prog.label, percent: prog.percent };
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
     } finally {
       if (!opts?.silent) setLoading(false);
     }
@@ -84,6 +101,14 @@ export function NarrationScriptView({ service }: Props) {
     [items],
   );
 
+  const [tickNow, setTickNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!hasGenerating) return;
+    const id = setInterval(() => setTickNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [hasGenerating]);
+
   useEffect(() => {
     void load();
     void loadMeta();
@@ -100,13 +125,17 @@ export function NarrationScriptView({ service }: Props) {
     const onLog = (payload: { message?: string; metadata?: Record<string, unknown> }) => {
       const parsed = parseNarrationScriptProgressLog(payload);
       if (!parsed?.historyId) return;
-      setLiveProgressById((prev) => ({
-        ...prev,
-        [parsed.historyId!]: {
-          label: parsed.label,
-          percent: parsed.percent ?? prev[parsed.historyId!]?.percent ?? 5,
-        },
-      }));
+      setLiveProgressById((prev) => {
+        const prevPct = prev[parsed.historyId!]?.percent ?? 0;
+        const incoming = parsed.percent ?? (prevPct || 5);
+        return {
+          ...prev,
+          [parsed.historyId!]: {
+            label: parsed.label,
+            percent: Math.max(incoming, prevPct),
+          },
+        };
+      });
     };
     socket.on('log', onLog);
     if (!socket.connected) socket.connect();
@@ -345,6 +374,7 @@ export function NarrationScriptView({ service }: Props) {
               filtered.map((item) => {
                 const prog =
                   item.status === 'script_generating' ? progressForItem(item) : null;
+                const displayPct = prog ? resolveNarrationDisplayPercent(prog, tickNow) : null;
                 return (
                   <li key={item.id}>
                     <button
@@ -361,12 +391,12 @@ export function NarrationScriptView({ service }: Props) {
                         <div className="mt-1.5">
                           <div className="mb-0.5 flex justify-between font-mono text-[8px] text-huma-t4">
                             <span className="truncate pr-1">{prog.label}</span>
-                            <span className="shrink-0 text-huma-accent">{prog.percent}%</span>
+                            <span className="shrink-0 text-huma-accent">{displayPct}%</span>
                           </div>
                           <div className="h-1 overflow-hidden rounded-full bg-huma-bg3">
                             <div
                               className="h-full rounded-full bg-huma-accent transition-[width] duration-500"
-                              style={{ width: `${prog.percent}%` }}
+                              style={{ width: `${displayPct}%` }}
                             />
                           </div>
                         </div>

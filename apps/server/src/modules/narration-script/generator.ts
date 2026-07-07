@@ -6,9 +6,11 @@ import { appendNarrationCta } from './cta-templates.js';
 import {
   buildFullCoverPrompt,
   buildRankedPrompt,
+  sanitizeNarrationDraft,
   validateNarrationDraft,
   type GeneratedNarrationDraft,
 } from './validation.js';
+import { buildFallbackNarrationTitle } from './format.js';
 import { NARRATION_WORKSPACE_LABEL, type NarrationScriptWorkspace } from '@huma/shared';
 import {
   NARRATION_LLM_PROGRESS_BAND,
@@ -49,7 +51,7 @@ async function callNarrationLlm(prompt: string, feedback?: string): Promise<Gene
   const title = String(parsed.title ?? '').trim();
   const body = String(parsed.body ?? parsed.script ?? parsed.narration ?? '').trim();
   if (!body) throw new Error('LLM JSON에 body가 없습니다');
-  return { title, body };
+  return sanitizeNarrationDraft({ title, body });
 }
 
 async function callNarrationLlmWithProgress(
@@ -168,9 +170,7 @@ export async function generateNarrationScript(
   const bodyWithCta = appendNarrationCta(draft!.body, plan.workspace, plan.topic.label);
   const title =
     draft!.title ||
-    (plan.formatType === 'ranked'
-      ? `${plan.topic.label} TOP5`
-      : `${plan.topic.label} — ${plan.axisType === 'zodiac' ? '띠별' : plan.axisType === 'constellation' ? '별자리별' : '연령대별'} 풀이`);
+    buildFallbackNarrationTitle(plan.topic.label, plan.axisType, plan.formatType);
 
   return { title, scriptBody: bodyWithCta, model };
 }
