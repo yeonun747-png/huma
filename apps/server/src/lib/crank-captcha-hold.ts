@@ -8,7 +8,7 @@ import {
   isNaverHumanHoldError,
 } from '../modules/watcher/detector.js';
 import type { ModemSession } from '../modules/proxy/manager.js';
-import { pickNaverCaptchaPage, tryAutoSolveNaverCaptcha } from './naver-captcha-vision.js';
+import { pickNaverCaptchaPage, shouldNotifyVisionAutoFailed, tryAutoSolveNaverCaptcha } from './naver-captcha-vision.js';
 import { isNaverLoginPagePendingSubmit } from './posting-captcha-session.js';
 import { setCrankSessionProgress } from './crank-session-progress.js';
 
@@ -44,6 +44,8 @@ export async function tryEnterCrankCaptchaHold(params: CrankCaptchaHoldParams): 
 
   const errMsg = (params.err as Error)?.message ?? '';
   let visionAutoFailed = false;
+  let visionAttempts = 0;
+  let visionFailureReason: import('./naver-captcha-vision.js').CaptchaVisionFailureReason | undefined;
   const captchaPage = await pickNaverCaptchaPage(params.context);
   const shouldRetryVision =
     isCaptchaError(params.err) ||
@@ -58,8 +60,10 @@ export async function tryEnterCrankCaptchaHold(params: CrankCaptchaHoldParams): 
         workspace: params.workspace,
         jobType: 'social_crank',
       });
-      if (vision === 'solved' && !(await isNaverLoginPagePendingSubmit(page))) return false;
-      if (vision === 'failed') visionAutoFailed = true;
+      visionAttempts = vision.attempts;
+      visionFailureReason = vision.failureReason;
+      if (vision.result === 'solved' && !(await isNaverLoginPagePendingSubmit(page))) return false;
+      if (shouldNotifyVisionAutoFailed(vision)) visionAutoFailed = true;
     }
   }
 
@@ -85,6 +89,8 @@ export async function tryEnterCrankCaptchaHold(params: CrankCaptchaHoldParams): 
     modemSession: params.modemSession,
     releaseAccountLock: params.releaseAccountLock ?? (() => {}),
     visionAutoFailed,
+    visionAttempts,
+    visionFailureReason,
   });
 
   return true;

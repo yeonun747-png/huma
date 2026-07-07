@@ -40,7 +40,7 @@ export async function isNaverAuthChallengePage(page: Page): Promise<boolean> {
   const idVisible = await page.locator('#id').isVisible({ timeout: 200 }).catch(() => false);
   const pwVisible = await page.locator('#pw').isVisible({ timeout: 200 }).catch(() => false);
   const captchaVisible = await page
-    .locator('#captcha, #captchaimg, #cptch')
+    .locator('#captcha, #captchaimg, #cptch, .captcha_wrap, [id*="captcha"], .captcha')
     .first()
     .isVisible({ timeout: 200 })
     .catch(() => false);

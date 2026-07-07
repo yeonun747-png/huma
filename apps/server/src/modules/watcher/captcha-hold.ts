@@ -65,6 +65,8 @@ export interface CaptchaHoldInput {
   payload?: Record<string, unknown>;
   /** Vision 3회 실패 후 VNC 폴백 */
   visionAutoFailed?: boolean;
+  visionAttempts?: number;
+  visionFailureReason?: import('../../lib/naver-captcha-vision.js').CaptchaVisionFailureReason;
 }
 
 export interface CaptchaHoldOptions {
@@ -78,6 +80,8 @@ interface CaptchaHoldEntry extends CaptchaHoldInput {
   isDrill: boolean;
   remindCount: number;
   visionAutoFailed: boolean;
+  visionAttempts: number;
+  visionFailureReason?: import('../../lib/naver-captcha-vision.js').CaptchaVisionFailureReason;
   resumingInProgress: boolean;
   /** 자동 재개 인터벌 틱 중복 실행 방지 (resumingInProgress 와 별개 — completeCaptchaHold 가 후자를 소유) */
   autoResumeFiring: boolean;
@@ -384,7 +388,7 @@ async function tryHoldVisionAutoSolve(entry: CaptchaHoldEntry, page: Page): Prom
       workspace: entry.workspace,
       jobType: entry.jobType,
     });
-    if (result === 'solved') {
+    if (result.result === 'solved') {
       await logOperation({
         level: 'info',
         message: '[CAPTCHA] hold 중 Vision 자동 해결 성공 — 로그인·발행 자동 재개 대기',
@@ -402,8 +406,7 @@ async function tryHoldVisionAutoSolve(entry: CaptchaHoldEntry, page: Page): Prom
   }
 }
 
-/**
- * hold 중 2FA·기기인증·보호조치 화면 감지 → 사람 무한 대기 대신
+/** hold 중 2FA·기기인증·보호조치 화면 감지 → 사람 무한 대기 대신
  * 자동발행 OFF·Operation 로그(ERROR=우상단 알림)·Slack/Telegram 알림 후
  * 브라우저 종료·동글 반납·계정 락 해제(hold 종료).
  */
@@ -456,6 +459,7 @@ async function abortHoldForNaverChallenge(
 
 /** 진행이 막힌 원인이 2FA·기기인증·보호조치면 정리, 그 외(로그인 대기 등)는 계속 대기 */
 async function handleHoldChallengeIfPresent(entry: CaptchaHoldEntry, page: Page): Promise<void> {
+  if (await isNaverCaptchaVisible(page)) return;
   const authChallenge = await isNaverAuthChallengePage(page).catch(() => false);
   let protection = false;
   if (!authChallenge) {
@@ -588,6 +592,7 @@ function rememberCaptchaTelegramOutbound(
 export function shouldPreserveBrowserPageForVnc(err: unknown): boolean {
   const msg = (err as Error)?.message ?? '';
   if (msg.includes('CAPTCHA') || msg.toLowerCase().includes('captcha')) return true;
+  if (msg.includes('vision_tried')) return true;
   if (msg.includes('429') || msg.includes('BLOCK') || msg.includes('Layer4')) return true;
   if (msg.includes('NAVER_LOGIN_2FA')) return true;
   if (msg.includes('NAVER_LOGIN_DEVICE_VERIFY')) return true;
@@ -667,6 +672,8 @@ export async function enterCaptchaHold(
     isDrill,
     remindCount: 0,
     visionAutoFailed: input.visionAutoFailed === true,
+    visionAttempts: input.visionAttempts ?? 0,
+    visionFailureReason: input.visionFailureReason,
     resumingInProgress: false,
     autoResumeFiring: false,
     timers: [],
@@ -676,58 +683,67 @@ export async function enterCaptchaHold(
     holdAutoSolveCalls: 0,
   };
   holds.set(input.jobId, entry);
-  scheduleReminders(entry);
-  await focusVncBrowserPage(input.context, input.modemSession?.proxyPort);
-  await consolidateNaverLoginTabs(input.context);
 
-  const captchaPage = await pickNaverCaptchaPage(input.context);
-  if (
-    captchaPage &&
-    !captchaPage.isClosed() &&
-    captchaPage.url().includes('nidlogin') &&
-    !(await isNaverAuthChallengePage(captchaPage))
-  ) {
-    await ensureNaverLoginCredentialsForCaptcha(captchaPage, input.accountId, { fast: true }).catch(
-      () => {},
-    );
-  }
+  try {
+    scheduleReminders(entry);
+    await focusVncBrowserPage(input.context, input.modemSession?.proxyPort);
+    await consolidateNaverLoginTabs(input.context);
 
-  if (captchaPage && !captchaPage.isClosed()) {
-    await syncCaptchaHoldState(entry, captchaPage, {
-      captureScreenshot: true,
+    const captchaPage = await pickNaverCaptchaPage(input.context);
+    if (
+      captchaPage &&
+      !captchaPage.isClosed() &&
+      captchaPage.url().includes('nidlogin') &&
+      !(await isNaverAuthChallengePage(captchaPage))
+    ) {
+      await ensureNaverLoginCredentialsForCaptcha(captchaPage, input.accountId, { fast: true }).catch(
+        () => {},
+      );
+    }
+
+    if (captchaPage && !captchaPage.isClosed()) {
+      await syncCaptchaHoldState(entry, captchaPage, {
+        captureScreenshot: true,
+      });
+    }
+
+    const vncSlotLabel = input.modemSession?.proxyPort
+      ? vncSlotLabelKo(input.modemSession.proxyPort)
+      : undefined;
+
+    const telegram = await notifyCaptchaTelegram({
+      jobId: input.jobId,
+      workspace: input.workspace,
+      accountLabel,
+      jobTitle: input.jobTitle,
+      jobType: input.jobType,
+      drill: isDrill,
+      force: isDrill,
+      visionAutoFailed: input.visionAutoFailed,
+      visionAttempts: input.visionAttempts,
+      visionFailureReason: input.visionFailureReason,
+      vncSlotLabel,
+      screenshotPath: entry.screenshotPath,
     });
+    rememberCaptchaTelegramOutbound(entry, telegram, resolveTelegramChatId(input.workspace));
+
+    await logOperation({
+      level: isDrill ? 'info' : 'warn',
+      message: isDrill
+        ? 'CAPTCHA DRILL — 5분 · VNC 확인 후 huma 발행 완료'
+        : input.jobType === 'social_crank'
+          ? 'C-Rank CAPTCHA — 30분 세션 유지 · VNC 해결 후 huma 활동 재개'
+          : 'CAPTCHA — 30분 세션 유지 · VNC 해결 후 huma 발행 완료',
+      job_id: input.jobId,
+      account_id: input.accountId,
+    });
+
+    return { telegram };
+  } catch (err) {
+    clearTimers(entry);
+    holds.delete(input.jobId);
+    throw err;
   }
-
-  const vncSlotLabel = input.modemSession?.proxyPort
-    ? vncSlotLabelKo(input.modemSession.proxyPort)
-    : undefined;
-
-  const telegram = await notifyCaptchaTelegram({
-    jobId: input.jobId,
-    workspace: input.workspace,
-    accountLabel,
-    jobTitle: input.jobTitle,
-    jobType: input.jobType,
-    drill: isDrill,
-    force: isDrill,
-    visionAutoFailed: input.visionAutoFailed,
-    vncSlotLabel,
-    screenshotPath: entry.screenshotPath,
-  });
-  rememberCaptchaTelegramOutbound(entry, telegram, resolveTelegramChatId(input.workspace));
-
-  await logOperation({
-    level: isDrill ? 'info' : 'warn',
-    message: isDrill
-      ? 'CAPTCHA DRILL — 5분 · VNC 확인 후 huma 발행 완료'
-      : input.jobType === 'social_crank'
-        ? 'C-Rank CAPTCHA — 30분 세션 유지 · VNC 해결 후 huma 활동 재개'
-        : 'CAPTCHA — 30분 세션 유지 · VNC 해결 후 huma 발행 완료',
-    job_id: input.jobId,
-    account_id: input.accountId,
-  });
-
-  return { telegram };
 }
 
 export async function cancelCaptchaHold(jobId: string): Promise<boolean> {

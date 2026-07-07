@@ -77,19 +77,25 @@ export function parseNaverAccountProtectionPhase(err: unknown): NaverAccountProt
 export async function throwIfNaverAccountProtection(
   page: Page,
   phase: NaverAccountProtectionPhase,
+  options?: { closeBrowser?: boolean },
 ): Promise<void> {
   if (!(await isNaverAccountProtectionPage(page))) return;
-  await closeBrowserContext(page.context()).catch(() => {});
+  if (options?.closeBrowser !== false) {
+    await closeBrowserContext(page.context()).catch(() => {});
+  }
   throw naverAccountProtectedError(phase);
 }
 
 export async function throwIfNaverAccountProtectionInContext(
   context: BrowserContext,
   phase: NaverAccountProtectionPhase,
+  options?: { closeBrowser?: boolean },
 ): Promise<void> {
   const hit = await findNaverAccountProtectionPage(context);
   if (!hit) return;
-  await closeBrowserContext(context).catch(() => {});
+  if (options?.closeBrowser !== false) {
+    await closeBrowserContext(context).catch(() => {});
+  }
   throw naverAccountProtectedError(phase);
 }
 

@@ -23,6 +23,28 @@ const VISION_MODEL = 'claude-sonnet-4-6';
 const MAX_ATTEMPTS = 3;
 
 export type CaptchaVisionResult = 'disabled' | 'not_visible' | 'solved' | 'failed';
+
+export type CaptchaVisionFailureReason =
+  | 'auth_challenge'
+  | 'capture_unavailable'
+  | 'apply_failed'
+  | 'attempts_exhausted'
+  | 'error';
+
+export interface CaptchaVisionRun {
+  result: CaptchaVisionResult;
+  attempts: number;
+  failureReason?: CaptchaVisionFailureReason;
+}
+
+/** 로그인 poll에서 Vision 선시도 후 hold — worker 중복 Vision 방지 */
+export const CAPTCHA_DETECTED_VISION_TRIED = 'CAPTCHA_DETECTED:vision_tried';
+
+export function shouldNotifyVisionAutoFailed(run: CaptchaVisionRun): boolean {
+  if (run.result !== 'failed') return false;
+  return run.failureReason !== 'auth_challenge';
+}
+
 type CaptchaType = 'text' | 'grid' | 'slider';
 
 export interface NaverCaptchaVisionContext {
@@ -812,22 +834,42 @@ async function applyVisionResult(
 /**
  * Claude Vision으로 네이버 CAPTCHA 자동 해결 (텍스트·그리드 클릭·슬라이드 퍼즐, 최대 3회).
  */
+function failedVisionRun(
+  attempts: number,
+  failureReason: CaptchaVisionFailureReason,
+): CaptchaVisionRun {
+  return { result: 'failed', attempts, failureReason };
+}
+
 export async function tryAutoSolveNaverCaptcha(
   page: Page,
   ctx: NaverCaptchaVisionContext = {},
-): Promise<CaptchaVisionResult> {
-  if (!(await shouldAutoSolveCaptchaVision())) return 'disabled';
-  if (!(await isNaverCaptchaVisible(page))) return 'not_visible';
-  if (await isNaverAuthChallengePage(page)) return 'failed';
+): Promise<CaptchaVisionRun> {
+  if (!(await shouldAutoSolveCaptchaVision())) {
+    return { result: 'disabled', attempts: 0 };
+  }
+  if (!(await isNaverCaptchaVisible(page))) {
+    return { result: 'not_visible', attempts: 0 };
+  }
+  if (await isNaverAuthChallengePage(page)) {
+    return failedVisionRun(0, 'auth_challenge');
+  }
 
   if (page.url().includes('nidlogin')) {
     await ensureNaverIpSecurityOff(page);
   }
-  if (await isNaverAuthChallengePage(page)) return 'failed';
+  if (await isNaverAuthChallengePage(page)) {
+    return failedVisionRun(0, 'auth_challenge');
+  }
+
+  let attempts = 0;
+  let failureReason: CaptchaVisionFailureReason = 'attempts_exhausted';
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     try {
-      if (await isNaverAuthChallengePage(page)) return 'failed';
+      if (await isNaverAuthChallengePage(page)) {
+        return failedVisionRun(attempts, 'auth_challenge');
+      }
 
       const captchaType = await detectCaptchaType(page);
       const question = await readCaptchaQuestion(page);
@@ -842,7 +884,12 @@ export async function tryAutoSolveNaverCaptcha(
       });
 
       const shot = await captureCaptchaScreenshot(page, captchaType, question);
-      if (!shot?.length) break;
+      if (!shot?.length) {
+        failureReason = 'capture_unavailable';
+        break;
+      }
+
+      attempts += 1;
 
       const root = await locateCaptchaRoot(page);
       const cells = captchaType === 'grid' ? await findGridCells(root) : [];
@@ -859,21 +906,24 @@ export async function tryAutoSolveNaverCaptcha(
       }
 
       const applied = await applyVisionResult(page, captchaType, solved);
-      if (!applied) break;
+      if (!applied) {
+        failureReason = 'apply_failed';
+        break;
+      }
 
       await humanSleep(300, 700);
       await submitCaptcha(page, ctx, { refillPassword: true });
 
       await sleep(randomBetween(800, 1500));
       if (await captchaCleared(page)) {
-        await throwIfNaverAccountProtection(page, 'captcha');
+        await throwIfNaverAccountProtection(page, 'captcha', { closeBrowser: false });
         await logOperation({
           level: 'info',
           message: `[captcha-vision] ${captchaType} 자동 해결 성공 (시도 ${attempt})`,
           job_id: ctx.humaJobId,
           account_id: ctx.accountId,
         });
-        return 'solved';
+        return { result: 'solved', attempts };
       }
 
       if (attempt < MAX_ATTEMPTS) {
@@ -881,6 +931,7 @@ export async function tryAutoSolveNaverCaptcha(
         await refreshCaptchaImage(page);
       }
     } catch (err) {
+      failureReason = 'error';
       await logOperation({
         level: 'warn',
         message: `[captcha-vision] 시도 ${attempt} 오류: ${(err as Error).message}`,
@@ -894,13 +945,22 @@ export async function tryAutoSolveNaverCaptcha(
     }
   }
 
+  const logDetail =
+    failureReason === 'capture_unavailable'
+      ? '캡처 실패'
+      : failureReason === 'apply_failed'
+        ? '정답 적용 실패'
+        : attempts > 0
+          ? `${attempts}/${MAX_ATTEMPTS}회 시도 후 미통과`
+          : 'Vision 시도 전 중단';
+
   await logOperation({
     level: 'warn',
-    message: '[captcha-vision] Vision 3회 실패 — VNC 수동 필요',
+    message: `[captcha-vision] Vision 자동 해결 실패 (${logDetail}) — VNC 수동 필요`,
     job_id: ctx.humaJobId,
     account_id: ctx.accountId,
   });
-  return 'failed';
+  return failedVisionRun(attempts, failureReason);
 }
 
 /** CAPTCHA hold·텔레그램·웹 UI용 PNG — union clip + 원본 이미지 펼침 */

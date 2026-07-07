@@ -29,7 +29,12 @@ import {
   passesWeekendVolumeGate,
 } from '../../lib/human-engine-policy.js';
 import { isScheduledPublishDue, resolveHumaJobScheduledAt } from '../../lib/job-scheduler.js';
-import { pickNaverCaptchaPage, tryAutoSolveNaverCaptcha } from '../../lib/naver-captcha-vision.js';
+import {
+  pickNaverCaptchaPage,
+  shouldNotifyVisionAutoFailed,
+  tryAutoSolveNaverCaptcha,
+  type CaptchaVisionRun,
+} from '../../lib/naver-captcha-vision.js';
 import { isNaverLoginPagePendingSubmit } from '../../lib/posting-captcha-session.js';
 import {
   isWarmupConnectionError,
@@ -660,54 +665,95 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
               POSTING_JOBS.includes(type)
             ) {
               let visionAutoFailed = false;
+              let visionAttempts = 0;
+              let visionFailureReason: CaptchaVisionRun['failureReason'];
               const captchaPage = await pickNaverCaptchaPage(context);
               const errMsg = (err as Error).message ?? '';
+              const visionTriedMatch = errMsg.match(
+                /^CAPTCHA_DETECTED:vision_tried(?::(\d+):([a-z_]+))?$/,
+              );
+              const visionTriedInLogin = Boolean(visionTriedMatch);
               const shouldRetryVision =
-                isCaptchaError(err) ||
-                (Boolean(captchaPage) && errMsg.includes('HUMAN_CLICK_NO_BBOX'));
+                !visionTriedInLogin &&
+                (isCaptchaError(err) ||
+                  (Boolean(captchaPage) && errMsg.includes('HUMAN_CLICK_NO_BBOX')));
               if (shouldRetryVision && captchaPage) {
-                const vision = await tryAutoSolveNaverCaptcha(captchaPage, {
-                  humaJobId,
-                  accountId,
-                  workspace: jobWorkspace,
-                  jobType: type,
-                });
-                if (vision === 'solved') {
-                  await throwIfNaverAccountProtectionInContext(context, 'captcha');
-                  const pendingLogin = await isNaverLoginPagePendingSubmit(captchaPage);
-                  if (!pendingLogin) {
-                  try {
-                    let retryResultUrl = '';
-                    if (type === 'post_blog' && runPostBlog) {
-                      retryResultUrl = await runPostBlog();
-                    } else if (type === 'cafe_new_post') {
-                      const retryPage = await context.newPage();
-                      ({ resultUrl: retryResultUrl } = await executeCafePost({
-                        page: retryPage,
-                        payload,
-                        humanConfig,
-                      }));
-                    } else if (type === 'cafe_reply') {
-                      const retryPage = await context.newPage();
-                      ({ resultUrl: retryResultUrl } = await executeCafeReply({
-                        page: retryPage,
-                        payload,
-                        humanConfig,
-                      }));
+                try {
+                  const vision = await tryAutoSolveNaverCaptcha(captchaPage, {
+                    humaJobId,
+                    accountId,
+                    workspace: jobWorkspace,
+                    jobType: type,
+                  });
+                  visionAttempts = vision.attempts;
+                  visionFailureReason = vision.failureReason;
+                  if (vision.result === 'solved') {
+                    await throwIfNaverAccountProtectionInContext(context, 'captcha', {
+                      closeBrowser: false,
+                    });
+                    const pendingLogin = await isNaverLoginPagePendingSubmit(captchaPage);
+                    if (!pendingLogin) {
+                      try {
+                        let retryResultUrl = '';
+                        if (type === 'post_blog' && runPostBlog) {
+                          retryResultUrl = await runPostBlog();
+                        } else if (type === 'cafe_new_post') {
+                          const retryPage = await context.newPage();
+                          ({ resultUrl: retryResultUrl } = await executeCafePost({
+                            page: retryPage,
+                            payload,
+                            humanConfig,
+                          }));
+                        } else if (type === 'cafe_reply') {
+                          const retryPage = await context.newPage();
+                          ({ resultUrl: retryResultUrl } = await executeCafeReply({
+                            page: retryPage,
+                            payload,
+                            humanConfig,
+                          }));
+                        }
+                        if (retryResultUrl) {
+                          await completeJob(humaJobId, retryResultUrl);
+                          await incrementAccountCount(accountId, dailyCountField(type));
+                          return;
+                        }
+                      } catch {
+                        /* Vision 후 재시도 실패 → VNC hold */
+                      }
                     }
-                    if (retryResultUrl) {
-                      await completeJob(humaJobId, retryResultUrl);
-                      await incrementAccountCount(accountId, dailyCountField(type));
-                      return;
-                    }
-                  } catch {
-                    /* Vision 후 재시도 실패 → VNC hold */
                   }
+                  if (shouldNotifyVisionAutoFailed(vision)) {
+                    visionAutoFailed = true;
                   }
+                } catch (visionErr) {
+                  if (isNaverAccountProtectionError(visionErr)) throw visionErr;
+                  await logOperation({
+                    level: 'warn',
+                    message: `[CAPTCHA] Vision 자동 해결 오류 — VNC hold: ${(visionErr as Error).message}`,
+                    job_id: humaJobId,
+                    account_id: accountId,
+                  });
+                  visionAutoFailed = true;
+                  visionFailureReason = 'error';
                 }
-                if (vision === 'failed') visionAutoFailed = true;
+              } else if (visionTriedInLogin) {
+                visionAttempts = Number(visionTriedMatch?.[1] ?? 0);
+                const reasonToken = visionTriedMatch?.[2];
+                if (
+                  reasonToken === 'auth_challenge' ||
+                  reasonToken === 'capture_unavailable' ||
+                  reasonToken === 'apply_failed' ||
+                  reasonToken === 'attempts_exhausted' ||
+                  reasonToken === 'error'
+                ) {
+                  visionFailureReason = reasonToken;
+                } else {
+                  visionFailureReason = 'attempts_exhausted';
+                }
+                visionAutoFailed = visionFailureReason !== 'auth_challenge';
               } else if (errMsg.includes('HUMAN_CLICK_NO_BBOX') && captchaPage) {
                 visionAutoFailed = true;
+                visionFailureReason = 'apply_failed';
               }
 
               await handleLayer4Detection(accountId, err, modemSession, {
@@ -715,20 +761,32 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
                 workspace: jobWorkspace,
                 skipAccountPause: true,
               });
-              await enterCaptchaHold({
-                jobId: humaJobId,
-                accountId,
-                workspace: jobWorkspace,
-                jobTitle: (payload.title as string | undefined) ?? type,
-                jobType: type,
-                context,
-                modemSession,
-                payload: type === 'post_blog' ? payload : undefined,
-                releaseAccountLock: () => releaseAccount(accountId),
-                visionAutoFailed,
-              });
-              heldForCaptcha = true;
-              skipReleaseAccount = true;
+              try {
+                await enterCaptchaHold({
+                  jobId: humaJobId,
+                  accountId,
+                  workspace: jobWorkspace,
+                  jobTitle: (payload.title as string | undefined) ?? type,
+                  jobType: type,
+                  context,
+                  modemSession,
+                  payload: type === 'post_blog' ? payload : undefined,
+                  releaseAccountLock: () => releaseAccount(accountId),
+                  visionAutoFailed,
+                  visionAttempts,
+                  visionFailureReason,
+                });
+                heldForCaptcha = true;
+                skipReleaseAccount = true;
+              } catch (holdErr) {
+                await logOperation({
+                  level: 'ERROR',
+                  message: `[CAPTCHA] hold 진입 실패 — ${(holdErr as Error).message}`,
+                  job_id: humaJobId,
+                  account_id: accountId,
+                });
+                throw holdErr;
+              }
               return;
             }
 

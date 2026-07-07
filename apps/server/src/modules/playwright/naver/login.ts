@@ -51,9 +51,12 @@ async function resolveLoginCaptchaIfNeeded(
   captchaCtx?: NaverCaptchaVisionContext,
 ): Promise<void> {
   try {
-    await tryAutoSolveNaverCaptcha(page, {
+    const run = await tryAutoSolveNaverCaptcha(page, {
       ...captchaCtx,
     });
+    if (run.result === 'failed' && run.failureReason === 'auth_challenge') {
+      throw new Error('NAVER_LOGIN_2FA');
+    }
   } catch (err) {
     if (await isNaverCaptchaVisible(page)) {
       throw new Error('CAPTCHA_DETECTED');
@@ -176,6 +179,7 @@ async function performNaverLoginOnPage(
   await pollUntilNaverLoginRedirect(page, {
     timeoutMs: NAVER_LOGIN_POST_SUBMIT_TIMEOUT_MS,
     assertOk: (p) => assertLoginSucceeded(p, captchaCtx),
+    captchaCtx,
   });
   await humanSleep(400, 900);
 

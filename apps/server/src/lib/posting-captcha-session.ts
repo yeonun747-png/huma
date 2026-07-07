@@ -4,7 +4,14 @@ import { humanSleep } from '../modules/human-engine/typing.js';
 import { submitNaverLoginAfterCaptcha } from './naver-login-fields.js';
 import { isNaverAuthChallengePage } from './naver-auth-challenge.js';
 import { throwIfNaverAccountProtection } from './naver-account-protection.js';
-import { isNaverCaptchaVisible, pickNaverCaptchaPage } from './naver-captcha-vision.js';
+import { shouldAutoSolveCaptchaVision } from './human-engine-policy.js';
+import {
+  CAPTCHA_DETECTED_VISION_TRIED,
+  isNaverCaptchaVisible,
+  pickNaverCaptchaPage,
+  tryAutoSolveNaverCaptcha,
+  type NaverCaptchaVisionContext,
+} from './naver-captcha-vision.js';
 import { gotoBlogPortal, waitForBlogPortalReady } from './naver-blog-portal.js';
 import {
   consolidateNaverBlogWorkflowTabs,
@@ -131,17 +138,28 @@ export async function isPostingAutoResumeBlocked(page: Page): Promise<boolean> {
 /** naverLogin — nid 이탈 또는 캡차 즉시 감지 (VNC 수동 로그인 대기 포함) */
 export async function pollUntilNaverLoginRedirect(
   page: Page,
-  options: { timeoutMs: number; assertOk?: (page: Page) => Promise<void> },
+  options: {
+    timeoutMs: number;
+    assertOk?: (page: Page) => Promise<void>;
+    captchaCtx?: NaverCaptchaVisionContext;
+  },
 ): Promise<void> {
   const deadline = Date.now() + options.timeoutMs;
   while (Date.now() < deadline) {
-    await throwIfNaverAccountProtection(page, 'login');
+    await throwIfNaverAccountProtection(page, 'login', { closeBrowser: false });
     if (!page.url().includes('nidlogin.login')) {
       if (options.assertOk) await options.assertOk(page);
       return;
     }
     if (await isNaverCaptchaVisible(page)) {
-      throw new Error('CAPTCHA_DETECTED');
+      if (options.captchaCtx && (await shouldAutoSolveCaptchaVision())) {
+        const run = await tryAutoSolveNaverCaptcha(page, options.captchaCtx);
+        if (run.result === 'solved') continue;
+        throw new Error(
+          `${CAPTCHA_DETECTED_VISION_TRIED}:${run.attempts}:${run.failureReason ?? 'attempts_exhausted'}`,
+        );
+      }
+      throw new Error(CAPTCHA_DETECTED_VISION_TRIED);
     }
     if (await isNaverAuthChallengePage(page)) {
       throw new Error('NAVER_LOGIN_2FA');

@@ -13,7 +13,7 @@ import { getModemIdByProxyPort } from '../proxy/manager.js';
 
 export function isCaptchaError(err: unknown): boolean {
   const msg = (err as Error).message ?? '';
-  return msg.includes('CAPTCHA') || msg.includes('captcha');
+  return msg.includes('CAPTCHA') || msg.includes('captcha') || msg.includes('vision_tried');
 }
 
 export function is429Error(err: unknown): boolean {

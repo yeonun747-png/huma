@@ -311,6 +311,48 @@ export async function notifyLayer4Telegram(
   await sendTelegramHtml(chatId, escapeHtml(message));
 }
 
+import type { CaptchaVisionFailureReason } from '../../lib/naver-captcha-vision.js';
+
+function formatVisionFailureHead(params: {
+  drill?: boolean;
+  visionAttempts?: number;
+  visionFailureReason?: CaptchaVisionFailureReason;
+}): string {
+  const attempts = params.visionAttempts ?? 0;
+  const reason = params.visionFailureReason;
+  if (reason === 'capture_unavailable') {
+    return params.drill
+      ? '🧪 huma · Vision 캡처 실패, VNC 필요 (DRILL)'
+      : '⚠️ huma · Vision 캡처 실패, VNC 필요';
+  }
+  if (attempts <= 0) {
+    return params.drill
+      ? '🧪 huma · Vision 자동 해결 실패, VNC 필요 (DRILL)'
+      : '⚠️ huma · Vision 자동 해결 실패, VNC 필요';
+  }
+  return params.drill
+    ? `🧪 huma · Vision ${attempts}회 실패, VNC 필요 (DRILL)`
+    : `⚠️ huma · Vision ${attempts}회 실패, VNC 필요`;
+}
+
+function formatVisionFailureDetail(params: {
+  visionAttempts?: number;
+  visionFailureReason?: CaptchaVisionFailureReason;
+}): string {
+  const attempts = params.visionAttempts ?? 0;
+  const reason = params.visionFailureReason;
+  if (reason === 'capture_unavailable') {
+    return 'Claude Vision CAPTCHA 캡처 실패 — VNC에서 수동 해결 필요';
+  }
+  if (reason === 'apply_failed') {
+    return 'Claude Vision 정답 적용 실패 — VNC에서 수동 해결 필요';
+  }
+  if (attempts > 0) {
+    return `Claude Vision 자동 해결 ${attempts}회 시도 후 미통과 — VNC에서 수동 해결 필요`;
+  }
+  return 'Claude Vision 자동 해결 실패 — VNC에서 수동 해결 필요';
+}
+
 export interface CaptchaTelegramParams {
   jobId: string;
   workspace?: string | null;
@@ -324,8 +366,10 @@ export interface CaptchaTelegramParams {
   drill?: boolean;
   /** DRILL 등 — 설정 토글 무시하고 token+chat_id 있으면 발송 */
   force?: boolean;
-  /** Claude Vision 3회 실패 후 VNC 폴백 */
+  /** Claude Vision 자동 해결 실패 후 VNC 폴백 */
   visionAutoFailed?: boolean;
+  visionAttempts?: number;
+  visionFailureReason?: CaptchaVisionFailureReason;
   /** VNC 3열 타일 — 어느 창인지 */
   vncSlotLabel?: string;
   /** CAPTCHA 화면 캡처 파일 (텔레그램 sendPhoto) */
@@ -366,9 +410,7 @@ export async function notifyCaptchaTelegram(
       ? `🔔 huma · CAPTCHA 연습 재알림 (${params.remindIndex ?? '?'}/1)`
       : `🔔 huma · CAPTCHA 재알림 (${params.remindIndex ?? '?'}/3)`;
   } else if (params.visionAutoFailed) {
-    head = params.drill
-      ? '🧪 huma · Vision 3회 실패, VNC 필요 (DRILL)'
-      : '⚠️ huma · Vision 3회 실패, VNC 필요';
+    head = formatVisionFailureHead(params);
   } else if (params.secondCaptcha) {
     head = params.drill
       ? `🔄 huma · CAPTCHA 재출제 (DRILL · ${params.secondCaptchaRound ?? 2}차)`
@@ -396,7 +438,7 @@ export async function notifyCaptchaTelegram(
         '또는 이 메시지에 <b>답장</b>으로 정답을 내면 huma가 자동 입력합니다.',
       );
     } else if (params.visionAutoFailed) {
-      lines.push('', 'Claude Vision 자동 해결 3회 실패 — VNC에서 수동 해결 필요');
+      lines.push('', formatVisionFailureDetail(params));
     }
     if (params.jobType === 'social_crank') {
       lines.push(

@@ -122,7 +122,7 @@ export async function resolveBlogCheckCaptcha(
     autoLoginSubmit: page.url().includes('nidlogin'),
   });
 
-  if (vision === 'solved') {
+  if (vision.result === 'solved') {
     await logOperation({
       level: 'info',
       message: `[blog-check] CAPTCHA Vision 자동 해결${ctx.blogId ? ` (${ctx.blogId})` : ''}`,
@@ -132,10 +132,12 @@ export async function resolveBlogCheckCaptcha(
     return !(await detectBlogCheckCaptcha(page));
   }
 
-  if (vision === 'failed') {
+  if (vision.result === 'failed') {
     await logOperation({
       level: 'warn',
-      message: `[blog-check] CAPTCHA Vision 3회 실패 — 스캔 중단${ctx.blogId ? ` (${ctx.blogId})` : ''}`,
+      message:
+        `[blog-check] CAPTCHA Vision 자동 해결 실패 (${vision.attempts}회) — 스캔 중단` +
+        `${ctx.blogId ? ` (${ctx.blogId})` : ''}`,
       account_id: ctx.accountId,
       workspace: ctx.workspace ?? undefined,
     });

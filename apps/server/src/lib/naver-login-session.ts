@@ -46,6 +46,7 @@ async function hasVisibleCaptchaOnPage(page: Page): Promise<boolean> {
 export async function ensureNaverLoginIdPhoneTab(page: Page): Promise<void> {
   if (!isNidLoginUrl(page.url())) return;
   if (await isNaverAuthChallengePage(page)) return;
+  if (await hasVisibleCaptchaOnPage(page)) return;
 
   if (await isNaverLoginIdTabActive(page)) return;
 
