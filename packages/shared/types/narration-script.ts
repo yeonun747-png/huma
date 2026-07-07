@@ -44,3 +44,30 @@ export const NARRATION_SCRIPT_STATUS_LABEL: Record<NarrationScriptStatus, string
   script_ready: '검토 대기',
   failed: '실패',
 };
+
+export interface NarrationScriptProgress {
+  stage?: string;
+  label: string;
+  percent: number;
+  sinceAt?: string;
+  updatedAt?: string;
+}
+
+export function resolveNarrationScriptProgress(
+  meta: Record<string, unknown> | null | undefined,
+): NarrationScriptProgress | null {
+  if (!meta) return null;
+  const label = typeof meta.progress_label === 'string' ? meta.progress_label.trim() : '';
+  const percent =
+    typeof meta.progress_percent === 'number' && Number.isFinite(meta.progress_percent)
+      ? Math.min(100, Math.max(0, Math.round(meta.progress_percent)))
+      : null;
+  if (!label && percent == null) return null;
+  return {
+    stage: typeof meta.progress_stage === 'string' ? meta.progress_stage : undefined,
+    label: label || '대본 생성 중…',
+    percent: percent ?? 5,
+    sinceAt: typeof meta.progress_since_at === 'string' ? meta.progress_since_at : undefined,
+    updatedAt: typeof meta.progress_updated_at === 'string' ? meta.progress_updated_at : undefined,
+  };
+}

@@ -2,6 +2,7 @@ import { supabase } from '../../middleware/auth.js';
 import type { NarrationScriptWorkspace } from '@huma/shared';
 import { generateNarrationScript } from './generator.js';
 import { planNarrationPick, type PlanNarrationPickInput } from './pick-plan.js';
+import { initialNarrationProgressMeta, reportNarrationProgress } from './progress.js';
 
 export async function createNarrationScriptJob(
   input: PlanNarrationPickInput,
@@ -19,7 +20,7 @@ export async function createNarrationScriptJob(
       title: '',
       script_body: '',
       status: 'script_generating',
-      source_meta: { pick: plan.combo },
+      source_meta: initialNarrationProgressMeta({ pick: plan.combo }),
     })
     .select('id')
     .single();
@@ -38,16 +39,24 @@ export async function runNarrationScriptGeneration(historyId: string): Promise<v
   if (error || !row) throw new Error(error?.message ?? '나레이션 이력 없음');
   if (row.status !== 'script_generating') return;
 
+  const workspace = row.workspace as NarrationScriptWorkspace;
+
+  await reportNarrationProgress(historyId, workspace, 'plan_pick');
+
   const plan = await planNarrationPick({
-    workspace: row.workspace as NarrationScriptWorkspace,
+    workspace,
     formatType: row.format_type as PlanNarrationPickInput['formatType'],
     axisType: row.axis_type as PlanNarrationPickInput['axisType'],
     topicKey: row.topic_key as string,
   });
 
   try {
-    const generated = await generateNarrationScript(plan);
+    const generated = await generateNarrationScript(plan, {
+      historyId,
+      workspace,
+    });
     const meta = (row.source_meta as Record<string, unknown>) ?? {};
+    await reportNarrationProgress(historyId, workspace, 'saving');
     await supabase
       .from('huma_narration_script_history')
       .update({

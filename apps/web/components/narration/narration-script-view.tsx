@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   HumaNarrationScriptHistory,
   NarrationAxisType,
   NarrationFormatType,
+  NarrationScriptProgress,
   NarrationScriptWorkspace,
 } from '@huma/shared';
 import {
@@ -15,8 +16,15 @@ import {
 } from '@huma/shared';
 import { api } from '@/lib/api';
 import { appAlert, appConfirm, appToast } from '@/lib/app-dialog';
+import { getLogSocket } from '@/lib/socket';
+import {
+  mergeNarrationProgress,
+  narrationProgressFromItem,
+  parseNarrationScriptProgressLog,
+} from '@/lib/narration-script-progress';
 import { MPanel, MTag } from '@/components/mockup/primitives';
 import { VIDEO_PRIMARY_BTN } from '@/components/video/video-content-ui';
+import { NarrationGeneratingPanel } from '@/components/narration/narration-generating-panel';
 
 type Tab = 'ready' | 'generating' | 'failed';
 
@@ -46,14 +54,18 @@ export function NarrationScriptView({ service }: Props) {
   const [editTitle, setEditTitle] = useState('');
   const [editBody, setEditBody] = useState('');
   const [saving, setSaving] = useState(false);
+  const [liveProgressById, setLiveProgressById] = useState<
+    Record<string, { label: string; percent: number }>
+  >({});
+  const hadGeneratingRef = useRef(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     try {
       const res = await api.narrationScriptsList(service);
       setItems(res.items ?? []);
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
   }, [service]);
 
@@ -66,12 +78,49 @@ export function NarrationScriptView({ service }: Props) {
     if (pickRes) setNextPick(pickRes);
   }, [service, formatType]);
 
+  const hasGenerating = useMemo(
+    () => items.some((i) => i.status === 'script_generating'),
+    [items],
+  );
+
   useEffect(() => {
     void load();
     void loadMeta();
-    const id = setInterval(() => void load(), 8000);
-    return () => clearInterval(id);
   }, [load, loadMeta]);
+
+  useEffect(() => {
+    const pollMs = hasGenerating ? 2_000 : 8_000;
+    const id = setInterval(() => void load({ silent: true }), pollMs);
+    return () => clearInterval(id);
+  }, [load, hasGenerating]);
+
+  useEffect(() => {
+    const socket = getLogSocket();
+    const onLog = (payload: { message?: string; metadata?: Record<string, unknown> }) => {
+      const parsed = parseNarrationScriptProgressLog(payload);
+      if (!parsed?.historyId) return;
+      setLiveProgressById((prev) => ({
+        ...prev,
+        [parsed.historyId!]: {
+          label: parsed.label,
+          percent: parsed.percent ?? prev[parsed.historyId!]?.percent ?? 5,
+        },
+      }));
+    };
+    socket.on('log', onLog);
+    if (!socket.connected) socket.connect();
+    return () => {
+      socket.off('log', onLog);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (hadGeneratingRef.current && !hasGenerating) {
+      void load();
+      setLiveProgressById({});
+    }
+    hadGeneratingRef.current = hasGenerating;
+  }, [hasGenerating, load]);
 
   const filtered = useMemo(() => {
     if (activeTab === 'ready') return items.filter((i) => i.status === 'script_ready');
@@ -80,6 +129,18 @@ export function NarrationScriptView({ service }: Props) {
   }, [items, activeTab]);
 
   const selected = items.find((i) => i.id === selectedId) ?? filtered[0] ?? null;
+
+  const selectedProgress = useMemo((): NarrationScriptProgress | null => {
+    if (!selected || selected.status !== 'script_generating') return null;
+    const fromMeta = narrationProgressFromItem(selected);
+    return mergeNarrationProgress(fromMeta, liveProgressById[selected.id] ?? null);
+  }, [selected, liveProgressById]);
+
+  useEffect(() => {
+    if (selected?.status === 'script_ready') {
+      setActiveTab('ready');
+    }
+  }, [selected?.id, selected?.status]);
 
   useEffect(() => {
     if (selected) {
@@ -158,6 +219,11 @@ export function NarrationScriptView({ service }: Props) {
     ready: items.filter((i) => i.status === 'script_ready').length,
     generating: items.filter((i) => i.status === 'script_generating').length,
     failed: items.filter((i) => i.status === 'failed').length,
+  };
+
+  const progressForItem = (item: HumaNarrationScriptHistory) => {
+    const fromMeta = narrationProgressFromItem(item);
+    return mergeNarrationProgress(fromMeta, liveProgressById[item.id] ?? null);
   };
 
   return (
@@ -250,21 +316,39 @@ export function NarrationScriptView({ service }: Props) {
             {loading ? (
               <li className="py-6 text-center text-[11px] text-huma-t3">불러오는 중…</li>
             ) : filtered.length ? (
-              filtered.map((item) => (
-                <li key={item.id}>
-                  <button
-                    type="button"
-                    className={`w-full rounded border px-2 py-2 text-left ${selected?.id === item.id ? 'border-huma-accent bg-huma-accent/10' : 'border-huma-bdr'}`}
-                    onClick={() => setSelectedId(item.id)}
-                  >
-                    <div className="truncate text-[11px] font-medium">{item.title || item.topic_label}</div>
-                    <div className="mt-0.5 flex gap-1 text-[9px] text-huma-t4">
-                      <MTag tone="idle">{NARRATION_FORMAT_LABEL[item.format_type]}</MTag>
-                      <span>{NARRATION_AXIS_LABEL[item.axis_type]}</span>
-                    </div>
-                  </button>
-                </li>
-              ))
+              filtered.map((item) => {
+                const prog =
+                  item.status === 'script_generating' ? progressForItem(item) : null;
+                return (
+                  <li key={item.id}>
+                    <button
+                      type="button"
+                      className={`w-full rounded border px-2 py-2 text-left ${selected?.id === item.id ? 'border-huma-accent bg-huma-accent/10' : 'border-huma-bdr'}`}
+                      onClick={() => setSelectedId(item.id)}
+                    >
+                      <div className="truncate text-[11px] font-medium">{item.title || item.topic_label}</div>
+                      <div className="mt-0.5 flex flex-wrap gap-1 text-[9px] text-huma-t4">
+                        <MTag tone="idle">{NARRATION_FORMAT_LABEL[item.format_type]}</MTag>
+                        <span>{NARRATION_AXIS_LABEL[item.axis_type]}</span>
+                      </div>
+                      {prog ? (
+                        <div className="mt-1.5">
+                          <div className="mb-0.5 flex justify-between font-mono text-[8px] text-huma-t4">
+                            <span className="truncate pr-1">{prog.label}</span>
+                            <span className="shrink-0 text-huma-accent">{prog.percent}%</span>
+                          </div>
+                          <div className="h-1 overflow-hidden rounded-full bg-huma-bg3">
+                            <div
+                              className="h-full rounded-full bg-huma-accent transition-[width] duration-500"
+                              style={{ width: `${prog.percent}%` }}
+                            />
+                          </div>
+                        </div>
+                      ) : null}
+                    </button>
+                  </li>
+                );
+              })
             ) : (
               <li className="py-6 text-center text-[11px] text-huma-t3">항목 없음</li>
             )}
@@ -273,52 +357,56 @@ export function NarrationScriptView({ service }: Props) {
 
         <MPanel title="📋 브루 붙여넣기용 대본" className="m-panel-fill min-h-0">
           {selected ? (
-            <div className="flex min-h-0 flex-1 flex-col gap-3">
-              <div className="flex flex-wrap gap-2 text-[10px] text-huma-t4">
-                <MTag tone={selected.status === 'script_ready' ? 'ok' : selected.status === 'failed' ? 'err' : 'warn'}>
-                  {NARRATION_SCRIPT_STATUS_LABEL[selected.status]}
-                </MTag>
-                <span>{selected.topic_label}</span>
+            selected.status === 'script_generating' && selectedProgress ? (
+              <NarrationGeneratingPanel topicLabel={selected.topic_label} progress={selectedProgress} />
+            ) : (
+              <div className="flex min-h-0 flex-1 flex-col gap-3">
+                <div className="flex flex-wrap gap-2 text-[10px] text-huma-t4">
+                  <MTag tone={selected.status === 'script_ready' ? 'ok' : selected.status === 'failed' ? 'err' : 'warn'}>
+                    {NARRATION_SCRIPT_STATUS_LABEL[selected.status]}
+                  </MTag>
+                  <span>{selected.topic_label}</span>
+                </div>
+                {selected.status === 'failed' && selected.error_message ? (
+                  <p className="text-[11px] text-red-400">{selected.error_message}</p>
+                ) : null}
+                <label className="text-[11px] text-huma-t3">
+                  제목
+                  <input
+                    className="mt-1 w-full rounded border border-huma-bdr bg-huma-bg2 px-2 py-1.5 text-[12px]"
+                    value={editTitle}
+                    disabled={selected.status === 'script_generating'}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                  />
+                </label>
+                <label className="min-h-0 flex flex-1 flex-col text-[11px] text-huma-t3">
+                  나레이션 대본
+                  <textarea
+                    className="mt-1 min-h-[280px] flex-1 resize-y rounded border border-huma-bdr bg-huma-bg2 px-2 py-2 font-mono text-[12px] leading-relaxed"
+                    value={editBody}
+                    disabled={selected.status === 'script_generating'}
+                    onChange={(e) => setEditBody(e.target.value)}
+                  />
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" className={VIDEO_PRIMARY_BTN} disabled={selected.status !== 'script_ready'} onClick={() => void handleCopy('all')}>
+                    제목+대본 복사
+                  </button>
+                  <button type="button" className="btn-ghost btn-sm" disabled={selected.status !== 'script_ready'} onClick={() => void handleCopy('body')}>
+                    대본만 복사
+                  </button>
+                  <button type="button" className="btn-ghost btn-sm" disabled={saving || selected.status !== 'script_ready'} onClick={() => void handleSave()}>
+                    저장
+                  </button>
+                  <button type="button" className="btn-ghost btn-sm" disabled={selected.status === 'script_generating'} onClick={() => void handleRegenerate()}>
+                    재생성
+                  </button>
+                  <button type="button" className="btn-ghost btn-sm text-red-400" disabled={selected.status === 'script_generating'} onClick={() => void handleDelete()}>
+                    삭제
+                  </button>
+                </div>
               </div>
-              {selected.status === 'failed' && selected.error_message ? (
-                <p className="text-[11px] text-red-400">{selected.error_message}</p>
-              ) : null}
-              <label className="text-[11px] text-huma-t3">
-                제목
-                <input
-                  className="mt-1 w-full rounded border border-huma-bdr bg-huma-bg2 px-2 py-1.5 text-[12px]"
-                  value={editTitle}
-                  disabled={selected.status === 'script_generating'}
-                  onChange={(e) => setEditTitle(e.target.value)}
-                />
-              </label>
-              <label className="min-h-0 flex flex-1 flex-col text-[11px] text-huma-t3">
-                나레이션 대본
-                <textarea
-                  className="mt-1 min-h-[280px] flex-1 resize-y rounded border border-huma-bdr bg-huma-bg2 px-2 py-2 font-mono text-[12px] leading-relaxed"
-                  value={editBody}
-                  disabled={selected.status === 'script_generating'}
-                  onChange={(e) => setEditBody(e.target.value)}
-                />
-              </label>
-              <div className="flex flex-wrap gap-2">
-                <button type="button" className={VIDEO_PRIMARY_BTN} disabled={selected.status !== 'script_ready'} onClick={() => void handleCopy('all')}>
-                  제목+대본 복사
-                </button>
-                <button type="button" className="btn-ghost btn-sm" disabled={selected.status !== 'script_ready'} onClick={() => void handleCopy('body')}>
-                  대본만 복사
-                </button>
-                <button type="button" className="btn-ghost btn-sm" disabled={saving || selected.status !== 'script_ready'} onClick={() => void handleSave()}>
-                  저장
-                </button>
-                <button type="button" className="btn-ghost btn-sm" disabled={selected.status === 'script_generating'} onClick={() => void handleRegenerate()}>
-                  재생성
-                </button>
-                <button type="button" className="btn-ghost btn-sm text-red-400" disabled={selected.status === 'script_generating'} onClick={() => void handleDelete()}>
-                  삭제
-                </button>
-              </div>
-            </div>
+            )
           ) : (
             <p className="py-12 text-center text-[12px] text-huma-t3">목록에서 대본을 선택하세요</p>
           )}

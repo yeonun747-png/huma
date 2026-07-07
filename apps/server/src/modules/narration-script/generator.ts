@@ -9,9 +9,15 @@ import {
   validateNarrationDraft,
   type GeneratedNarrationDraft,
 } from './validation.js';
-import { NARRATION_WORKSPACE_LABEL } from '@huma/shared';
+import { NARRATION_WORKSPACE_LABEL, type NarrationScriptWorkspace } from '@huma/shared';
+import { reportNarrationProgress } from './progress.js';
 
 const MAX_ATTEMPTS = 2;
+
+export interface NarrationGenerateProgressCtx {
+  historyId: string;
+  workspace: NarrationScriptWorkspace;
+}
 
 function workspaceLabel(ws: NarrationPickPlan['workspace']): string {
   return NARRATION_WORKSPACE_LABEL[ws];
@@ -35,7 +41,10 @@ async function callNarrationLlm(prompt: string, feedback?: string): Promise<Gene
   return { title, body };
 }
 
-export async function generateNarrationScript(plan: NarrationPickPlan): Promise<{
+export async function generateNarrationScript(
+  plan: NarrationPickPlan,
+  progress?: NarrationGenerateProgressCtx,
+): Promise<{
   title: string;
   scriptBody: string;
   model: string;
@@ -60,13 +69,33 @@ export async function generateNarrationScript(plan: NarrationPickPlan): Promise<
   let draft: GeneratedNarrationDraft | null = null;
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    if (progress) {
+      await reportNarrationProgress(
+        progress.historyId,
+        progress.workspace,
+        attempt === 0 ? 'llm_write' : 'llm_retry',
+        attempt === 0
+          ? `Sonnet 대본 작성 중… (${plan.formatType === 'ranked' ? '순위특집' : '전체커버'})`
+          : `대본 재작성 중… (${attempt + 1}/${MAX_ATTEMPTS}회)`,
+      );
+    }
+
     draft = await callNarrationLlm(basePrompt, feedback);
+
+    if (progress) {
+      await reportNarrationProgress(progress.historyId, progress.workspace, 'validate');
+    }
+
     const check = validateNarrationDraft(draft, plan.formatType, plan.axisType);
     if (check.ok) break;
     feedback = check.message;
     if (attempt === MAX_ATTEMPTS - 1) {
       throw new Error(`대본 검증 실패: ${check.message}`);
     }
+  }
+
+  if (progress) {
+    await reportNarrationProgress(progress.historyId, progress.workspace, 'cta_append');
   }
 
   const bodyWithCta = appendNarrationCta(draft!.body, plan.workspace, plan.topic.label);

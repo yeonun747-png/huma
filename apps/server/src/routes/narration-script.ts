@@ -18,6 +18,7 @@ import {
   syncFortune82ProductsCache,
 } from '../modules/narration-script/fortune82-product-cache.js';
 import { NARRATION_ROTATION_COOLDOWN_DAYS } from '../modules/narration-script/rotation.js';
+import { initialNarrationProgressMeta } from '../modules/narration-script/progress.js';
 
 const NARRATION_WORKSPACES: NarrationScriptWorkspace[] = ['yeonun', 'fortune82'];
 
@@ -197,11 +198,13 @@ export function registerNarrationScriptRoutes(app: FastifyInstance) {
       return reply.code(403).send({ error: '권한 없음' });
     }
 
+    const prevMeta = (row.source_meta as Record<string, unknown>) ?? {};
     await supabase
       .from('huma_narration_script_history')
       .update({
         status: 'script_generating',
         error_message: null,
+        source_meta: initialNarrationProgressMeta({ pick: prevMeta.pick }),
         updated_at: new Date().toISOString(),
       })
       .eq('id', id);
