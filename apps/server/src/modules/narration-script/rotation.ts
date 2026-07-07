@@ -24,7 +24,7 @@ export async function listRecentBlockedCombos(
     .select('format_type, axis_type, topic_key')
     .eq('workspace', workspace)
     .gte('created_at', since)
-    .in('status', ['script_ready', 'script_generating']);
+    .eq('status', 'script_ready');
 
   if (error) throw new Error(error.message);
 

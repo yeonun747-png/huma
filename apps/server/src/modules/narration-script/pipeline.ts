@@ -1,7 +1,7 @@
 import { supabase } from '../../middleware/auth.js';
 import type { NarrationScriptWorkspace } from '@huma/shared';
 import { generateNarrationScript } from './generator.js';
-import { planNarrationPick, type PlanNarrationPickInput } from './pick-plan.js';
+import { planFromNarrationHistoryRow, planNarrationPick, type PlanNarrationPickInput } from './pick-plan.js';
 import {
   initialNarrationProgressMeta,
   markNarrationScriptFailed,
@@ -93,11 +93,12 @@ async function runNarrationScriptGenerationInner(historyId: string): Promise<voi
   await assertNarrationScriptNotCancelled(historyId);
   await reportNarrationProgress(historyId, workspace, 'plan_pick');
 
-  const plan = await planNarrationPick({
+  const plan = await planFromNarrationHistoryRow({
     workspace,
-    formatType: row.format_type as PlanNarrationPickInput['formatType'],
-    axisType: row.axis_type as PlanNarrationPickInput['axisType'],
-    topicKey: row.topic_key as string,
+    format_type: row.format_type as PlanNarrationPickInput['formatType'],
+    axis_type: row.axis_type as PlanNarrationPickInput['axisType'],
+    topic_key: String(row.topic_key),
+    topic_label: String(row.topic_label),
   });
 
   await assertNarrationScriptNotCancelled(historyId);

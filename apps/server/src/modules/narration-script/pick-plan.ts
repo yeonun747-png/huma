@@ -61,14 +61,33 @@ export async function planNarrationPick(input: PlanNarrationPickInput): Promise<
   }
 
   let topic: NarrationTopic;
+  let resolvedAxis = axisType;
+
   if (input.topicKey?.trim()) {
     topic = topicCandidates[0]!;
+    if (input.axisType === 'auto' || !input.axisType) {
+      const openAxes = ALL_AXIS_TYPES.filter((axis) => {
+        const combo: NarrationComboKey = {
+          workspace: input.workspace,
+          formatType: input.formatType,
+          axisType: axis,
+          topicKey: topic.key,
+        };
+        return !isComboBlocked(combo, blocked);
+      });
+      if (!openAxes.length) {
+        throw new Error(
+          `최근 ${14}일 이내 「${topic.label}」 조합이 모두 사용되었습니다. 다른 주제를 선택하세요.`,
+        );
+      }
+      resolvedAxis = pickLeastUsedAxis(openAxes, axisUsage);
+    }
   } else {
     const allowed = topics.filter((t) => {
       const combo: NarrationComboKey = {
         workspace: input.workspace,
         formatType: input.formatType,
-        axisType,
+        axisType: resolvedAxis,
         topicKey: t.key,
       };
       return !isComboBlocked(combo, blocked);
@@ -84,7 +103,7 @@ export async function planNarrationPick(input: PlanNarrationPickInput): Promise<
   const combo: NarrationComboKey = {
     workspace: input.workspace,
     formatType: input.formatType,
-    axisType,
+    axisType: resolvedAxis,
     topicKey: topic.key,
   };
 
@@ -97,9 +116,42 @@ export async function planNarrationPick(input: PlanNarrationPickInput): Promise<
   return {
     workspace: input.workspace,
     formatType: input.formatType,
-    axisType,
+    axisType: resolvedAxis,
     topic,
     combo,
+  };
+}
+
+/** 워커 — 이미 DB에 확정된 조합으로 plan 구성 (14일 순환 재검사 없음) */
+export async function planFromNarrationHistoryRow(row: {
+  workspace: NarrationScriptWorkspace;
+  format_type: NarrationFormatType;
+  axis_type: NarrationAxisType;
+  topic_key: string;
+  topic_label: string;
+}): Promise<NarrationPickPlan> {
+  const topics = await listNarrationTopics(row.workspace);
+  let topic = topics.find((t) => t.key === row.topic_key);
+  if (!topic) {
+    topic = {
+      key: row.topic_key,
+      label: row.topic_label,
+      categoryKey: null,
+      contextText: `[주제]\n상품명: ${row.topic_label}`,
+    };
+  }
+
+  return {
+    workspace: row.workspace,
+    formatType: row.format_type,
+    axisType: row.axis_type,
+    topic,
+    combo: {
+      workspace: row.workspace,
+      formatType: row.format_type,
+      axisType: row.axis_type,
+      topicKey: row.topic_key,
+    },
   };
 }
 
