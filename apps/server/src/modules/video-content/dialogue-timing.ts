@@ -1,6 +1,7 @@
 import type { VideoConti, VideoContiShot } from './types.js';
 import { asContiShots } from './types.js';
 import { parseDialogueSegments, type DialogueSegment } from './subtitle.js';
+import { buildDialogueSpokenNumberRule } from './korean-spoken-numbers.js';
 import { buildMultiShotTimeline, getShotCountBounds, normalizeVideoDurationSec } from './shot-timing.js';
 
 /** 검증·프롬프트 — 권장 상한 (한국어 숏폼 발화) */
@@ -297,7 +298,8 @@ export function buildDialogueLengthRule(): string {
     `(1.5초→${maxDialogueCharsForDuration(1.5)}자, 2.5초→${maxDialogueCharsForDuration(2.5)}자, 5초→${maxDialogueCharsForDuration(5)}자). ` +
     'scenarioSummary 없이도 그 샷의 사건·정보가 전달되게 완결된 짧은 문장으로. ' +
     '단어만 남기거나 "…"로 끊긴 불완전 대사 금지. setup·연운·반전 핵심은 유지하되 **같은 문구 전문 반복 금지** — 두 번째 화자는 짧게 참조. ' +
-    '한 샷에 A·B 대사를 여러 줄 넣지 말고 샷을 나눈다.'
+    '한 샷에 A·B 대사를 여러 줄 넣지 말고 샷을 나눈다. ' +
+    buildDialogueSpokenNumberRule()
   );
 }
 

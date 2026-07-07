@@ -69,6 +69,7 @@ import { executeSocialCrank } from './jobs/social-crank.js';
 import { executeScheduledSocialCrank } from '../crank/scheduled-session.js';
 import { executeVideoPipeline } from './jobs/video-pipeline.js';
 import { executeVideoContentConti } from './jobs/video-content-conti.js';
+import { executeNarrationScriptGenerate } from '../../routes/narration-script.js';
 import { executeVideoContentRender } from './jobs/video-content-render.js';
 import { executeVideoContentGenerate } from './jobs/video-content-generate.js';
 import { executeContentFull } from '../claude/auto-content-orchestrator.js';
@@ -219,7 +220,8 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         type !== 'blog_check' &&
         type !== 'video_content_generate' &&
         type !== 'video_content_conti' &&
-        type !== 'video_content_render'
+        type !== 'video_content_render' &&
+        type !== 'narration_script_generate'
       ) {
         await deferHumaJob(job, humaJobId, CRANK_PAUSE_DEFER_MS, {
           reason: 'SYSTEM_PAUSED',
@@ -865,6 +867,11 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         } else if (type === 'video_content_conti') {
           await markRunning();
           await executeVideoContentConti(payload.accountId as string);
+        } else if (type === 'narration_script_generate') {
+          await markRunning();
+          await executeNarrationScriptGenerate({
+            historyId: String(payload.historyId ?? ''),
+          });
         } else if (type === 'video_content_render') {
           await markRunning();
           await executeVideoContentRender(payload.historyId as string);
@@ -936,7 +943,8 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         const isVideoContentJob =
           type === 'video_content_conti' ||
           type === 'video_content_render' ||
-          type === 'video_content_generate';
+          type === 'video_content_generate' ||
+          type === 'narration_script_generate';
         if (humaJobId && type === 'post_blog') {
           const msg = (err as Error).message ?? '';
           const reconciledUrl = await tryReconcilePostBlogJobCompletion(humaJobId).catch(() => null);

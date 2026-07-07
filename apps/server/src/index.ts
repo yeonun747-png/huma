@@ -53,10 +53,12 @@ import { registerVncRoutes } from './routes/vnc.js';
 import { registerSeoRoutes } from './routes/seo.js';
 import { registerBlogCheckRoutes } from './routes/blog-check.js';
 import { registerVideoContentRoutes } from './routes/video-content.js';
+import { registerNarrationScriptRoutes } from './routes/narration-script.js';
 import { registerQuizImageRoutes } from './routes/quiz-images.js';
 import { startPananaCharacterSyncScheduler } from './lib/panana-character-scheduler.js';
 import { startQuizContentSyncScheduler } from './lib/quiz-content-scheduler.js';
 import { startVideoContentStorageScheduler } from './lib/video-content-storage-scheduler.js';
+import { startFortune82ProductSyncScheduler } from './lib/fortune82-product-scheduler.js';
 import { assertSecretsConfigured } from './lib/secrets.js';
 import { probePhysicalModemsOnStartup } from './lib/modem-startup-probe.js';
 
@@ -104,6 +106,12 @@ async function main() {
     bodyLimit: 2 * 1024 * 1024,
   });
 
+  if (!process.env.SUPABASE_SERVICE_KEY?.trim()) {
+    app.log.warn(
+      'SUPABASE_SERVICE_KEY 없음 — 로그인·DB API 불가. apps/server/.env.local 에 service_role 키 입력 (i7 .env 복사 또는 Supabase 대시보드)',
+    );
+  }
+
 
 
   await app.register(cors, {
@@ -144,6 +152,7 @@ async function main() {
   await registerSeoRoutes(app);
   await registerBlogCheckRoutes(app);
   await registerVideoContentRoutes(app);
+  await registerNarrationScriptRoutes(app);
   await registerQuizImageRoutes(app);
 
   await app.listen({ port: PORT, host: '0.0.0.0' });
@@ -233,7 +242,8 @@ async function main() {
     startPananaCharacterSyncScheduler();
     startQuizContentSyncScheduler();
     startVideoContentStorageScheduler();
-    app.log.info('BullMQ worker + crank scheduler + cafe activity + panana-sync + quiz-sync + video-storage scheduler started');
+    startFortune82ProductSyncScheduler();
+    app.log.info('BullMQ worker + crank scheduler + cafe activity + panana-sync + quiz-sync + video-storage + fortune82-sync scheduler started');
 
     void probePhysicalModemsOnStartup((msg) => app.log.info(msg)).catch((err) => {
       app.log.warn('[modem-startup-probe] %s', (err as Error).message);

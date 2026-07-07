@@ -19,10 +19,17 @@ const WS_ROUTE_MAP: Partial<Record<string, Workspace>> = {
   '/cafe-viral': 'yeonun',
 };
 
-function readStoredWorkspace(): Workspace | null {
+function readStoredUnit(): BusinessUnit | null {
   if (typeof window === 'undefined') return null;
   const value = localStorage.getItem(STORAGE_KEY);
-  if (value === 'yeonun' || value === 'quizoasis' || value === 'panana') return value;
+  if (
+    value === 'yeonun' ||
+    value === 'fortune82' ||
+    value === 'quizoasis' ||
+    value === 'panana'
+  ) {
+    return value;
+  }
   return null;
 }
 
@@ -60,9 +67,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [accessibleBusinessUnitIds],
   );
 
-  const [workspace, setWorkspaceState] = useState<Workspace>(() => readStoredWorkspace() ?? 'yeonun');
+  const [businessUnit, setBusinessUnitState] = useState<BusinessUnit>(
+    () => readStoredUnit() ?? 'yeonun',
+  );
 
-  const businessUnit = workspaceToBusinessUnit(workspace);
+  const workspace = (businessUnit === 'fortune82' ? 'yeonun' : businessUnit) as Workspace;
 
   const accessibleSubWorkspaces = useMemo(
     () => WORKSPACES.filter((ws) => accessibleWorkspaces.some((a) => a.id === ws.id)),
@@ -70,43 +79,42 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    const allowedIds = accessibleWorkspaces.map((ws) => ws.id);
-    if (allowedIds.length === 0) return;
+    if (accessibleBusinessUnitIds.length === 0) return;
 
-    setWorkspaceState((current) => {
-      const stored = readStoredWorkspace();
-      const candidate = stored && allowedIds.includes(stored) ? stored : current;
-      if (allowedIds.includes(candidate)) return candidate;
-      return (accessibleBusinessUnitIds[0] ?? 'yeonun') as Workspace;
+    setBusinessUnitState((current) => {
+      const stored = readStoredUnit();
+      const candidate = stored && accessibleBusinessUnitIds.includes(stored) ? stored : current;
+      if (accessibleBusinessUnitIds.includes(candidate)) return candidate;
+      return accessibleBusinessUnitIds[0] ?? 'yeonun';
     });
-  }, [admin, accessibleWorkspaces, accessibleBusinessUnitIds]);
+  }, [admin, accessibleBusinessUnitIds]);
 
   useEffect(() => {
     const routeWs = WS_ROUTE_MAP[pathname];
     if (!routeWs) return;
     if (!accessibleWorkspaces.some((ws) => ws.id === routeWs)) return;
-    setWorkspaceState(routeWs);
+    setBusinessUnitState(routeWs);
     localStorage.setItem(STORAGE_KEY, routeWs);
   }, [pathname, accessibleWorkspaces]);
 
   useEffect(() => {
-    document.documentElement.setAttribute('data-ws', workspace);
-    localStorage.setItem(STORAGE_KEY, workspace);
-  }, [workspace]);
+    document.documentElement.setAttribute('data-ws', businessUnit);
+    localStorage.setItem(STORAGE_KEY, businessUnit);
+  }, [businessUnit]);
 
   const setBusinessUnit = (unit: BusinessUnit) => {
     if (!accessibleBusinessUnitIds.includes(unit)) return;
-    setWorkspaceState(unit);
+    setBusinessUnitState(unit);
   };
 
   const setSubWorkspace = (ws: Workspace) => {
     if (!accessibleWorkspaces.some((a) => a.id === ws)) return;
-    setWorkspaceState(ws);
+    setBusinessUnitState(ws);
   };
 
   const setWorkspace = (ws: Workspace) => {
     if (!accessibleWorkspaces.some((item) => item.id === ws)) return;
-    setWorkspaceState(ws);
+    setBusinessUnitState(ws);
   };
 
   return (

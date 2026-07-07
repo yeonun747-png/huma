@@ -1,4 +1,14 @@
-import type { HumaJob, HumaAccount, HumaModem, HumaVideoQueue, HumaVideoContentHistory } from '@huma/shared';
+import type {
+  HumaJob,
+  HumaAccount,
+  HumaModem,
+  HumaVideoQueue,
+  HumaVideoContentHistory,
+  HumaNarrationScriptHistory,
+  NarrationAxisType,
+  NarrationFormatType,
+  NarrationScriptWorkspace,
+} from '@huma/shared';
 import { cachedFetch, invalidateApiCache } from '@/lib/api-cache';
 import { refreshNavBadges } from '@/lib/nav-badge-events';
 
@@ -1321,4 +1331,52 @@ export const api = {
       body: JSON.stringify({ items, zipName }),
       timeoutMs: Math.min(280_000, Math.max(120_000, items.length * 12_000 + 30_000)),
     }),
+  narrationScriptsList: (workspace?: NarrationScriptWorkspace, status?: string) => {
+    const params = new URLSearchParams();
+    if (workspace) params.set('workspace', workspace);
+    if (status) params.set('status', status);
+    const qsStr = params.toString();
+    return request<{ items: HumaNarrationScriptHistory[] }>(
+      `/api/narration-scripts${qsStr ? `?${qsStr}` : ''}`,
+    );
+  },
+  narrationScriptGet: (id: string) => request<HumaNarrationScriptHistory>(`/api/narration-scripts/${id}`),
+  narrationScriptTopics: (workspace: NarrationScriptWorkspace) =>
+    request<{
+      workspace: string;
+      topics: Array<{ key: string; label: string }>;
+      lastSync: string | null;
+      rotationDays: number;
+    }>(`/api/narration-scripts/topics?workspace=${encodeURIComponent(workspace)}`),
+  narrationScriptNextPick: (workspace: NarrationScriptWorkspace, formatType: NarrationFormatType) =>
+    request<{
+      workspace: NarrationScriptWorkspace;
+      format_type: NarrationFormatType;
+      axis_type: NarrationAxisType;
+      topic_key: string;
+      topic_label: string;
+    }>(
+      `/api/narration-scripts/next-pick?workspace=${encodeURIComponent(workspace)}&format_type=${encodeURIComponent(formatType)}`,
+    ),
+  narrationScriptGenerate: (body: {
+    workspace: NarrationScriptWorkspace;
+    format_type: NarrationFormatType;
+    axis_type?: NarrationAxisType | 'auto';
+    topic_key?: string | null;
+  }) =>
+    request<{ id: string; jobId?: string }>('/api/narration-scripts/generate', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  narrationScriptUpdate: (id: string, body: { title?: string; script_body?: string }) =>
+    request<HumaNarrationScriptHistory>(`/api/narration-scripts/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  narrationScriptRegenerate: (id: string) =>
+    request<{ id: string; jobId?: string }>(`/api/narration-scripts/${id}/regenerate`, { method: 'POST' }),
+  narrationScriptDelete: (id: string) =>
+    request<{ ok: boolean }>(`/api/narration-scripts/${id}`, { method: 'DELETE' }),
+  fortune82ProductsSync: () =>
+    request<{ synced: number; error?: string }>('/api/fortune82-products/sync', { method: 'POST' }),
 };

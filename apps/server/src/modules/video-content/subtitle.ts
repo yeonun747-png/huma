@@ -2,6 +2,7 @@ import { execSync } from 'child_process';
 import { mkdir, writeFile } from 'fs/promises';
 import { join } from 'path';
 import type { SubtitleStyle, VideoConti, VideoContiShot } from './types.js';
+import { convertSpokenKoreanNumbersToDigits } from './korean-spoken-numbers.js';
 
 /** ASS PrimaryColour — &H00BBGGRR */
 const ASS_COLOR_A = '&H00FFFFFF';
@@ -23,6 +24,11 @@ function normalizeDialogueQuotes(dialogue: string): string {
 
 function cleanQuotedFragment(text: string): string {
   return text.trim().replace(/^["']+|["']+$/g, '').trim();
+}
+
+/** ASS·미리보기 자막 — TTS 대본(한글 발음 숫자)을 화면용 숫자 표기로 변환 */
+export function formatSubtitleDisplayText(text: string): string {
+  return convertSpokenKoreanNumbersToDigits(text);
 }
 
 /** A: / B: 구간별 파싱 — 한 샷에 복수 화자 대사 가능 */
@@ -81,15 +87,16 @@ function formatAssDialogueLine(line: string): {
 
   if (segments.length === 1) {
     const seg = segments[0]!;
-    if (seg.speaker === 'B') return { text: assNewlines(seg.text), style: 'SpeakerB' };
-    if (seg.speaker === 'A') return { text: assNewlines(seg.text), style: 'SpeakerA' };
-    return { text: assNewlines(seg.text), style: 'Default' };
+    const display = formatSubtitleDisplayText(seg.text);
+    if (seg.speaker === 'B') return { text: assNewlines(display), style: 'SpeakerB' };
+    if (seg.speaker === 'A') return { text: assNewlines(display), style: 'SpeakerA' };
+    return { text: assNewlines(display), style: 'Default' };
   }
 
   const parts = segments.map((seg, i) => {
     const prefix = i > 0 ? ' ' : '';
     const color = seg.speaker === 'B' ? ASS_COLOR_B : ASS_COLOR_A;
-    return `${prefix}{\\c${color}&}${assNewlines(seg.text)}`;
+    return `${prefix}{\\c${color}&}${assNewlines(formatSubtitleDisplayText(seg.text))}`;
   });
   return { text: parts.join(''), style: 'Default' };
 }
@@ -294,7 +301,7 @@ export function buildTimedDialogueCues(params: {
         startSec: params.startSec,
         endSec: params.endSec,
         speakerStyle,
-        displayText: stripSpeakerLabelLine(physicalLines[0]!),
+        displayText: formatSubtitleDisplayText(stripSpeakerLabelLine(physicalLines[0]!)),
       },
     ];
   }
@@ -328,7 +335,7 @@ export function buildTimedDialogueCues(params: {
       startSec: cursor,
       endSec: lineEnd,
       speakerStyle,
-      displayText: stripSpeakerLabelLine(line),
+      displayText: formatSubtitleDisplayText(stripSpeakerLabelLine(line)),
     });
     cursor = lineEnd;
   }

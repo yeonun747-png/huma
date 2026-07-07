@@ -44,6 +44,12 @@ describe('formatAssDialogueText', () => {
     });
   });
 
+  it('shows digits in subtitles when dialogue uses spoken Korean numbers', () => {
+    const { text, style } = formatAssDialogueText('A: "일곱개 남았어"');
+    expect(style).toBe('SpeakerA');
+    expect(text).toBe('7개 남았어');
+  });
+
   it('uses inline colors for multi-speaker line', () => {
     const { text, style } = formatAssDialogueText('B: "지퍼 확인해." A: "제발."');
     expect(style).toBe('Default');
@@ -182,6 +188,35 @@ describe('buildAssContent', () => {
     expect(events[1]!.speakerStyle).toBe('B');
     expect(events[0]!.startSec).toBeLessThan(events[1]!.startSec);
     expect(events[0]!.endSec).toBeLessThanOrEqual(events[1]!.endSec);
+  });
+
+  it('shows digits in preview when dialogue uses spoken Korean numbers', () => {
+    const conti: VideoConti = {
+      characters: [],
+      location: '거실',
+      lighting: '밝음',
+      timeOfDay: '낮',
+      cutType: 'single_shot',
+      duration: 5,
+      scenarioSummary: '테스트',
+      fullText: '테스트',
+      shots: [
+        {
+          shotNumber: 1,
+          startSec: 0,
+          endSec: 5,
+          camera: '미디엄',
+          action: 'A',
+          dialogue: 'A: "사십팔번이요?"',
+        },
+      ],
+    };
+    const ass = buildAssContent(conti, subtitleStyle);
+    expect(ass).toContain('48번이요');
+    expect(ass).not.toContain('사십팔번');
+
+    const events = buildSubtitlePreviewEvents(conti, subtitleStyle);
+    expect(events[0]!.text).toBe('48번이요?');
   });
 
   it('assigns sequential time windows per physical line', () => {

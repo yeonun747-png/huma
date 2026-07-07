@@ -42,6 +42,8 @@ import {
 } from './generic-action-fallback.js';
 import { applyRuleBasedShotRecovery } from './conti-recovery.js';
 import { fitContiDialogueToBudget } from './dialogue-fit.js';
+import { applySpokenKoreanNumbersToConti } from './conti-spoken-numbers.js';
+import { buildDialogueSpokenNumberRule } from './korean-spoken-numbers.js';
 import { findRealNamesInShots, buildCharacterNameToLabelMap } from './character-labels.js';
 import {
   buildMetadataTagInstruction,
@@ -359,6 +361,7 @@ ${shotGuide}
 
 대사 분배:
 ${buildDialogueDistinctRule()}
+${buildDialogueSpokenNumberRule()}
 
 JSON 스키마:
 ${buildShotsJsonSchema(ctx.conditions)}${materialBlock}${metadataBlock}`;
@@ -624,6 +627,8 @@ async function finalizeContiFromParts(
     contentWarnings.push('대사를 샷별 러닝타임 예산(8자/초)에 맞게 압축');
   }
   contentWarnings.push(...dialogueFit.warnings);
+
+  conti = applySpokenKoreanNumbersToConti(conti);
 
   const punchCheck = validatePunchlineShotMinDuration(conti);
   if (!punchCheck.ok) {

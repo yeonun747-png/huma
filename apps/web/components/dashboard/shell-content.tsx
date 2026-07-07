@@ -3,12 +3,12 @@
 import dynamic from 'next/dynamic';
 import { Suspense, useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react';
 import { getPageMeta } from '@/lib/page-config';
-import { SHELL_VIEW_LOADERS, isShellRoute } from '@/lib/shell-routes';
+import { SHELL_VIEW_LOADERS, isShellRoute, type ShellViewLoader } from '@/lib/shell-routes';
 import { useShellNav } from './shell-nav-context';
 import { ShellPageSkeleton } from './shell-page-skeleton';
 import { ShellViewPathProvider } from './shell-view-active';
 
-const viewCache = new Map<string, ComponentType<object>>();
+const viewCache = new Map<string, { loader: ShellViewLoader; View: ComponentType<object> }>();
 const MAX_KEEP_ALIVE = 8;
 
 function resolveShellView(path: string): ComponentType<object> | null {
@@ -16,12 +16,12 @@ function resolveShellView(path: string): ComponentType<object> | null {
   if (!loader) return null;
 
   const cached = viewCache.get(path);
-  if (cached) return cached;
+  if (cached?.loader === loader) return cached.View;
 
   const View = dynamic(loader, {
     loading: () => <ShellPageSkeleton title={getPageMeta(path).title} />,
   });
-  viewCache.set(path, View);
+  viewCache.set(path, { loader, View });
   return View;
 }
 

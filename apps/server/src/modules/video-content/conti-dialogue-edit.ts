@@ -1,5 +1,6 @@
 import { asContiShots } from './types.js';
 import type { VideoConti } from './types.js';
+import { applySpokenKoreanNumbersToDialogue } from './conti-spoken-numbers.js';
 
 export function parseVideoContiFromJson(raw: unknown): VideoConti {
   const obj = (raw ?? {}) as Record<string, unknown>;
@@ -76,7 +77,7 @@ export function applyShotDialoguePatches(
       .map((p) => [
         p.shotNumber,
         {
-          dialogue: normalizeDialogueField(p.dialogue),
+          dialogue: applySpokenKoreanNumbersToDialogue(normalizeDialogueField(p.dialogue)),
           action: String(p.action ?? '').trim(),
           startSec: p.startSec,
           endSec: p.endSec,

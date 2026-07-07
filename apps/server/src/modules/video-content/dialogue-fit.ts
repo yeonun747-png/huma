@@ -9,6 +9,7 @@ import {
   maxDialogueCharsForDuration,
 } from './dialogue-timing.js';
 import { buildYeonunFortuneDialogueRule } from './screen-text-constraint.js';
+import { buildDialogueSpokenNumberRule } from './korean-spoken-numbers.js';
 import type { VideoConti } from './types.js';
 import { asContiShots } from './types.js';
 
@@ -43,6 +44,7 @@ function buildDialogueFitPrompt(conti: VideoConti, workspace?: string): string {
 - 연운·운세 경고 문구 **전문**은 최초 setup 샷 1곳에만. 다른 화자는 "똑같은 경고 봤어요"처럼 짧게 참조(전문 반복 금지).
 - 한 샷에 A·B 두 대사가 필요하면 각각 예산 안에 들어가게 더 짧게.
 - A/B 라벨·완결된 문장 유지. JSON 문자열 안 큰따옴표는 \\" 또는 「」.
+- ${buildDialogueSpokenNumberRule()}
 ${yeonunBlock}
 ${buildDialogueBudgetBlockForConti(conti)}
 

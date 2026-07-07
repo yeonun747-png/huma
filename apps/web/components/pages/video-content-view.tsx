@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { BusinessUnit } from '@/lib/admin-scope';
 import type { HumaAccount, HumaVideoContentHistory } from '@huma/shared';
 import { api } from '@/lib/api';
 import { appAlert, appConfirm, appToast } from '@/lib/app-dialog';
@@ -45,6 +46,46 @@ import { MGrid, MPanel, MTag } from '@/components/mockup/primitives';
 import { SocialPlatformIcon, type SocialPlatformKey } from '@/components/video/social-platform-icon';
 import { useShellViewActive } from '@/components/dashboard/shell-view-active';
 import { resolveYoutubeShortsCaptionFields } from '@/lib/video-content-youtube-caption';
+
+const NarrationScriptView = lazy(() =>
+  import('@/components/narration/narration-script-view').then((m) => ({ default: m.NarrationScriptView })),
+);
+
+type ContentTrack = 'story' | 'narration';
+
+function defaultContentTrack(unit: BusinessUnit): ContentTrack {
+  return unit === 'fortune82' ? 'narration' : 'story';
+}
+
+function VideoContentTrackBar({
+  track,
+  storyDisabled,
+  onTrack,
+}: {
+  track: ContentTrack;
+  storyDisabled: boolean;
+  onTrack: (t: ContentTrack) => void;
+}) {
+  return (
+    <div className="flex shrink-0 gap-2 border-b border-huma-bdr pb-2">
+      <button
+        type="button"
+        className={`rounded px-3 py-1.5 text-[12px] ${track === 'story' && !storyDisabled ? 'bg-huma-accent/20 text-huma-accent' : 'text-huma-t3'} ${storyDisabled ? 'cursor-not-allowed opacity-40' : ''}`}
+        disabled={storyDisabled}
+        onClick={() => onTrack('story')}
+      >
+        스토리형 · 클링3
+      </button>
+      <button
+        type="button"
+        className={`rounded px-3 py-1.5 text-[12px] ${track === 'narration' || storyDisabled ? 'bg-huma-accent/20 text-huma-accent' : 'text-huma-t3'}`}
+        onClick={() => onTrack('narration')}
+      >
+        나레이션 · 브루
+      </button>
+    </div>
+  );
+}
 
 const PLATFORMS: Array<{
   key: SocialPlatformKey;
@@ -694,7 +735,7 @@ function DetailPanel({
   );
 }
 
-export function VideoContentView() {
+export function VideoContentStoryView() {
   const shellActive = useShellViewActive();
   const { workspace: filterWorkspace } = useWorkspace();
   const [accounts, setAccounts] = useState<HumaAccount[]>([]);
@@ -1323,6 +1364,33 @@ export function VideoContentView() {
           setActiveTab('done');
         }}
       />
+    </div>
+  );
+}
+
+/** 숏폼 영상 관리 — 스토리형·나레이션 탭 */
+export function VideoContentView() {
+  const { businessUnit } = useWorkspace();
+  const [track, setTrack] = useState<ContentTrack>(() => defaultContentTrack(businessUnit));
+
+  useEffect(() => {
+    setTrack(defaultContentTrack(businessUnit));
+  }, [businessUnit]);
+
+  const storyDisabled = businessUnit === 'fortune82';
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
+      <VideoContentTrackBar track={track} storyDisabled={storyDisabled} onTrack={setTrack} />
+      <Suspense
+        fallback={<div className="py-16 text-center text-[12px] text-huma-t3 animate-pulse">불러오는 중…</div>}
+      >
+        {track === 'narration' || storyDisabled ? (
+          <NarrationScriptView service={businessUnit === 'fortune82' ? 'fortune82' : 'yeonun'} />
+        ) : (
+          <VideoContentStoryView />
+        )}
+      </Suspense>
     </div>
   );
 }

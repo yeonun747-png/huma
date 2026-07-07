@@ -132,7 +132,9 @@ export function verifyAdminToken(token: string | undefined): AdminPayload | null
 
 export function getWorkspaceFilter(request: FastifyRequest): string[] {
   const admin = request.admin!;
-  return admin.isSuper ? ['yeonun', 'quizoasis', 'panana'] : admin.workspaces;
+  return admin.isSuper
+    ? ['yeonun', 'quizoasis', 'panana', 'fortune82']
+    : admin.workspaces;
 }
 
 /** 슈퍼관리자 전용 라우트 가드 (인프라 제어 등). authMiddleware 이후에 둔다. */
