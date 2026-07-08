@@ -39,14 +39,14 @@ function stripLlmFooterLines(body: string): string {
   return kept.join('\n').trim();
 }
 
-/** LLM 본문 길이 — intro·CTA는 검증 후 시스템 append (TTS ~450자/분, 1분30초 내외) */
+/** LLM 본문 길이 — intro·CTA는 검증 후 시스템 append */
 function fullCoverLengthBounds(axisType: NarrationAxisType): { min: number; max: number } {
-  if (axisType === 'generation') return { min: 420, max: 1100 };
-  return { min: 380, max: 1000 };
+  if (axisType === 'generation') return { min: 420, max: 2000 };
+  return { min: 380, max: 2000 };
 }
 
 function rankedLengthBounds(): { min: number; max: number } {
-  return { min: 450, max: 1050 };
+  return { min: 450, max: 2000 };
 }
 
 export function validateNarrationDraft(

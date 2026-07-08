@@ -17,22 +17,20 @@ function fullCoverZodiacBody(length: number): string {
 }
 
 describe('validateNarrationDraft length bounds', () => {
-  it('full_cover zodiac allows up to 1000 chars (not legacy 650)', () => {
-    const body = fullCoverZodiacBody(900);
-    expect(body.length).toBeGreaterThan(650);
-    expect(body.length).toBeLessThanOrEqual(1000);
+  it('full_cover zodiac allows up to 2000 chars', () => {
+    const body = fullCoverZodiacBody(1900);
+    expect(body.length).toBeLessThanOrEqual(2000);
     const result = validateNarrationDraft(draft(body), 'full_cover', 'zodiac', 'daily');
     expect(result).toEqual({ ok: true });
   });
 
-  it('rejects full_cover zodiac over 1000 chars', () => {
-    const body = fullCoverZodiacBody(1100);
-    expect(body.length).toBeGreaterThan(1000);
+  it('rejects full_cover zodiac over 2000 chars', () => {
+    const body = fullCoverZodiacBody(2100);
+    expect(body.length).toBeGreaterThan(2000);
     const result = validateNarrationDraft(draft(body), 'full_cover', 'zodiac', 'daily');
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.message).toContain('1000');
-      expect(result.message).not.toContain('650');
+      expect(result.message).toContain('2000');
     }
   });
 });
