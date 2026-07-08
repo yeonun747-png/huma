@@ -2,7 +2,7 @@ import { askClaudeWithModel } from '../../lib/anthropic-client.js';
 import { getMainClaudeModel } from '../../lib/ai-engine.js';
 import { parseLlmJsonBlock } from '../../lib/llm-json.js';
 import type { NarrationPickPlan } from './pick-plan.js';
-import { resolveNarrationFormatForPeriod, resolveNarrationRankedTopN, resolveNarrationTopN } from '@huma/shared';
+import { resolveNarrationFormatForPeriod, resolveNarrationRankedTopN } from '@huma/shared';
 import { appendNarrationScriptFooter } from './cta-templates.js';
 import { insertNarrationEngagementIntro } from './engagement-intro.js';
 import {
@@ -23,7 +23,6 @@ import {
 import { buildNarrationPersonaSystem } from './narration-persona.js';
 import { loadNarrationPersonaText } from './narration-persona-store.js';
 import { assertNarrationScriptNotCancelled } from './cancel.js';
-import { resolveMonthlySeriesEpisode } from './monthly-series.js';
 
 const MAX_ATTEMPTS = 2;
 const LLM_PROGRESS_HEARTBEAT_MS = 2_500;
@@ -134,7 +133,6 @@ export async function generateNarrationScript(
 }> {
   const model = await getMainClaudeModel();
   const formatType = resolveNarrationFormatForPeriod(plan.periodType, plan.formatType);
-  const seriesEpisode = plan.seriesEpisode;
   const promptParams = {
     topicLabel: plan.topic.label,
     topicHookLabel: plan.topic.hookLabel,
@@ -144,7 +142,6 @@ export async function generateNarrationScript(
     periodType: plan.periodType,
     formatType,
     dateContext: plan.dateContext,
-    seriesEpisode,
   };
   const basePrompt =
     formatType === 'full_cover'
@@ -167,10 +164,7 @@ export async function generateNarrationScript(
   );
 
   const rankedTopN = resolveNarrationRankedTopN(plan.periodType, plan.axisType);
-  const formatLabel =
-    plan.periodType === 'monthly'
-      ? `이달 TOP${resolveNarrationTopN(plan.axisType)} 시리즈${seriesEpisode ? ` ${seriesEpisode}편` : ''}`
-      : `${formatType === 'ranked' ? '순위특집' : '전체커버'}·${plan.periodType}`;
+  const formatLabel = `${formatType === 'ranked' ? '순위특집' : '전체커버'}·${plan.periodType}`;
 
   let feedback: string | undefined;
   let draft: GeneratedNarrationDraft | null = null;
@@ -231,7 +225,6 @@ export async function generateNarrationScript(
       plan.axisType,
       formatType,
       plan.periodType,
-      seriesEpisode,
     );
 
   return { title, scriptBody: bodyWithCta, model };

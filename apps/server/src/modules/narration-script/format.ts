@@ -1,5 +1,5 @@
 import type { NarrationAxisType, NarrationFormatType, NarrationPeriodType } from '@huma/shared';
-import { resolveNarrationRankedTopN, resolveNarrationTopN } from '@huma/shared';
+import { resolveNarrationRankedTopN } from '@huma/shared';
 import { periodTitleKeyword, type NarrationDateContext } from './date-context.js';
 import {
   buildPeriodAngleBlock,
@@ -29,17 +29,12 @@ export function buildFallbackNarrationTitle(
   axisType: NarrationAxisType,
   formatType: NarrationFormatType,
   periodType: NarrationPeriodType = 'daily',
-  seriesEpisode?: number,
 ): string {
   const axisWord = axisTitleKeyword(axisType);
   const period = periodTitleKeyword(periodType);
   const hook = hookLabel.trim() || '운세';
   const rankedN = resolveNarrationRankedTopN(periodType, axisType);
 
-  if (periodType === 'monthly') {
-    const ep = seriesEpisode && seriesEpisode > 0 ? ` ${seriesEpisode}편` : '';
-    return `이달 ${hook} ${axisWord} TOP${rankedN} 시리즈${ep}, 1위는?`;
-  }
   if (formatType === 'ranked') {
     return `${period} ${hook} ${axisWord} TOP${rankedN}, 1위는?`;
   }
@@ -80,17 +75,6 @@ export function validateNarrationTitle(
           ? '제목에 "이달" 또는 "이번 달" 표현이 포함되어야 합니다'
           : `제목에 주기 표현 "${periodWord}"(또는 "${periodAlt}")이 포함되어야 합니다`,
     };
-  }
-
-  if (periodType === 'monthly') {
-    const topN = resolveNarrationTopN(axisType);
-    const topRe = new RegExp(`TOP\\s*${topN}|TOP${topN}`, 'i');
-    if (!topRe.test(t)) {
-      return { ok: false, message: `월간 시리즈 제목에 TOP${topN}가 포함되어야 합니다` };
-    }
-    if (!/시리즈/.test(t)) {
-      return { ok: false, message: '월간 시리즈 제목에 "시리즈"가 포함되어야 합니다' };
-    }
   }
 
   const axisWord = axisTitleKeyword(axisType);
@@ -144,20 +128,10 @@ function buildTitleExamples(
   hookLabel: string,
   periodType: NarrationPeriodType,
   formatType: NarrationFormatType,
-  seriesEpisode?: number,
 ): string[] {
   const axisWord = axisTitleKeyword(axisType);
   const periodLabel = periodTitleKeyword(periodType);
   const hook = hookLabel.trim() || '운세';
-  const epSuffix = seriesEpisode && seriesEpisode > 0 ? ` ${seriesEpisode}편` : '';
-
-  if (periodType === 'monthly') {
-    const topN = resolveNarrationTopN(axisType);
-    return [
-      `이달 ${hook} ${axisWord} TOP${topN} 시리즈${epSuffix || ' 1편'}, 1위는?`,
-      `이달 ${hook} 기운 좋은 ${axisWord} TOP${topN}${epSuffix || ''}, 1위는?`,
-    ];
-  }
 
   if (formatType === 'ranked') {
     if (axisType === 'zodiac') {
@@ -178,6 +152,12 @@ function buildTitleExamples(
     ];
   }
 
+  if (periodType === 'monthly') {
+    return [
+      `이번 달 ${axisWord} ${hook}, 당신은?`,
+      `이달 ${hook} ${axisWord}, 이번 달 핵심은?`,
+    ];
+  }
   if (periodType === 'weekly') {
     return [
       `이번 주 ${axisWord} ${hook}, 이번 주 핵심은?`,
@@ -197,19 +177,12 @@ export function buildTitlePromptBlock(
   catalogTitle: string,
   periodType: NarrationPeriodType,
   dateContext: NarrationDateContext,
-  seriesEpisode?: number,
   formatType: NarrationFormatType = 'full_cover',
 ): string {
   const axisWord = axisTitleKeyword(axisType);
   const periodLabel = periodTitleKeyword(periodType);
   const hook = hookLabel.trim() || '운세';
-  const examples = buildTitleExamples(
-    axisType,
-    hook,
-    periodType,
-    formatType,
-    seriesEpisode,
-  );
+  const examples = buildTitleExamples(axisType, hook, periodType, formatType);
 
   const angleBlock = buildPeriodAngleBlock(
     periodType,

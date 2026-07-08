@@ -48,8 +48,8 @@ describe('narration format', () => {
     expect(buildFallbackNarrationTitle('재회운', 'constellation', 'full_cover', 'daily')).toBe(
       '오늘 별자리 재회운, 당신은?',
     );
-    expect(buildFallbackNarrationTitle('작명', 'zodiac', 'ranked', 'monthly', 1)).toBe(
-      '이달 작명 띠 TOP12 시리즈 1편, 1위는?',
+    expect(buildFallbackNarrationTitle('작명', 'zodiac', 'ranked', 'monthly')).toBe(
+      '이번 달 작명 띠 TOP5, 1위는?',
     );
   });
 });

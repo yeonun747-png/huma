@@ -104,7 +104,8 @@ ${catalogNote}
 ${catalogNote}
 - 제목·오프닝: 주기(이번 주) > 훅(${hookLabel}) > 축/순위`;
   }
-  return `[이번 영상 각도 — 월간 시리즈]
-- **이달** ${hookLabel} TOP N 시리즈 — 한 달 전체 순위
-${catalogNote}`;
+  return `[이번 영상 각도 — 월간]
+- **이번 달** / 이달의 ${hookLabel} 관점 (${absoluteLabel} 맥락)
+${catalogNote}
+- 제목·오프닝: 주기(이달·이번 달) > 훅(${hookLabel}) > 축/순위`;
 }

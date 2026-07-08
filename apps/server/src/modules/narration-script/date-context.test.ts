@@ -8,16 +8,12 @@ describe('narration date-context', () => {
     expect(ctx.periodPhrase).toBe('오늘');
   });
 
-  it('builds monthly context', () => {
-    const ctx = buildNarrationDateContext('monthly', new Date('2026-07-07T15:00:00.000Z'), 'zodiac');
+  it('builds monthly context like weekly (no TOP series)', () => {
+    const ctx = buildNarrationDateContext('monthly', new Date('2026-07-07T15:00:00.000Z'));
     expect(ctx.absoluteLabel).toBe('2026년 7월');
     expect(ctx.periodPhrase).toBe('이번 달');
-    expect(ctx.promptBlock).toContain('TOP12 시리즈');
-  });
-
-  it('builds monthly context for generation TOP5', () => {
-    const ctx = buildNarrationDateContext('monthly', new Date('2026-07-07T15:00:00.000Z'), 'generation');
-    expect(ctx.promptBlock).toContain('TOP5 시리즈');
+    expect(ctx.promptBlock).toContain('[시점 — 월간]');
+    expect(ctx.promptBlock).not.toContain('시리즈');
   });
 
   it('kst month boundaries', () => {

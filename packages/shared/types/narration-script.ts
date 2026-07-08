@@ -43,45 +43,31 @@ export const NARRATION_PERIOD_HINT: Record<NarrationPeriodType, string> = {
   monthly: '이달',
 };
 
-/** @deprecated resolveNarrationRankedTopN 사용 */
+/** @deprecated 항상 TOP5 — resolveNarrationRankedTopN 사용 */
 export const NARRATION_TOP_N = 5;
 
-/** 축별 월간 시리즈 TOP N (띠·별자리 12, 연령대 5) */
-export function resolveNarrationTopN(axisType: NarrationAxisType): number {
-  if (axisType === 'generation') return 5;
-  return 12;
-}
-
-/** 순위특집 TOP N — 월간=축 전체(5·12), 데일리/주간=5 */
+/** 순위특집 TOP N — 데일리·주간·월간 공통 TOP5 */
 export function resolveNarrationRankedTopN(
-  periodType: NarrationPeriodType,
-  axisType: NarrationAxisType,
+  _periodType: NarrationPeriodType,
+  _axisType: NarrationAxisType,
 ): number {
-  if (periodType === 'monthly') return resolveNarrationTopN(axisType);
   return 5;
 }
 
-/** 월간은 이달 TOP N 시리즈(순위특집) 전용 */
+/** 주기별 형식 — 월간도 데일리·주간과 동일하게 선택 */
 export function resolveNarrationFormatForPeriod(
-  periodType: NarrationPeriodType,
+  _periodType: NarrationPeriodType,
   formatType: NarrationFormatType,
 ): NarrationFormatType {
-  if (periodType === 'monthly') return 'ranked';
   return formatType;
 }
 
-/** 전체커버형-데일리 · 이달 TOP12 시리즈 등 표시 */
+/** 전체커버형-데일리 · 순위특집형-월간 등 표시 */
 export function resolveNarrationVariantLabel(
   formatType: NarrationFormatType,
   periodType: NarrationPeriodType,
-  axisType?: NarrationAxisType,
 ): string {
-  if (periodType === 'monthly') {
-    const n = axisType ? resolveNarrationTopN(axisType) : 12;
-    return `이달 TOP${n} 시리즈`;
-  }
-  const period = periodType === 'weekly' ? periodType : 'daily';
-  return `${NARRATION_FORMAT_LABEL[formatType]}-${NARRATION_PERIOD_LABEL[period]}`;
+  return `${NARRATION_FORMAT_LABEL[formatType]}-${NARRATION_PERIOD_LABEL[periodType]}`;
 }
 
 export const NARRATION_PERIOD_TITLE_PREFIX: Record<NarrationPeriodType, string> = {

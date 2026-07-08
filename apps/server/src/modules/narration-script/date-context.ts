@@ -1,5 +1,4 @@
-import type { NarrationAxisType, NarrationPeriodType } from '@huma/shared';
-import { resolveNarrationTopN } from '@huma/shared';
+import type { NarrationPeriodType } from '@huma/shared';
 
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
@@ -50,7 +49,6 @@ const WEEK_ORDINAL = ['첫', '둘', '셋', '넷', '다섯'];
 export function buildNarrationDateContext(
   periodType: NarrationPeriodType,
   refDate: Date = new Date(),
-  axisType?: NarrationAxisType,
 ): NarrationDateContext {
   const { y, m, d, day } = toKstParts(refDate);
   const ym = `${y}년 ${m}월`;
@@ -75,11 +73,8 @@ export function buildNarrationDateContext(
   }
 
   const absoluteLabel = ym;
-  const topN = axisType ? resolveNarrationTopN(axisType) : 12;
-  const promptBlock = `[시점 — 월간 · 이달 TOP${topN} 시리즈]
-- 포맷: **이달 TOP${topN} 순위특집 시리즈** (전체커버형 아님 — ${topN}위→1위)
+  const promptBlock = `[시점 — 월간]
 - 제목·오프닝 첫 문장에 "이달"(또는 "이번 달")과 "${absoluteLabel}" 포함
-- 제목에 반드시 "TOP${topN}" + "시리즈" + "N편" + 숏폼 훅 표기 (예: 이달 작명 띠 TOP${topN} 시리즈 2편)
 - 본문 시기: "이번 달", "이달 중순", "월 초반" 등 **상대 표현만**
 - "9월", "10월 중순" 같이 **다른 달·절대 월 표현 금지**`;
   return { periodType, absoluteLabel, periodPhrase: '이번 달', promptBlock };

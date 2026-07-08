@@ -25,7 +25,6 @@ import {
   inferNarrationAxisFromTopic,
   topicTextForAxisInference,
 } from './axis-inference.js';
-import { resolveMonthlySeriesEpisode } from './monthly-series.js';
 import { deriveNarrationHookLabel } from './topic-hook.js';
 
 function axisPickOrder(topic: NarrationTopic): NarrationAxisType[] {
@@ -52,8 +51,6 @@ export interface NarrationPickPlan {
   topic: NarrationTopic;
   combo: NarrationComboKey;
   dateContext: NarrationDateContext;
-  /** 월간 TOP N 시리즈 N편 (생성 시 채움) */
-  seriesEpisode?: number;
 }
 
 export interface PlanNarrationPickInput {
@@ -175,7 +172,7 @@ export async function planNarrationPick(input: PlanNarrationPickInput): Promise<
     axisType: resolvedAxis,
     topic,
     combo,
-    dateContext: buildNarrationDateContext(periodType, new Date(), resolvedAxis),
+    dateContext: buildNarrationDateContext(periodType),
   };
 }
 
@@ -214,15 +211,7 @@ export async function planFromNarrationHistoryRow(row: {
       axisType: row.axis_type,
       topicKey: row.topic_key,
     },
-    dateContext: buildNarrationDateContext(periodType, new Date(), row.axis_type),
-    seriesEpisode:
-      periodType === 'monthly' ? await resolveMonthlySeriesEpisode({
-          workspace: row.workspace,
-          formatType,
-          periodType,
-          axisType: row.axis_type,
-          topicKey: row.topic_key,
-        }) : undefined,
+    dateContext: buildNarrationDateContext(periodType),
   };
 }
 
