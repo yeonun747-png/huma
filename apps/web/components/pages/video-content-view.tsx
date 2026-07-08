@@ -118,7 +118,7 @@ function useVideoBlob(
     setLoadError(false);
     setUrl(null);
     void api
-      .fetchVideoContentBlob(id, variant === 'source' ? 'source' : undefined)
+      .fetchVideoContentBlob(id, variant === 'source' ? 'source' : undefined, refreshKey)
       .then((blob) => {
         revoked = URL.createObjectURL(blob);
         setUrl(revoked);

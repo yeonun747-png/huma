@@ -94,13 +94,23 @@ export function applyShotDialoguePatches(
       ]),
   );
 
+  if (patches.length > 0 && byNumber.size === 0) {
+    throw new Error('유효한 샷 번호가 없습니다');
+  }
+
+  let appliedPatchCount = 0;
   const nextShots = shots.map((shot, index) => {
     const shotNumber = shot.shotNumber > 0 ? shot.shotNumber : index + 1;
     const patch = byNumber.get(shotNumber);
     if (!patch) return shot;
+    appliedPatchCount += 1;
     const timing = patchShotTiming(shot, patch);
     return { ...shot, dialogue: patch.dialogue, action: patch.action, ...timing };
   });
+
+  if (patches.length > 0 && appliedPatchCount === 0) {
+    throw new Error('멘트 패치가 어떤 샷에도 적용되지 않았습니다 (샷 번호 확인)');
+  }
 
   return { ...contiJson, shots: nextShots };
 }

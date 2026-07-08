@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { convertSpokenKoreanNumbersToDigits } from '@huma/shared';
 import type { ContiPreviewData } from '@/lib/video-content-status';
 import { api } from '@/lib/api';
 import { appConfirm } from '@/lib/app-dialog';
@@ -67,10 +68,14 @@ function AutoHeightTextarea({
   );
 }
 
+function dialogueForEditor(stored: string): string {
+  return convertSpokenKoreanNumbersToDigits(stored.replace(/\r\n/g, '\n'));
+}
+
 function shotsToDrafts(conti: ContiPreviewData): ShotSubtitleDraft[] {
   return (conti.shots ?? []).map((s, i) => ({
     shotNumber: s.shotNumber ?? i + 1,
-    dialogue: s.dialogue ?? '',
+    dialogue: dialogueForEditor(s.dialogue ?? ''),
     action: s.action ?? '',
     startSec: Number(s.startSec) || 0,
     endSec: Number(s.endSec) || 0,
@@ -81,7 +86,7 @@ function contiShotsFingerprint(conti: ContiPreviewData): string {
   return JSON.stringify(
     (conti.shots ?? []).map((s, i) => ({
       shotNumber: s.shotNumber ?? i + 1,
-      dialogue: s.dialogue ?? '',
+      dialogue: dialogueForEditor(s.dialogue ?? ''),
       action: s.action ?? '',
       startSec: Number(s.startSec) || 0,
       endSec: Number(s.endSec) || 0,
@@ -188,11 +193,7 @@ export function SubtitleEditPanel({
     if (!hasSource || busy) return;
     setSaving(true);
     try {
-      if (dirty) {
-        await onSaveAndApply(drafts);
-      } else {
-        await onApplyWithoutSave({ skipConfirm: true });
-      }
+      await onSaveAndApply(drafts);
     } finally {
       setSaving(false);
     }
@@ -233,7 +234,7 @@ export function SubtitleEditPanel({
           <div>
             <div className="text-[12px] font-semibold text-huma-t">💬 자막만 다시 입히기(무료)</div>
             <p className="mt-0.5 text-[10px] leading-relaxed text-huma-t3">
-              원본 영상은 그대로, 아래 멘트·구간 기준으로 자막만 다시 입힙니다.
+              원본 영상은 그대로, 아래 멘트·구간 기준으로 자막만 다시 입힙니다. (자막 표시와 동일한 숫자 형식)
               {reburnCount > 0 ? (
                 <span className="ml-1 font-mono text-huma-t4">· 수정 {reburnCount}회</span>
               ) : null}

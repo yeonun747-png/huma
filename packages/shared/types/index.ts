@@ -16,6 +16,7 @@ export * from './watcher-log-filter';
 export * from './quiz-image-prompt';
 export * from './narration-script';
 export * from './narration-persona';
+export * from './korean-spoken-numbers';
 
 export type Workspace = import('./account').Workspace;
 

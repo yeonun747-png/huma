@@ -29,6 +29,15 @@ describe('applyShotDialoguePatches', () => {
     ]);
   });
 
+  it('rejects patches with unknown shot numbers', () => {
+    expect(() =>
+      applyShotDialoguePatches(
+        { shots: [{ shotNumber: 1, startSec: 0, endSec: 3, camera: '', action: '', dialogue: 'A: "원본"' }] },
+        [{ shotNumber: 99, dialogue: 'A: "수정"', action: '' }],
+      ),
+    ).toThrow(/샷 번호/);
+  });
+
   it('rejects invalid timing', () => {
     expect(() =>
       applyShotDialoguePatches(

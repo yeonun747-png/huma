@@ -718,10 +718,17 @@ export const api = {
     }),
   deleteVideoContent: (id: string) =>
     request<{ ok: boolean }>(`/api/video-content/${id}`, { method: 'DELETE' }),
-  fetchVideoContentBlob: async (id: string, variant?: 'source' | 'subtitled'): Promise<Blob> => {
+  fetchVideoContentBlob: async (
+    id: string,
+    variant?: 'source' | 'subtitled',
+    cacheBust?: number,
+  ): Promise<Blob> => {
     const token = getToken();
-    const qs = variant === 'source' ? '?variant=source' : '';
-    const res = await fetch(`${API_BASE}/api/video-content/${id}/stream${qs}`, {
+    const q = new URLSearchParams();
+    if (variant === 'source') q.set('variant', 'source');
+    if (cacheBust != null) q.set('t', String(cacheBust));
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    const res = await fetch(resolveRequestUrl(`/api/video-content/${id}/stream${qs}`), {
       headers: token ? { 'X-HUMA-KEY': token } : {},
     });
     if (!res.ok) throw new Error(variant === 'source' ? '원본 로드 실패' : '영상 로드 실패');
