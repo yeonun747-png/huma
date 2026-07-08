@@ -626,9 +626,19 @@ export const api = {
     request<{ ok: boolean; previousStatus?: string }>(`/api/video-content/${historyId}/cancel`, {
       method: 'POST',
     }),
-  reburnVideoSubtitles: (historyId: string) =>
+  reburnVideoSubtitles: (
+    historyId: string,
+    dialogues?: Array<{
+      shotNumber: number;
+      dialogue: string;
+      action: string;
+      startSec?: number;
+      endSec?: number;
+    }>,
+  ) =>
     request<{ ok: boolean; message?: string }>(`/api/video-content/${historyId}/reburn-subtitles`, {
       method: 'POST',
+      body: JSON.stringify(dialogues?.length ? { dialogues } : {}),
     }),
   deleteVideoContentFile: (id: string, target: 'source' | 'subtitled') =>
     request<{ ok: boolean; deleted: string; historyRemoved?: boolean }>(

@@ -58,6 +58,11 @@ import {
 } from './conti-cancel.js';
 import { enforceDialogueShotsMinDuration } from './conti-validation.js';
 import { mergeShotTimingKeepDialogue } from './dialogue-timing.js';
+import {
+  parseVideoContiFromJson,
+  resolveContiJsonForSubtitleBurn,
+  type ShotDialoguePatch,
+} from './conti-dialogue-edit.js';
 
 function contiGenerationSecSince(startedAtIso: string): number {
   const t = new Date(startedAtIso).getTime();
@@ -522,7 +527,10 @@ async function finalizeVideoContent(params: {
 }
 
 /** 완료된 작업 — EvoLink 재호출 없이 원본에 자막만 다시 burn */
-export async function runSubtitleReburn(historyId: string): Promise<void> {
+export async function runSubtitleReburn(
+  historyId: string,
+  opts?: { dialogues?: ShotDialoguePatch[] },
+): Promise<void> {
   const { data: history, error } = await supabase
     .from('huma_video_content_history')
     .select('id, account_id, workspace, status, conti_json, source_video_path, video_file_path')
@@ -543,8 +551,9 @@ export async function runSubtitleReburn(historyId: string): Promise<void> {
     throw new Error('원본 영상이 서버에 없습니다. (이전 작업이거나 원본이 삭제됨)');
   }
 
-  const conti = parseContiFromJson(history.conti_json);
-  const contiJson = (history.conti_json as Record<string, unknown> | null) ?? {};
+  const baseContiJson = (history.conti_json as Record<string, unknown> | null) ?? {};
+  const contiJson = resolveContiJsonForSubtitleBurn(baseContiJson, opts?.dialogues);
+  const conti = parseVideoContiFromJson(contiJson);
   const tmpDir = join(process.cwd(), 'tmp', 'video-content', historyId);
   await mkdir(tmpDir, { recursive: true });
 
@@ -561,6 +570,14 @@ export async function runSubtitleReburn(historyId: string): Promise<void> {
     workspace,
     account_id: accountId,
   });
+
+  if (opts?.dialogues?.length) {
+    const { error: saveErr } = await supabase
+      .from('huma_video_content_history')
+      .update({ conti_json: contiJson })
+      .eq('id', historyId);
+    if (saveErr) throw new Error(`멘트 저장 실패: ${saveErr.message}`);
+  }
 
   try {
     await burnSubtitles({

@@ -62,6 +62,15 @@ function patchShotTiming(
   return { startSec, endSec };
 }
 
+/** 자막 reburn — UI에서 전달된 멘트가 있으면 저장본 대신 해당 패치 적용 */
+export function resolveContiJsonForSubtitleBurn(
+  contiJson: Record<string, unknown>,
+  dialogues?: ShotDialoguePatch[],
+): Record<string, unknown> {
+  if (!dialogues?.length) return contiJson;
+  return applyShotDialoguePatches(contiJson, dialogues);
+}
+
 export function applyShotDialoguePatches(
   contiJson: Record<string, unknown>,
   patches: ShotDialoguePatch[],

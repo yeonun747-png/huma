@@ -212,6 +212,19 @@ function ProgressWait({
   );
 }
 
+export type ReburnDialoguePatch = {
+  shotNumber: number;
+  dialogue: string;
+  action: string;
+  startSec?: number;
+  endSec?: number;
+};
+
+export type ReburnOptions = {
+  skipConfirm?: boolean;
+  dialogues?: ReburnDialoguePatch[];
+};
+
 function CompletedDetail({
   item,
   conti,
@@ -235,7 +248,7 @@ function CompletedDetail({
   rerendering: boolean;
   deleting: boolean;
   videoRefreshKey: number;
-  onReburn: (opts?: { skipConfirm?: boolean }) => Promise<void>;
+  onReburn: (opts?: ReburnOptions) => Promise<void>;
   onRestoreSubtitles: () => Promise<void>;
   onRerender: () => void;
   onDelete: () => void;
@@ -299,17 +312,16 @@ function CompletedDetail({
   const saveAndApply = useCallback(
     async (drafts: ShotSubtitleDraft[]) => {
       try {
-        await api.updateVideoContentShotDialogues(
-          item.id,
-          drafts.map((d) => ({
+        await onReburn({
+          skipConfirm: true,
+          dialogues: drafts.map((d) => ({
             shotNumber: d.shotNumber,
             dialogue: d.dialogue.replace(/\r\n/g, '\n'),
             action: d.action,
             startSec: d.startSec,
             endSec: d.endSec,
           })),
-        );
-        await onReburn({ skipConfirm: true });
+        });
         appToast('자막이 적용되었습니다');
         await onRefresh();
       } catch (e) {
@@ -317,7 +329,7 @@ function CompletedDetail({
         throw e;
       }
     },
-    [item.id, onReburn, onRefresh],
+    [onReburn, onRefresh],
   );
 
   const seekVideo = useCallback((sec: number) => {
@@ -581,7 +593,7 @@ function DetailPanel({
   videoRefreshKey: number;
   onRender: () => void;
   onDelete: () => void;
-  onReburn: (opts?: { skipConfirm?: boolean }) => Promise<void>;
+  onReburn: (opts?: ReburnOptions) => Promise<void>;
   onRestoreSubtitles: () => Promise<void>;
   onRerender: () => void;
   onRefresh: () => void;
@@ -1093,7 +1105,7 @@ export function VideoContentStoryView() {
     }
   };
 
-  const handleReburn = async (opts?: { skipConfirm?: boolean }) => {
+  const handleReburn = async (opts?: ReburnOptions) => {
     if (!selectedId) return;
     if (
       !opts?.skipConfirm &&
@@ -1105,7 +1117,7 @@ export function VideoContentStoryView() {
     }
     setReburning(true);
     try {
-      await api.reburnVideoSubtitles(selectedId);
+      await api.reburnVideoSubtitles(selectedId, opts?.dialogues);
       const row = await api.videoContentGet(selectedId);
       setDetail(row);
       await load({ silent: true });

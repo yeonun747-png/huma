@@ -470,8 +470,12 @@ export async function registerVideoContentRoutes(app: FastifyInstance) {
       });
     }
 
+    const body = (request.body ?? {}) as { dialogues?: ShotDialoguePatch[] };
+    const dialogues =
+      Array.isArray(body.dialogues) && body.dialogues.length ? body.dialogues : undefined;
+
     try {
-      await runSubtitleReburn(id);
+      await runSubtitleReburn(id, dialogues ? { dialogues } : undefined);
       return { ok: true, message: '자막을 다시 입혔습니다' };
     } catch (err) {
       const msg = err instanceof Error ? err.message : '자막 재입히기 실패';

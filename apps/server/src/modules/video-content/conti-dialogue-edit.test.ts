@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyShotDialoguePatches, canEditContiDialogues } from './conti-dialogue-edit.js';
+import { applyShotDialoguePatches, canEditContiDialogues, resolveContiJsonForSubtitleBurn } from './conti-dialogue-edit.js';
 
 describe('canEditContiDialogues', () => {
   it('allows review and completed statuses', () => {
@@ -36,5 +36,22 @@ describe('applyShotDialoguePatches', () => {
         [{ shotNumber: 1, dialogue: '', action: '', startSec: 5, endSec: 2 }],
       ),
     ).toThrow(/시작 시각/);
+  });
+});
+
+describe('resolveContiJsonForSubtitleBurn', () => {
+  it('uses patched dialogues when provided', () => {
+    const base = {
+      shots: [{ shotNumber: 1, startSec: 0, endSec: 3, camera: '', action: '본다', dialogue: 'A: "원본"' }],
+    };
+    const next = resolveContiJsonForSubtitleBurn(base, [
+      { shotNumber: 1, dialogue: 'A: "수정본"', action: '본다' },
+    ]);
+    expect((next.shots as Array<{ dialogue: string }>)[0]?.dialogue).toBe('A: "수정본"');
+  });
+
+  it('returns original json when dialogues omitted', () => {
+    const base = { shots: [{ shotNumber: 1, startSec: 0, endSec: 3, camera: '', action: '', dialogue: '원본' }] };
+    expect(resolveContiJsonForSubtitleBurn(base)).toBe(base);
   });
 });
