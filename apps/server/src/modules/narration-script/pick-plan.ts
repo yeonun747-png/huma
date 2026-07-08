@@ -26,6 +26,7 @@ import {
   topicTextForAxisInference,
 } from './axis-inference.js';
 import { resolveMonthlySeriesEpisode } from './monthly-series.js';
+import { deriveNarrationHookLabel } from './topic-hook.js';
 
 function axisPickOrder(topic: NarrationTopic): NarrationAxisType[] {
   const inferred = inferNarrationAxisFromTopic(topicTextForAxisInference(topic));
@@ -194,6 +195,7 @@ export async function planFromNarrationHistoryRow(row: {
     topic = {
       key: row.topic_key,
       label: row.topic_label,
+      hookLabel: deriveNarrationHookLabel(row.topic_label),
       categoryKey: null,
       contextText: `[주제]\n상품명: ${row.topic_label}`,
     };

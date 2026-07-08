@@ -8,6 +8,7 @@ describe('buildNarrationPersonaSystem', () => {
       workspace: 'yeonun',
       workspaceLabel: '연운',
       topicLabel: '2026 자미두수 별의 흐름',
+      topicHookLabel: '자미두수',
       axisType: 'constellation',
       formatType: 'full_cover',
       periodType: 'weekly',
@@ -26,6 +27,7 @@ describe('buildNarrationPersonaSystem', () => {
         workspace: 'yeonun',
         workspaceLabel: '연운',
         topicLabel: '재물운',
+        topicHookLabel: '재물운',
         axisType: 'zodiac',
         formatType: 'full_cover',
         periodType: 'daily',
@@ -42,6 +44,7 @@ describe('buildNarrationPersonaSystem', () => {
       workspace: 'fortune82',
       workspaceLabel: '포춘82',
       topicLabel: '타로',
+      topicHookLabel: '타로',
       axisType: 'zodiac',
       formatType: 'ranked',
       periodType: 'daily',
@@ -49,6 +52,7 @@ describe('buildNarrationPersonaSystem', () => {
     });
     expect(f82).toContain('포춘82');
     expect(f82).toContain('TOP5');
+    expect(f82).toContain('숏폼 훅');
   });
 });
 

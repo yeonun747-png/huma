@@ -1,4 +1,5 @@
 import type { NarrationAxisType, NarrationScriptWorkspace } from '@huma/shared';
+import { buildNarrationCtaLead } from './topic-hook.js';
 
 const NARRATION_CTA_SITE: Record<NarrationScriptWorkspace, { label: string; domain: string }> = {
   yeonun: { label: '연운', domain: 'yeonun.com' },
@@ -19,19 +20,19 @@ export function buildNarrationZodiacDisclaimer(workspace: NarrationScriptWorkspa
   );
 }
 
-export function buildNarrationCta(workspace: NarrationScriptWorkspace, productTitle: string): string {
-  const name = productTitle.trim() || '운세';
+export function buildNarrationCta(workspace: NarrationScriptWorkspace, hookLabel: string): string {
+  const lead = buildNarrationCtaLead(hookLabel);
   const site = NARRATION_CTA_SITE[workspace];
   const siteWithDomain = `${site.label}(${site.domain})`;
 
   if (workspace === 'fortune82') {
     return (
-      `더 자세한 내 ${name}이 궁금하다면, ${siteWithDomain}에서 확인해보세요. ` +
+      `${lead}, ${siteWithDomain}에서 확인해보세요. ` +
       `결제하시면 코드와 인증번호로 60일 안에 다시 보실 수 있어요.`
     );
   }
   return (
-    `더 정확한 내 ${name}이 궁금하다면, ${siteWithDomain}에서 사주로 확인해보세요. ` +
+    `${lead}, ${siteWithDomain}에서 사주로 확인해보세요. ` +
     `가입하면 5천 원 크레딧 바로 드려요.`
   );
 }
@@ -40,15 +41,15 @@ export function appendNarrationScriptFooter(
   body: string,
   opts: {
     workspace: NarrationScriptWorkspace;
-    productTitle: string;
+    hookLabel: string;
     axisType: NarrationAxisType;
   },
 ): string {
   const trimmed = body.trim();
   if (!trimmed) {
     return opts.axisType === 'zodiac'
-      ? `${buildNarrationZodiacDisclaimer(opts.workspace)}\n${buildNarrationCta(opts.workspace, opts.productTitle)}`
-      : buildNarrationCta(opts.workspace, opts.productTitle);
+      ? `${buildNarrationZodiacDisclaimer(opts.workspace)}\n${buildNarrationCta(opts.workspace, opts.hookLabel)}`
+      : buildNarrationCta(opts.workspace, opts.hookLabel);
   }
 
   const last = trimmed.at(-1);
@@ -59,7 +60,7 @@ export function appendNarrationScriptFooter(
     next = `${next}\n${buildNarrationZodiacDisclaimer(opts.workspace)}`;
   }
 
-  const cta = buildNarrationCta(opts.workspace, opts.productTitle);
+  const cta = buildNarrationCta(opts.workspace, opts.hookLabel);
   return `${next}\n${cta}`;
 }
 
@@ -67,11 +68,11 @@ export function appendNarrationScriptFooter(
 export function appendNarrationCta(
   body: string,
   workspace: NarrationScriptWorkspace,
-  productTitle: string,
+  hookLabel: string,
 ): string {
   return appendNarrationScriptFooter(body, {
     workspace,
-    productTitle,
+    hookLabel,
     axisType: 'constellation',
   });
 }

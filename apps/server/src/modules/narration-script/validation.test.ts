@@ -3,7 +3,7 @@ import { validateNarrationDraft } from './validation.js';
 
 function draft(body: string) {
   return {
-    title: '오늘 띠별로 알아보는 재물운 TOP5',
+    title: '오늘 띠별 재물운 TOP5, 1위는?',
     body,
   };
 }
@@ -20,14 +20,14 @@ describe('validateNarrationDraft length bounds', () => {
   it('full_cover zodiac allows up to 2000 chars', () => {
     const body = fullCoverZodiacBody(1900);
     expect(body.length).toBeLessThanOrEqual(2000);
-    const result = validateNarrationDraft(draft(body), 'full_cover', 'zodiac', 'daily');
+    const result = validateNarrationDraft(draft(body), 'full_cover', 'zodiac', 'daily', '재물운');
     expect(result).toEqual({ ok: true });
   });
 
   it('rejects full_cover zodiac over 2000 chars', () => {
     const body = fullCoverZodiacBody(2100);
     expect(body.length).toBeGreaterThan(2000);
-    const result = validateNarrationDraft(draft(body), 'full_cover', 'zodiac', 'daily');
+    const result = validateNarrationDraft(draft(body), 'full_cover', 'zodiac', 'daily', '재물운');
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.message).toContain('2000');

@@ -7,6 +7,7 @@ export interface NarrationPersonaInput {
   workspace: NarrationScriptWorkspace;
   workspaceLabel: string;
   topicLabel: string;
+  topicHookLabel: string;
   axisType: NarrationAxisType;
   formatType: NarrationFormatType;
   periodType: NarrationPeriodType;
@@ -71,7 +72,8 @@ export function buildNarrationPersonaSystem(
     '- 말하듯 읽히는 문장. 이모지·해시태그·마크다운·괄호 stage direction 금지.',
     '',
     '## 이번 작업 (벗어나면 실패)',
-    `- 주제(상품): 「${input.topicLabel}」 — 모든 문장이 이 주제와 **직접** 연결될 것`,
+    `- 주제(상품): 「${input.topicLabel}」 — 본문 해석은 이 주제와 **직접** 연결`,
+    `- 숏폼 훅(제목·오프닝): 「${input.topicHookLabel}」 — **상품 전체명을 제목에 그대로 쓰지 말 것**`,
     `- 포맷: ${formatLabel} · 주기: ${input.periodType} · 시점: ${input.dateContext.absoluteLabel}`,
     `- ${axisRoleLine(input.axisType)}`,
     `- 반드시 다룰 라벨: ${instances}`,

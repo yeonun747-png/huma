@@ -137,10 +137,12 @@ export async function generateNarrationScript(
   const seriesEpisode = plan.seriesEpisode;
   const promptParams = {
     topicLabel: plan.topic.label,
+    topicHookLabel: plan.topic.hookLabel,
     topicContext: plan.topic.contextText,
     axisType: plan.axisType,
     workspaceLabel: workspaceLabel(plan.workspace),
     periodType: plan.periodType,
+    formatType,
     dateContext: plan.dateContext,
     seriesEpisode,
   };
@@ -155,6 +157,7 @@ export async function generateNarrationScript(
       workspace: plan.workspace,
       workspaceLabel: workspaceLabel(plan.workspace),
       topicLabel: plan.topic.label,
+      topicHookLabel: plan.topic.hookLabel,
       axisType: plan.axisType,
       formatType,
       periodType: plan.periodType,
@@ -185,7 +188,14 @@ export async function generateNarrationScript(
       await reportNarrationProgress(progress.historyId, progress.workspace, 'validate');
     }
 
-    const check = validateNarrationDraft(draft, formatType, plan.axisType, plan.periodType);
+    const check = validateNarrationDraft(
+      draft,
+      formatType,
+      plan.axisType,
+      plan.periodType,
+      plan.topic.hookLabel,
+      plan.topic.label,
+    );
     if (check.ok) break;
     feedback = check.message;
     if (attempt === MAX_ATTEMPTS - 1) {
@@ -211,13 +221,13 @@ export async function generateNarrationScript(
 
   const bodyWithCta = appendNarrationScriptFooter(bodyWithIntro, {
     workspace: plan.workspace,
-    productTitle: plan.topic.label,
+    hookLabel: plan.topic.hookLabel,
     axisType: plan.axisType,
   });
   const title =
     draft!.title ||
     buildFallbackNarrationTitle(
-      plan.topic.label,
+      plan.topic.hookLabel,
       plan.axisType,
       formatType,
       plan.periodType,

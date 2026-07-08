@@ -1,6 +1,11 @@
 import type { NarrationAxisType, NarrationFormatType, NarrationPeriodType } from '@huma/shared';
 import { resolveNarrationRankedTopN, resolveNarrationTopN } from '@huma/shared';
 import { periodTitleKeyword, type NarrationDateContext } from './date-context.js';
+import {
+  buildPeriodAngleBlock,
+  titleContainsCatalogName,
+  titleIncludesHook,
+} from './topic-hook.js';
 
 /** LLM이 문장마다 넣는 불필요한 빈 줄 제거 — 항목 구분은 단일 줄바꿈만 */
 export function normalizeNarrationBody(body: string): string {
@@ -19,31 +24,26 @@ export function axisTitleKeyword(axisType: NarrationAxisType): string {
   return '연령';
 }
 
-export function buildAxisTitlePrefix(axisType: NarrationAxisType): string {
-  if (axisType === 'zodiac') return '띠별로 알아보는';
-  if (axisType === 'constellation') return '별자리로 알아보는';
-  return '연령대별로 알아보는';
-}
-
 export function buildFallbackNarrationTitle(
-  topicLabel: string,
+  hookLabel: string,
   axisType: NarrationAxisType,
   formatType: NarrationFormatType,
   periodType: NarrationPeriodType = 'daily',
   seriesEpisode?: number,
 ): string {
-  const prefix = buildAxisTitlePrefix(axisType);
+  const axisWord = axisTitleKeyword(axisType);
   const period = periodTitleKeyword(periodType);
-  const topic = topicLabel.trim() || '운세';
+  const hook = hookLabel.trim() || '운세';
   const rankedN = resolveNarrationRankedTopN(periodType, axisType);
+
   if (periodType === 'monthly') {
     const ep = seriesEpisode && seriesEpisode > 0 ? ` ${seriesEpisode}편` : '';
-    return `이달 ${prefix} ${topic} TOP${rankedN} 시리즈${ep}`;
+    return `이달 ${hook} ${axisWord} TOP${rankedN} 시리즈${ep}, 1위는?`;
   }
   if (formatType === 'ranked') {
-    return `${period} ${prefix} ${topic} TOP${rankedN}`;
+    return `${period} ${hook} ${axisWord} TOP${rankedN}, 1위는?`;
   }
-  return `${period} ${prefix} ${topic}`;
+  return `${period} ${axisWord} ${hook}, 당신은?`;
 }
 
 const WEAK_TITLE_PATTERNS = [
@@ -55,6 +55,8 @@ export function validateNarrationTitle(
   title: string,
   axisType: NarrationAxisType,
   periodType: NarrationPeriodType = 'daily',
+  hookLabel = '운세',
+  catalogTitle?: string,
 ): { ok: true } | { ok: false; message: string } {
   const t = title.trim();
   if (t.length < 8) {
@@ -92,77 +94,141 @@ export function validateNarrationTitle(
   }
 
   const axisWord = axisTitleKeyword(axisType);
-  if (!t.includes(axisWord)) {
-    const prefix = buildAxisTitlePrefix(axisType);
+  const axisOk =
+    t.includes(axisWord) ||
+    (axisType === 'generation' && /연령대|나이대|대생/.test(t)) ||
+    (axisType === 'zodiac' && /띠/.test(t));
+  if (!axisOk) {
     return {
       ok: false,
-      message: `제목에 "${axisWord}" 축이 드러나야 합니다 (예: "${prefix} ○○")`,
+      message: `제목에 "${axisWord}" 축이 드러나야 합니다 (예: "${hookLabel} ${axisWord}")`,
     };
   }
 
-  const hasAxisPrefix = /(띠별|별자리|연령대).{0,4}알아보는/.test(t);
+  if (!titleIncludesHook(t, hookLabel)) {
+    return {
+      ok: false,
+      message: `제목에 숏폼 훅「${hookLabel}」가 포함되어야 합니다 — 상품 전체명 대신 짧은 키워드`,
+    };
+  }
+
+  if (catalogTitle && titleContainsCatalogName(t, catalogTitle)) {
+    return {
+      ok: false,
+      message: '제목에 상품 전체명이 들어갔습니다 — 숏폼 훅 키워드만 사용',
+    };
+  }
+
   const hasHook =
     /[?？]/.test(t) ||
     /\d/.test(t) ||
-    /TOP|top|1위|당신|나는|우리|비밀|충격|역대|이유|진짜|놀라|의외|주의|경고|기회/.test(t);
-  if (!hasAxisPrefix && !hasHook && WEAK_TITLE_PATTERNS.some((re) => re.test(t))) {
+    /TOP|top|1위|당신|나는|우리|비밀|충격|역대|이유|진짜|놀라|의외|주의|경고|기회|핵심|해당/.test(t);
+  if (!hasHook && WEAK_TITLE_PATTERNS.some((re) => re.test(t))) {
     return {
       ok: false,
-      message: '제목이 설명형 부제 수준입니다 — 질문·숫자·반전·"당신은?" 등 후킹 요소 추가',
+      message: '제목이 설명형 부제 수준입니다 — 질문·숫자·1위·당신은? 등 후킹 요소 추가',
     };
   }
-  if (!hasAxisPrefix && !hasHook) {
+  if (!hasHook) {
     return {
       ok: false,
-      message:
-        '제목 후킹이 약합니다 — "띠별/별자리/연령대별로 알아보는 ○○" + 궁금증(?, 1위, 당신은?) 조합',
+      message: `제목 후킹이 약합니다 — "${periodWord} + ${hookLabel} + ${axisWord}" + 궁금증(?, 1위, 당신은?)`,
     };
   }
 
   return { ok: true };
 }
 
+function buildTitleExamples(
+  axisType: NarrationAxisType,
+  hookLabel: string,
+  periodType: NarrationPeriodType,
+  formatType: NarrationFormatType,
+  seriesEpisode?: number,
+): string[] {
+  const axisWord = axisTitleKeyword(axisType);
+  const periodLabel = periodTitleKeyword(periodType);
+  const hook = hookLabel.trim() || '운세';
+  const epSuffix = seriesEpisode && seriesEpisode > 0 ? ` ${seriesEpisode}편` : '';
+
+  if (periodType === 'monthly') {
+    const topN = resolveNarrationTopN(axisType);
+    return [
+      `이달 ${hook} ${axisWord} TOP${topN} 시리즈${epSuffix || ' 1편'}, 1위는?`,
+      `이달 ${hook} 기운 좋은 ${axisWord} TOP${topN}${epSuffix || ''}, 1위는?`,
+    ];
+  }
+
+  if (formatType === 'ranked') {
+    if (axisType === 'zodiac') {
+      return [
+        `${periodLabel} ${hook} ${axisWord} TOP5, 1위는?`,
+        `${periodLabel} 운 좋은 ${axisWord} TOP5, ${hook}`,
+      ];
+    }
+    if (axisType === 'constellation') {
+      return [
+        `${periodLabel} ${axisWord} ${hook} TOP5, 1위는?`,
+        `${periodLabel} ${hook} ${axisWord}, 당신은?`,
+      ];
+    }
+    return [
+      `${periodLabel} ${hook} ${axisWord} TOP5, 내 나이대는?`,
+      `${periodLabel} ${axisWord} ${hook}, 40대만 해당?`,
+    ];
+  }
+
+  if (periodType === 'weekly') {
+    return [
+      `이번 주 ${axisWord} ${hook}, 이번 주 핵심은?`,
+      `이번 주 ${hook} ${axisWord}, 당신만 해당?`,
+    ];
+  }
+
+  return [
+    `오늘 ${axisWord} ${hook}, 당신은?`,
+    `오늘 ${hook} ${axisWord}, 오늘 핵심은?`,
+  ];
+}
+
 export function buildTitlePromptBlock(
   axisType: NarrationAxisType,
-  topicLabel: string,
+  hookLabel: string,
+  catalogTitle: string,
   periodType: NarrationPeriodType,
   dateContext: NarrationDateContext,
   seriesEpisode?: number,
+  formatType: NarrationFormatType = 'full_cover',
 ): string {
-  const prefix = buildAxisTitlePrefix(axisType);
   const axisWord = axisTitleKeyword(axisType);
   const periodLabel = periodTitleKeyword(periodType);
-  const epSuffix = seriesEpisode && seriesEpisode > 0 ? ` ${seriesEpisode}편` : '';
-  const monthlyTopN = resolveNarrationTopN(axisType);
-  const examples =
-    periodType === 'monthly'
-      ? [
-          `이달 ${prefix} ${topicLabel} TOP${monthlyTopN} 시리즈${epSuffix || ' 1편'}`,
-          `이달 운 좋은 ${axisWord} TOP${monthlyTopN} 시리즈${epSuffix || ' 2편'}, 1위는?`,
-        ]
-      : axisType === 'zodiac'
-      ? [
-          `${periodLabel} ${prefix} ${topicLabel}, 12띠 중 당신은?`,
-          `${periodLabel} 운 좋은 띠 1위는? ${topicLabel}`,
-        ]
-      : axisType === 'constellation'
-        ? [
-            `${periodLabel} ${prefix} ${topicLabel}`,
-            `${periodLabel} 재회 가능성 높은 별자리 1위는?`,
-          ]
-        : [
-            `${periodLabel} ${prefix} ${topicLabel}, 내 나이대는?`,
-            `${periodLabel} 40대만 해당? 연령대별 ${topicLabel}`,
-          ];
+  const hook = hookLabel.trim() || '운세';
+  const examples = buildTitleExamples(
+    axisType,
+    hook,
+    periodType,
+    formatType,
+    seriesEpisode,
+  );
+
+  const angleBlock = buildPeriodAngleBlock(
+    periodType,
+    hook,
+    catalogTitle,
+    dateContext.absoluteLabel,
+  );
 
   return `${dateContext.promptBlock}
 
+${angleBlock}
+
 제목 (가장 중요 — 클릭·시청을 결정):
-- 반드시 "${periodLabel}"(또는 "${periodTitleKeyword(periodType).replace(/\s/g, '')}") + "${prefix}" 또는 "${axisWord}" 축
-- 상품 주제「${topicLabel}」를 자연스럽게 포함
+- 반드시 "${periodLabel}" + 숏폼 훅「${hook}」+ "${axisWord}" 축 (띠/별자리/연령)
+- **상품 전체명「${catalogTitle}」은 제목에 넣지 말 것** — 훅「${hook}」만
 - 시점: ${dateContext.absoluteLabel} 맥락이 제목·오프닝에서 바로 보이게
+- "띠별로 알아보는 ○○" 같은 긴 접두어 **금지** — 짧고 후킹되게
 - 설명형 부제만 쓰지 말 것 (예: "한눈에", "살펴보세요" 단독 금지)
-- 질문·숫자·1위·당신은·반전·궁금증 중 1개 이상
+- 질문·숫자·1위·TOP·당신은·반전·궁금증 중 1개 이상
 - 14~44자, 숏폼 썸네일·첫 화면용 한 줄
 - 좋은 예: ${examples.map((e) => `"${e}"`).join(' / ')}`;
 }

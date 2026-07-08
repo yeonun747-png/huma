@@ -3,9 +3,12 @@ import { listYeonunProducts, type YeonunProductRow } from '../video-content/yeon
 import { listActiveFortune82Products, type Fortune82ProductRow } from './fortune82-product-cache.js';
 import type { NarrationScriptWorkspace } from '@huma/shared';
 
+import { deriveNarrationHookLabel } from './topic-hook.js';
+
 export interface NarrationTopic {
   key: string;
   label: string;
+  hookLabel: string;
   categoryKey: string | null;
   contextText: string;
 }
@@ -22,12 +25,16 @@ export function isYeonunCreditPackageSlug(slug: string): boolean {
 
 function formatYeonunTopic(row: YeonunProductRow): NarrationTopic {
   const tags = Array.isArray(row.tags) ? row.tags.join(', ') : '';
+  const label = String(row.title ?? row.slug);
+  const hookLabel = deriveNarrationHookLabel(label);
   return {
     key: row.slug,
-    label: String(row.title ?? row.slug),
+    label,
+    hookLabel,
     categoryKey: row.category_slug ?? null,
     contextText: `[연운 상품]
-상품명: ${row.title ?? row.slug}
+상품명: ${label}
+숏폼 훅(제목·썸네일): ${hookLabel}
 slug: ${row.slug}
 소개: ${row.quote ?? ''}
 카테고리: ${row.category_slug ?? ''}
@@ -38,12 +45,16 @@ slug: ${row.slug}
 function formatFortune82Topic(row: Fortune82ProductRow): NarrationTopic {
   const intro = String(row.intro ?? '').slice(0, 600);
   const composition = String(row.composition ?? '').slice(0, 400);
+  const label = row.title;
+  const hookLabel = deriveNarrationHookLabel(label);
   return {
     key: row.product_id,
-    label: row.title,
+    label,
+    hookLabel,
     categoryKey: row.gc != null ? String(row.gc) : null,
     contextText: `[포춘82 상품]
-상품명: ${row.title}
+상품명: ${label}
+숏폼 훅(제목·썸네일): ${hookLabel}
 선생님: ${row.teacher_name ?? ''}
 소개: ${intro}
 구성: ${composition}

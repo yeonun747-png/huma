@@ -64,12 +64,20 @@ export function validateNarrationDraft(
   formatType: NarrationFormatType,
   axisType: NarrationAxisType,
   periodType: NarrationPeriodType = 'daily',
+  hookLabel = '운세',
+  catalogTitle?: string,
 ): { ok: true } | { ok: false; message: string } {
   const title = draft.title.trim();
   const body = draft.body.trim();
   if (!title) return { ok: false, message: '제목이 비어 있습니다' };
 
-  const titleCheck = validateNarrationTitle(title, axisType, periodType);
+  const titleCheck = validateNarrationTitle(
+    title,
+    axisType,
+    periodType,
+    hookLabel,
+    catalogTitle,
+  );
   if (!titleCheck.ok) return titleCheck;
 
   if (/\n{2,}/.test(body)) {
@@ -136,10 +144,12 @@ export function validateNarrationDraft(
 
 type PromptBase = {
   topicLabel: string;
+  topicHookLabel: string;
   topicContext: string;
   axisType: NarrationAxisType;
   workspaceLabel: string;
   periodType: NarrationPeriodType;
+  formatType: NarrationFormatType;
   dateContext: NarrationDateContext;
   seriesEpisode?: number;
 };
@@ -169,10 +179,12 @@ export function buildFullCoverPrompt(params: PromptBase): string {
   const instanceLines = labels.map((i) => `- ${i.label}`).join('\n');
   const titleBlock = buildTitlePromptBlock(
     params.axisType,
+    params.topicHookLabel,
     params.topicLabel,
     params.periodType,
     params.dateContext,
     params.seriesEpisode,
+    params.formatType,
   );
   const { min, max } = fullCoverLengthBounds(params.axisType);
 
@@ -181,7 +193,8 @@ export function buildFullCoverPrompt(params: PromptBase): string {
 한국어 숏폼 나레이션 대본(전체커버형·${params.periodType}) — 브루(Vrew) TTS용.
 
 서비스: ${params.workspaceLabel}
-주제(상품): ${params.topicLabel}
+상품(카탈로그): ${params.topicLabel}
+숏폼 훅: ${params.topicHookLabel}
 축: ${axisName} — 아래 ${labels.length}개 **전부** 다룰 것.
 
 ${params.topicContext}
@@ -194,7 +207,7 @@ ${titleBlock}
 규칙:
 - JSON: {"title":"...","body":"..."} 만 출력
 - ${mismatchRule}
-- 오프닝 1~2문장: 시청자가 5초 안에 "지금 내 얘기"라고 느끼게 (날짜·주기·축·주제 제목 소개)
+- 오프닝 1~2문장: 시청자가 5초 안에 "지금 내 얘기"라고 느끼게 (날짜·주기·축·훅「${params.topicHookLabel}」)
 - **"화면을 두번터치"·댓글 유도 금지** (시스템이 오프닝 직후 삽입)
 - 본문: 각 인스턴스를 "쥐띠:" 또는 "양자리:" 형식
 - ${instanceSentenceRule(params.axisType)}
@@ -213,10 +226,12 @@ export function buildRankedPrompt(params: PromptBase): string {
   const pool = labels.map((i) => i.label).join(', ');
   const titleBlock = buildTitlePromptBlock(
     params.axisType,
+    params.topicHookLabel,
     params.topicLabel,
     params.periodType,
     params.dateContext,
     params.seriesEpisode,
+    params.formatType,
   );
   const topN = resolveNarrationRankedTopN(params.periodType, params.axisType);
   const { min, max } = rankedLengthBounds(params.periodType, params.axisType);
@@ -235,7 +250,8 @@ export function buildRankedPrompt(params: PromptBase): string {
 한국어 숏폼 나레이션 대본(${params.periodType === 'monthly' ? `이달 TOP${topN} 시리즈` : `순위특집형 TOP5·${params.periodType}`}) — 브루(Vrew) TTS용.
 
 서비스: ${params.workspaceLabel}
-주제(상품): ${params.topicLabel}
+상품(카탈로그): ${params.topicLabel}
+숏폼 훅: ${params.topicHookLabel}
 축: ${axisName}
 
 ${params.topicContext}
@@ -246,8 +262,8 @@ ${titleBlock}
 
 규칙:
 ${seriesLine}- ${mismatchRule}
-- 제목: ${params.periodType === 'monthly' ? `"이달" + TOP${topN} + 시리즈 + N편 + 축 + 후킹` : '주기 + TOP5 + 축 + 후킹'}
-- 오프닝 **강한 후킹** + 시점(${params.dateContext.absoluteLabel}) + 주제 제목 소개
+- 제목: ${params.periodType === 'monthly' ? `"이달" + 훅 + TOP${topN} + 시리즈 + N편 + 축 + 후킹` : '주기 + 훅 + TOP5 + 축 + 후킹'}
+- 오프닝 **강한 후킹** + 시점(${params.dateContext.absoluteLabel}) + 훅「${params.topicHookLabel}」소개 (상품 전체명 금지)
 - **"화면을 두번터치"·댓글 유도 금지** (시스템이 오프닝 직후 삽입)
 - ${topN}위→1위 순, ${rankSentence}
 - 1위는 "그리고 1위는..." 서스펜스 후 공개
