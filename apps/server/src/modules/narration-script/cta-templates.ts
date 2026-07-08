@@ -6,18 +6,29 @@ const NARRATION_CTA_SITE: Record<NarrationScriptWorkspace, { label: string; doma
   fortune82: { label: '포춘82', domain: 'fortune82.com' },
 };
 
-/** 띠 축 — CTA 직전 면피 (A안) */
-export function buildNarrationZodiacDisclaimer(workspace: NarrationScriptWorkspace): string {
-  if (workspace === 'fortune82') {
-    return (
-      '같은 띠여도 태어난 해에 따라 흐름이 달라질 수 있어요.\n' +
-      '더 자세한 풀이는 포춘82(fortune82.com)에서 확인해보세요.'
-    );
+/** LLM·재처리 시 CTA·면피·댓글 유도 줄 제거 */
+export function stripNarrationFooterLines(body: string): string {
+  const lines = body.split('\n');
+  const kept: string[] = [];
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t) continue;
+    if (/같은\s*띠여도/.test(t)) continue;
+    if (/연운\s*\(\s*yeonun\.com\s*\)/i.test(t)) continue;
+    if (/포춘82\s*\(\s*fortune82\.com\s*\)/i.test(t)) continue;
+    if (/yeonun\.com|fortune82\.com/i.test(t)) continue;
+    if (/가입하면\s*5\s*천\s*원\s*크레딧|가입하면\s*5천\s*원\s*크레딧/.test(t)) continue;
+    if (/결제하시면\s*코드와\s*인증번호/.test(t)) continue;
+    if (/더\s*(정확한|자세한)\s*/.test(t) && /궁금|확인|풀이|사주\s*흐름/.test(t)) continue;
+    if (/화면을\s*두\s*번?\s*터치|화면을\s*두번터치/i.test(t)) continue;
+    kept.push(line);
   }
-  return (
-    '같은 띠여도 태어난 해에 따라 흐름이 달라질 수 있어요.\n' +
-    '더 정확한 내 사주 흐름은 연운(yeonun.com)에서 확인해보세요.'
-  );
+  return kept.join('\n').trim();
+}
+
+/** 띠 축 — CTA 직전 면피 (URL·가입 유도 없음) */
+export function buildNarrationZodiacDisclaimer(_workspace: NarrationScriptWorkspace): string {
+  return '같은 띠여도 태어난 해에 따라 흐름이 달라질 수 있어요.';
 }
 
 export function buildNarrationCta(workspace: NarrationScriptWorkspace, hookLabel: string): string {
@@ -45,7 +56,7 @@ export function appendNarrationScriptFooter(
     axisType: NarrationAxisType;
   },
 ): string {
-  const trimmed = body.trim();
+  const trimmed = stripNarrationFooterLines(body.trim());
   if (!trimmed) {
     return opts.axisType === 'zodiac'
       ? `${buildNarrationZodiacDisclaimer(opts.workspace)}\n${buildNarrationCta(opts.workspace, opts.hookLabel)}`

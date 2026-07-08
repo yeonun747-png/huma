@@ -8,6 +8,7 @@ import {
   normalizeNarrationBody,
   validateNarrationTitle,
 } from './format.js';
+import { stripNarrationFooterLines } from './cta-templates.js';
 
 export interface GeneratedNarrationDraft {
   title: string;
@@ -17,27 +18,8 @@ export interface GeneratedNarrationDraft {
 export function sanitizeNarrationDraft(draft: GeneratedNarrationDraft): GeneratedNarrationDraft {
   return {
     title: draft.title.trim(),
-    body: stripLlmFooterLines(normalizeNarrationBody(draft.body)),
+    body: stripNarrationFooterLines(normalizeNarrationBody(draft.body)),
   };
-}
-
-/** LLM이 CTA·면피를 넣은 경우 시스템 append 전 제거 */
-function stripLlmFooterLines(body: string): string {
-  const lines = body.split('\n');
-  const kept: string[] = [];
-  for (const line of lines) {
-    const t = line.trim();
-    if (!t) continue;
-    if (/같은\s*띠여도/.test(t)) continue;
-    if (/연운\s*\(\s*yeonun\.com\s*\)/i.test(t)) continue;
-    if (/포춘82\s*\(\s*fortune82\.com\s*\)/i.test(t)) continue;
-    if (/가입하면\s*5\s*천\s*원\s*크레딧/.test(t)) continue;
-    if (/더\s*(정확한|자세한)\s*내/.test(t) && /(yeonun|fortune82)\.com/i.test(t)) continue;
-    if (/결제하시면\s*코드와\s*인증번호/.test(t)) continue;
-    if (/화면을\s*두\s*번?\s*터치|화면을\s*두번터치/i.test(t)) continue;
-    kept.push(line);
-  }
-  return kept.join('\n').trim();
 }
 
 /** LLM 본문 길이 — intro·CTA는 검증 후 시스템 append */
