@@ -20,6 +20,26 @@ import {
   pickWeightedTopic,
   type NarrationTopic,
 } from './topic-pool.js';
+import {
+  inferNarrationAxisFromTopic,
+  topicTextForAxisInference,
+} from './axis-inference.js';
+
+function axisPickOrder(topic: NarrationTopic): NarrationAxisType[] {
+  const inferred = inferNarrationAxisFromTopic(topicTextForAxisInference(topic));
+  if (!inferred) return ALL_AXIS_TYPES;
+  return [inferred, ...ALL_AXIS_TYPES.filter((a) => a !== inferred)];
+}
+
+function pickAxisForTopic(
+  topic: NarrationTopic,
+  openAxes: NarrationAxisType[],
+  axisUsage: Map<NarrationAxisType, number>,
+): NarrationAxisType {
+  const preferred = axisPickOrder(topic).filter((axis) => openAxes.includes(axis));
+  if (!preferred.length) return openAxes[0]!;
+  return pickLeastUsedAxis(preferred, axisUsage);
+}
 
 export interface NarrationPickPlan {
   workspace: NarrationScriptWorkspace;
@@ -60,11 +80,6 @@ export async function planNarrationPick(input: PlanNarrationPickInput): Promise<
   const topicUsage = await getNarrationTopicUsageCounts(input.workspace);
   const axisUsage = await getAxisUsageCounts(input.workspace);
 
-  const axisType =
-    input.axisType && input.axisType !== 'auto'
-      ? input.axisType
-      : pickLeastUsedAxis(ALL_AXIS_TYPES, axisUsage);
-
   const topicCandidates = input.topicKey?.trim()
     ? topics.filter((t) => t.key === input.topicKey.trim())
     : topics;
@@ -74,7 +89,7 @@ export async function planNarrationPick(input: PlanNarrationPickInput): Promise<
   }
 
   let topic: NarrationTopic;
-  let resolvedAxis = axisType;
+  let resolvedAxis: NarrationAxisType;
 
   const makeCombo = (axis: NarrationAxisType, topicKey: string): NarrationComboKey => ({
     workspace: input.workspace,
@@ -86,7 +101,9 @@ export async function planNarrationPick(input: PlanNarrationPickInput): Promise<
 
   if (input.topicKey?.trim()) {
     topic = topicCandidates[0]!;
-    if (input.axisType === 'auto' || !input.axisType) {
+    if (input.axisType && input.axisType !== 'auto') {
+      resolvedAxis = input.axisType;
+    } else {
       const openAxes = ALL_AXIS_TYPES.filter(
         (axis) => !isComboBlocked(makeCombo(axis, topic.key), blocked),
       );
@@ -95,9 +112,10 @@ export async function planNarrationPick(input: PlanNarrationPickInput): Promise<
           `최근 ${cooldownDays}일 이내 「${topic.label}」 조합이 모두 사용되었습니다. 다른 주제·포맷을 선택하세요.`,
         );
       }
-      resolvedAxis = pickLeastUsedAxis(openAxes, axisUsage);
+      resolvedAxis = pickAxisForTopic(topic, openAxes, axisUsage);
     }
-  } else {
+  } else if (input.axisType && input.axisType !== 'auto') {
+    resolvedAxis = input.axisType;
     const allowed = topics.filter(
       (t) => !isComboBlocked(makeCombo(resolvedAxis, t.key), blocked),
     );
@@ -107,6 +125,26 @@ export async function planNarrationPick(input: PlanNarrationPickInput): Promise<
       );
     }
     topic = pickWeightedTopic(allowed, topicUsage);
+  } else {
+    const pairs: Array<{ topic: NarrationTopic; axis: NarrationAxisType }> = [];
+    for (const t of topics) {
+      for (const axis of axisPickOrder(t)) {
+        if (!isComboBlocked(makeCombo(axis, t.key), blocked)) {
+          pairs.push({ topic: t, axis });
+          break;
+        }
+      }
+    }
+    if (!pairs.length) {
+      throw new Error(
+        `최근 ${cooldownDays}일 이내 사용 가능한 주제·조합이 없습니다. 축·포맷·주기를 바꿔 보세요.`,
+      );
+    }
+    topic = pickWeightedTopic(
+      pairs.map((p) => p.topic),
+      topicUsage,
+    );
+    resolvedAxis = pairs.find((p) => p.topic.key === topic.key)!.axis;
   }
 
   const combo = makeCombo(resolvedAxis, topic.key);

@@ -3,6 +3,7 @@ import { getMainClaudeModel } from '../../lib/ai-engine.js';
 import { parseLlmJsonBlock } from '../../lib/llm-json.js';
 import type { NarrationPickPlan } from './pick-plan.js';
 import { appendNarrationScriptFooter } from './cta-templates.js';
+import { insertNarrationEngagementIntro } from './engagement-intro.js';
 import {
   buildFullCoverPrompt,
   buildRankedPrompt,
@@ -18,6 +19,8 @@ import {
   reportNarrationProgress,
   reportNarrationProgressPercent,
 } from './progress.js';
+import { buildNarrationPersonaSystem } from './narration-persona.js';
+import { loadNarrationPersonaText } from './narration-persona-store.js';
 import { assertNarrationScriptNotCancelled } from './cancel.js';
 
 const MAX_ATTEMPTS = 2;
@@ -32,12 +35,17 @@ function workspaceLabel(ws: NarrationPickPlan['workspace']): string {
   return NARRATION_WORKSPACE_LABEL[ws];
 }
 
-async function callNarrationLlm(prompt: string, feedback?: string): Promise<GeneratedNarrationDraft> {
+async function callNarrationLlm(
+  prompt: string,
+  system: string,
+  feedback?: string,
+): Promise<GeneratedNarrationDraft> {
   const model = await getMainClaudeModel();
   const userPrompt = feedback ? `${prompt}\n\n[재작성] ${feedback}` : prompt;
   const raw = await askClaudeWithModel({
     model,
     max_tokens: 2048,
+    system,
     prompt: userPrompt,
     timeout_ms: NARRATION_LLM_TIMEOUT_MS,
   });
@@ -56,6 +64,7 @@ async function callNarrationLlm(prompt: string, feedback?: string): Promise<Gene
 
 async function callNarrationLlmWithProgress(
   prompt: string,
+  system: string,
   feedback: string | undefined,
   progress: NarrationGenerateProgressCtx,
   attempt: number,
@@ -99,7 +108,7 @@ async function callNarrationLlmWithProgress(
   }, LLM_PROGRESS_HEARTBEAT_MS);
 
   try {
-    return await callNarrationLlm(prompt, feedback);
+    return await callNarrationLlm(prompt, system, feedback);
   } finally {
     clearInterval(heartbeat);
     await reportNarrationProgressPercent(
@@ -141,6 +150,20 @@ export async function generateNarrationScript(
           dateContext: plan.dateContext,
         });
 
+  const customPersona = await loadNarrationPersonaText(plan.workspace);
+  const personaSystem = buildNarrationPersonaSystem(
+    {
+      workspace: plan.workspace,
+      workspaceLabel: workspaceLabel(plan.workspace),
+      topicLabel: plan.topic.label,
+      axisType: plan.axisType,
+      formatType: plan.formatType,
+      periodType: plan.periodType,
+      dateContext: plan.dateContext,
+    },
+    customPersona,
+  );
+
   const formatLabel = `${plan.formatType === 'ranked' ? '순위특집' : '전체커버'}·${plan.periodType}`;
 
   let feedback: string | undefined;
@@ -152,8 +175,8 @@ export async function generateNarrationScript(
     }
 
     draft = progress
-      ? await callNarrationLlmWithProgress(basePrompt, feedback, progress, attempt, formatLabel)
-      : await callNarrationLlm(basePrompt, feedback);
+      ? await callNarrationLlmWithProgress(basePrompt, personaSystem, feedback, progress, attempt, formatLabel)
+      : await callNarrationLlm(basePrompt, personaSystem, feedback);
 
     if (progress) {
       await reportNarrationProgress(progress.historyId, progress.workspace, 'validate');
@@ -168,10 +191,21 @@ export async function generateNarrationScript(
   }
 
   if (progress) {
+    await reportNarrationProgress(progress.historyId, progress.workspace, 'intro_append');
+  }
+
+  const bodyWithIntro = insertNarrationEngagementIntro(draft!.body, {
+    axisType: plan.axisType,
+    formatType: plan.formatType,
+    topicLabel: plan.topic.label,
+    workspace: plan.workspace,
+  });
+
+  if (progress) {
     await reportNarrationProgress(progress.historyId, progress.workspace, 'cta_append');
   }
 
-  const bodyWithCta = appendNarrationScriptFooter(draft!.body, {
+  const bodyWithCta = appendNarrationScriptFooter(bodyWithIntro, {
     workspace: plan.workspace,
     productTitle: plan.topic.label,
     axisType: plan.axisType,

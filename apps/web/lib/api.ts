@@ -1388,6 +1388,20 @@ export const api = {
     }),
   narrationScriptDelete: (id: string) =>
     request<{ ok: boolean }>(`/api/narration-scripts/${id}`, { method: 'DELETE' }),
+  narrationScriptPersonaGet: (workspace: NarrationScriptWorkspace) =>
+    request<{
+      workspace: NarrationScriptWorkspace;
+      personaText: string;
+      updatedAt: string | null;
+      isDefault: boolean;
+      sectionGuide: string;
+      defaultPersonaText: string;
+    }>(`/api/narration-scripts/persona?workspace=${encodeURIComponent(workspace)}`),
+  narrationScriptPersonaUpdate: (workspace: NarrationScriptWorkspace, personaText: string) =>
+    request<{ ok: boolean; updatedAt: string }>('/api/narration-scripts/persona', {
+      method: 'PATCH',
+      body: JSON.stringify({ workspace, personaText }),
+    }),
   fortune82ProductsSync: () =>
     request<{ synced: number; error?: string }>('/api/fortune82-products/sync', { method: 'POST' }),
 };

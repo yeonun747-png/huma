@@ -8,6 +8,7 @@ export const NARRATION_PROGRESS_STAGES = {
   llm_write: { percent: 10, label: 'Sonnet 대본 작성 중…' },
   llm_retry: { percent: 72, label: '대본 재작성 중…' },
   validate: { percent: 88, label: '길이·형식 검증' },
+  intro_append: { percent: 91, label: '댓글 유도 문구 추가' },
   cta_append: { percent: 93, label: 'CTA 문구 추가' },
   saving: { percent: 97, label: '저장 중' },
 } as const;

@@ -30,6 +30,7 @@ import {
 import { MPanel, MTag } from '@/components/mockup/primitives';
 import { VIDEO_PRIMARY_BTN } from '@/components/video/video-content-ui';
 import { NarrationGeneratingPanel } from '@/components/narration/narration-generating-panel';
+import { NarrationPersonaPanel } from '@/components/narration/narration-persona-panel';
 
 type Tab = 'ready' | 'generating' | 'failed';
 
@@ -325,6 +326,7 @@ export function NarrationScriptView({ service }: Props) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
+      <NarrationPersonaPanel service={service} />
       <MPanel title={`🎙 새 나레이션 대본 · ${NARRATION_WORKSPACE_LABEL[service]}`}>
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-5">
           <label className="text-[11px] text-huma-t3">

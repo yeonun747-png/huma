@@ -16,8 +16,27 @@ export interface GeneratedNarrationDraft {
 export function sanitizeNarrationDraft(draft: GeneratedNarrationDraft): GeneratedNarrationDraft {
   return {
     title: draft.title.trim(),
-    body: normalizeNarrationBody(draft.body),
+    body: stripLlmFooterLines(normalizeNarrationBody(draft.body)),
   };
+}
+
+/** LLM이 CTA·면피를 넣은 경우 시스템 append 전 제거 */
+function stripLlmFooterLines(body: string): string {
+  const lines = body.split('\n');
+  const kept: string[] = [];
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t) continue;
+    if (/같은\s*띠여도/.test(t)) continue;
+    if (/연운\s*\(\s*yeonun\.com\s*\)/i.test(t)) continue;
+    if (/포춘82\s*\(\s*fortune82\.com\s*\)/i.test(t)) continue;
+    if (/가입하면\s*5\s*천\s*원\s*크레딧/.test(t)) continue;
+    if (/더\s*(정확한|자세한)\s*내/.test(t) && /(yeonun|fortune82)\.com/i.test(t)) continue;
+    if (/결제하시면\s*코드와\s*인증번호/.test(t)) continue;
+    if (/화면을\s*두\s*번?\s*터치|화면을\s*두번터치/i.test(t)) continue;
+    kept.push(line);
+  }
+  return kept.join('\n').trim();
 }
 
 function fullCoverLengthBounds(axisType: NarrationAxisType): { min: number; max: number } {
@@ -108,10 +127,21 @@ function instanceSentenceRule(axisType: NarrationAxisType): string {
   return '각 띠/별자리 2~3문장 — 자연스러운 호흡, 억지로 늘리지 말 것';
 }
 
+function axisMismatchRule(axisType: NarrationAxisType): string {
+  if (axisType === 'constellation') {
+    return '- 주제가 별·자미두수·14주성·별자리 관련 — **양자리~물고기자리 12개만**. 쥐띠~돼지띠 **절대 금지**';
+  }
+  if (axisType === 'zodiac') {
+    return '- **쥐띠~돼지띠 12개만**. 양자리~물고기자리 **절대 금지**';
+  }
+  return '- **60~00년대생 5개 연령대만**';
+}
+
 export function buildFullCoverPrompt(params: PromptBase): string {
   const labels = axisInstances(params.axisType);
   const axisName =
     params.axisType === 'zodiac' ? '띠' : params.axisType === 'constellation' ? '별자리' : '연령대';
+  const mismatchRule = axisMismatchRule(params.axisType);
   const instanceLines = labels.map((i) => `- ${i.label}`).join('\n');
   const titleBlock = buildTitlePromptBlock(
     params.axisType,
@@ -121,7 +151,9 @@ export function buildFullCoverPrompt(params: PromptBase): string {
   );
   const { min, max } = fullCoverLengthBounds(params.axisType);
 
-  return `한국어 숏폼 나레이션 대본(전체커버형·${params.periodType})을 작성하라. 브루(Vrew) TTS용.
+  return `아래 [이번 작업] 지시에 따라 대본 JSON만 작성하라. system 역할·금지 규칙을 반드시 준수.
+
+한국어 숏폼 나레이션 대본(전체커버형·${params.periodType}) — 브루(Vrew) TTS용.
 
 서비스: ${params.workspaceLabel}
 주제(상품): ${params.topicLabel}
@@ -136,7 +168,9 @@ ${titleBlock}
 
 규칙:
 - JSON: {"title":"...","body":"..."} 만 출력
-- 오프닝 1~2문장: 시청자가 5초 안에 "지금 내 얘기"라고 느끼게 (날짜·주기·축)
+- ${mismatchRule}
+- 오프닝 1~2문장: 시청자가 5초 안에 "지금 내 얘기"라고 느끼게 (날짜·주기·축·주제 제목 소개)
+- **"화면을 두번터치"·댓글 유도 금지** (시스템이 오프닝 직후 삽입)
 - 본문: 각 인스턴스를 "쥐띠:" 또는 "양자리:" 형식
 - ${instanceSentenceRule(params.axisType)}
 - 전체 1분~1분30초 (${min}~${max}자)
@@ -150,6 +184,7 @@ export function buildRankedPrompt(params: PromptBase): string {
   const labels = axisInstances(params.axisType);
   const axisName =
     params.axisType === 'zodiac' ? '띠' : params.axisType === 'constellation' ? '별자리' : '연령대';
+  const mismatchRule = axisMismatchRule(params.axisType);
   const pool = labels.map((i) => i.label).join(', ');
   const titleBlock = buildTitlePromptBlock(
     params.axisType,
@@ -159,7 +194,9 @@ export function buildRankedPrompt(params: PromptBase): string {
   );
   const { min, max } = rankedLengthBounds();
 
-  return `한국어 숏폼 나레이션 대본(순위특집형 TOP5·${params.periodType})을 작성하라. 브루 TTS용.
+  return `아래 [이번 작업] 지시에 따라 대본 JSON만 작성하라. system 역할·금지 규칙을 반드시 준수.
+
+한국어 숏폼 나레이션 대본(순위특집형 TOP5·${params.periodType}) — 브루(Vrew) TTS용.
 
 서비스: ${params.workspaceLabel}
 주제(상품): ${params.topicLabel}
@@ -172,8 +209,10 @@ ${params.topicContext}
 ${titleBlock}
 
 규칙:
+- ${mismatchRule}
 - 제목: 주기 + TOP5 + 축 + 후킹
-- 오프닝 **강한 후킹** + 시점(${params.dateContext.absoluteLabel})
+- 오프닝 **강한 후킹** + 시점(${params.dateContext.absoluteLabel}) + 주제 제목 소개
+- **"화면을 두번터치"·댓글 유도 금지** (시스템이 오프닝 직후 삽입)
 - 5위→1위 순, 각 3~4문장
 - 1위는 "그리고 1위는..." 서스펜스 후 공개
 - ${axisName} 5개만 선택

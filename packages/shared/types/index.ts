@@ -15,6 +15,7 @@ export * from './video-persona-text';
 export * from './watcher-log-filter';
 export * from './quiz-image-prompt';
 export * from './narration-script';
+export * from './narration-persona';
 
 export type Workspace = import('./account').Workspace;
 

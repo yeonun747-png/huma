@@ -22,6 +22,11 @@ import {
 import { NARRATION_ROTATION_COOLDOWN_DAYS } from '../modules/narration-script/rotation.js';
 import { initialNarrationProgressMeta } from '../modules/narration-script/progress.js';
 import { cancelNarrationScriptJob, narrationScriptQueueJobId } from '../modules/narration-script/cancel.js';
+import {
+  getNarrationPersonaMeta,
+  saveNarrationPersonaText,
+} from '../modules/narration-script/narration-persona-store.js';
+import { buildDefaultNarrationPersonaText, NARRATION_PERSONA_SECTION_GUIDE } from '@huma/shared';
 
 const NARRATION_WORKSPACES: NarrationScriptWorkspace[] = ['yeonun', 'fortune82'];
 
@@ -162,6 +167,58 @@ export function registerNarrationScriptRoutes(app: FastifyInstance) {
     } catch (err) {
       return reply.code(400).send({ error: (err as Error).message });
     }
+  });
+
+  app.get('/api/narration-scripts/persona', { preHandler: authMiddleware }, async (request, reply) => {
+    const allowed = getWorkspaceFilter(request);
+    const { workspace } = request.query as { workspace?: string };
+    const ws = (workspace ?? 'yeonun').trim();
+    if (!assertNarrationWorkspace(ws, allowed)) {
+      return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
+    }
+    const defaultPersonaText = buildDefaultNarrationPersonaText(ws);
+    try {
+      const meta = await getNarrationPersonaMeta(ws);
+      return {
+        workspace: meta.workspace,
+        personaText: meta.personaText,
+        updatedAt: meta.updatedAt,
+        isDefault: meta.isDefault,
+        sectionGuide: NARRATION_PERSONA_SECTION_GUIDE,
+        defaultPersonaText,
+      };
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (/huma_narration_persona|does not exist|relation/i.test(msg)) {
+        return {
+          workspace: ws,
+          personaText: defaultPersonaText,
+          updatedAt: null,
+          isDefault: true,
+          sectionGuide: NARRATION_PERSONA_SECTION_GUIDE,
+          defaultPersonaText,
+          dbMigrationRequired: 'v3_79_narration_persona.sql',
+        };
+      }
+      return reply.code(500).send({ error: msg });
+    }
+  });
+
+  app.patch('/api/narration-scripts/persona', { preHandler: authMiddleware }, async (request, reply) => {
+    const allowed = getWorkspaceFilter(request);
+    const body = request.body as { workspace?: string; personaText?: string };
+    const ws = (body.workspace ?? 'yeonun').trim();
+    if (!assertNarrationWorkspace(ws, allowed)) {
+      return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
+    }
+    if (typeof body.personaText !== 'string') {
+      return reply.code(400).send({ error: 'personaText가 필요합니다' });
+    }
+    if (body.personaText.trim().length > 8000) {
+      return reply.code(400).send({ error: '페르소나는 8000자 이내로 작성해 주세요' });
+    }
+    const { updatedAt } = await saveNarrationPersonaText(ws, body.personaText);
+    return { ok: true, updatedAt };
   });
 
   app.get('/api/narration-scripts/:id', { preHandler: authMiddleware }, async (request, reply) => {
