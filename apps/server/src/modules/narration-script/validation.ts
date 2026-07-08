@@ -1,4 +1,5 @@
 import type { NarrationAxisType, NarrationFormatType, NarrationPeriodType } from '@huma/shared';
+import { resolveNarrationRankedTopN } from '@huma/shared';
 import { axisInstanceLabels, axisInstances } from './axis-instances.js';
 import type { NarrationDateContext } from './date-context.js';
 import { hasAmbiguousAbsoluteMonthPhrase } from './date-context.js';
@@ -45,8 +46,17 @@ function fullCoverLengthBounds(axisType: NarrationAxisType): { min: number; max:
   return { min: 380, max: 2000 };
 }
 
-function rankedLengthBounds(): { min: number; max: number } {
-  return { min: 450, max: 2000 };
+function rankedLengthBounds(
+  periodType: NarrationPeriodType,
+  axisType: NarrationAxisType,
+): { min: number; max: number } {
+  const topN = resolveNarrationRankedTopN(periodType, axisType);
+  const min = topN >= 12 ? 900 : topN >= 10 ? 750 : 450;
+  return { min, max: 2000 };
+}
+
+function hasRankMarker(body: string, rank: number): boolean {
+  return new RegExp(`${rank}\\s*위|${rank}위`).test(body);
 }
 
 export function validateNarrationDraft(
@@ -74,7 +84,9 @@ export function validateNarrationDraft(
   }
 
   const lengthBounds =
-    formatType === 'full_cover' ? fullCoverLengthBounds(axisType) : rankedLengthBounds();
+    formatType === 'full_cover'
+      ? fullCoverLengthBounds(axisType)
+      : rankedLengthBounds(periodType, axisType);
   if (body.length < lengthBounds.min) {
     return { ok: false, message: `대본이 너무 짧습니다 (최소 ${lengthBounds.min}자)` };
   }
@@ -95,14 +107,24 @@ export function validateNarrationDraft(
     return { ok: true };
   }
 
-  const rankMatches = body.match(/[1-5]\s*위/g) ?? [];
-  if (rankMatches.length < 5) {
-    return { ok: false, message: '순위특집형 — 5위~1위 표기가 부족합니다' };
+  const topN = resolveNarrationRankedTopN(periodType, axisType);
+  const missingRanks: number[] = [];
+  for (let rank = topN; rank >= 1; rank--) {
+    if (!hasRankMarker(body, rank)) missingRanks.push(rank);
+  }
+  if (missingRanks.length > 0) {
+    return {
+      ok: false,
+      message: `순위특집형 — ${topN}위~1위 표기가 부족합니다 (${missingRanks.slice(0, 4).join(', ')}위 누락)`,
+    };
   }
 
   const mentioned = labels.filter((label) => body.includes(label));
-  if (mentioned.length < 5) {
-    return { ok: false, message: '순위특집형 — 별자리/띠/연령대 5개가 모두 포함되지 않았습니다' };
+  if (mentioned.length < topN) {
+    return {
+      ok: false,
+      message: `순위특집형 — 별자리/띠/연령대 ${topN}개가 모두 포함되지 않았습니다 (${mentioned.length}/${topN})`,
+    };
   }
 
   if (!/1\s*위/.test(body) && !/1위/.test(body)) {
@@ -119,6 +141,7 @@ type PromptBase = {
   workspaceLabel: string;
   periodType: NarrationPeriodType;
   dateContext: NarrationDateContext;
+  seriesEpisode?: number;
 };
 
 function instanceSentenceRule(axisType: NarrationAxisType): string {
@@ -149,6 +172,7 @@ export function buildFullCoverPrompt(params: PromptBase): string {
     params.topicLabel,
     params.periodType,
     params.dateContext,
+    params.seriesEpisode,
   );
   const { min, max } = fullCoverLengthBounds(params.axisType);
 
@@ -192,12 +216,23 @@ export function buildRankedPrompt(params: PromptBase): string {
     params.topicLabel,
     params.periodType,
     params.dateContext,
+    params.seriesEpisode,
   );
-  const { min, max } = rankedLengthBounds();
+  const topN = resolveNarrationRankedTopN(params.periodType, params.axisType);
+  const { min, max } = rankedLengthBounds(params.periodType, params.axisType);
+  const rankSentence = topN >= 12 ? '각 2~3문장' : '각 3~4문장';
+  const selectRule =
+    params.periodType === 'monthly'
+      ? `${axisName} ${topN}개 **전부** (${labels.length}개 풀에서 ${topN}개)`
+      : `${axisName} 5개만 선택`;
+  const seriesLine =
+    params.periodType === 'monthly'
+      ? `- **이달 TOP${topN} 시리즈**${params.seriesEpisode ? ` ${params.seriesEpisode}편` : ''} — 제목·오프닝에 "이달" + "TOP${topN}" + "시리즈" + "N편" 필수\n`
+      : '';
 
   return `아래 [이번 작업] 지시에 따라 대본 JSON만 작성하라. system 역할·금지 규칙을 반드시 준수.
 
-한국어 숏폼 나레이션 대본(순위특집형 TOP5·${params.periodType}) — 브루(Vrew) TTS용.
+한국어 숏폼 나레이션 대본(${params.periodType === 'monthly' ? `이달 TOP${topN} 시리즈` : `순위특집형 TOP5·${params.periodType}`}) — 브루(Vrew) TTS용.
 
 서비스: ${params.workspaceLabel}
 주제(상품): ${params.topicLabel}
@@ -210,13 +245,13 @@ ${params.topicContext}
 ${titleBlock}
 
 규칙:
-- ${mismatchRule}
-- 제목: 주기 + TOP5 + 축 + 후킹
+${seriesLine}- ${mismatchRule}
+- 제목: ${params.periodType === 'monthly' ? `"이달" + TOP${topN} + 시리즈 + N편 + 축 + 후킹` : '주기 + TOP5 + 축 + 후킹'}
 - 오프닝 **강한 후킹** + 시점(${params.dateContext.absoluteLabel}) + 주제 제목 소개
 - **"화면을 두번터치"·댓글 유도 금지** (시스템이 오프닝 직후 삽입)
-- 5위→1위 순, 각 3~4문장
+- ${topN}위→1위 순, ${rankSentence}
 - 1위는 "그리고 1위는..." 서스펜스 후 공개
-- ${axisName} 5개만 선택
+- ${selectRule}
 - **본문 빈 줄 금지**
 - 전체 1분30초 내외 TTS — **본문(body) ${min}~${max}자** (댓글 유도·CTA는 시스템 추가)
 - CTA·면피 **금지**

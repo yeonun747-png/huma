@@ -4,6 +4,7 @@ import type {
   NarrationPeriodType,
   NarrationScriptWorkspace,
 } from '@huma/shared';
+import { resolveNarrationFormatForPeriod } from '@huma/shared';
 import { ALL_AXIS_TYPES } from './axis-instances.js';
 import { buildNarrationDateContext, type NarrationDateContext } from './date-context.js';
 import {
@@ -24,6 +25,7 @@ import {
   inferNarrationAxisFromTopic,
   topicTextForAxisInference,
 } from './axis-inference.js';
+import { resolveMonthlySeriesEpisode } from './monthly-series.js';
 
 function axisPickOrder(topic: NarrationTopic): NarrationAxisType[] {
   const inferred = inferNarrationAxisFromTopic(topicTextForAxisInference(topic));
@@ -49,6 +51,8 @@ export interface NarrationPickPlan {
   topic: NarrationTopic;
   combo: NarrationComboKey;
   dateContext: NarrationDateContext;
+  /** 월간 TOP N 시리즈 N편 (생성 시 채움) */
+  seriesEpisode?: number;
 }
 
 export interface PlanNarrationPickInput {
@@ -64,8 +68,16 @@ function normalizePeriodType(periodType?: NarrationPeriodType): NarrationPeriodT
   return 'daily';
 }
 
+function normalizeFormatType(
+  periodType: NarrationPeriodType,
+  formatType: NarrationFormatType,
+): NarrationFormatType {
+  return resolveNarrationFormatForPeriod(periodType, formatType);
+}
+
 export async function planNarrationPick(input: PlanNarrationPickInput): Promise<NarrationPickPlan> {
   const periodType = normalizePeriodType(input.periodType);
+  const formatType = normalizeFormatType(periodType, input.formatType);
   const cooldownDays = rotationCooldownDays(periodType);
   const topics = await listNarrationTopics(input.workspace);
   if (!topics.length) {
@@ -93,7 +105,7 @@ export async function planNarrationPick(input: PlanNarrationPickInput): Promise<
 
   const makeCombo = (axis: NarrationAxisType, topicKey: string): NarrationComboKey => ({
     workspace: input.workspace,
-    formatType: input.formatType,
+    formatType,
     periodType,
     axisType: axis,
     topicKey,
@@ -157,12 +169,12 @@ export async function planNarrationPick(input: PlanNarrationPickInput): Promise<
 
   return {
     workspace: input.workspace,
-    formatType: input.formatType,
+    formatType,
     periodType,
     axisType: resolvedAxis,
     topic,
     combo,
-    dateContext: buildNarrationDateContext(periodType),
+    dateContext: buildNarrationDateContext(periodType, new Date(), resolvedAxis),
   };
 }
 
@@ -175,6 +187,7 @@ export async function planFromNarrationHistoryRow(row: {
   topic_label: string;
 }): Promise<NarrationPickPlan> {
   const periodType = normalizePeriodType(row.period_type as NarrationPeriodType | undefined);
+  const formatType = normalizeFormatType(periodType, row.format_type);
   const topics = await listNarrationTopics(row.workspace);
   let topic = topics.find((t) => t.key === row.topic_key);
   if (!topic) {
@@ -188,18 +201,26 @@ export async function planFromNarrationHistoryRow(row: {
 
   return {
     workspace: row.workspace,
-    formatType: row.format_type,
+    formatType,
     periodType,
     axisType: row.axis_type,
     topic,
     combo: {
       workspace: row.workspace,
-      formatType: row.format_type,
+      formatType,
       periodType,
       axisType: row.axis_type,
       topicKey: row.topic_key,
     },
-    dateContext: buildNarrationDateContext(periodType),
+    dateContext: buildNarrationDateContext(periodType, new Date(), row.axis_type),
+    seriesEpisode:
+      periodType === 'monthly' ? await resolveMonthlySeriesEpisode({
+          workspace: row.workspace,
+          formatType,
+          periodType,
+          axisType: row.axis_type,
+          topicKey: row.topic_key,
+        }) : undefined,
   };
 }
 

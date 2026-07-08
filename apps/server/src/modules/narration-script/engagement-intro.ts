@@ -77,9 +77,11 @@ function findEngagementInsertIndex(
   body: string,
   axisType: NarrationAxisType,
   formatType: NarrationFormatType,
+  rankedTopN = 5,
 ): number {
   if (formatType === 'ranked') {
-    for (const pattern of [/5\s*위/, /4\s*위/, /3\s*위/, /2\s*위/, /1\s*위/]) {
+    for (let rank = rankedTopN; rank >= 1; rank--) {
+      const pattern = new RegExp(`${rank}\\s*위|${rank}위`);
       const m = body.match(pattern);
       if (m?.index != null && m.index > 0) return m.index;
     }
@@ -111,6 +113,7 @@ export function insertNarrationEngagementIntro(
     formatType: NarrationFormatType;
     topicLabel: string;
     workspace: NarrationScriptWorkspace;
+    rankedTopN?: number;
   },
 ): string {
   const trimmed = body.trim();
@@ -118,7 +121,12 @@ export function insertNarrationEngagementIntro(
   if (/화면을\s*두\s*번?\s*터치|화면을\s*두번터치/i.test(trimmed)) return trimmed;
 
   const intro = buildNarrationEngagementIntro(opts);
-  const idx = findEngagementInsertIndex(trimmed, opts.axisType, opts.formatType);
+  const idx = findEngagementInsertIndex(
+    trimmed,
+    opts.axisType,
+    opts.formatType,
+    opts.rankedTopN ?? 5,
+  );
 
   if (idx <= 0) return `${intro}\n${trimmed}`;
 

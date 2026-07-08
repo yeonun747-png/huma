@@ -16,6 +16,7 @@ import {
   NARRATION_PERIOD_LABEL,
   NARRATION_SCRIPT_STATUS_LABEL,
   NARRATION_WORKSPACE_LABEL,
+  resolveNarrationTopN,
   resolveNarrationVariantLabel,
 } from '@huma/shared';
 import { api } from '@/lib/api';
@@ -60,8 +61,13 @@ function resolvePeriodHint(period?: NarrationPeriodType | null): string {
 function resolveVariantLabel(
   formatType: NarrationFormatType,
   periodType?: NarrationPeriodType | null,
+  axisType?: NarrationAxisType | 'auto' | null,
 ): string {
   const period = periodType === 'weekly' || periodType === 'monthly' ? periodType : 'daily';
+  const resolvedAxis = axisType && axisType !== 'auto' ? axisType : undefined;
+  if (period === 'monthly') {
+    return resolveNarrationVariantLabel?.('ranked', 'monthly', resolvedAxis) ?? '이달 TOP12 시리즈';
+  }
   if (typeof resolveNarrationVariantLabel === 'function') {
     return resolveNarrationVariantLabel(formatType, period);
   }
@@ -155,6 +161,12 @@ export function NarrationScriptView({ service }: Props) {
     void load();
     void loadMeta();
   }, [load, loadMeta]);
+
+  useEffect(() => {
+    if (periodType === 'monthly' && formatType !== 'ranked') {
+      setFormatType('ranked');
+    }
+  }, [periodType, formatType]);
 
   useEffect(() => {
     const pollMs = hasGenerating ? 2_000 : 8_000;
@@ -334,11 +346,21 @@ export function NarrationScriptView({ service }: Props) {
             <select
               className="mt-1 w-full rounded border border-huma-bdr bg-huma-bg2 px-2 py-1.5 text-[12px]"
               value={formatType}
+              disabled={periodType === 'monthly'}
               onChange={(e) => setFormatType(e.target.value as NarrationFormatType)}
             >
-              <option value="full_cover">{NARRATION_FORMAT_LABEL.full_cover}</option>
+              <option value="full_cover" disabled={periodType === 'monthly'}>
+                {NARRATION_FORMAT_LABEL.full_cover}
+                {periodType === 'monthly' ? ' (월간 불가)' : ''}
+              </option>
               <option value="ranked">{NARRATION_FORMAT_LABEL.ranked}</option>
             </select>
+            {periodType === 'monthly' ? (
+              <span className="mt-1 block text-[10px] text-huma-t4">
+                월간은 이달 TOP
+                {axisType !== 'auto' ? resolveNarrationTopN(axisType) : '5·12'} 시리즈(순위특집) 전용
+              </span>
+            ) : null}
           </label>
           <label className="text-[11px] text-huma-t3">
             주기
@@ -349,7 +371,11 @@ export function NarrationScriptView({ service }: Props) {
             >
               <option value="daily">{resolvePeriodLabel('daily')} ({resolvePeriodHint('daily')})</option>
               <option value="weekly">{resolvePeriodLabel('weekly')} ({resolvePeriodHint('weekly')})</option>
-              <option value="monthly">{resolvePeriodLabel('monthly')} ({resolvePeriodHint('monthly')})</option>
+              <option value="monthly">
+                {resolvePeriodLabel('monthly')} (
+                {resolvePeriodHint('monthly')}{' '}
+                {axisType !== 'auto' ? `TOP${resolveNarrationTopN(axisType)}` : 'TOP5·12'} 시리즈)
+              </option>
             </select>
           </label>
           <label className="text-[11px] text-huma-t3">
@@ -383,7 +409,7 @@ export function NarrationScriptView({ service }: Props) {
         </div>
         {nextPick ? (
           <p className="mt-2 text-[10px] text-huma-t4">
-            선택 포맷: {resolveVariantLabel(formatType, periodType)} · 다음 자동 pick:{' '}
+            선택 포맷: {resolveVariantLabel(formatType, periodType, axisType)} · 다음 자동 pick:{' '}
             {NARRATION_AXIS_LABEL[nextPick.axis_type]} × 「{nextPick.topic_label}」 (순환)
           </p>
         ) : null}
@@ -440,7 +466,9 @@ export function NarrationScriptView({ service }: Props) {
                     >
                       <div className="truncate text-[11px] font-medium">{item.title || item.topic_label}</div>
                       <div className="mt-0.5 flex flex-wrap gap-1 text-[9px] text-huma-t4">
-                        <MTag tone="idle">{resolveVariantLabel(item.format_type, item.period_type)}</MTag>
+                        <MTag tone="idle">
+                          {resolveVariantLabel(item.format_type, item.period_type, item.axis_type)}
+                        </MTag>
                         <span>{NARRATION_AXIS_LABEL[item.axis_type]}</span>
                       </div>
                       {prog ? (

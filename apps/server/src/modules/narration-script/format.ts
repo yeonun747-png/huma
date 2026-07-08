@@ -1,4 +1,5 @@
 import type { NarrationAxisType, NarrationFormatType, NarrationPeriodType } from '@huma/shared';
+import { resolveNarrationRankedTopN, resolveNarrationTopN } from '@huma/shared';
 import { periodTitleKeyword, type NarrationDateContext } from './date-context.js';
 
 /** LLM이 문장마다 넣는 불필요한 빈 줄 제거 — 항목 구분은 단일 줄바꿈만 */
@@ -29,12 +30,18 @@ export function buildFallbackNarrationTitle(
   axisType: NarrationAxisType,
   formatType: NarrationFormatType,
   periodType: NarrationPeriodType = 'daily',
+  seriesEpisode?: number,
 ): string {
   const prefix = buildAxisTitlePrefix(axisType);
   const period = periodTitleKeyword(periodType);
   const topic = topicLabel.trim() || '운세';
+  const rankedN = resolveNarrationRankedTopN(periodType, axisType);
+  if (periodType === 'monthly') {
+    const ep = seriesEpisode && seriesEpisode > 0 ? ` ${seriesEpisode}편` : '';
+    return `이달 ${prefix} ${topic} TOP${rankedN} 시리즈${ep}`;
+  }
   if (formatType === 'ranked') {
-    return `${period} ${prefix} ${topic} TOP5`;
+    return `${period} ${prefix} ${topic} TOP${rankedN}`;
   }
   return `${period} ${prefix} ${topic}`;
 }
@@ -59,11 +66,29 @@ export function validateNarrationTitle(
 
   const periodWord = periodTitleKeyword(periodType);
   const periodAlt = periodWord.replace(/\s/g, '');
-  if (!t.includes(periodWord) && !t.includes(periodAlt)) {
+  const periodOk =
+    periodType === 'monthly'
+      ? /이달|이번\s*달/.test(t)
+      : t.includes(periodWord) || t.includes(periodAlt);
+  if (!periodOk) {
     return {
       ok: false,
-      message: `제목에 주기 표현 "${periodWord}"(또는 "${periodAlt}")이 포함되어야 합니다`,
+      message:
+        periodType === 'monthly'
+          ? '제목에 "이달" 또는 "이번 달" 표현이 포함되어야 합니다'
+          : `제목에 주기 표현 "${periodWord}"(또는 "${periodAlt}")이 포함되어야 합니다`,
     };
+  }
+
+  if (periodType === 'monthly') {
+    const topN = resolveNarrationTopN(axisType);
+    const topRe = new RegExp(`TOP\\s*${topN}|TOP${topN}`, 'i');
+    if (!topRe.test(t)) {
+      return { ok: false, message: `월간 시리즈 제목에 TOP${topN}가 포함되어야 합니다` };
+    }
+    if (!/시리즈/.test(t)) {
+      return { ok: false, message: '월간 시리즈 제목에 "시리즈"가 포함되어야 합니다' };
+    }
   }
 
   const axisWord = axisTitleKeyword(axisType);
@@ -102,12 +127,20 @@ export function buildTitlePromptBlock(
   topicLabel: string,
   periodType: NarrationPeriodType,
   dateContext: NarrationDateContext,
+  seriesEpisode?: number,
 ): string {
   const prefix = buildAxisTitlePrefix(axisType);
   const axisWord = axisTitleKeyword(axisType);
   const periodLabel = periodTitleKeyword(periodType);
+  const epSuffix = seriesEpisode && seriesEpisode > 0 ? ` ${seriesEpisode}편` : '';
+  const monthlyTopN = resolveNarrationTopN(axisType);
   const examples =
-    axisType === 'zodiac'
+    periodType === 'monthly'
+      ? [
+          `이달 ${prefix} ${topicLabel} TOP${monthlyTopN} 시리즈${epSuffix || ' 1편'}`,
+          `이달 운 좋은 ${axisWord} TOP${monthlyTopN} 시리즈${epSuffix || ' 2편'}, 1위는?`,
+        ]
+      : axisType === 'zodiac'
       ? [
           `${periodLabel} ${prefix} ${topicLabel}, 12띠 중 당신은?`,
           `${periodLabel} 운 좋은 띠 1위는? ${topicLabel}`,

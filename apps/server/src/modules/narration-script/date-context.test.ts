@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildNarrationDateContext, hasAmbiguousAbsoluteMonthPhrase } from './date-context.js';
+import { buildNarrationDateContext, hasAmbiguousAbsoluteMonthPhrase, kstMonthBoundaries } from './date-context.js';
 
 describe('narration date-context', () => {
   it('builds daily context in KST', () => {
@@ -9,9 +9,24 @@ describe('narration date-context', () => {
   });
 
   it('builds monthly context', () => {
-    const ctx = buildNarrationDateContext('monthly', new Date('2026-07-07T15:00:00.000Z'));
+    const ctx = buildNarrationDateContext('monthly', new Date('2026-07-07T15:00:00.000Z'), 'zodiac');
     expect(ctx.absoluteLabel).toBe('2026년 7월');
     expect(ctx.periodPhrase).toBe('이번 달');
+    expect(ctx.promptBlock).toContain('TOP12 시리즈');
+  });
+
+  it('builds monthly context for generation TOP5', () => {
+    const ctx = buildNarrationDateContext('monthly', new Date('2026-07-07T15:00:00.000Z'), 'generation');
+    expect(ctx.promptBlock).toContain('TOP5 시리즈');
+  });
+
+  it('kst month boundaries', () => {
+    const { startIso, endIso, year, month } = kstMonthBoundaries(
+      new Date('2026-07-15T00:00:00.000Z'),
+    );
+    expect(year).toBe(2026);
+    expect(month).toBe(7);
+    expect(new Date(startIso).getTime()).toBeLessThan(new Date(endIso).getTime());
   });
 
   it('detects ambiguous absolute month phrases', () => {

@@ -43,12 +43,44 @@ export const NARRATION_PERIOD_HINT: Record<NarrationPeriodType, string> = {
   monthly: '이달',
 };
 
-/** 전체커버형-데일리 등 6종 표시 */
+/** @deprecated resolveNarrationRankedTopN 사용 */
+export const NARRATION_TOP_N = 5;
+
+/** 축별 월간 시리즈 TOP N (띠·별자리 12, 연령대 5) */
+export function resolveNarrationTopN(axisType: NarrationAxisType): number {
+  if (axisType === 'generation') return 5;
+  return 12;
+}
+
+/** 순위특집 TOP N — 월간=축 전체(5·12), 데일리/주간=5 */
+export function resolveNarrationRankedTopN(
+  periodType: NarrationPeriodType,
+  axisType: NarrationAxisType,
+): number {
+  if (periodType === 'monthly') return resolveNarrationTopN(axisType);
+  return 5;
+}
+
+/** 월간은 이달 TOP N 시리즈(순위특집) 전용 */
+export function resolveNarrationFormatForPeriod(
+  periodType: NarrationPeriodType,
+  formatType: NarrationFormatType,
+): NarrationFormatType {
+  if (periodType === 'monthly') return 'ranked';
+  return formatType;
+}
+
+/** 전체커버형-데일리 · 이달 TOP12 시리즈 등 표시 */
 export function resolveNarrationVariantLabel(
   formatType: NarrationFormatType,
   periodType: NarrationPeriodType,
+  axisType?: NarrationAxisType,
 ): string {
-  const period = periodType === 'weekly' || periodType === 'monthly' ? periodType : 'daily';
+  if (periodType === 'monthly') {
+    const n = axisType ? resolveNarrationTopN(axisType) : 12;
+    return `이달 TOP${n} 시리즈`;
+  }
+  const period = periodType === 'weekly' ? periodType : 'daily';
   return `${NARRATION_FORMAT_LABEL[formatType]}-${NARRATION_PERIOD_LABEL[period]}`;
 }
 

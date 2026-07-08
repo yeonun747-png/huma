@@ -1,4 +1,5 @@
 import type { NarrationAxisType, NarrationFormatType, NarrationPeriodType, NarrationScriptWorkspace } from '@huma/shared';
+import { resolveNarrationRankedTopN } from '@huma/shared';
 import { axisInstanceLabels } from './axis-instances.js';
 import type { NarrationDateContext } from './date-context.js';
 
@@ -53,7 +54,14 @@ export function buildNarrationPersonaSystem(
   customPersonaText?: string | null,
 ): string {
   const instances = axisInstanceLabels(input.axisType).join(', ');
-  const formatLabel = input.formatType === 'ranked' ? '순위특집형 TOP5' : '전체커버형(12개 전부)';
+  const rankedTopN =
+    input.formatType === 'ranked'
+      ? resolveNarrationRankedTopN(input.periodType, input.axisType)
+      : undefined;
+  const formatLabel =
+    input.formatType === 'ranked'
+      ? `순위특집형 TOP${rankedTopN}`
+      : '전체커버형(12개 전부)';
 
   return [
     '당신은 한국어 숏폼 **브루(Vrew) TTS 나레이션 대본** 전문 작가다.',
@@ -73,7 +81,7 @@ export function buildNarrationPersonaSystem(
     '- 각 항목 해석은 **그 주제 관점**에서만. 무관한 연애·이직·건강을 끼워 넣지 말 것(주제가 그것일 때만).',
     '- 자미두수·14주성·타로 등 **주제에 맞는 용어만**. 주제와 무관한 다른 점술 체계 섞지 말 것.',
     '- 구체적이되 단정적 예언 금지: "~반드시", "100%" 대신 "~흐름", "~기운", "~좋아요".',
-    '- 숫자·순위·TOP5는 **대본 안에서만** — 허구 통계·조회수·뉴스 인용 금지.',
+    `- 숫자·순위·TOP${rankedTopN ?? 'N'}는 **대본 안에서만** — 허구 통계·조회수·뉴스 인용 금지.`,
     '- CTA·가입·면피·URL·"연운/포춘82" 언급 **금지** (시스템이 붙임).',
     '',
     '## 출력',

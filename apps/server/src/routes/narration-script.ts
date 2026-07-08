@@ -26,7 +26,7 @@ import {
   getNarrationPersonaMeta,
   saveNarrationPersonaText,
 } from '../modules/narration-script/narration-persona-store.js';
-import { buildDefaultNarrationPersonaText, NARRATION_PERSONA_SECTION_GUIDE } from '@huma/shared';
+import { buildDefaultNarrationPersonaText, NARRATION_PERSONA_SECTION_GUIDE, resolveNarrationFormatForPeriod } from '@huma/shared';
 
 const NARRATION_WORKSPACES: NarrationScriptWorkspace[] = ['yeonun', 'fortune82'];
 
@@ -95,11 +95,12 @@ export function registerNarrationScriptRoutes(app: FastifyInstance) {
     if (!assertNarrationWorkspace(ws, allowed)) {
       return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
     }
-    const formatType = (format_type === 'ranked' ? 'ranked' : 'full_cover') as NarrationFormatType;
     const periodType =
       period_type === 'weekly' || period_type === 'monthly'
         ? period_type
         : ('daily' as NarrationPeriodType);
+    const rawFormat = format_type === 'ranked' ? 'ranked' : 'full_cover';
+    const formatType = resolveNarrationFormatForPeriod(periodType, rawFormat);
     try {
       const plan = await previewNextNarrationPick(ws, formatType, periodType);
       return {
@@ -130,11 +131,12 @@ export function registerNarrationScriptRoutes(app: FastifyInstance) {
       return reply.code(403).send({ error: '워크스페이스 접근 권한 없음' });
     }
 
-    const formatType = body.format_type === 'ranked' ? 'ranked' : 'full_cover';
     const periodType =
       body.period_type === 'weekly' || body.period_type === 'monthly'
         ? body.period_type
         : ('daily' as NarrationPeriodType);
+    const rawFormat = body.format_type === 'ranked' ? 'ranked' : 'full_cover';
+    const formatType = resolveNarrationFormatForPeriod(periodType, rawFormat);
 
     const { data: busy } = await supabase
       .from('huma_narration_script_history')
