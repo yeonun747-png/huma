@@ -24,6 +24,9 @@ const COUNTER_KIND: Record<string, CounterKind> = {
   채: 'native',
   가지: 'native',
   곳: 'native',
+  주치: 'native',
+  주째: 'native',
+  주: 'native',
   시: 'hour',
   월: 'sino',
   년: 'sino',
@@ -150,7 +153,7 @@ export function convertSpokenKoreanNumbers(text: string): string {
   });
 
   out = out.replace(
-    /(\d+(?:,\d{3})*(?:\.\d+)?)\s*(개|명|마리|살|시|분|초|월|년|일|층|번|호|회|원|%|퍼센트|점|대|벌|켤레|그루|채|잔|병|마디|송이|가지|곳|위|등)/g,
+    /(\d+(?:,\d{3})*(?:\.\d+)?)\s*(개|명|마리|살|시|분|초|월|년|일|층|번|호|회|원|%|퍼센트|점|대|벌|켤레|그루|채|잔|병|마디|송이|가지|곳|위|등|주치|주째|주)/g,
     (match, numRaw: string, counter: string) => {
       const n = parseNumericToken(numRaw);
       if (n == null) return match;

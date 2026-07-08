@@ -50,6 +50,11 @@ describe('formatAssDialogueText', () => {
     expect(text).toBe('7개 남았어');
   });
 
+  it('shows digits for week counters in subtitles', () => {
+    const { text } = formatAssDialogueText('B: "창가분 세주치 다른 음료드렸어요."');
+    expect(text).toBe('창가분 3주치 다른 음료드렸어요.');
+  });
+
   it('uses inline colors for multi-speaker line', () => {
     const { text, style } = formatAssDialogueText('B: "지퍼 확인해." A: "제발."');
     expect(style).toBe('Default');

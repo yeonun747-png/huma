@@ -61,6 +61,18 @@ describe('convertSpokenKoreanNumbersToDigits', () => {
       '7월 7개 12시 48번 5000원',
     );
   });
+
+  it('round-trips week counters (주치·주째)', () => {
+    expect(convertSpokenKoreanNumbers('3주치')).toBe('세주치');
+    expect(convertSpokenKoreanNumbersToDigits('세주치')).toBe('3주치');
+    expect(convertSpokenKoreanNumbers('3주째')).toBe('세주째');
+    expect(convertSpokenKoreanNumbersToDigits('세주째')).toBe('3주째');
+    expect(
+      convertSpokenKoreanNumbersToDigits(
+        convertSpokenKoreanNumbers('B: "창가분 3주치 다른 음료드렸어요."'),
+      ),
+    ).toBe('B: "창가분 3주치 다른 음료드렸어요."');
+  });
 });
 
 describe('applySpokenKoreanNumbersToConti', () => {
