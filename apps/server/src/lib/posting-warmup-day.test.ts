@@ -3,8 +3,8 @@ import { getPostingWarmupWeekdayCap } from './posting-warmup.js';
 import { postingWarmupResetPatch, resolveReconcileWarmupDay, resolveWarmupPublishKstDateKey } from './posting-warmup-day.js';
 
 describe('posting warmup day caps', () => {
-  it('day 6 uses expand stage cap (3)', () => {
-    expect(getPostingWarmupWeekdayCap(6)).toBe(3);
+  it('day 6 uses expand stage cap (2)', () => {
+    expect(getPostingWarmupWeekdayCap(6)).toBe(2);
   });
 
   it('day 0 uses initial cap (1)', () => {

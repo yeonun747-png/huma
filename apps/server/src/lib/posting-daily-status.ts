@@ -578,7 +578,7 @@ export async function getAutoPublishStatus(
 
       auto_publish_next_slot_at: null,
 
-      weekday_base: 4,
+      weekday_base: 3,
 
       remaining: 0,
 

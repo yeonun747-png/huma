@@ -3,7 +3,7 @@ import { supabase } from '../middleware/auth.js';
 import { formatPostingAccountLabel } from './posting-accounts.js';
 import { getDailyPostingTarget } from './posting-daily-target.js';
 import { reconcilePostingWarmupDay } from './posting-warmup-day.js';
-import { describePostingWarmupPhase, getPostingWarmupWeekdayCap } from './posting-warmup.js';
+import { describePostingWarmupPhase, resolvePostingWeekdayCapDisplay } from './posting-warmup.js';
 
 export interface PostingWarmupStatusRow {
   dongle_label: string;
@@ -33,8 +33,11 @@ async function buildAccountWarmupRow(
   const accountId = account.id as string;
   const warmupDay = await reconcilePostingWarmupDay(accountId);
   const phase = describePostingWarmupPhase(warmupDay);
-  const cap = getPostingWarmupWeekdayCap(warmupDay);
+  const weekdayCapDisplay = resolvePostingWeekdayCapDisplay(warmupDay);
   const targetInfo = getDailyPostingTarget(accountId, new Date(), { warmupDay });
+  const todayTarget = targetInfo.is_weekend
+    ? targetInfo.target
+    : Math.min(targetInfo.target, weekdayCapDisplay);
 
   return {
     dongle_label: dongleLabel,
@@ -45,9 +48,9 @@ async function buildAccountWarmupRow(
     warmup_day: warmupDay,
     phase_label: phase.label,
     stage: phase.stage,
-    weekday_cap: cap >= 999 ? null : cap,
-    today_target: targetInfo.target,
-    is_complete: cap >= 999,
+    weekday_cap: weekdayCapDisplay,
+    today_target: todayTarget,
+    is_complete: phase.stage === 'complete',
     missing: false,
   };
 }

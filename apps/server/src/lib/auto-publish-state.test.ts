@@ -23,7 +23,7 @@ describe('resolveBlockedAutoPublishNextSlot', () => {
         today_completed: 1,
         today_skipped: 0,
         daily_target: 1,
-        weekday_base: 4,
+        weekday_base: 3,
         remaining: 0,
         hard_cap: 99,
         can_publish: false,

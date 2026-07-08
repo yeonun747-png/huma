@@ -121,7 +121,7 @@ export function buildAutoPublishTitle(
     return `${accountHint}자동발행 ON · ${line}${hint}`;
   }
   const warmupHint = status.warmup_cap != null ? ` · 워밍업 상한 ${status.warmup_cap}건` : '';
-  return `${accountHint}클릭하여 자동발행 ON · 평일 4~5건${warmupHint}${
+  return `${accountHint}클릭하여 자동발행 ON · 평일 3건${warmupHint}${
     status.block_message ? ` (${status.block_message})` : ''
   }`;
 }
@@ -214,7 +214,7 @@ export function buildYeonunPlaceholderAccounts(): AutoPublishStatus[] {
     today_completed: 0,
     today_skipped: 0,
     daily_target: 0,
-    weekday_base: 4,
+    weekday_base: 3,
     remaining: 0,
     hard_cap: 99,
     can_publish: false,

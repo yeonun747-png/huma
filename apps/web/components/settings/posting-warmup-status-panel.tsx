@@ -20,9 +20,9 @@ export type PostingWarmupStatusRow = {
 const POSTING_WARMUP_STAGES = [
   { id: 'initial' as const, label: '초기', dayRange: '0~2일', cap: 1, capLabel: '1건' },
   { id: 'adapt' as const, label: '적응', dayRange: '3~5일', cap: 2, capLabel: '2건' },
-  { id: 'expand' as const, label: '확대', dayRange: '6~9일', cap: 3, capLabel: '3건' },
-  { id: 'late' as const, label: '후반', dayRange: '10~14일', cap: 4, capLabel: '4건' },
-  { id: 'complete' as const, label: '완료', dayRange: '15일+', cap: 5, capLabel: '4~5건' },
+  { id: 'expand' as const, label: '확대', dayRange: '6~9일', cap: 2, capLabel: '2건' },
+  { id: 'late' as const, label: '후반', dayRange: '10~14일', cap: 3, capLabel: '3건' },
+  { id: 'complete' as const, label: '완료', dayRange: '15일+', cap: 3, capLabel: '3건' },
 ];
 
 type CountTone = 'acc' | 'ok' | 'warn' | 't3';
@@ -64,12 +64,21 @@ function CountCell({
   );
 }
 
-function resolveWeekdayCap(row: PostingWarmupStatusRow): number | string | null {
+function resolveWeekdayCap(row: PostingWarmupStatusRow): number | null {
   if (row.missing) return null;
   if (row.weekday_cap != null) return row.weekday_cap;
-  if (row.is_complete || row.stage === 'complete') return '4~5';
   const stageMeta = POSTING_WARMUP_STAGES.find((s) => s.id === row.stage);
   return stageMeta?.cap ?? null;
+}
+
+/** 평일상한을 넘지 않도록 오늘 목표 표시 */
+function resolveTodayTarget(
+  row: PostingWarmupStatusRow,
+  weekdayCap: number | null,
+): number | null {
+  if (row.today_target == null) return null;
+  if (weekdayCap != null) return Math.min(row.today_target, weekdayCap);
+  return row.today_target;
 }
 
 type EnrichedWarmupRow = PostingWarmupStatusRow & {
@@ -185,7 +194,7 @@ function WarmupStageTable() {
               <td className="px-2 py-1 text-huma-t2">{s.dayRange}</td>
               <td className="px-2 py-1 text-right">
                 {s.id === 'complete' ? (
-                  <CountCell value="4~5" suffix="건" tone="ok" />
+                  <CountCell value={3} suffix="건" tone="ok" />
                 ) : (
                   <CountCell value={s.cap} suffix="건" tone="acc" />
                 )}
@@ -280,10 +289,8 @@ function AccountWarmupTable({ rows }: { rows: PostingWarmupStatusRow[] }) {
                   </td>
                   <td className="px-2 py-1.5 text-center">
                     <CountCell
-                      value={
-                        typeof weekdayCap === 'string' ? weekdayCap : weekdayCap != null ? weekdayCap : null
-                      }
-                      suffix={typeof weekdayCap === 'string' ? '건' : weekdayCap != null ? '건' : undefined}
+                      value={weekdayCap}
+                      suffix={weekdayCap != null ? '건' : undefined}
                       tone={tone}
                     />
                   </td>
@@ -292,7 +299,7 @@ function AccountWarmupTable({ rows }: { rows: PostingWarmupStatusRow[] }) {
                       <span className="text-[10px] text-huma-t3">계정 없음</span>
                     ) : (
                       <CountCell
-                        value={row.today_target}
+                        value={resolveTodayTarget(row, weekdayCap)}
                         suffix="건"
                         tone={row.is_complete ? 'ok' : 'acc'}
                       />

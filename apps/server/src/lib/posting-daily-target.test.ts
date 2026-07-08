@@ -1,16 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { getDailyPostingTarget } from './posting-daily-target.js';
 import { computeDynamicPublishIntervalHours } from './posting-interval.js';
-import { getPostingWarmupWeekdayCap, applyPostingWarmupCap } from './posting-warmup.js';
+import { getPostingWarmupWeekdayCap, applyPostingWarmupCap, resolvePostingWeekdayCapDisplay } from './posting-warmup.js';
 
 describe('getDailyPostingTarget', () => {
   const accountId = 'acc-test-001';
 
-  it('weekday target is 4 or 5', () => {
+  it('weekday target is 3', () => {
     const monday = new Date('2026-06-22T12:00:00+09:00');
     const t = getDailyPostingTarget(accountId, monday);
     expect(t.is_weekend).toBe(false);
-    expect([4, 5]).toContain(t.target);
+    expect(t.weekday_base).toBe(3);
+    expect(t.target).toBe(3);
     expect(t.target).toBe(t.raw_target);
   });
 
@@ -36,21 +37,22 @@ describe('getDailyPostingTarget', () => {
     const fresh = getDailyPostingTarget(accountId, monday, { warmupDay: 0 });
     expect(fresh.target).toBeLessThanOrEqual(1);
     const mid = getDailyPostingTarget(accountId, monday, { warmupDay: 8 });
-    expect(mid.target).toBeLessThanOrEqual(3);
+    expect(mid.target).toBeLessThanOrEqual(2);
   });
 });
 
 describe('posting warmup ramp', () => {
-  it('ramps 1→2→3→4→full', () => {
+  it('ramps 1→2→3→full', () => {
     expect(getPostingWarmupWeekdayCap(0)).toBe(1);
     expect(getPostingWarmupWeekdayCap(3)).toBe(2);
-    expect(getPostingWarmupWeekdayCap(7)).toBe(3);
-    expect(getPostingWarmupWeekdayCap(12)).toBe(4);
+    expect(getPostingWarmupWeekdayCap(7)).toBe(2);
+    expect(getPostingWarmupWeekdayCap(12)).toBe(3);
     expect(getPostingWarmupWeekdayCap(20)).toBe(999);
   });
 
-  it('applyPostingWarmupCap respects weekend', () => {
-    expect(applyPostingWarmupCap(5, 0, true, 0.45)).toBe(1);
+  it('resolvePostingWeekdayCapDisplay returns 3 when warmup complete', () => {
+    expect(resolvePostingWeekdayCapDisplay(20)).toBe(3);
+    expect(resolvePostingWeekdayCapDisplay(0)).toBe(1);
   });
 });
 

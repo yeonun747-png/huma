@@ -6,14 +6,23 @@
 /** 절대 최소 발행 간격(시간) — human_engine 설정 하한 */
 export const ABSOLUTE_MIN_PUBLISH_INTERVAL_HOURS = 2;
 
-/** warmup_day별 평일 최대 발행 건수 (이후 4~5 목표 적용) */
+/** 워밍업 완료 후 평일 목표 건수 */
+export const POSTING_COMPLETE_WEEKDAY_TARGET = 3;
+
+/** warmup_day별 평일 최대 발행 건수 (완료 후 평일 3건 목표) */
 export function getPostingWarmupWeekdayCap(warmupDay: number): number {
   const d = Math.max(0, warmupDay);
   if (d <= 2) return 1;
   if (d <= 5) return 2;
-  if (d <= 9) return 3;
-  if (d <= 14) return 4;
+  if (d <= 9) return 2;
+  if (d <= 14) return 3;
   return 999;
+}
+
+/** UI·API — 워밍업 완료(999)여도 평일 상한 표시값 반환 */
+export function resolvePostingWeekdayCapDisplay(warmupDay: number): number {
+  const cap = getPostingWarmupWeekdayCap(warmupDay);
+  return cap >= 999 ? POSTING_COMPLETE_WEEKDAY_TARGET : cap;
 }
 
 export function applyPostingWarmupCap(
@@ -51,7 +60,7 @@ export function postingWarmupScheduleSpreadFraction(warmupDay: number): number {
 
 /**
  * 오늘 발행 목표 건수별 시간 분산 — 목표가 적을수록 8시대 군집 없이 활성창 전체에 배치.
- * 4~5건은 이른 시간(8시대) 밀집, 1~2건은 하루 종일 스프레드.
+ * 3건은 활성창 중반 분산, 1~2건은 하루 종일 스프레드.
  */
 export function postingDailyTargetSpreadFraction(dailyTarget: number): number {
   const t = Math.max(1, Math.round(dailyTarget));
@@ -79,7 +88,11 @@ export function describePostingWarmupPhase(warmupDay: number): {
   const d = Math.max(0, warmupDay);
   const cap = getPostingWarmupWeekdayCap(d);
   if (cap >= 999) {
-    return { stage: 'complete', label: '완료 · 평일 4~5건', weekday_cap: null };
+    return {
+      stage: 'complete',
+      label: '완료 · 평일 3건',
+      weekday_cap: POSTING_COMPLETE_WEEKDAY_TARGET,
+    };
   }
 
   const stage: PostingWarmupStage =

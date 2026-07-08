@@ -52,9 +52,9 @@ describe('computeEarliestPostingCandidate', () => {
       lastAnchor: null,
     });
     expect(candidate.getTime()).toBeGreaterThanOrEqual(
-      new Date('2026-07-01T07:01:00+09:00').getTime(),
+      new Date('2026-07-01T08:01:00+09:00').getTime(),
     );
-    expect(candidate.getTime()).toBeLessThan(new Date('2026-07-01T07:15:00+09:00').getTime());
+    expect(candidate.getTime()).toBeLessThan(new Date('2026-07-01T08:09:00+09:00').getTime());
   });
 });
 
@@ -110,7 +110,7 @@ describe('computePostingScheduleCandidate', () => {
         minGapMs: 2 * 3_600_000,
         lastAnchor: null,
         warmupDay: 20,
-        dailyTarget: 4,
+        dailyTarget: 5,
       });
       expect(candidate.getTime()).toBeGreaterThanOrEqual(earliest.getTime());
       expect(candidate.getTime() - earliest.getTime()).toBeLessThanOrEqual(2 * 3_600_000);
