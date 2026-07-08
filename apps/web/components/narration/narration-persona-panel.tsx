@@ -16,7 +16,7 @@ interface Props {
 }
 
 export function NarrationPersonaPanel({ service }: Props) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState('');

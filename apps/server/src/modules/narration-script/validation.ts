@@ -39,13 +39,14 @@ function stripLlmFooterLines(body: string): string {
   return kept.join('\n').trim();
 }
 
+/** LLM 본문 길이 — intro·CTA는 검증 후 시스템 append (TTS ~450자/분, 1분30초 내외) */
 function fullCoverLengthBounds(axisType: NarrationAxisType): { min: number; max: number } {
-  if (axisType === 'generation') return { min: 280, max: 720 };
-  return { min: 250, max: 650 };
+  if (axisType === 'generation') return { min: 420, max: 1100 };
+  return { min: 380, max: 1000 };
 }
 
 function rankedLengthBounds(): { min: number; max: number } {
-  return { min: 420, max: 850 };
+  return { min: 450, max: 1050 };
 }
 
 export function validateNarrationDraft(
@@ -173,7 +174,7 @@ ${titleBlock}
 - **"화면을 두번터치"·댓글 유도 금지** (시스템이 오프닝 직후 삽입)
 - 본문: 각 인스턴스를 "쥐띠:" 또는 "양자리:" 형식
 - ${instanceSentenceRule(params.axisType)}
-- 전체 1분~1분30초 (${min}~${max}자)
+- 전체 1분~1분30초 TTS 분량 — **본문(body) ${min}~${max}자** (댓글 유도·CTA는 시스템 추가라 본문에 넣지 말 것)
 - **본문 빈 줄 금지**
 - 숫자는 아라비아 숫자 그대로
 - CTA·면피 **금지** (시스템 append)
@@ -217,7 +218,7 @@ ${titleBlock}
 - 1위는 "그리고 1위는..." 서스펜스 후 공개
 - ${axisName} 5개만 선택
 - **본문 빈 줄 금지**
-- 전체 1분30초 이상 (${min}~${max}자)
+- 전체 1분30초 내외 TTS — **본문(body) ${min}~${max}자** (댓글 유도·CTA는 시스템 추가)
 - CTA·면피 **금지**
 - JSON만: {"title":"...","body":"..."}`;
 }
