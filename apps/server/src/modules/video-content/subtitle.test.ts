@@ -59,7 +59,7 @@ describe('formatAssDialogueText', () => {
     const { text } = formatAssDialogueText(
       'B: "근데 강사님... 주소록이 삼천팔백사십칠명 이네요."',
     );
-    expect(text).toBe('근데 강사님... 주소록이 3847명 이네요.');
+    expect(text).toBe('근데 강사님... 주소록이 3,847명 이네요.');
   });
 
   it('uses inline colors for multi-speaker line', () => {

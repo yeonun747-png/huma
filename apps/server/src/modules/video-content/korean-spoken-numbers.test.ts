@@ -51,14 +51,14 @@ describe('convertSpokenKoreanNumbersToDigits', () => {
 
   it('restores waiting numbers, money, and clock times', () => {
     expect(convertSpokenKoreanNumbersToDigits('사십팔번이요')).toBe('48번이요');
-    expect(convertSpokenKoreanNumbersToDigits('오천원이요')).toBe('5000원이요');
+    expect(convertSpokenKoreanNumbersToDigits('오천원이요')).toBe('5,000원이요');
     expect(convertSpokenKoreanNumbersToDigits('일곱시 삼십분까지')).toBe('7:30까지');
   });
 
   it('round-trips common dialogue numbers', () => {
     const src = '7월 7개 12시 48번 5000원';
     expect(convertSpokenKoreanNumbersToDigits(convertSpokenKoreanNumbers(src))).toBe(
-      '7월 7개 12시 48번 5000원',
+      '7월 7개 12시 48번 5,000원',
     );
   });
 
@@ -79,7 +79,7 @@ describe('convertSpokenKoreanNumbersToDigits', () => {
     const spoken = convertSpokenKoreanNumbers(line);
     expect(spoken).toBe('B: "근데 강사님... 주소록이 삼천팔백사십칠명 이네요."');
     expect(convertSpokenKoreanNumbersToDigits(spoken)).toBe(
-      'B: "근데 강사님... 주소록이 3847명 이네요."',
+      'B: "근데 강사님... 주소록이 3,847명 이네요."',
     );
     expect(convertSpokenKoreanNumbersToDigits('마흔여덟명')).toBe('48명');
     expect(convertSpokenKoreanNumbersToDigits('백명')).toBe('100명');

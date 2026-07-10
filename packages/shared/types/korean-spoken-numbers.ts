@@ -282,6 +282,12 @@ function parseNativeFromStart(text: string): { value: number; length: number } |
   return null;
 }
 
+/** 자막·편집 UI — 1,000 이상 정수에 천 단위 콤마 */
+function formatIntegerWithCommas(n: number): string {
+  if (!Number.isFinite(n)) return String(n);
+  return Math.trunc(n).toLocaleString('en-US');
+}
+
 function matchClockTimeAt(rest: string): { text: string; length: number } | null {
   const hour = parseNativeFromStart(rest);
   if (!hour) return null;
@@ -301,7 +307,7 @@ function matchClockTimeAt(rest: string): { text: string; length: number } | null
 function matchNumberWithCounterAt(rest: string): { text: string; length: number } | null {
   const percent = parseSinoFromStart(rest);
   if (percent && rest.slice(percent.length).startsWith('퍼센트')) {
-    return { text: `${percent.value}%`, length: percent.length + 3 };
+    return { text: `${formatIntegerWithCommas(percent.value)}%`, length: percent.length + 3 };
   }
 
   for (const counter of SORTED_COUNTERS) {
@@ -312,13 +318,16 @@ function matchNumberWithCounterAt(rest: string): { text: string; length: number 
       const parsed = parseNativeFromStart(rest);
       if (!parsed) continue;
       if (!rest.slice(parsed.length).startsWith(counter)) continue;
-      return { text: `${parsed.value}${counter}`, length: parsed.length + counter.length };
+      return {
+        text: `${formatIntegerWithCommas(parsed.value)}${counter}`,
+        length: parsed.length + counter.length,
+      };
     }
     if (kind === 'native') {
       const parsedNative = parseNativeFromStart(rest);
       if (parsedNative && rest.slice(parsedNative.length).startsWith(counter)) {
         return {
-          text: `${parsedNative.value}${counter}`,
+          text: `${formatIntegerWithCommas(parsedNative.value)}${counter}`,
           length: parsedNative.length + counter.length,
         };
       }
@@ -326,7 +335,7 @@ function matchNumberWithCounterAt(rest: string): { text: string; length: number 
       const parsedSino = parseSinoFromStart(rest);
       if (parsedSino && rest.slice(parsedSino.length).startsWith(counter)) {
         return {
-          text: `${parsedSino.value}${counter}`,
+          text: `${formatIntegerWithCommas(parsedSino.value)}${counter}`,
           length: parsedSino.length + counter.length,
         };
       }
@@ -336,8 +345,13 @@ function matchNumberWithCounterAt(rest: string): { text: string; length: number 
     const parsed = parseSinoFromStart(rest);
     if (!parsed) continue;
     if (!rest.slice(parsed.length).startsWith(counter)) continue;
-    if (counter === '원') return { text: `${parsed.value}원`, length: parsed.length + 1 };
-    return { text: `${parsed.value}${counter}`, length: parsed.length + counter.length };
+    if (counter === '원') {
+      return { text: `${formatIntegerWithCommas(parsed.value)}원`, length: parsed.length + 1 };
+    }
+    return {
+      text: `${formatIntegerWithCommas(parsed.value)}${counter}`,
+      length: parsed.length + counter.length,
+    };
   }
 
   return null;
