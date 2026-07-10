@@ -55,6 +55,13 @@ describe('formatAssDialogueText', () => {
     expect(text).toBe('창가분 3주치 다른 음료드렸어요.');
   });
 
+  it('shows digits for large native-counter numbers in subtitles', () => {
+    const { text } = formatAssDialogueText(
+      'B: "근데 강사님... 주소록이 삼천팔백사십칠명 이네요."',
+    );
+    expect(text).toBe('근데 강사님... 주소록이 3847명 이네요.');
+  });
+
   it('uses inline colors for multi-speaker line', () => {
     const { text, style } = formatAssDialogueText('B: "지퍼 확인해." A: "제발."');
     expect(style).toBe('Default');

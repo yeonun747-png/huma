@@ -73,6 +73,17 @@ describe('convertSpokenKoreanNumbersToDigits', () => {
       ),
     ).toBe('B: "창가분 3주치 다른 음료드렸어요."');
   });
+
+  it('round-trips large native-counter numbers (명)', () => {
+    const line = 'B: "근데 강사님... 주소록이 3,847명 이네요."';
+    const spoken = convertSpokenKoreanNumbers(line);
+    expect(spoken).toBe('B: "근데 강사님... 주소록이 삼천팔백사십칠명 이네요."');
+    expect(convertSpokenKoreanNumbersToDigits(spoken)).toBe(
+      'B: "근데 강사님... 주소록이 3847명 이네요."',
+    );
+    expect(convertSpokenKoreanNumbersToDigits('마흔여덟명')).toBe('48명');
+    expect(convertSpokenKoreanNumbersToDigits('백명')).toBe('100명');
+  });
 });
 
 describe('applySpokenKoreanNumbersToConti', () => {

@@ -308,11 +308,29 @@ function matchNumberWithCounterAt(rest: string): { text: string; length: number 
     if (counter === '퍼센트' || counter === '%') continue;
 
     const kind = COUNTER_KIND[counter] ?? 'sino';
-    if (kind === 'native' || kind === 'hour') {
+    if (kind === 'hour') {
       const parsed = parseNativeFromStart(rest);
       if (!parsed) continue;
       if (!rest.slice(parsed.length).startsWith(counter)) continue;
       return { text: `${parsed.value}${counter}`, length: parsed.length + counter.length };
+    }
+    if (kind === 'native') {
+      const parsedNative = parseNativeFromStart(rest);
+      if (parsedNative && rest.slice(parsedNative.length).startsWith(counter)) {
+        return {
+          text: `${parsedNative.value}${counter}`,
+          length: parsedNative.length + counter.length,
+        };
+      }
+      // 100+ 는 TTS·저장 시 한자어 수사(삼천팔백…) + 네이티브 단위(명·개 등)
+      const parsedSino = parseSinoFromStart(rest);
+      if (parsedSino && rest.slice(parsedSino.length).startsWith(counter)) {
+        return {
+          text: `${parsedSino.value}${counter}`,
+          length: parsedSino.length + counter.length,
+        };
+      }
+      continue;
     }
 
     const parsed = parseSinoFromStart(rest);
