@@ -128,7 +128,7 @@ export async function countTodayGenerationSkipped(accountId: string, sinceIso: s
 }
 
 export interface GenerateAllContentOptions {
-  /** 포스팅 계정 — 설정 시 과거 발행 대비 유사도 가드 */
+  /** 포스팅 계정 — 설정 시 유사도 가드 (제목=워크스페이스 전체, 본문=계정) */
   accountId?: string;
   /** Claude main 재생성 시 추가 지시 */
   mainExtraPrompt?: string;
@@ -742,7 +742,7 @@ export async function generateAllContent(
     return generateAllContentOnce(input, genOptions);
   }
 
-  return withPostingSimilarityLock(accountId, () =>
+  return withPostingSimilarityLock(input.workspace, () =>
     generateAllContentWithSimilarity(input, genOptions, accountId),
   );
 }
@@ -754,7 +754,7 @@ async function generateAllContentWithSimilarity(
 ): Promise<ContentGenerationOutput> {
   let corpus: Awaited<ReturnType<typeof loadPostingSimilarityCorpus>>;
   try {
-    corpus = await loadPostingSimilarityCorpus(accountId);
+    corpus = await loadPostingSimilarityCorpus(accountId, input.workspace);
   } catch (err) {
     if (err instanceof PostingSimilarityCorpusLoadError) {
       throw new PostingSimilaritySkipError(
@@ -831,7 +831,7 @@ async function generateAllContentWithSimilarity(
 
     let check = checkPostingSimilarity(result.seo_title, result.blog_post, corpus);
     if (check.ok) {
-      corpus = await loadPostingSimilarityCorpus(accountId);
+      corpus = await loadPostingSimilarityCorpus(accountId, input.workspace);
       check = checkPostingSimilarity(result.seo_title, result.blog_post, corpus);
       if (check.ok) {
         return {

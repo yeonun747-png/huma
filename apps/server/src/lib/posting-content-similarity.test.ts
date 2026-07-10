@@ -9,6 +9,7 @@ import {
   MAX_POSTING_BODY_SIMILARITY_RETRIES,
   POSTING_BODY_COMPARE_LIMIT,
   POSTING_SIMILARITY_THRESHOLD,
+  POSTING_TITLE_RESERVED_STATUSES,
   POSTING_TITLE_SIMILARITY_THRESHOLD,
   PostingSimilaritySkipError,
 } from './posting-content-similarity.js';
@@ -20,6 +21,8 @@ describe('checkPostingSimilarity', () => {
     expect(POSTING_SIMILARITY_THRESHOLD).toBe(0.85);
     expect(POSTING_BODY_COMPARE_LIMIT).toBe(10);
     expect(MAX_POSTING_BODY_SIMILARITY_RETRIES).toBe(1);
+    expect(POSTING_TITLE_RESERVED_STATUSES).toContain('scheduled');
+    expect(POSTING_TITLE_RESERVED_STATUSES).toContain('completed');
   });
 
   it('passes at exactly threshold (초과만 실패)', () => {
@@ -37,6 +40,16 @@ describe('checkPostingSimilarity', () => {
       recentBodyEmbeddings: [],
     });
     expect(check.titleSimilarity).toBeGreaterThanOrEqual(0.99);
+    expect(check.titleTooSimilar).toBe(true);
+    expect(check.ok).toBe(false);
+  });
+
+  it('fails on identical title from another account corpus entry', () => {
+    const title = '이달 운세 7월 연운으로 확인해봤어요';
+    const check = checkPostingSimilarity(title, '다른 계정 본문', {
+      allTitleEmbeddings: [embedText(title)],
+      recentBodyEmbeddings: [],
+    });
     expect(check.titleTooSimilar).toBe(true);
     expect(check.ok).toBe(false);
   });

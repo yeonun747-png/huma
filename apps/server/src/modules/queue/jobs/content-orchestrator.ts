@@ -962,7 +962,10 @@ export async function promoteDryRunToPublish(parentJobId: string) {
   });
   const generatedWithSeo = { ...generated, seo_title };
   if (postingAccount?.id) {
-    const corpus = await loadPostingSimilarityCorpus(postingAccount.id);
+    const corpus = await loadPostingSimilarityCorpus(
+      postingAccount.id,
+      String(job.workspace ?? ''),
+    );
     assertPostingSimilarityPasses(generatedWithSeo.seo_title, generatedWithSeo.blog_post, corpus);
   }
   const schedule = extractPlatformSchedule(ps);

@@ -11,10 +11,10 @@ export { POSTING_SIMILARITY_THRESHOLD };
 /** SEO 제목 유사도 재생성 기준 (본문은 POSTING_SIMILARITY_THRESHOLD) */
 export const POSTING_TITLE_SIMILARITY_THRESHOLD = 0.65;
 
-/** 본문 유사도 비교 — 직전 N건 */
+/** 본문 유사도 비교 — 직전 N건 (계정별) */
 export const POSTING_BODY_COMPARE_LIMIT = 10;
 
-/** 제목 임베딩 상한 — 메모리·지연 보호 */
+/** 제목 임베딩 상한 — 워크스페이스 전체 최근 N건 */
 export const POSTING_TITLE_COMPARE_LIMIT = 300;
 
 /** 본문 — 최초 생성 후 재생성 상한 1회 */
@@ -28,6 +28,14 @@ export const POSTING_TITLE_HEURISTIC_FALLBACK_AFTER = 4;
 
 /** @deprecated MAX_POSTING_BODY_SIMILARITY_RETRIES 사용 */
 export const MAX_POSTING_SIMILARITY_RETRIES = MAX_POSTING_BODY_SIMILARITY_RETRIES;
+
+/** 제목 예약으로 볼 상태 — 미발행(scheduled 등)도 검색 중복 방지에 포함 */
+export const POSTING_TITLE_RESERVED_STATUSES = [
+  'completed',
+  'pending',
+  'scheduled',
+  'running',
+] as const;
 
 /** 요구: 기준 초과 시 재생성 → 기준 이하(이내) 통과 */
 export function isPostingTitleSimilarityTooHigh(score: number): boolean {
@@ -51,9 +59,9 @@ export function maxPostingBodySimilarity(body: string, pastBodyEmbeddings: numbe
 }
 
 export interface PostingSimilarityCorpus {
-  /** 과거 발행 SEO 제목 (최근 N건) */
+  /** 워크스페이스 전체 SEO 제목 (최근 N건) */
   allTitleEmbeddings: number[][];
-  /** 직전 N건 본문 */
+  /** 계정 직전 N건 본문 */
   recentBodyEmbeddings: number[][];
 }
 
@@ -133,48 +141,90 @@ export class PostingSimilarityCorpusLoadError extends Error {
   }
 }
 
-function rowsToCorpus(
-  rows: Array<{ title?: unknown; content?: unknown }>,
-): PostingSimilarityCorpus {
-  const allTitles = rows
-    .slice(0, POSTING_TITLE_COMPARE_LIMIT)
-    .map((r) => String(r.title ?? ''))
-    .filter((t) => t.trim().length > 0);
-  const recentBodies = rows
-    .slice(0, POSTING_BODY_COMPARE_LIMIT)
-    .map((r) => String(r.content ?? ''))
-    .filter((b) => b.trim().length > 0);
-
-  return {
-    allTitleEmbeddings: allTitles.map((t) => embedText(t)),
-    recentBodyEmbeddings: recentBodies.map((b) => embedText(b)),
-  };
+function uniqueNonEmptyTitles(rows: Array<{ title?: unknown }>): string[] {
+  const seen = new Set<string>();
+  const titles: string[] = [];
+  for (const row of rows) {
+    const title = String(row.title ?? '').trim();
+    if (!title) continue;
+    const key = title.replace(/\s+/g, ' ').toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    titles.push(title);
+    if (titles.length >= POSTING_TITLE_COMPARE_LIMIT) break;
+  }
+  return titles;
 }
 
-/** 계정별 완료 post_blog — 제목·본문 임베딩. 실패 시 throw (fail-closed) */
-export async function loadPostingSimilarityCorpus(accountId: string): Promise<PostingSimilarityCorpus> {
-  const { data, error } = await supabase
-    .from('huma_jobs')
-    .select('title, content, created_at')
-    .eq('account_id', accountId)
-    .eq('job_type', 'post_blog')
-    .eq('status', 'completed')
-    .not('title', 'is', null)
-    .not('content', 'is', null)
-    .order('created_at', { ascending: false })
-    .limit(POSTING_TITLE_COMPARE_LIMIT);
+function rowsToBodyEmbeddings(rows: Array<{ content?: unknown }>): number[][] {
+  return rows
+    .slice(0, POSTING_BODY_COMPARE_LIMIT)
+    .map((r) => String(r.content ?? ''))
+    .filter((b) => b.trim().length > 0)
+    .map((b) => embedText(b));
+}
 
-  if (error) {
-    await logOperation({
-      level: 'error',
-      message: `[posting-similarity] 과거 발행 로드 실패 — ${error.message}`,
-    });
+/**
+ * 제목: 워크스페이스 전체 post_blog (완료+예약/대기 포함) — 계정 간 동일 제목 차단
+ * 본문: 해당 계정 완료분 최근 N건
+ */
+export async function loadPostingSimilarityCorpus(
+  accountId: string,
+  workspace: string,
+): Promise<PostingSimilarityCorpus> {
+  const ws = workspace.trim();
+  const acc = accountId.trim();
+  if (!ws || !acc) {
     throw new PostingSimilarityCorpusLoadError(
-      `포스팅 유사도 코퍼스 로드 실패 — 발행 중단 (${error.message})`,
+      '포스팅 유사도 코퍼스 로드 실패 — workspace/accountId 없음',
     );
   }
 
-  return rowsToCorpus(data ?? []);
+  const [titleResult, bodyResult] = await Promise.all([
+    supabase
+      .from('huma_jobs')
+      .select('title, created_at')
+      .eq('workspace', ws)
+      .eq('job_type', 'post_blog')
+      .in('status', [...POSTING_TITLE_RESERVED_STATUSES])
+      .not('title', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(POSTING_TITLE_COMPARE_LIMIT * 2),
+    supabase
+      .from('huma_jobs')
+      .select('content, created_at')
+      .eq('account_id', acc)
+      .eq('job_type', 'post_blog')
+      .eq('status', 'completed')
+      .not('content', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(POSTING_BODY_COMPARE_LIMIT),
+  ]);
+
+  if (titleResult.error) {
+    await logOperation({
+      level: 'error',
+      message: `[posting-similarity] 워크스페이스 제목 로드 실패 — ${titleResult.error.message}`,
+    });
+    throw new PostingSimilarityCorpusLoadError(
+      `포스팅 유사도 코퍼스 로드 실패 — 발행 중단 (${titleResult.error.message})`,
+    );
+  }
+  if (bodyResult.error) {
+    await logOperation({
+      level: 'error',
+      message: `[posting-similarity] 계정 본문 로드 실패 — ${bodyResult.error.message}`,
+    });
+    throw new PostingSimilarityCorpusLoadError(
+      `포스팅 유사도 코퍼스 로드 실패 — 발행 중단 (${bodyResult.error.message})`,
+    );
+  }
+
+  const titles = uniqueNonEmptyTitles(titleResult.data ?? []);
+  return {
+    allTitleEmbeddings: titles.map((t) => embedText(t)),
+    recentBodyEmbeddings: rowsToBodyEmbeddings(bodyResult.data ?? []),
+  };
 }
 
 /** 승격·최종 검증 — 미달 시 throw */
