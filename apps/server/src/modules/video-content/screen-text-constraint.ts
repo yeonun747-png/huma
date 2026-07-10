@@ -158,7 +158,7 @@ export function shotNeedsFortuneSetupDialogue(
 
 function normalizeDialogueBodyForSetup(dialogue: string): string {
   return trimField(dialogue)
-    .replace(/^[AB]:\s*/i, '')
+    .replace(/^[A-Z]:\s*/i, '')
     .replace(/^["「『]|["」』]$/g, '')
     .trim();
 }

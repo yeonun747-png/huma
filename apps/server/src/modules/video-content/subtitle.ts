@@ -1,12 +1,11 @@
 import { execSync } from 'child_process';
 import { mkdir, writeFile } from 'fs/promises';
 import { join } from 'path';
+import { speakerAssColor } from '@huma/shared';
 import type { SubtitleStyle, VideoConti, VideoContiShot } from './types.js';
 import { convertSpokenKoreanNumbersToDigits } from './korean-spoken-numbers.js';
 
-/** ASS PrimaryColour — &H00BBGGRR */
-const ASS_COLOR_A = '&H00FFFFFF';
-const ASS_COLOR_B = '&H0000FFFF';
+const ASS_DEFAULT_COLOR = '&H00FFFFFF';
 const ASS_FONT_SIZE = 42;
 /** 하단 정렬(alignment 2) — MarginV가 작을수록 화면에서 위 */
 const SUBTITLE_LINES_OFFSET_UP = 1;
@@ -16,7 +15,13 @@ function subtitleMarginV(baseFromBottom: number): number {
   return baseFromBottom + SUBTITLE_LINES_OFFSET_UP * SUBTITLE_LINE_HEIGHT_PX;
 }
 
-export type DialogueSegment = { speaker: 'A' | 'B' | null; text: string };
+export type DialogueSegment = { speaker: string | null; text: string };
+
+/** 등장인물 라벨 — A/B/C 등 단일 알파벳 */
+const SPEAKER_LABEL = '[A-Z]';
+const SPEAKER_LABEL_SPLIT_RE = new RegExp(`(?=${SPEAKER_LABEL}\\s*:)`, 'i');
+const SPEAKER_LABEL_LINE_RE = new RegExp(`^(${SPEAKER_LABEL})\\s*:\\s*(.*)$`, 'is');
+const SPEAKER_LABEL_STRIP_RE = new RegExp(`(?:^|\\s)${SPEAKER_LABEL}\\s*:\\s*`, 'gi');
 
 function normalizeDialogueQuotes(dialogue: string): string {
   return dialogue.trim().replace(/[「『]/g, '"').replace(/[」』]/g, '"');
@@ -36,14 +41,14 @@ export function parseDialogueSegments(dialogue: string): DialogueSegment[] {
   const normalized = normalizeDialogueQuotes(dialogue);
   if (!normalized) return [];
 
-  const chunks = normalized.split(/(?=[AB]\s*:)/i).filter((c) => c.trim());
+  const chunks = normalized.split(SPEAKER_LABEL_SPLIT_RE).filter((c) => c.trim());
   const segments: DialogueSegment[] = [];
 
   for (const chunk of chunks) {
-    const m = chunk.match(/^([AB])\s*:\s*(.*)$/is);
+    const m = chunk.match(SPEAKER_LABEL_LINE_RE);
     if (m) {
       const text = cleanQuotedFragment(m[2]!);
-      if (text) segments.push({ speaker: m[1]!.toUpperCase() as 'A' | 'B', text });
+      if (text) segments.push({ speaker: m[1]!.toUpperCase(), text });
       continue;
     }
     const text = cleanQuotedFragment(chunk);
@@ -57,7 +62,7 @@ export function parseDialogueSegments(dialogue: string): DialogueSegment[] {
 function stripSpeakerLabelLine(line: string): string {
   const segments = parseDialogueSegments(line);
   if (segments.length) return segments.map((s) => s.text).join(' ').trim();
-  return cleanQuotedFragment(normalizeDialogueQuotes(line).replace(/(?:^|\s)[AB]\s*:\s*/gi, ' '));
+  return cleanQuotedFragment(normalizeDialogueQuotes(line).replace(SPEAKER_LABEL_STRIP_RE, ' '));
 }
 
 /** 화면 자막용 — 모든 A:/B: 라벨·따옴표 제거 (줄바꿈 유지) */
@@ -77,49 +82,48 @@ function assNewlines(text: string): string {
   return escapeAssText(text).replace(/\n/g, '\\N');
 }
 
-/** 한 물리 줄(엔터로 구분) ASS 텍스트 — 같은 줄에 A/B 복수 대사는 인라인 색상 */
+function assInlineColor(speaker: string | null, text: string): string {
+  const color = speaker ? speakerAssColor(speaker) : ASS_DEFAULT_COLOR;
+  return `{\\c${color}&}${text}`;
+}
+
+/** 한 물리 줄(엔터로 구분) ASS 텍스트 — 같은 줄에 복수 화자 대사는 인라인 색상 */
 function formatAssDialogueLine(line: string): {
   text: string;
-  style: 'Default' | 'SpeakerA' | 'SpeakerB';
+  speaker: string | null;
 } {
   const segments = parseDialogueSegments(line);
-  if (!segments.length) return { text: '', style: 'Default' };
+  if (!segments.length) return { text: '', speaker: null };
 
   if (segments.length === 1) {
     const seg = segments[0]!;
-    const display = formatSubtitleDisplayText(seg.text);
-    if (seg.speaker === 'B') return { text: assNewlines(display), style: 'SpeakerB' };
-    if (seg.speaker === 'A') return { text: assNewlines(display), style: 'SpeakerA' };
-    return { text: assNewlines(display), style: 'Default' };
+    const display = assNewlines(formatSubtitleDisplayText(seg.text));
+    return { text: assInlineColor(seg.speaker, display), speaker: seg.speaker };
   }
 
   const parts = segments.map((seg, i) => {
     const prefix = i > 0 ? ' ' : '';
-    const color = seg.speaker === 'B' ? ASS_COLOR_B : ASS_COLOR_A;
-    return `${prefix}{\\c${color}&}${assNewlines(formatSubtitleDisplayText(seg.text))}`;
+    const display = assNewlines(formatSubtitleDisplayText(seg.text));
+    return `${prefix}${assInlineColor(seg.speaker, display)}`;
   });
-  return { text: parts.join(''), style: 'Default' };
-}
-
-function assColoredLine(f: { text: string; style: 'Default' | 'SpeakerA' | 'SpeakerB' }): string {
-  if (f.style === 'SpeakerB') return `{\\c${ASS_COLOR_B}&}${f.text}`;
-  if (f.style === 'SpeakerA') return `{\\c${ASS_COLOR_A}&}${f.text}`;
-  return f.text;
+  return { text: parts.join(''), speaker: segments[0]!.speaker ?? null };
 }
 
 export function formatAssDialogueText(dialogue: string): {
   text: string;
-  style: 'Default' | 'SpeakerA' | 'SpeakerB';
+  style: 'Default';
+  speaker: string | null;
 } {
   const normalized = dialogue.replace(/\r\n/g, '\n');
   const lines = normalized.split('\n').map((l) => l.trim()).filter(Boolean);
   const formatted = lines.map(formatAssDialogueLine);
-  if (!formatted.length) return { text: '', style: 'Default' };
-  if (formatted.length === 1) return formatted[0]!;
+  if (!formatted.length) return { text: '', style: 'Default', speaker: null };
+  if (formatted.length === 1) return { ...formatted[0]!, style: 'Default' };
 
   return {
-    text: formatted.map(assColoredLine).join('\\N'),
+    text: formatted.map((f) => f.text).join('\\N'),
     style: 'Default',
+    speaker: formatted[0]!.speaker ?? null,
   };
 }
 
@@ -202,9 +206,11 @@ function subtitleWindow(
   return { startSec, endSec };
 }
 
+export type SubtitleSpeakerStyle = string | 'default';
+
 export interface SubtitlePreviewLine {
   text: string;
-  speakerStyle: 'A' | 'B' | 'default';
+  speakerStyle: SubtitleSpeakerStyle;
 }
 
 export interface SubtitlePreviewEvent {
@@ -212,7 +218,7 @@ export interface SubtitlePreviewEvent {
   startSec: number;
   endSec: number;
   text: string;
-  speakerStyle: 'A' | 'B' | 'default';
+  speakerStyle: SubtitleSpeakerStyle;
   lines: SubtitlePreviewLine[];
 }
 
@@ -266,12 +272,12 @@ function estimateLineSpeechDurationSec(line: string): number {
 }
 
 export interface TimedDialogueCue {
-  assStyle: 'Default' | 'SpeakerA' | 'SpeakerB';
+  assStyle: 'Default';
   marginV: number;
   text: string;
   startSec: number;
   endSec: number;
-  speakerStyle: 'A' | 'B' | 'default';
+  speakerStyle: SubtitleSpeakerStyle;
   displayText: string;
 }
 
@@ -291,16 +297,14 @@ export function buildTimedDialogueCues(params: {
   if (physicalLines.length === 1) {
     const formatted = formatAssDialogueLine(physicalLines[0]!);
     if (!formatted.text) return [];
-    const speakerStyle: TimedDialogueCue['speakerStyle'] =
-      formatted.style === 'SpeakerB' ? 'B' : formatted.style === 'SpeakerA' ? 'A' : 'default';
     return [
       {
-        assStyle: formatted.style,
+        assStyle: 'Default',
         marginV: pos.marginV,
         text: formatted.text,
         startSec: params.startSec,
         endSec: params.endSec,
-        speakerStyle,
+        speakerStyle: formatted.speaker ?? 'default',
         displayText: formatSubtitleDisplayText(stripSpeakerLabelLine(physicalLines[0]!)),
       },
     ];
@@ -325,11 +329,10 @@ export function buildTimedDialogueCues(params: {
     }
     lineEnd = Math.min(lineEnd, params.endSec);
 
-    const speakerStyle: TimedDialogueCue['speakerStyle'] =
-      formatted.style === 'SpeakerB' ? 'B' : formatted.style === 'SpeakerA' ? 'A' : 'default';
+    const speakerStyle: TimedDialogueCue['speakerStyle'] = formatted.speaker ?? 'default';
 
     cues.push({
-      assStyle: formatted.style,
+      assStyle: 'Default',
       marginV: pos.marginV,
       text: formatted.text,
       startSec: cursor,
@@ -354,9 +357,7 @@ PlayResY: 1280
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${fontName},${ASS_FONT_SIZE},${ASS_COLOR_A},&H000000FF,&H00000000,${box.backColour},-1,0,0,0,100,100,0,0,${box.borderStyle},${box.outline},${box.shadow},${pos.alignment},20,20,${pos.marginV},1
-Style: SpeakerA,${fontName},${ASS_FONT_SIZE},${ASS_COLOR_A},&H000000FF,&H00000000,${box.backColour},-1,0,0,0,100,100,0,0,${box.borderStyle},${box.outline},${box.shadow},${pos.alignment},20,20,${pos.marginV},1
-Style: SpeakerB,${fontName},${ASS_FONT_SIZE},${ASS_COLOR_B},&H000000FF,&H00000000,${box.backColour},-1,0,0,0,100,100,0,0,${box.borderStyle},${box.outline},${box.shadow},${pos.alignment},20,20,${pos.marginV},1
+Style: Default,${fontName},${ASS_FONT_SIZE},${ASS_DEFAULT_COLOR},&H000000FF,&H00000000,${box.backColour},-1,0,0,0,100,100,0,0,${box.borderStyle},${box.outline},${box.shadow},${pos.alignment},20,20,${pos.marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

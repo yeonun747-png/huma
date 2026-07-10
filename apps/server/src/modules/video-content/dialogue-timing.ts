@@ -39,7 +39,7 @@ export function countDialogueQuotedChars(dialogue: string): number {
   const spoken = countDialogueSpokenChars(trimmed);
   if (spoken > 0) return spoken;
 
-  const afterLabel = trimmed.replace(/^[AB]:\s*/i, '');
+  const afterLabel = trimmed.replace(/^[A-Z]:\s*/i, '');
   const openIdx = afterLabel.search(/["「『]/);
   if (openIdx >= 0) {
     const openChar = afterLabel[openIdx]!;
@@ -58,15 +58,15 @@ export function countDialogueQuotedChars(dialogue: string): number {
 /** dialogue — A/B 라벨·인용부호 제거 본문 (비교·유사도용) */
 export function normalizeDialogueBody(dialogue: string): string {
   return trimField(dialogue)
-    .replace(/^[AB]:\s*/i, '')
+    .replace(/^[A-Z]:\s*/i, '')
     .replace(/^["「『]|["」』]$/g, '')
     .trim();
 }
 
-export function extractDialogueSpeaker(dialogue: string): 'A' | 'B' | null {
-  const m = trimField(dialogue).match(/^([AB]):\s*/i);
+export function extractDialogueSpeaker(dialogue: string): string | null {
+  const m = trimField(dialogue).match(/^([A-Z]):\s*/i);
   if (!m) return null;
-  return m[1]!.toUpperCase() as 'A' | 'B';
+  return m[1]!.toUpperCase();
 }
 
 export function dialogueCharsPerSec(dialogue: string, durationSec: number): number {
@@ -271,7 +271,7 @@ export function trimDialogueToFitShot(
   let result: string;
   if (!segments.length) {
     if (countDialogueSpokenChars(dialogue) <= maxChars) return dialogue;
-    const m = dialogue.match(/^([AB]:\s*)?/i);
+    const m = dialogue.match(/^([A-Z]:\s*)?/i);
     const prefix = m?.[0] ?? '';
     const body = dialogue.slice(prefix.length).replace(/^["'「]|["'」]$/g, '');
     result = `${prefix}"${trimTextToCharCount(body, maxChars)}"`;
@@ -283,7 +283,7 @@ export function trimDialogueToFitShot(
     if (segments.length) {
       result = formatDialogueSegments(trimSegmentsToBudget(segments, maxChars));
     } else {
-      const m = result.match(/^([AB]:\s*)?/i);
+      const m = result.match(/^([A-Z]:\s*)?/i);
       const prefix = m?.[0] ?? '';
       const body = result.slice(prefix.length).replace(/^["'「]|["'」]$/g, '');
       result = `${prefix}"${trimTextToCharCount(body, maxChars)}"`;

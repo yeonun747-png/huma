@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { speakerAssColor } from '@huma/shared';
 import type { SubtitleStyle, VideoConti } from './types.js';
 import {
   buildAssContent,
@@ -24,6 +25,12 @@ describe('parseDialogueSegments', () => {
   it('parses without quotes', () => {
     expect(parseDialogueSegments('B: 지퍼 확인해')).toEqual([{ speaker: 'B', text: '지퍼 확인해' }]);
   });
+
+  it('parses third character label C', () => {
+    expect(parseDialogueSegments('C: "오, 진짜 센스 있네."')).toEqual([
+      { speaker: 'C', text: '오, 진짜 센스 있네.' },
+    ]);
+  });
 });
 
 describe('stripSpeakerLabel', () => {
@@ -34,32 +41,48 @@ describe('stripSpeakerLabel', () => {
   it('removes leading label only once before fix regression', () => {
     expect(stripSpeakerLabel('A: "한마디"')).toBe('한마디');
   });
+
+  it('removes C speaker label', () => {
+    expect(stripSpeakerLabel('C: "오, 진짜 센스 있네."')).toBe('오, 진짜 센스 있네.');
+  });
 });
 
 describe('formatAssDialogueText', () => {
-  it('uses SpeakerB style for single B line', () => {
-    expect(formatAssDialogueText('B: "지퍼 확인해."')).toEqual({
-      text: '지퍼 확인해.',
-      style: 'SpeakerB',
-    });
+  it('colors B speaker white', () => {
+    const { text, style, speaker } = formatAssDialogueText('B: "지퍼 확인해."');
+    expect(style).toBe('Default');
+    expect(speaker).toBe('B');
+    expect(text).toContain(`{\\c${speakerAssColor('B')}&}`);
+    expect(text).toContain('지퍼 확인해.');
+  });
+
+  it('colors C speaker blue and strips label', () => {
+    const { text, style, speaker } = formatAssDialogueText('C: "오, 진짜 센스 있네."');
+    expect(style).toBe('Default');
+    expect(speaker).toBe('C');
+    expect(text).toContain(`{\\c${speakerAssColor('C')}&}`);
+    expect(text).toContain('오, 진짜 센스 있네.');
+    expect(text).not.toContain('C:');
   });
 
   it('shows digits in subtitles when dialogue uses spoken Korean numbers', () => {
-    const { text, style } = formatAssDialogueText('A: "일곱개 남았어"');
-    expect(style).toBe('SpeakerA');
-    expect(text).toBe('7개 남았어');
+    const { text, style, speaker } = formatAssDialogueText('A: "일곱개 남았어"');
+    expect(style).toBe('Default');
+    expect(speaker).toBe('A');
+    expect(text).toContain(`{\\c${speakerAssColor('A')}&}`);
+    expect(text).toContain('7개 남았어');
   });
 
   it('shows digits for week counters in subtitles', () => {
     const { text } = formatAssDialogueText('B: "창가분 세주치 다른 음료드렸어요."');
-    expect(text).toBe('창가분 3주치 다른 음료드렸어요.');
+    expect(text).toContain('창가분 3주치 다른 음료드렸어요.');
   });
 
   it('shows digits for large native-counter numbers in subtitles', () => {
     const { text } = formatAssDialogueText(
       'B: "근데 강사님... 주소록이 삼천팔백사십칠명 이네요."',
     );
-    expect(text).toBe('근데 강사님... 주소록이 3,847명 이네요.');
+    expect(text).toContain('근데 강사님... 주소록이 3,847명 이네요.');
   });
 
   it('uses inline colors for multi-speaker line', () => {
@@ -67,8 +90,9 @@ describe('formatAssDialogueText', () => {
     expect(style).toBe('Default');
     expect(text).toContain('지퍼 확인해.');
     expect(text).toContain('제발.');
-    expect(text).not.toMatch(/\b[AB]\s*:/i);
-    expect(text).toMatch(/\\c&H/);
+    expect(text).not.toMatch(/\b[A-Z]\s*:/i);
+    expect(text).toContain(`{\\c${speakerAssColor('B')}&}`);
+    expect(text).toContain(`{\\c${speakerAssColor('A')}&}`);
   });
 
   it('preserves newline between speaker lines in ASS output', () => {
@@ -129,8 +153,9 @@ describe('buildAssContent', () => {
     };
     const ass = buildAssContent(conti, subtitleStyle);
     expect(ass).toContain('Dialogue:');
-    expect(ass).toContain('SpeakerA');
-    expect(ass).toContain('SpeakerB');
+    expect(ass).toContain('Style: Default,');
+    expect(ass).toContain(`{\\c${speakerAssColor('A')}&}`);
+    expect(ass).toContain(`{\\c${speakerAssColor('B')}&}`);
     // bottom_center base 50 + 1 line × ~50px
     expect(ass).toContain(',20,20,100,1');
   });
@@ -187,9 +212,9 @@ describe('buildAssContent', () => {
     const ass = buildAssContent(conti, subtitleStyle);
     const dialogueLines = ass.split('\n').filter((line) => line.startsWith('Dialogue:'));
     expect(dialogueLines).toHaveLength(2);
-    expect(dialogueLines[0]).toContain('SpeakerA');
+    expect(dialogueLines[0]).toContain(`{\\c${speakerAssColor('A')}&}`);
     expect(dialogueLines[0]).toContain('손님이 워낙 많아서');
-    expect(dialogueLines[1]).toContain('SpeakerB');
+    expect(dialogueLines[1]).toContain(`{\\c${speakerAssColor('B')}&}`);
     expect(dialogueLines[1]).toContain('최고 공감인데');
 
     const events = buildSubtitlePreviewEvents(conti, subtitleStyle);
@@ -231,6 +256,41 @@ describe('buildAssContent', () => {
     expect(events[0]!.text).toBe('48번이요?');
   });
 
+  it('burns C dialogue without speaker label', () => {
+    const conti: VideoConti = {
+      characters: [],
+      location: '카페',
+      lighting: '밝음',
+      timeOfDay: '낮',
+      cutType: 'single_shot',
+      duration: 5,
+      scenarioSummary: '테스트',
+      fullText: '테스트',
+      shots: [
+        {
+          shotNumber: 1,
+          startSec: 0,
+          endSec: 5,
+          camera: '미디엄',
+          action: 'C',
+          dialogue: 'C: "오, 진짜 센스 있네."',
+        },
+      ],
+    };
+    const ass = buildAssContent(conti, subtitleStyle);
+    expect(ass).toContain('오, 진짜 센스 있네.');
+    expect(ass).not.toMatch(/\bC\s*:/);
+
+    const events = buildSubtitlePreviewEvents(conti, subtitleStyle);
+    expect(events[0]!.text).toBe('오, 진짜 센스 있네.');
+    expect(events[0]!.speakerStyle).toBe('C');
+  });
+
+  it('cycles speaker colors after F', () => {
+    expect(speakerAssColor('G')).toBe(speakerAssColor('A'));
+    expect(speakerAssColor('H')).toBe(speakerAssColor('B'));
+  });
+
   it('assigns sequential time windows per physical line', () => {
     const dialogue = 'A: "손님이 워낙 많아서..."\nB: "최고 공감인데 단골은 안기억나요?"';
     const cues = buildTimedDialogueCues({
@@ -240,8 +300,10 @@ describe('buildAssContent', () => {
       endSec: 5,
     });
     expect(cues).toHaveLength(2);
-    expect(cues[0]!.assStyle).toBe('SpeakerA');
-    expect(cues[1]!.assStyle).toBe('SpeakerB');
+    expect(cues[0]!.assStyle).toBe('Default');
+    expect(cues[1]!.assStyle).toBe('Default');
+    expect(cues[0]!.speakerStyle).toBe('A');
+    expect(cues[1]!.speakerStyle).toBe('B');
     expect(cues[0]!.marginV).toBe(cues[1]!.marginV);
     expect(cues[0]!.startSec).toBeLessThan(cues[1]!.startSec);
   });

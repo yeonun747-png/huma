@@ -1,14 +1,17 @@
 'use client';
 
-const SPEAKER_TEXT: Record<'A' | 'B' | 'default', string> = {
-  A: 'text-white',
-  B: 'text-yellow-300',
-  default: 'text-white',
-};
+import { speakerPreviewClass } from '@huma/shared';
+
+export type SubtitleSpeakerStyle = string | 'default';
+
+function previewTextClass(speakerStyle: SubtitleSpeakerStyle): string {
+  if (speakerStyle === 'default') return 'text-white';
+  return speakerPreviewClass(speakerStyle);
+}
 
 export type SubtitlePreviewLine = {
   text: string;
-  speakerStyle: 'A' | 'B' | 'default';
+  speakerStyle: SubtitleSpeakerStyle;
 };
 
 export type SubtitlePreviewEvent = {
@@ -16,7 +19,7 @@ export type SubtitlePreviewEvent = {
   startSec: number;
   endSec: number;
   text: string;
-  speakerStyle: 'A' | 'B' | 'default';
+  speakerStyle: SubtitleSpeakerStyle;
   lines?: SubtitlePreviewLine[];
 };
 
@@ -49,7 +52,7 @@ export function SubtitlePreviewOverlay({
             style={{ textShadow: '0 0 4px #000, 0 0 8px #000' }}
           >
             {lines.map((line, i) => (
-              <p key={i} className={SPEAKER_TEXT[line.speakerStyle]}>
+              <p key={i} className={previewTextClass(line.speakerStyle)}>
                 {line.text}
               </p>
             ))}

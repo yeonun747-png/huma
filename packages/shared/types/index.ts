@@ -17,6 +17,7 @@ export * from './quiz-image-prompt';
 export * from './narration-script';
 export * from './narration-persona';
 export * from './korean-spoken-numbers';
+export * from './subtitle-speaker-colors';
 
 export type Workspace = import('./account').Workspace;
 

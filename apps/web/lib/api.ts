@@ -705,8 +705,8 @@ export const api = {
         startSec: number;
         endSec: number;
         text: string;
-        speakerStyle: 'A' | 'B' | 'default';
-        lines: Array<{ text: string; speakerStyle: 'A' | 'B' | 'default' }>;
+        speakerStyle: string | 'default';
+        lines: Array<{ text: string; speakerStyle: string | 'default' }>;
       }>;
     }>(`/api/video-content/${id}/subtitle-preview`, {
       method: 'POST',
