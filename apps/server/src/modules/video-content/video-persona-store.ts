@@ -5,7 +5,7 @@ import { DEFAULT_VIDEO_PERSONAS } from './types.js';
 
 const HOOK_SUBTYPES: Record<Workspace, string[]> = {
   yeonun: ['정체 반전', '영역 전환', '동시성 반전', '의미 전환', '시제 반전'],
-  quizoasis: ['행동-성격 연결형', '폭로형', '역할 반전형', '동시성형'],
+  quizoasis: ['행동-성격 연결형', '유형 공감형', '자기발견형', '동시성형'],
   panana: ['숨은 디테일 캐치', '톤 뒤집기', '캐릭터 특유 반응', '예상 밖 공감'],
 };
 

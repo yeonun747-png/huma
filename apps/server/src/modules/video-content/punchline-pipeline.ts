@@ -18,6 +18,7 @@ import {
 import type { PreGenerationPlan } from './pre-generation-plan.js';
 import { buildHookTypePromptBlock } from './persona-axis.js';
 import { buildVideoCharacterAppearancePromptBlock } from './character-appearance.js';
+import { buildQuizOasisBrandSafetyBlock } from './quiz-brand-safety.js';
 
 async function callClaudeJson(params: {
   model: string;
@@ -64,6 +65,7 @@ function buildStage1Prompt(params: {
   const situationLine = conditions.situationAxis ? `- 상황축: ${conditions.situationAxis}\n` : '';
   const productBlock = yeonunProduct ? `\n${yeonunProduct.contextText}\n(이번 영상에 자연스럽게 녹일 상품)\n` : '';
   const quizBlock = quizContent ? `\n${quizContent.contextText}\n(이번 영상에 자연스럽게 녹일 테스트)\n` : '';
+  const brandSafetyBlock = buildQuizOasisBrandSafetyBlock(workspace);
   const hookTypeBlock = buildHookTypePromptBlock(personaText, conditions.hookType);
 
   return `한국어 숏폼 영상 — 펀치라인(결말) 아이디어 8개 발산.
@@ -78,7 +80,7 @@ ${situationLine}- 감정곡선: ${conditions.emotionCurve}
 - hook_subtype (이번 발산 각도): ${conditions.hookSubtype}
 - duration: ${conditions.duration}초
 - cut_type: multi_shot
-${hookTypeBlock}${charBlock}${productBlock}${quizBlock}${pastBlock}
+${hookTypeBlock}${brandSafetyBlock}${charBlock}${productBlock}${quizBlock}${pastBlock}
 
 규칙:
 - 정확히 8개. 각 1~2문장, 마지막 대사/상황이 펀치라인이 되도록.
@@ -94,19 +96,21 @@ JSON:
 }`;
 }
 
-function buildStage2Prompt(ideas: string[], hookType: string): string {
+function buildStage2Prompt(ideas: string[], hookType: string, workspace: Workspace): string {
   const numbered = ideas.map((idea, i) => `${i + 1}. ${idea}`).join('\n');
+  const brandSafetyBlock = buildQuizOasisBrandSafetyBlock(workspace);
   return `아래 8개 숏폼 펀치라인 아이디어 중 시청자가 "피식/헐" 할 가능성이 가장 높은 1개를 고른다.
 
 고정 hook_type: ${hookType}
-
+${brandSafetyBlock}
 ${numbered}
 
 기준 (우선순):
 1. hook_type "${hookType}" 메커니즘 부합 (필수 — 부합하지 않으면 선택 금지)
-2. 반전 강도, 대사 임팩트, 클리셰 회피, 15초 내 전달 가능성
+2. 브랜드 필수 위반(테스트 결과=틀렸다/허세 폭로) 아이디어는 선택 금지
+3. 반전 강도, 대사 임팩트, 클리셰 회피, 15초 내 전달 가능성
 
-부합하는 아이디어가 여러 개면 2번 기준으로 최고를 고른다.
+부합하는 아이디어가 여러 개면 3번 기준으로 최고를 고른다.
 
 must_include_props 규칙:
 - 선택한 아이디어의 펀치라인을 성립시키는 **필수** 촬영 가능 소품·사물 **1~2개만** (최대 2개)
@@ -146,12 +150,16 @@ export async function generatePunchlineIdeas(params: {
   return ideas.slice(0, 8);
 }
 
-export async function selectPunchlineIdea(ideas: string[], hookType: string): Promise<PunchlineSelection> {
+export async function selectPunchlineIdea(
+  ideas: string[],
+  hookType: string,
+  workspace: Workspace = 'yeonun',
+): Promise<PunchlineSelection> {
   const model = await getPunchlineHaikuModel();
   const parsed = await callClaudeJson({
     model,
     max_tokens: 384,
-    prompt: buildStage2Prompt(ideas, hookType),
+    prompt: buildStage2Prompt(ideas, hookType, workspace),
   });
 
   const index = Number(parsed.index);
@@ -267,7 +275,11 @@ export async function runPunchlineContiPipeline(params: {
     });
 
     await params.onStage?.('2단계 Haiku 펀치라인 1개 선택 + must_include_props');
-    const selected = await selectPunchlineIdea(ideas, params.plan.conditions.hookType);
+    const selected = await selectPunchlineIdea(
+      ideas,
+      params.plan.conditions.hookType,
+      params.workspace,
+    );
     punchlineIdea = selected.punchlineIdea;
     mustIncludeProps = selected.mustIncludeProps;
   } else if (!mustIncludeProps.length) {

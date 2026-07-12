@@ -152,7 +152,7 @@ export function formatQuizContext(row: QuizContentRow): string {
   const desc = row.description?.trim() ? `소개: ${row.description.trim()}\n` : '';
   return `[퀴즈오아시스 테스트]
 ${slugLine}제목: ${row.title}
-${desc}(이번 영상에 자연스럽게 녹일 심리테스트 — 결과 유형·펀치라인과 연결)`;
+${desc}(이번 영상에 자연스럽게 녹일 심리테스트 — 결과가 「맞아서」 공감·웃음이 나게. 결과가 틀렸다는 폭로 금지)`;
 }
 
 /** 포스팅 Claude 컨텍스트 — 계정관리 퀴즈 캐시 기준 */

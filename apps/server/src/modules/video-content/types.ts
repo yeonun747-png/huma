@@ -175,12 +175,13 @@ ${VIDEO_SCREEN_TEXT_RENDERING_CONSTRAINT}`,
       '당황→웃음',
       '공감→여운',
       '긴장→해소',
+      '의심→공감',
     ],
     hookTypes: [
       '자기 발견',
-      '반전 질문',
       '공감 한마디',
       '유머 포인트',
+      '반전 질문',
     ],
     serviceConstraints: `퀴즈오아시스 제약:
 - 한국어 전용
@@ -188,6 +189,9 @@ ${VIDEO_SCREEN_TEXT_RENDERING_CONSTRAINT}`,
 - 의학적 진단 표현 금지
 - 백과사전형 설명체 금지
 - 매번 새로 창작한 등장인물(연예인급 훈남·훈녀). 실제 연예인·유명인 모방 금지
+- 테스트 결과가 「틀렸다/허세다/안 맞는다」로 뒤집히는 결말 금지 — 퀴즈 신뢰를 해치지 말 것
+- 결과 자랑 → 「실제론 반대」 폭로로 테스트를 무력화하는 패턴 금지
+- 유머는 공감·자기발견·말장난으로 — 테스트 정확도를 깎는 펀치 금지
 ${VIDEO_SCREEN_TEXT_RENDERING_CONSTRAINT}`,
     cutTypeRule: DEFAULT_CUT_TYPE_RULE,
     shotStructure: DEFAULT_SHOT_STRUCTURE,

@@ -3,6 +3,7 @@ import { buildHookTypePromptBlock, extractSectionBody } from './persona-axis.js'
 import { buildCharacterNamingRule } from './conti-validation.js';
 import { buildYeonunFortuneDialogueRule } from './screen-text-constraint.js';
 import { VIDEO_CHARACTER_JSON_SCHEMA_SNIPPET } from './character-appearance.js';
+import { buildQuizOasisBrandSafetyBlock } from './quiz-brand-safety.js';
 import type { GenerationConditions } from './types.js';
 import type { Workspace } from '@huma/shared';
 
@@ -178,6 +179,7 @@ export function buildStoryDraftPrompt(params: {
 
   const productBlock = yeonunProductContext ? `\n${yeonunProductContext}\n` : '';
   const quizBlock = quizContentContext ? `\n${quizContentContext}\n` : '';
+  const brandSafetyBlock = buildQuizOasisBrandSafetyBlock(workspace);
   const propsBlock = mustIncludeProps?.length
     ? `\n이야기에 자연스럽게 넣을 핵심 소재(촬영 가능한 사물): ${mustIncludeProps.join(', ')}\n`
     : '';
@@ -188,7 +190,7 @@ export function buildStoryDraftPrompt(params: {
 ⚠️ 이 단계 금지: 샷 개수, 초 단위 시간 배분, 대사 글자 수 제한, camera/action/dialogue JSON.
 오직 등장인물·장소·사건 전개·대사 **내용**(말할 것)에만 집중한다. 형식은 다음 3b단계에서 처리한다.
 연운·운세 setup은 narrativeProse·대사 **내용**에 읽은 문구를 넣는다. 3b에서 샷별 초×8자 예산에 맞게 압축·분배한다.
-${yeonunFortuneBlock}
+${yeonunFortuneBlock}${brandSafetyBlock}
 
 선택된 펀치라인(결말 고정 — 반드시 이 결말로 수렴, 변경 금지):
 ${punchlineIdea}

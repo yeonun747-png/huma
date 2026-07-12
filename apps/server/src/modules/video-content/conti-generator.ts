@@ -85,6 +85,7 @@ import {
   type ContiFoundation,
   type StoryDraft,
 } from './story-draft.js';
+import { buildQuizOasisBrandSafetyBlock } from './quiz-brand-safety.js';
 
 export type { ContiFoundation, StoryDraft };
 
@@ -225,6 +226,7 @@ function buildFoundationPrompt(ctx: PromptContext): string {
 
   const productBlock = ctx.yeonunProductContext ? `\n${ctx.yeonunProductContext}\n` : '';
   const quizBlock = ctx.quizContentContext ? `\n${ctx.quizContentContext}\n` : '';
+  const brandSafetyBlock = buildQuizOasisBrandSafetyBlock(ctx.workspace);
   const mustIncludeBlock = ctx.mustIncludeProps?.length
     ? `\n반드시 샷에 포함할 핵심 소재(must_include — 3단계에서 각각 최소 1샷): ${ctx.mustIncludeProps.join(', ')}\n`
     : '';
@@ -246,7 +248,7 @@ ${situationLine}- 감정곡선: ${conditions.emotionCurve}
 - 펀치라인 메커니즘(hook_type): ${conditions.hookType}
 ${hookSubtypeLine}- cut_type: multi_shot
 - duration: ${conditions.duration}초
-${hookTypeBlock}${punchlineBlock}${productBlock}${quizBlock}${mustIncludeBlock}${charBlock}${cutRuleBlock}${pastBlock}${feedbackBlock}
+${hookTypeBlock}${brandSafetyBlock}${punchlineBlock}${productBlock}${quizBlock}${mustIncludeBlock}${charBlock}${cutRuleBlock}${pastBlock}${feedbackBlock}
 
 창작 지침:
 "이번 영상은 ${storyAxis}의 인물들이 등장하고, 새로 창작한 장소/시간에서 벌어지는 [${conditions.emotionCurve}] 흐름의 이야기.
