@@ -1,8 +1,10 @@
 import type { Workspace } from '@huma/shared';
 import type { VideoConti } from './types.js';
+import { asContiShots } from './types.js';
 import { askClaudeWithModel } from '../../lib/anthropic-client.js';
 import { callClaudeJsonWithRetry } from '../../lib/llm-json.js';
 import { getSubClaudeModel } from '../../lib/ai-engine.js';
+import { logOperation } from '../../lib/log-emitter.js';
 import {
   generateContiFromPunchline,
   CONTI_JSON_MAX_ATTEMPTS,
@@ -18,7 +20,13 @@ import {
 import type { PreGenerationPlan } from './pre-generation-plan.js';
 import { buildHookTypePromptBlock } from './persona-axis.js';
 import { buildVideoCharacterAppearancePromptBlock } from './character-appearance.js';
-import { buildQuizOasisBrandSafetyBlock } from './quiz-brand-safety.js';
+import {
+  buildQuizOasisBrandSafetyBlock,
+  contiTextForBrandCheck,
+  filterQuizOasisSafeIdeas,
+  isQuizOasisBrandViolation,
+  QUIZOASIS_BRAND_WARNING,
+} from './quiz-brand-safety.js';
 
 async function callClaudeJson(params: {
   model: string;
@@ -67,6 +75,16 @@ function buildStage1Prompt(params: {
   const quizBlock = quizContent ? `\n${quizContent.contextText}\n(이번 영상에 자연스럽게 녹일 테스트)\n` : '';
   const brandSafetyBlock = buildQuizOasisBrandSafetyBlock(workspace);
   const hookTypeBlock = buildHookTypePromptBlock(personaText, conditions.hookType);
+  const quizSafeIdeaRule =
+    workspace === 'quizoasis'
+      ? `
+퀴즈오아시스 아이디어 필수 (8개 전부 — 미충족 시 출력 무효):
+- 8개 모두 「테스트 결과가 일상에서 맞아 보여」 피식·공감·자기발견으로 끝낼 것
+- 「결과 자랑 → 일정표/쓰레기/자료 펼침 → 결과 안 맞음·폰 엎고 무너짐」 구조는 0개
+- 증거물이 나와도 「아 그래서 네가 그 유형이지」처럼 결과 긍정만 허용. 허세 폭로 엔딩 출력 금지
+- 브랜드 필수 규약·금지 예시를 어긴 문장은 ideas 배열에 넣지 말 것
+`
+      : '';
 
   return `한국어 숏폼 영상 — 펀치라인(결말) 아이디어 8개 발산.
 
@@ -80,7 +98,7 @@ ${situationLine}- 감정곡선: ${conditions.emotionCurve}
 - hook_subtype (이번 발산 각도): ${conditions.hookSubtype}
 - duration: ${conditions.duration}초
 - cut_type: multi_shot
-${hookTypeBlock}${brandSafetyBlock}${charBlock}${productBlock}${quizBlock}${pastBlock}
+${hookTypeBlock}${brandSafetyBlock}${quizSafeIdeaRule}${charBlock}${productBlock}${quizBlock}${pastBlock}
 
 규칙:
 - 정확히 8개. 각 1~2문장, 마지막 대사/상황이 펀치라인이 되도록.
@@ -99,16 +117,25 @@ JSON:
 function buildStage2Prompt(ideas: string[], hookType: string, workspace: Workspace): string {
   const numbered = ideas.map((idea, i) => `${i + 1}. ${idea}`).join('\n');
   const brandSafetyBlock = buildQuizOasisBrandSafetyBlock(workspace);
-  return `아래 8개 숏폼 펀치라인 아이디어 중 시청자가 "피식/헐" 할 가능성이 가장 높은 1개를 고른다.
+  const quizPickRule =
+    workspace === 'quizoasis'
+      ? `
+퀴즈오아시스 선택 필수:
+- 「결과 자랑→증거 폭로→안 맞음/무너짐」 아이디어는 선택 불가 (고르면 무효)
+- 「결과가 맞아 보여 공감·피식」인 아이디어만 선택
+- 브랜드 안전·퀴즈 신뢰 유지가 반전 강도보다 우선 (필수)
+`
+      : '';
+  return `아래 숏폼 펀치라인 아이디어 중 시청자가 "피식/헐" 할 가능성이 가장 높은 1개를 고른다.
 
 고정 hook_type: ${hookType}
-${brandSafetyBlock}
+${brandSafetyBlock}${quizPickRule}
 ${numbered}
 
 기준 (우선순):
 1. hook_type "${hookType}" 메커니즘 부합 (필수 — 부합하지 않으면 선택 금지)
-2. 브랜드 필수 위반(테스트 결과=틀렸다/허세 폭로) 아이디어는 선택 금지
-3. 반전 강도, 대사 임팩트, 클리셰 회피, 15초 내 전달 가능성
+2. 브랜드 필수 규약 위반(테스트 결과=틀렸다/허세 폭로) 아이디어는 선택 금지
+3. ${workspace === 'quizoasis' ? '퀴즈 결과가 맞아 보이는 공감·임팩트, 클리셰 회피, 15초 내 전달' : '반전 강도, 대사 임팩트, 클리셰 회피, 15초 내 전달 가능성'}
 
 부합하는 아이디어가 여러 개면 3번 기준으로 최고를 고른다.
 
@@ -155,16 +182,35 @@ export async function selectPunchlineIdea(
   hookType: string,
   workspace: Workspace = 'yeonun',
 ): Promise<PunchlineSelection> {
+  const pool =
+    workspace === 'quizoasis' ? filterQuizOasisSafeIdeas(ideas) : ideas;
+  if (!pool.length) {
+    throw new Error(
+      '퀴즈오아시스 브랜드 필수 규약 위반 — 안전 펀치라인 후보 없음 (재발산·재작성 없음)',
+    );
+  }
+
   const model = await getPunchlineHaikuModel();
   const parsed = await callClaudeJson({
     model,
     max_tokens: 384,
-    prompt: buildStage2Prompt(ideas, hookType, workspace),
+    prompt: buildStage2Prompt(pool, hookType, workspace),
   });
 
   const index = Number(parsed.index);
-  const idea =
-    Number.isInteger(index) && index >= 0 && index < ideas.length ? ideas[index]! : ideas[0]!;
+  let idea =
+    Number.isInteger(index) && index >= 0 && index < pool.length ? pool[index]! : pool[0]!;
+
+  if (workspace === 'quizoasis' && isQuizOasisBrandViolation(idea)) {
+    const fallback = pool.find((i) => !isQuizOasisBrandViolation(i));
+    if (!fallback) {
+      throw new Error(
+        '퀴즈오아시스 브랜드 필수 규약 위반 — 안전 펀치라인 후보 없음 (재발산·재작성 없음)',
+      );
+    }
+    idea = fallback;
+  }
+
   const mustIncludeProps = parseMustIncludeProps(parsed.must_include_props);
 
   return { punchlineIdea: idea, mustIncludeProps };
@@ -287,7 +333,7 @@ export async function runPunchlineContiPipeline(params: {
     mustIncludeProps = await inferMustIncludePropsFromIdea(punchlineIdea);
   }
 
-  return runPunchlineContiStage3Only({
+  const result = await runPunchlineContiStage3Only({
     workspace: params.workspace,
     plan: params.plan,
     punchlineIdea,
@@ -297,4 +343,28 @@ export async function runPunchlineContiPipeline(params: {
     isInitial,
     onStage: params.onStage,
   });
+
+  // 콘티 전체 재생성은 하지 않음 — 위반 시 검토 경고만 (토큰 절약)
+  if (params.workspace === 'quizoasis') {
+    const checkText = contiTextForBrandCheck({
+      punchlineIdea: result.punchlineIdea,
+      scenarioSummary: result.conti.scenarioSummary,
+      dialogues: asContiShots(result.conti.shots).map((s) => s.dialogue),
+    });
+    if (isQuizOasisBrandViolation(checkText)) {
+      await logOperation({
+        level: 'warn',
+        message: `[video-content] 퀴즈 브랜드 위반 콘티 — 재생성 없이 검토 경고만`,
+        workspace: 'quizoasis',
+      });
+      const warnings = [...(result.conti.contentWarnings ?? [])];
+      if (!warnings.includes(QUIZOASIS_BRAND_WARNING)) warnings.push(QUIZOASIS_BRAND_WARNING);
+      return {
+        ...result,
+        conti: { ...result.conti, contentWarnings: warnings },
+      };
+    }
+  }
+
+  return result;
 }
