@@ -1,8 +1,19 @@
 import { supabase } from '../../middleware/auth.js';
+import { redisConnection } from '../queue/producer.js';
+import { CRANK_PROXY_PORTS, POSTING_PROXY_PORTS } from '../../lib/modem-ports.js';
 import { getModemProxyPort, releaseModemLocks } from '../modem/allocation.js';
+import { logOperation } from '../../lib/log-emitter.js';
 
 /** 프로세스 내 동시 점유 — 규칙 ⑬: 동일 슬롯 2계정 금지 */
 const busyModems = new Set<string>();
+
+function postingLockKey(port: number) {
+  return `modem_lock:posting:${port}`;
+}
+
+function crankLockKey(port: number) {
+  return `modem_lock:${port}`;
+}
 
 export interface ModemSession {
   proxyPort: number;
@@ -131,4 +142,51 @@ export async function getModemIdByProxyPort(proxyPort: number): Promise<string |
     .eq('proxy_port', proxyPort)
     .maybeSingle();
   return data?.id ?? null;
+}
+
+/**
+ * 전체 정지 등 — Redis posting/crank 락·프로세스 busy·DB busy 일괄 해제.
+ * 네트워크 복구(flock)와 달리 lease 고착을 강제로 푼다.
+ */
+export async function forceReleaseAllDongleLocks(): Promise<{
+  ports: number[];
+  redisKeysDeleted: number;
+  busyCleared: number;
+}> {
+  const { data: modemRows } = await supabase.from('huma_modems').select('proxy_port');
+  const ports = new Set<number>([...POSTING_PROXY_PORTS, ...CRANK_PROXY_PORTS]);
+  for (const row of modemRows ?? []) {
+    const port = Number(row.proxy_port);
+    if (Number.isFinite(port) && port > 0) ports.add(port);
+  }
+
+  const portList = [...ports].sort((a, b) => a - b);
+  const keys: string[] = [];
+  for (const port of portList) {
+    keys.push(postingLockKey(port), crankLockKey(port));
+    busyModems.delete(String(port));
+  }
+
+  let redisKeysDeleted = 0;
+  if (keys.length > 0) {
+    redisKeysDeleted = await redisConnection.del(...keys);
+  }
+
+  const { data: busyBefore } = await supabase
+    .from('huma_modems')
+    .select('id')
+    .eq('status', 'busy');
+  const busyCleared = busyBefore?.length ?? 0;
+
+  if (busyCleared > 0) {
+    await supabase.from('huma_modems').update({ status: 'idle' }).eq('status', 'busy');
+  }
+
+  await logOperation({
+    level: 'warn',
+    message: `[modem] 전체 동글 락 해제 — Redis ${redisKeysDeleted}키 · busy→idle ${busyCleared}슬롯 · ports=${portList.join(',')}`,
+    metadata: { redis_keys_deleted: redisKeysDeleted, busy_cleared: busyCleared, ports: portList },
+  });
+
+  return { ports: portList, redisKeysDeleted, busyCleared };
 }
