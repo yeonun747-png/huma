@@ -39,7 +39,10 @@ export async function resumePostingAfterCaptcha(jobId: string, accountId: string
     })
     .eq('id', jobId);
 
-  await enqueueHumaJob({ ...(job as JobRecord), platform_schedule }, { immediate: true });
+  await enqueueHumaJob(
+    { ...(job as JobRecord), platform_schedule, advance_requested_at: now },
+    { immediate: true, advance: true, priority: 1 },
+  );
 
   await logOperation({
     level: 'info',

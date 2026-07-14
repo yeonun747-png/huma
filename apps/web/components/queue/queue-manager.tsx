@@ -730,7 +730,7 @@ export function QueueManager() {
                           .advanceJob(job.id)
                           .then(() => {
                             void load();
-                            void appAlert('앞당김 — 큐에 등록했습니다. 잠시 후 LIVE로 바뀌는지 확인하세요.');
+                            void appAlert('앞당김 — 즉시 실행 큐에 올렸습니다. LIVE로 바뀌는지 확인하세요.');
                           })
                           .catch((e) => void appAlert((e as Error).message))
                     : undefined

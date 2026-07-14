@@ -62,7 +62,10 @@ function parseSocialCrankContent(content?: string | null): Record<string, unknow
   return {};
 }
 
-export function buildEnqueuePayload(job: JobRecord) {
+export function buildEnqueuePayload(
+  job: JobRecord,
+  opts?: { advanceRequested?: boolean },
+) {
   const crankExtras =
     job.job_type === 'social_crank' ? parseSocialCrankContent(job.content) : {};
 
@@ -76,7 +79,8 @@ export function buildEnqueuePayload(job: JobRecord) {
     accountId: job.account_id,
     platformAccountId: job.platform_account_id,
     humaJobId: job.id,
-    advanceRequested: Boolean(job.advance_requested_at),
+    // opts 우선 — DB 컬럼 누락·레이스에도 앞당기기 게이트 우회가 유지되도록
+    advanceRequested: opts?.advanceRequested === true || Boolean(job.advance_requested_at),
     payload: {
       title: job.title,
       content: job.content,
@@ -114,16 +118,25 @@ export async function removeBullJob(bullJobId?: string | null) {
 
 export async function enqueueHumaJob(
   job: JobRecord,
-  opts?: { immediate?: boolean; jobId?: string; priority?: number },
+  opts?: {
+    immediate?: boolean;
+    jobId?: string;
+    /** BullMQ: 숫자가 작을수록 우선 (1=최상단). 앞당기기 기본 1 */
+    priority?: number;
+    /** true면 Bull payload advanceRequested 강제 — 워커가 즉시 실행 게이트 우회 */
+    advance?: boolean;
+  },
 ) {
   const delay = opts?.immediate ? undefined : getScheduleDelay(job.scheduled_at);
   const status = delay ? 'scheduled' : 'pending';
-  const advancePriority = job.advance_requested_at ? 1_000_000 : undefined;
+  const forceAdvance = opts?.advance === true || Boolean(job.advance_requested_at);
+  // BullMQ: lower number = higher priority (1e6 은 최하순위였음)
+  const advancePriority = forceAdvance ? 1 : undefined;
 
   await removeBullJob(job.bull_job_id);
   await removeBullJob(`huma-${job.id}`);
 
-  const bullJob = await enqueueJob(buildEnqueuePayload(job), {
+  const bullJob = await enqueueJob(buildEnqueuePayload(job, { advanceRequested: forceAdvance }), {
     delay,
     jobId: opts?.jobId ?? `huma-${job.id}`,
     priority: opts?.priority ?? advancePriority,

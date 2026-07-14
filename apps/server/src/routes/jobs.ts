@@ -614,7 +614,7 @@ export async function registerJobRoutes(app: FastifyInstance) {
     return data;
   });
 
-  /** v3.27 ⏫ 스케줄 앞당기기 — 다음 실행 우선 (즉시 강제 실행 아님) */
+  /** ⏫ 스케줄 앞당기기 — 즉시 큐 실행(휴먼엔진·발행간격 게이트 우회) */
   app.patch('/api/jobs/:id/advance', { preHandler: authMiddleware }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const access = await assertJobWorkspaceAccess(id, getWorkspaceFilter(request));
@@ -665,6 +665,7 @@ export async function registerJobRoutes(app: FastifyInstance) {
       .select()
       .single();
     if (updated.error) {
+      // DB 컬럼 없을 때 — 메모리·Bull payload 로 advance 우회 유지
       updated = await supabase.from('huma_jobs').update(basePatch).eq('id', id).select().single();
     }
     const { data, error } = updated;
@@ -672,12 +673,17 @@ export async function registerJobRoutes(app: FastifyInstance) {
       return reply.code(500).send({ error: error?.message ?? '작업 상태 갱신 실패' });
     }
 
-    await enqueueHumaJob(data as JobRecord, {
+    const record = {
+      ...(data as JobRecord),
+      advance_requested_at: (data as JobRecord).advance_requested_at ?? now,
+    };
+    await enqueueHumaJob(record, {
       immediate: true,
+      advance: true,
       jobId: `huma-${id}-advance-${Date.now()}`,
-      priority: 1_000_000,
+      priority: 1,
     });
-    return data;
+    return { ...record, ...data };
   });
 
   /** 고착 LIVE·CAPTCHA — 세션·락 해제 후 failed 또는 삭제 */
