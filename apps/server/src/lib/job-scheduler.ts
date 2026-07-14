@@ -32,9 +32,16 @@ export function getScheduleDelay(scheduledAt?: string | null): number | undefine
 }
 
 /** 발행 예약 시각이 도래했으면 true — 워커가 휴먼 엔진 재예약으로 밀지 않도록 */
-export function isScheduledPublishDue(scheduledAt?: string | null): boolean {
+export function isScheduledPublishDue(
+  scheduledAt?: string | null,
+  opts?: { graceMs?: number },
+): boolean {
   if (!scheduledAt) return false;
-  return getScheduleDelay(scheduledAt) === undefined;
+  const grace = opts?.graceMs ?? 90_000;
+  const dueAt = new Date(scheduledAt).getTime();
+  if (!Number.isFinite(dueAt)) return false;
+  // delay>0 이어도 grace 안이면 due로 취급 (Bull/DB 시계 어긋남 보정)
+  return dueAt <= Date.now() + grace;
 }
 
 export async function resolveHumaJobScheduledAt(humaJobId?: string): Promise<string | null> {
@@ -45,6 +52,21 @@ export async function resolveHumaJobScheduledAt(humaJobId?: string): Promise<str
     .eq('id', humaJobId)
     .maybeSingle();
   return data?.scheduled_at ?? null;
+}
+
+/** 원발행 시각(_publish_scheduled_at) 우선 — defer로 scheduled_at이 밀려도 due 판정 유지 */
+export async function resolvePostBlogHonorDueAt(humaJobId?: string): Promise<string | null> {
+  if (!humaJobId) return null;
+  const { data } = await supabase
+    .from('huma_jobs')
+    .select('scheduled_at, platform_schedule')
+    .eq('id', humaJobId)
+    .maybeSingle();
+  if (!data) return null;
+  const ps = (data.platform_schedule as Record<string, unknown> | null) ?? {};
+  const reserved =
+    typeof ps._publish_scheduled_at === 'string' ? (ps._publish_scheduled_at as string) : null;
+  return reserved?.trim() || data.scheduled_at || null;
 }
 
 export function resolveJobStatus(scheduledAt?: string | null): 'scheduled' | 'pending' {

@@ -28,7 +28,7 @@ import {
   passesActiveHoursGate,
   passesWeekendVolumeGate,
 } from '../../lib/human-engine-policy.js';
-import { isScheduledPublishDue, resolveHumaJobScheduledAt } from '../../lib/job-scheduler.js';
+import { isScheduledPublishDue, resolvePostBlogHonorDueAt } from '../../lib/job-scheduler.js';
 import {
   pickNaverCaptchaPage,
   shouldNotifyVisionAutoFailed,
@@ -210,10 +210,12 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
       const advanceRequested = await resolveHumaJobAdvanceRequested(humaJobId, {
         advanceRequested: advanceFlag,
       });
-      const humaScheduledAt =
-        type === 'post_blog' && humaJobId ? await resolveHumaJobScheduledAt(humaJobId) : null;
+      const humaHonorDueAt =
+        type === 'post_blog' && humaJobId ? await resolvePostBlogHonorDueAt(humaJobId) : null;
       const honorDueScheduledPublish =
-        type === 'post_blog' && !advanceRequested && isScheduledPublishDue(humaScheduledAt);
+        type === 'post_blog' && isScheduledPublishDue(humaHonorDueAt);
+      // 앞당기기·예약 due — 재시도 시 scheduled_at을 덮어쓰지 않음
+      const softDefer = Boolean(advanceRequested || honorDueScheduledPublish);
 
       if (
         getSystemPaused() &&
@@ -229,6 +231,7 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
           token,
           logMessage: '[crank] 전체 정지 — 5분 후 재예약',
           level: 'info',
+          preserveScheduledAt: softDefer,
         });
         throw new DelayedError();
       }
@@ -360,15 +363,19 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
         type === 'video_content_generate';
 
       if (accountId && !skipAccountLock && !(await acquireAccount(accountId))) {
-        if (scheduledCrank || advanceRequested) {
-          await deferHumaJob(job, humaJobId, advanceRequested ? 60_000 : CRANK_MODEM_DEFER_MS, {
+        if (scheduledCrank || softDefer) {
+          const busyDelay = advanceRequested ? 30_000 : softDefer ? 60_000 : CRANK_MODEM_DEFER_MS;
+          await deferHumaJob(job, humaJobId, busyDelay, {
             reason: 'ACCOUNT_BUSY',
             accountId,
             token,
             logMessage: advanceRequested
-              ? `[${type}] 앞당기기 — 계정 사용 중 · 1분 후 재시도`
-              : `[crank] 동글 대기 — 15분 후 재예약: ACCOUNT_BUSY`,
+              ? `[${type}] 앞당기기 — 계정 사용 중 · 30초 후 재시도`
+              : softDefer
+                ? `[${type}] 예약시각 due — 계정 사용 중 · 1분 후 재시도`
+                : `[crank] 동글 대기 — 15분 후 재예약: ACCOUNT_BUSY`,
             level: 'info',
+            preserveScheduledAt: softDefer,
           });
           throw new DelayedError();
         }
@@ -377,13 +384,13 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
 
       const markRunning = async () => {
         if (humaJobId) {
+          // advance_requested_at는 완료 시에만 클리어 — SOCKS/워밍업 재시도에서 플래그 소실 방지
           await supabase
             .from('huma_jobs')
             .update({
               status: 'running',
               started_at: new Date().toISOString(),
               error_message: null,
-              advance_requested_at: null,
             })
             .eq('id', humaJobId)
             .neq('status', 'completed');
@@ -414,17 +421,19 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
           }
         }
         const workspace = payload.workspace as string | undefined;
-        if (accountId && workspace && type === 'post_blog' && !advanceRequested) {
+        if (accountId && workspace && type === 'post_blog' && !advanceRequested && !honorDueScheduledPublish) {
           await assertAccountPostingQuota(workspace, accountId, {
             excludeJobId: humaJobId ?? undefined,
           });
         }
-        if (type === 'post_blog' && accountId && !advanceRequested) {
+        // due·앞당기기는 동글 스태거로 원발행 시각을 밀지 않음
+        if (type === 'post_blog' && accountId && !advanceRequested && !honorDueScheduledPublish) {
           const crossWait = await checkCrossPostingStagger(accountId);
           if (crossWait) {
             await deferHumaJob(job, humaJobId, crossWait, {
               accountId,
               token,
+              reason: 'CROSS_DONGLE_STAGGER',
               logMessage: `[post_blog] 동글 CAPTCHA 겹침 방지 — ${Math.ceil(crossWait / 60_000)}분 후`,
               level: 'info',
             });
@@ -455,12 +464,13 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
               { context: 'post_blog' },
             );
             if (!socks.ok) {
-              await deferHumaJob(job, humaJobId, 5 * 60_000, {
+              await deferHumaJob(job, humaJobId, softDefer ? 60_000 : 5 * 60_000, {
                 reason: 'SOCKS_PROBE',
                 accountId,
                 token,
-                logMessage: `[post_blog] ${socks.detail} — 5분 후 재시도`,
+                logMessage: `[post_blog] ${socks.detail} — ${softDefer ? '1분' : '5분'} 후 재시도`,
                 level: 'warn',
+                preserveScheduledAt: softDefer,
               });
               if (modemSession) await releaseModem(modemSession).catch(() => {});
               throw new DelayedError();
@@ -511,12 +521,13 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
                 };
 
                 const deferWarmupConnection = async (detail: string) => {
-                  await deferHumaJob(job, humaJobId, 5 * 60 * 1000, {
+                  await deferHumaJob(job, humaJobId, softDefer ? 60_000 : 5 * 60 * 1000, {
                     reason: 'WARMUP_CONNECTION',
                     accountId,
                     token,
-                    logMessage: `[post_blog] ${detail} — 5분 후 재시도`,
+                    logMessage: `[post_blog] ${detail} — ${softDefer ? '1분' : '5분'} 후 재시도`,
                     level: 'info',
+                    preserveScheduledAt: softDefer,
                   });
                   throw new DelayedError();
                 };

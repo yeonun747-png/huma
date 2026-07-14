@@ -8,7 +8,7 @@ export const CRANK_NIGHT_DEFER_MS = 60 * 60 * 1000;
 
 type BullDeferJob = { moveToDelayed: (ts: number, token?: string) => Promise<void> };
 
-function deferDelayMs(delayMs: number): number {
+function resolveDeferUntilMs(delayMs: number): number {
   return Date.now() + Math.max(60_000, delayMs);
 }
 
@@ -21,26 +21,32 @@ export async function deferBullJob(
   bullJob: BullDeferJob,
   delayMs: number,
   token?: string,
-): Promise<void> {
-  await bullJob.moveToDelayed(deferDelayMs(delayMs), token);
+  untilMs?: number,
+): Promise<number> {
+  const until = untilMs ?? resolveDeferUntilMs(delayMs);
+  await bullJob.moveToDelayed(until, token);
+  return until;
 }
 
 export async function syncHumaJobDeferred(
   humaJobId: string | undefined,
   delayMs: number,
   reason: string | null,
+  opts?: { untilMs?: number; preserveScheduledAt?: boolean },
 ): Promise<string> {
-  const nextAt = new Date(deferDelayMs(delayMs)).toISOString();
+  const until = opts?.untilMs ?? resolveDeferUntilMs(delayMs);
+  const nextAt = new Date(until).toISOString();
   if (humaJobId) {
-    await supabase
-      .from('huma_jobs')
-      .update({
-        status: 'scheduled',
-        scheduled_at: nextAt,
-        started_at: null,
-        error_message: reason,
-      })
-      .eq('id', humaJobId);
+    const patch: Record<string, unknown> = {
+      status: 'scheduled',
+      started_at: null,
+      error_message: reason,
+    };
+    // 앞당기기·예약시각 due 재시도에서는 원발행 시각을 덮어쓰지 않음
+    if (!opts?.preserveScheduledAt) {
+      patch.scheduled_at = nextAt;
+    }
+    await supabase.from('huma_jobs').update(patch).eq('id', humaJobId);
 
     if (reason) {
       const { data: jobRow } = await supabase
@@ -69,10 +75,16 @@ export async function deferHumaJob(
     logMessage?: string;
     level?: 'warn' | 'info';
     token?: string;
+    /** true면 DB scheduled_at 유지(Bull만 지연) — 앞당기기·due 재시도용 */
+    preserveScheduledAt?: boolean;
   },
 ): Promise<void> {
-  await deferBullJob(bullJob, delayMs, opts?.token);
-  await syncHumaJobDeferred(humaJobId, delayMs, opts?.reason ?? null);
+  const untilMs = resolveDeferUntilMs(delayMs);
+  await deferBullJob(bullJob, delayMs, opts?.token, untilMs);
+  await syncHumaJobDeferred(humaJobId, delayMs, opts?.reason ?? null, {
+    untilMs,
+    preserveScheduledAt: opts?.preserveScheduledAt,
+  });
   if (opts?.logMessage) {
     await logOperation({
       level: opts.level ?? 'warn',

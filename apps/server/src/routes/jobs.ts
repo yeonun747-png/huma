@@ -652,11 +652,27 @@ export async function registerJobRoutes(app: FastifyInstance) {
     await removeBullJob(job.bull_job_id);
     await removeBullJob(`huma-${id}`);
 
-    const basePatch = {
+    const prevPs = (job.platform_schedule as Record<string, unknown> | null) ?? {};
+    const reservedPublishAt =
+      typeof prevPs._publish_scheduled_at === 'string'
+        ? (prevPs._publish_scheduled_at as string)
+        : (job.scheduled_at as string | null | undefined);
+    const platform_schedule =
+      job.job_type === 'post_blog'
+        ? {
+            ...prevPs,
+            ...(reservedPublishAt?.trim()
+              ? { _publish_scheduled_at: reservedPublishAt }
+              : { _publish_scheduled_at: now }),
+          }
+        : job.platform_schedule;
+
+    const basePatch: Record<string, unknown> = {
       scheduled_at: now,
       status: 'pending' as const,
       error_message: null,
       started_at: null,
+      ...(platform_schedule != null ? { platform_schedule } : {}),
     };
     let updated = await supabase
       .from('huma_jobs')
@@ -676,6 +692,9 @@ export async function registerJobRoutes(app: FastifyInstance) {
     const record = {
       ...(data as JobRecord),
       advance_requested_at: (data as JobRecord).advance_requested_at ?? now,
+      platform_schedule:
+        ((data as JobRecord).platform_schedule as JobRecord['platform_schedule']) ??
+        (platform_schedule as JobRecord['platform_schedule']),
     };
     await enqueueHumaJob(record, {
       immediate: true,
