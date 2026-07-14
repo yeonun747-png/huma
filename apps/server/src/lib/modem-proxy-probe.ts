@@ -1,4 +1,5 @@
 import { supabase } from '../middleware/auth.js';
+import { redisConnection } from '../modules/queue/producer.js';
 import { readInterfaceIp } from './dongle-health.js';
 import { preparePostingDongleForProbe, resolvePostingDongleInterface } from './dongle-route-warm.js';
 import { fetchModemPublicGeo } from './modem-geo.js';
@@ -9,6 +10,14 @@ import {
   resetProbeFailureStreak,
 } from './modem-probe-failure-streak.js';
 import { probeModemSocks } from './modem-socks-probe.js';
+
+async function hasActiveModemLease(proxyPort: number): Promise<boolean> {
+  const [posting, crank] = await Promise.all([
+    redisConnection.get(`modem_lock:posting:${proxyPort}`),
+    redisConnection.get(`modem_lock:${proxyPort}`),
+  ]);
+  return Boolean(posting || crank);
+}
 
 /** 물리 동글 SOCKS probe 대상 (프록시 관리와 동일: 슬롯 1~7) */
 export const PHYSICAL_MODEM_PROBE_MAX_SLOT = 7;
@@ -76,7 +85,15 @@ export async function applyModemProxyProbe(
     failureStreak = 0;
     patch.response_ms = health.ms;
 
-    if (modem.status !== 'busy') {
+    // busy는 세션 중 보호. 단 Redis lease가 없으면 고착 상태로 보고 idle 복구
+    // (일괄복구·전체정지 후에도 「사용중」이 남는 주원인)
+    if (modem.status === 'busy') {
+      const leased = await hasActiveModemLease(modem.proxy_port).catch(() => true);
+      if (!leased) {
+        patch.status = 'idle';
+        nextStatus = 'idle';
+      }
+    } else {
       patch.status = 'idle';
       nextStatus = 'idle';
     }

@@ -15,6 +15,7 @@ import { sendTelegramTest } from '../modules/watcher/telegram.js';
 import { getVncRuntimeStatus } from '../modules/watcher/vnc-status.js';
 import { resolveEarliestNextPublishAt } from '../lib/next-publish-schedule.js';
 import { forceReleaseAllDongleLocks } from '../modules/proxy/manager.js';
+import { abortAllLiveJobs } from '../lib/abort-job.js';
 import type { Workspace } from '@huma/shared';
 
 export async function registerSystemRoutes(app: FastifyInstance) {
@@ -68,13 +69,15 @@ export async function registerSystemRoutes(app: FastifyInstance) {
     const reason = String(body.reason ?? '').trim() || '운영자 전체 정지';
     const autoPublishSnapshot = await disableAllAutoPublish();
     await setSystemPaused(true, { reason, autoPublishSnapshot });
+    const liveAbort = await abortAllLiveJobs(`SYSTEM_STOP_ALL: ${reason}`);
     const dongleLocks = await forceReleaseAllDongleLocks();
     await logOperation({
       level: 'INFO',
-      message: `HUMA 전체 정지 — ${reason} · 자동발행 ${autoPublishSnapshot.length}계정 OFF · 동글락 해제 Redis ${dongleLocks.redisKeysDeleted}·busy ${dongleLocks.busyCleared}`,
+      message: `HUMA 전체 정지 — ${reason} · 자동발행 ${autoPublishSnapshot.length}계정 OFF · LIVE중단 ${liveAbort.aborted} · 동글락 Redis ${dongleLocks.redisKeysDeleted}·busy ${dongleLocks.busyCleared}`,
       metadata: {
         stop_reason: reason,
         auto_publish_off: autoPublishSnapshot.length,
+        live_abort: liveAbort,
         dongle_locks: dongleLocks,
       },
     });
@@ -83,6 +86,7 @@ export async function registerSystemRoutes(app: FastifyInstance) {
       message: '전체 작업 중지됨',
       reason,
       auto_publish_disabled: autoPublishSnapshot.length,
+      live_jobs_aborted: liveAbort.aborted,
       dongle_locks_released: dongleLocks,
     };
   });

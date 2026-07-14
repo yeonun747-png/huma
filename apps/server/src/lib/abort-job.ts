@@ -136,3 +136,29 @@ export async function abortHumaJobById(
 
   return { ok: true, deleted: false };
 }
+
+/** 전체 정지 등 — LIVE·CAPTCHA 대기 작업을 모두 강제 중단하고 리소스 해제 */
+export async function abortAllLiveJobs(reason: string): Promise<{ aborted: number; errors: number }> {
+  const { data: jobs, error } = await supabase
+    .from('huma_jobs')
+    .select('id')
+    .in('status', ['running', 'awaiting_captcha']);
+
+  if (error) {
+    await logOperation({
+      level: 'ERROR',
+      message: `[job] LIVE 일괄 중단 조회 실패: ${error.message}`,
+    });
+    return { aborted: 0, errors: 1 };
+  }
+
+  let aborted = 0;
+  let errors = 0;
+  for (const row of jobs ?? []) {
+    const result = await abortHumaJobById(String(row.id), { reason });
+    if (result.ok) aborted++;
+    else errors++;
+  }
+
+  return { aborted, errors };
+}

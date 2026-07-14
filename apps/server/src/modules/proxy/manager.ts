@@ -152,7 +152,10 @@ export async function forceReleaseAllDongleLocks(): Promise<{
   ports: number[];
   redisKeysDeleted: number;
   busyCleared: number;
+  dbError?: string;
 }> {
+  busyModems.clear();
+
   const { data: modemRows } = await supabase.from('huma_modems').select('proxy_port');
   const ports = new Set<number>([...POSTING_PROXY_PORTS, ...CRANK_PROXY_PORTS]);
   for (const row of modemRows ?? []) {
@@ -161,32 +164,45 @@ export async function forceReleaseAllDongleLocks(): Promise<{
   }
 
   const portList = [...ports].sort((a, b) => a - b);
-  const keys: string[] = [];
+  const keySet = new Set<string>();
   for (const port of portList) {
-    keys.push(postingLockKey(port), crankLockKey(port));
-    busyModems.delete(String(port));
+    keySet.add(postingLockKey(port));
+    keySet.add(crankLockKey(port));
   }
 
+  // 포트 목록 밖 orphan 키까지 스캔
+  try {
+    const orphanKeys = await redisConnection.keys('modem_lock*');
+    for (const key of orphanKeys) keySet.add(key);
+  } catch {
+    /* best-effort */
+  }
+
+  const keys = [...keySet];
   let redisKeysDeleted = 0;
   if (keys.length > 0) {
     redisKeysDeleted = await redisConnection.del(...keys);
   }
 
-  const { data: busyBefore } = await supabase
+  const { data: clearedRows, error: updateErr } = await supabase
     .from('huma_modems')
-    .select('id')
-    .eq('status', 'busy');
-  const busyCleared = busyBefore?.length ?? 0;
+    .update({ status: 'idle' })
+    .eq('status', 'busy')
+    .select('id');
 
-  if (busyCleared > 0) {
-    await supabase.from('huma_modems').update({ status: 'idle' }).eq('status', 'busy');
-  }
+  const busyCleared = clearedRows?.length ?? 0;
+  const dbError = updateErr?.message;
 
   await logOperation({
-    level: 'warn',
-    message: `[modem] 전체 동글 락 해제 — Redis ${redisKeysDeleted}키 · busy→idle ${busyCleared}슬롯 · ports=${portList.join(',')}`,
-    metadata: { redis_keys_deleted: redisKeysDeleted, busy_cleared: busyCleared, ports: portList },
+    level: dbError ? 'ERROR' : 'warn',
+    message: `[modem] 전체 동글 락 해제 — Redis ${redisKeysDeleted}키 · busy→idle ${busyCleared}슬롯 · ports=${portList.join(',')}${dbError ? ` · DB오류 ${dbError}` : ''}`,
+    metadata: {
+      redis_keys_deleted: redisKeysDeleted,
+      busy_cleared: busyCleared,
+      ports: portList,
+      db_error: dbError ?? null,
+    },
   });
 
-  return { ports: portList, redisKeysDeleted, busyCleared };
+  return { ports: portList, redisKeysDeleted, busyCleared, dbError };
 }
