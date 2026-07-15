@@ -916,6 +916,10 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
 
         await logOperation({ level: 'info', message: `작업 완료: ${type}`, job_id: humaJobId, account_id: accountId });
       } catch (err) {
+        // deferHumaJob 후 throw 한 DelayedError — failed로 덮어쓰면 UI에 bullmq:movedToDelayed 고착
+        if (err instanceof DelayedError || (err as Error)?.name === 'DelayedError') {
+          throw err;
+        }
         if (accountId && isNaverAccountProtectionError(err)) {
           const jobWorkspace = (payload.workspace as string | undefined) ?? undefined;
           await handleNaverAccountProtection({
@@ -968,6 +972,22 @@ export function startWorker(concurrency = Number(process.env.HUMA_WORKER_CONCURR
               account_id: accountId,
             });
             return;
+          }
+          // 동글 공유(계정 여러 개→동일 proxy_port) 시 락 충돌은 실패가 아니라 대기
+          if (
+            msg === 'MODEM_BUSY' ||
+            msg.includes('다른 계정 사용 중') ||
+            msg.includes('C-Rank 사용 중')
+          ) {
+            await deferHumaJob(job, humaJobId, softDefer ? 60_000 : 2 * 60_000, {
+              reason: 'MODEM_BUSY',
+              accountId,
+              token,
+              logMessage: `[post_blog] 동글 사용 중 — ${softDefer ? '1' : '2'}분 후 재시도`,
+              level: 'info',
+              preserveScheduledAt: softDefer,
+            });
+            throw new DelayedError();
           }
           if (!advanceRequested && isPostingConnectionError(msg)) {
             await deferHumaJob(job, humaJobId, 5 * 60 * 1000, {

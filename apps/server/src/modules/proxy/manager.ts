@@ -43,12 +43,12 @@ export async function acquireModem(
     lockKind =
       account.account_type === 'posting' && account.proxy_port === proxyPort ? 'posting' : 'crank';
   } catch (err) {
-    if ((err as Error).message.includes('유휴 C-Rank')) {
+    const msg = (err as Error).message ?? '';
+    if (msg.includes('유휴 C-Rank')) {
       throw new Error('NO_IDLE_MODEM');
     }
-    if (
-      (err as Error).message.includes('C-Rank 사용 중')
-    ) {
+    // 동일 물리 동글에 여러 포스팅 계정 — 락 점유 중은 대기·재시도 대상
+    if (msg.includes('C-Rank 사용 중') || msg.includes('다른 계정 사용 중')) {
       throw new Error('MODEM_BUSY');
     }
     throw err;
